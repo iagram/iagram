@@ -1,0 +1,23 @@
+id: azure.vnet
+label: Virtual Network
+category: network
+icon: azure/vnet.svg
+kind: container
+allowed_parents: [azure.resource_group]
+size: {w: 800, h: 480}
+props:
+  type: object
+  required: [cidr]
+  properties:
+    cidr:
+      type: string
+      title: Address space
+      format: cidr
+      default: 10.20.0.0/16
+terraform:
+  module: azure/vnet
+  inputs_from_parent:
+    resource_group_name: parent.resource_group_name
+    location: parent.location
+  import: {resource: azurerm_virtual_network, name: name, props: {cidr: address_space.0}}
+outputs: [vnet_id, vnet_name, resource_group_name, location]

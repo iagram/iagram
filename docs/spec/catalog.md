@@ -28,8 +28,9 @@ all layers are merged, so an external catalog may reference built-in types.
 ## `_provider.yaml`
 
 ```yaml
-name: aws                    # must equal the directory name
-source: hashicorp/aws        # required_providers source
+name: gcp                    # must equal the directory name
+local_name: google           # Terraform provider name when it differs (gcp -> google, azure -> azurerm)
+source: hashicorp/google     # required_providers source
 version: "~> 6.0"
 required_version: ">= 1.6.0" # optional terraform.required_version
 extra_providers:             # optional, e.g. helpers modules need
@@ -79,6 +80,10 @@ terraform:
 outputs: [instance_id, private_ip]   # module outputs written back after apply
 ```
 
+Property names may not be `source`, `version`, `providers`, `count`,
+`for_each`, `depends_on`, `name` or `tags`: they become module inputs and
+would shadow meta-arguments or the inputs the generator sets.
+
 ### Semantics
 
 - **Placement is containment.** A node may be created only inside a node whose
@@ -124,6 +129,30 @@ outputs: [instance_id, private_ip]   # module outputs written back after apply
 - Outputs: the root emits `output "<module>" { value = {<outputs...>} }`;
   `iagram apply` reads them and writes them onto `nodes[].outputs` in the
   diagram file.
+
+### Import mapping (`terraform.import`)
+
+`iagram import` walks a Terraform state and uses these mappings to rebuild
+nodes and containment:
+
+```yaml
+terraform:
+  import:
+    resource: aws_instance                  # primary resource type of the module
+    parent: subnet_id                       # attribute holding the parent's primary id
+    id: id                                  # attribute other resources reference (default id)
+    name: tags.Name                         # attribute path for the node name (default: state name)
+    props: {instance_type: instance_type, az: "availability_zone|last", scheme: "internal|bool:internal:internet-facing"}
+```
+
+Attribute paths walk maps and lists (`vpc_config.0.subnet_ids.0`); the
+transforms are `|last` (last character) and `|bool:<if-true>:<if-false>`. For
+`account` / `region` roles, `from` names where the grouping value comes from:
+an attribute (`project`, `location`), `arn.account` / `arn.region` (parsed from
+an `arn` attribute) or `arm.subscription` (parsed from an Azure resource id);
+`prop` receives it. Resources with no resolvable parent fall into the sole
+known container of an allowed type, and the report says so. Arrows are not
+recovered.
 
 ### Module contract
 

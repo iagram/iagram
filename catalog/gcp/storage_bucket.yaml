@@ -1,0 +1,29 @@
+id: gcp.storage_bucket
+label: Cloud Storage
+category: storage
+icon: gcp/cloud_storage.svg
+kind: leaf
+allowed_parents: [gcp.project]
+size: {w: 120, h: 90}
+props:
+  type: object
+  required: [location]
+  properties:
+    location:
+      type: string
+      title: Location
+      default: EU
+      enum: [EU, US, ASIA, europe-west1, europe-west4, us-central1, us-east1, asia-east1]
+    versioning:
+      type: boolean
+      title: Versioning
+      default: false
+    storage_class:
+      type: string
+      title: Storage class
+      default: STANDARD
+      enum: [STANDARD, NEARLINE, COLDLINE, ARCHIVE]
+terraform:
+  module: gcp/storage_bucket
+  import: {resource: google_storage_bucket, name: name, props: {location: location, storage_class: storage_class}}
+outputs: [bucket_name, bucket_url]

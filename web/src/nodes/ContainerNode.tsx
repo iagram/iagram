@@ -14,7 +14,7 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
   const dropState = dragging && rules ? (rules.canContain(data.type, dragging) ? 'valid' : 'invalid') : ''
 
   return (
-    <div className={`node container ${planClass} ${dropState} ${selected ? 'selected' : ''}`} data-type={data.type}>
+    <div className={`node container ${planClass} ${dropState} ${selected ? 'selected' : ''}`} data-type={data.type} data-provider={data.type.split('.')[0]}>
       <NodeResizer isVisible={selected} onResizeStart={() => commit()} minWidth={200} minHeight={120} lineClassName="resizer-line" handleClassName="resizer-handle" />
       <header>
         {icon && <img src={`/icons/${icon}`} alt="" draggable={false} />}

@@ -1,0 +1,43 @@
+id: azure.virtual_machine
+label: Virtual Machine
+description: Ubuntu 24.04 LTS Linux VM with a generated SSH key (private key in state) and a system-assigned identity.
+category: compute
+icon: azure/virtual_machine.svg
+kind: leaf
+allowed_parents: [azure.subnet]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: azure.storage_account,          kind: reads_writes, label: reads/writes, terraform: {set: from, input: storage_account_ids, value: to.storage_account_id}}
+    - {to: azure.postgres_flexible_server, kind: connects_to,  label: connects to,  terraform: {set: to, input: allowed_ip_addresses, value: from.public_ip}}
+props:
+  type: object
+  required: [size]
+  properties:
+    size:
+      type: string
+      title: Size
+      default: Standard_B1s
+      enum: [Standard_B1s, Standard_B2s, Standard_B2ms, Standard_D2s_v5, Standard_D4s_v5, Standard_E2s_v5]
+    admin_username:
+      type: string
+      title: Admin username
+      default: azureuser
+    os_disk_gb:
+      type: integer
+      title: OS disk (GB)
+      default: 30
+      minimum: 30
+      maximum: 4095
+    public_ip:
+      type: boolean
+      title: Public IP
+      default: true
+terraform:
+  module: azure/virtual_machine
+  inputs_from_parent:
+    subnet_id: parent.subnet_id
+    resource_group_name: parent.resource_group_name
+    location: parent.location
+  import: {resource: azurerm_linux_virtual_machine, name: name, props: {size: size, admin_username: admin_username}}
+outputs: [vm_id, private_ip, public_ip, principal_id]

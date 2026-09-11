@@ -1,0 +1,29 @@
+id: azure.network_security_group
+label: Network Security Group
+description: Inbound TCP allow rules, associated with the NICs of the VMs it protects.
+category: security
+icon: azure/nsg.svg
+kind: leaf
+allowed_parents: [azure.vnet]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: azure.virtual_machine, kind: protects, label: protects, terraform: {set: to, input: network_security_group_ids, value: from.nsg_id}}
+props:
+  type: object
+  properties:
+    inbound_ports:
+      type: string
+      title: Inbound TCP ports
+      default: "22,443"
+    source_cidr:
+      type: string
+      title: Source
+      default: "*"
+terraform:
+  module: azure/network_security_group
+  inputs_from_parent:
+    resource_group_name: parent.resource_group_name
+    location: parent.location
+  import: {resource: azurerm_network_security_group, name: name}
+outputs: [nsg_id]

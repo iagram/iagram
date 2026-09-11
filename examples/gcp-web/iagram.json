@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "name": "gcp-web",
+  "nodes": [
+    {"id": "bucket", "type": "gcp.storage_bucket", "name": "assets", "parent": "proj", "props": {"location": "EU"}, "layout": {"x": 900, "y": 120}},
+    {"id": "db", "type": "gcp.cloud_sql_instance", "name": "orders-db", "parent": "vpc", "props": {"database_version": "POSTGRES_16", "tier": "db-f1-micro", "region": "europe-west1"}, "layout": {"x": 560, "y": 300}},
+    {"id": "fw", "type": "gcp.firewall_rule", "name": "allow-web", "parent": "vpc", "props": {"ports": "22,443", "source_ranges": "0.0.0.0/0"}, "layout": {"x": 60, "y": 300}},
+    {"id": "proj", "type": "gcp.project", "name": "demo", "props": {"project": "iagram-demo-123456", "region": "europe-west1"}, "layout": {"x": 0, "y": 0, "w": 1100, "h": 700}},
+    {"id": "run", "type": "gcp.cloud_run_service", "name": "api", "parent": "proj", "props": {"region": "europe-west1", "allow_unauthenticated": true}, "layout": {"x": 900, "y": 280}},
+    {"id": "sub", "type": "gcp.subnetwork", "name": "web-eu", "parent": "vpc", "props": {"cidr": "10.10.0.0/24", "region": "europe-west1", "private_google_access": true}, "layout": {"x": 60, "y": 60, "w": 380, "h": 200}},
+    {"id": "vm", "type": "gcp.compute_instance", "name": "web-1", "parent": "sub", "props": {"machine_type": "e2-small", "zone": "b", "public_ip": true}, "layout": {"x": 40, "y": 60}},
+    {"id": "vpc", "type": "gcp.vpc", "name": "core", "parent": "proj", "props": {}, "layout": {"x": 40, "y": 60, "w": 800, "h": 480}}
+  ],
+  "edges": [
+    {"id": "e1", "kind": "protects", "source": "fw", "target": "vm"},
+    {"id": "e2", "kind": "connects_to", "source": "vm", "target": "db"},
+    {"id": "e3", "kind": "reads_writes", "source": "vm", "target": "bucket"},
+    {"id": "e4", "kind": "connects_to", "source": "run", "target": "db"},
+    {"id": "e5", "kind": "reads_writes", "source": "run", "target": "bucket"}
+  ]
+}

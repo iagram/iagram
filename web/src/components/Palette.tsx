@@ -1,4 +1,4 @@
-import type { DragEvent } from 'react'
+import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useStore } from '../store'
 import type { Entry } from '../types'
 import { ROOT } from '../types'
@@ -7,12 +7,22 @@ const ORDER = ['account', 'network', 'compute', 'database', 'storage', 'security
 
 export const DND_TYPE = 'application/x-iagram-type'
 
+const PROVIDER_LABEL: Record<string, string> = { aws: 'AWS', gcp: 'Google Cloud', azure: 'Azure' }
+
 export function Palette() {
   const catalog = useStore((s) => s.catalog)
   const rules = useStore((s) => s.rules)
   const selectedId = useStore((s) => s.selectedId)
   const nodes = useStore((s) => s.nodes)
   const setDragging = useStore((s) => s.setDragging)
+
+  const providers = useMemo(() => [...new Set((catalog?.entries ?? []).map((e) => e.provider))].sort(), [catalog])
+  const inUse = useMemo(() => [...new Set(nodes.map((n) => n.data.type.split('.')[0]))], [nodes])
+  const [provider, setProvider] = useState<string>('')
+  useEffect(() => {
+    // Default to the provider the diagram already uses, else the first one.
+    if (!provider && providers.length) setProvider(inUse[0] && providers.includes(inUse[0]) ? inUse[0] : providers[0])
+  }, [providers, inUse, provider])
 
   if (!catalog || !rules) return <aside className="palette" />
 
@@ -22,7 +32,10 @@ export function Palette() {
   const contextLabel = contextType === ROOT ? 'the canvas' : rules.entry(contextType)?.label ?? contextType
 
   const groups = new Map<string, Entry[]>()
-  for (const e of catalog.entries) (groups.get(e.category) ?? groups.set(e.category, []).get(e.category)!).push(e)
+  for (const e of catalog.entries) {
+    if (e.provider !== provider) continue
+    ;(groups.get(e.category) ?? groups.set(e.category, []).get(e.category)!).push(e)
+  }
 
   const onDragStart = (ev: DragEvent, e: Entry) => {
     ev.dataTransfer.setData(DND_TYPE, e.id)
@@ -33,6 +46,16 @@ export function Palette() {
   return (
     <aside className="palette">
       <h2>Elements</h2>
+      {providers.length > 1 && (
+        <div className="providers" role="tablist">
+          {providers.map((p) => (
+            <button key={p} role="tab" aria-selected={p === provider} className={p === provider ? 'active' : ''} onClick={() => setProvider(p)}>
+              {PROVIDER_LABEL[p] ?? p}
+              {inUse.includes(p) && <i title="used in this diagram" />}
+            </button>
+          ))}
+        </div>
+      )}
       <p className="hint">
         Drag onto the canvas. Highlighted items fit inside <b>{contextLabel}</b>.
       </p>

@@ -128,3 +128,23 @@ func TestNoTerraformMappingIsAWarning(t *testing.T) {
 		t.Error("provider blocks expected even without modules")
 	}
 }
+
+func TestProviderArgsKeepLiteralEmptyBlocks(t *testing.T) {
+	c, d := fixture(t)
+	// Simulate an azurerm-style template through the aws account entry.
+	e, _ := c.Get("aws.account")
+	saved := e.Terraform.ProviderArgs
+	e.Terraform.ProviderArgs = map[string]any{"features": map[string]any{}, "profile": "${profile}", "gone": map[string]any{"x": "${missing}"}}
+	defer func() { e.Terraform.ProviderArgs = saved }()
+	res, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov := res.Config["provider"].(map[string][]map[string]any)["aws"][0]
+	if _, ok := prov["features"]; !ok {
+		t.Error("literal empty block dropped")
+	}
+	if _, ok := prov["gone"]; ok {
+		t.Error("block with only unresolved placeholders kept")
+	}
+}

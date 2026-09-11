@@ -21,13 +21,26 @@ func TestShippedCatalogLoads(t *testing.T) {
 	if len(c.Entries) < 10 {
 		t.Fatalf("expected >= 10 entries, got %d", len(c.Entries))
 	}
+	providers := map[string]int{}
 	for _, e := range c.Entries {
-		if e.Provider != "aws" {
-			t.Errorf("%s: provider %q", e.ID, e.Provider)
+		providers[e.Provider]++
+		if _, ok := c.Providers[e.Provider]; !ok {
+			t.Errorf("%s: provider %q has no _provider.yaml", e.ID, e.Provider)
 		}
 		if e.Icon == "" {
 			t.Errorf("%s: no icon", e.ID)
 		}
+		if _, err := iagram.CatalogFS.ReadFile("catalog/icons/" + e.Icon); err != nil {
+			t.Errorf("%s: icon %s missing", e.ID, e.Icon)
+		}
+	}
+	for _, want := range []string{"aws", "gcp", "azure"} {
+		if providers[want] < 7 {
+			t.Errorf("provider %s has %d entries", want, providers[want])
+		}
+	}
+	if c.Providers["gcp"].LocalName() != "google" || c.Providers["azure"].LocalName() != "azurerm" || c.Providers["aws"].LocalName() != "aws" {
+		t.Errorf("local names: %+v", c.Providers)
 	}
 }
 
@@ -81,5 +94,18 @@ func TestEntryHelpers(t *testing.T) {
 	p, ok := e.Property("cidr")
 	if !ok || p["format"] != "cidr" {
 		t.Errorf("cidr property = %v, %v", p, ok)
+	}
+}
+
+func TestReservedPropertyNamesRejected(t *testing.T) {
+	c := load(t)
+	// Every shipped module path must exist for every module-role entry.
+	for _, e := range c.Entries {
+		if e.Terraform == nil || e.Terraform.Role != "module" {
+			continue
+		}
+		if _, err := iagram.ModulesFS.ReadFile("modules/" + e.Terraform.Module + "/main.tf"); err != nil {
+			t.Errorf("%s: module %s missing", e.ID, e.Terraform.Module)
+		}
 	}
 }

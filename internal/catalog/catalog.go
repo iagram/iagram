@@ -98,6 +98,33 @@ type Terraform struct {
 	ProviderArgs     map[string]any     `yaml:"provider_args,omitempty" json:"provider_args,omitempty"`
 	InputsFromParent map[string]string  `yaml:"inputs_from_parent,omitempty" json:"inputs_from_parent,omitempty"`
 	Collect          map[string]Collect `yaml:"collect,omitempty" json:"collect,omitempty"`
+	// Import says how to recognise this element in an existing Terraform
+	// state (`iagram import`).
+	Import *Import `yaml:"import,omitempty" json:"import,omitempty"`
+}
+
+// Import maps a state resource back to an element.
+//
+// For role module: Resource is the primary resource type (aws_instance),
+// Props maps element properties to attribute paths ("tags.Name",
+// "vpc_config.0.subnet_ids.0", with optional "|last" or
+// "|bool:<if-true>:<if-false>" transforms), Parent is the attribute holding
+// the parent's primary id, ID the attribute others reference (default id),
+// Name the attribute path for the node name (default: the state name).
+//
+// For roles account/region: From says where to read the value that groups
+// resources: an attribute name ("project", "location"), "arn.account",
+// "arn.region" (parsed from an `arn` attribute) or "arm.subscription"
+// (parsed from an Azure resource id). Prop names the element property that
+// receives it.
+type Import struct {
+	Resource string            `yaml:"resource,omitempty" json:"resource,omitempty"`
+	Props    map[string]string `yaml:"props,omitempty" json:"props,omitempty"`
+	Parent   string            `yaml:"parent,omitempty" json:"parent,omitempty"`
+	ID       string            `yaml:"id,omitempty" json:"id,omitempty"`
+	Name     string            `yaml:"name,omitempty" json:"name,omitempty"`
+	From     string            `yaml:"from,omitempty" json:"from,omitempty"`
+	Prop     string            `yaml:"prop,omitempty" json:"prop,omitempty"`
 }
 
 // Collect describes one gathered list input.
@@ -116,11 +143,22 @@ type Collect struct {
 // Provider is the per-cloud Terraform provider configuration, loaded from
 // catalog/<provider>/_provider.yaml.
 type Provider struct {
-	Name            string            `yaml:"name" json:"name"`
+	Name string `yaml:"name" json:"name"`
+	// Local is the Terraform local provider name when it differs from the
+	// catalog provider (gcp -> google, azure -> azurerm). Defaults to Name.
+	Local           string            `yaml:"local_name,omitempty" json:"local_name,omitempty"`
 	Source          string            `yaml:"source" json:"source"`
 	Version         string            `yaml:"version" json:"version"`
 	RequiredVersion string            `yaml:"required_version,omitempty" json:"required_version,omitempty"`
 	Extra           map[string]Source `yaml:"extra_providers,omitempty" json:"extra_providers,omitempty"`
+}
+
+// LocalName returns the Terraform provider name used in configuration.
+func (p Provider) LocalName() string {
+	if p.Local != "" {
+		return p.Local
+	}
+	return p.Name
 }
 
 // Source is a required_providers entry.
@@ -218,6 +256,15 @@ func (c *Catalog) compile() error {
 		if e.Props == nil {
 			e.Props = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
+		// Properties become module inputs, so they cannot shadow module
+		// meta-arguments or the inputs the generator sets itself.
+		if props, ok := e.Props["properties"].(map[string]any); ok {
+			for name := range props {
+				if reservedInputs[name] {
+					return fmt.Errorf("%s: property %q is reserved (module meta-argument or generator input); rename it", e.ID, name)
+				}
+			}
+		}
 		c.byID[e.ID] = e
 	}
 
@@ -295,6 +342,13 @@ func (c *Catalog) addRule(seen map[string]bool, r Rule) error {
 	seen[key] = true
 	c.Rules = append(c.Rules, r)
 	return nil
+}
+
+// reservedInputs are names a property may not use: Terraform module
+// meta-arguments plus the inputs every generated module block already sets.
+var reservedInputs = map[string]bool{
+	"source": true, "version": true, "providers": true, "count": true, "for_each": true, "depends_on": true,
+	"name": true, "tags": true,
 }
 
 func contains(list []string, s string) bool {

@@ -53,6 +53,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		doc, err = runApply(args[1:], stdout)
 	case "drift":
 		doc, err = runDrift(args[1:], stdout)
+	case "import":
+		err = runImport(args[1:], stdout)
 	case "catalog":
 		err = runCatalog(args[1:], stdout)
 	case "telemetry":
@@ -130,6 +132,7 @@ Usage:
   iagram plan [flags]          generate, then run OpenTofu init + plan
   iagram apply [flags]         apply the last plan, write outputs back onto the diagram
   iagram drift [flags]         refresh-only plan: report infrastructure that no longer matches state
+  iagram import --state FILE   build a diagram from an existing Terraform state
   iagram catalog check DIR     validate an external catalog directory
   iagram telemetry on|off|status
   iagram version

@@ -1,0 +1,31 @@
+id: gcp.subnetwork
+label: Subnetwork
+category: network
+icon: gcp/subnetwork.svg
+kind: container
+allowed_parents: [gcp.vpc]
+size: {w: 380, h: 260}
+props:
+  type: object
+  required: [cidr, region]
+  properties:
+    cidr:
+      type: string
+      title: IP range
+      format: cidr
+      default: 10.10.0.0/24
+    region:
+      type: string
+      title: Region
+      default: europe-west1
+      enum: [us-central1, us-east1, us-east4, us-west1, europe-west1, europe-west2, europe-west3, europe-west4, europe-north1, asia-east1, asia-southeast1, asia-northeast1, australia-southeast1]
+    private_google_access:
+      type: boolean
+      title: Private Google access
+      default: true
+terraform:
+  module: gcp/subnetwork
+  inputs_from_parent:
+    network_id: parent.network_id
+  import: {resource: google_compute_subnetwork, parent: network, name: name, props: {cidr: ip_cidr_range, region: region, private_google_access: private_ip_google_access}}
+outputs: [subnetwork_id, subnetwork_name, region]

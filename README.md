@@ -15,7 +15,8 @@ iagram is a single local binary, like `terraform`:
 - **Your credentials never leave your machine.** iagram does not store, prompt for or transmit cloud credentials. `tofu` inherits your shell's credential chain (`AWS_PROFILE`, SSO, `gcloud auth application-default`, `az login`) exactly as `terraform` would. See [SECURITY.md](SECURITY.md) for the complete list of network calls the binary makes.
 - **Git-friendly.** The diagram is `iagram.json`, written deterministically so diffs are readable; commit it next to your code. Generated Terraform lands in `.iagram/tf/main.tf.json` with the modules alongside; you can eject to plain Terraform at any time.
 - **Nothing invalid is drawable.** A catalog defines every element, where it may be placed, what it may connect to and which properties it takes. An EC2 instance can only be dropped into a subnet; an ALB can only be wired to targets it can route to; sibling subnets cannot overlap. The plan is painted back onto the diagram: green create, amber update, red destroy.
-- **Cloud-agnostic core.** No code in iagram names a cloud. Providers are catalog directories plus Terraform modules; see [Adding a provider](docs/spec/catalog.md#adding-a-provider). External catalogs load with `--catalog DIR`.
+- **Cloud-agnostic core.** No code in iagram names a cloud. AWS, Google Cloud and Azure ship as catalog directories plus Terraform modules; adding a fourth is [a directory of YAML and modules](docs/spec/catalog.md#adding-a-provider). External catalogs load with `--catalog DIR`.
+- **Bring existing infrastructure.** `iagram import --state terraform.tfstate` rebuilds nodes and containment from any Terraform state using the catalog's import mappings; you draw the arrows and plan to see the gap.
 
 ## Status
 
@@ -24,9 +25,18 @@ iagram is a single local binary, like `terraform`:
 | 1 | Canvas, palette, containment and connection rules, property panel, validation, undo/redo, save/load | done |
 | 2 | Terraform generation (`.tf.json` module calls), OpenTofu install + `plan`, plan overlay on the canvas, `iagram plan` CLI | done |
 | 3 | Apply from the UI with confirmation, outputs written back onto nodes, drift check (refresh-only plan) painted on the canvas | done |
-| 4 | GCP and Azure catalogs, state → diagram import | next |
+| 4 | Google Cloud and Azure catalogs with official icons, provider switcher, `iagram import` from an existing Terraform state | done |
+| 5 | Re-parenting by drag, multi-select, copy/paste; GoReleaser + Homebrew tap; more elements per provider | next |
 
-Shipped catalog: AWS (account, region, VPC, subnet, security group, EC2, RDS, S3, ALB, Lambda). Every module defaults to encrypted storage, IMDSv2, private databases and IAM derived from the arrows you draw.
+Shipped catalogs:
+
+| Provider | Elements |
+|---|---|
+| AWS | account, region, VPC, subnet, security group, EC2, RDS, S3, ALB, Lambda |
+| Google Cloud | project, VPC network (with private services access), subnetwork, firewall rule, Compute Engine, Cloud SQL, Cloud Storage, Cloud Run |
+| Azure | subscription, resource group, virtual network, subnet, network security group, Linux VM, storage account, PostgreSQL Flexible Server |
+
+Every module defaults to the secure option (encrypted storage, IMDSv2, private databases, no public buckets, least-privilege IAM/roles derived from the arrows you draw). One diagram can hold several providers; each gets its own provider block.
 
 ## How it works
 
@@ -53,6 +63,7 @@ iagram generate               write .iagram/tf/main.tf.json
 iagram plan                   generate + tofu init + plan, summarised per node
 iagram apply                  apply the last plan, write outputs back onto the diagram
 iagram drift                  refresh-only plan; exit 1 when infrastructure drifted
+iagram import --state FILE    build a diagram from a terraform.tfstate or `tofu show -json` (nodes and containment; draw the arrows)
 iagram catalog check DIR      validate an external catalog
 iagram telemetry on|off|status
 ```

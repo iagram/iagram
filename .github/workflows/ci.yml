@@ -35,18 +35,21 @@ jobs:
           path: |
             ~/.iagram/bin
             ~/.iagram/plugin-cache
-          key: iagram-tofu-${{ hashFiles('internal/tofu/install.go', 'catalog/aws/_provider.yaml') }}
+          key: iagram-tofu-${{ hashFiles('internal/tofu/install.go', 'catalog/*/_provider.yaml') }}
       - name: runner e2e (real OpenTofu, no cloud)
         run: IAGRAM_E2E=1 go test ./internal/tofu/ -run TestRunnerPlanRoundTrip -v
-      - name: generated terraform validates
+      - name: generated terraform validates (aws, gcp, azure)
         run: |
-          cd examples/aws-three-tier
-          "$GITHUB_WORKSPACE/iagram" validate
-          "$GITHUB_WORKSPACE/iagram" generate
           TOFU=$(ls ~/.iagram/bin/tofu-*)
-          cd .iagram/tf
-          "$TOFU" init -backend=false -input=false -no-color
-          "$TOFU" validate -no-color
+          for ex in aws-three-tier gcp-web azure-web; do
+            echo "== $ex"
+            ( cd "examples/$ex" && "$GITHUB_WORKSPACE/iagram" validate && "$GITHUB_WORKSPACE/iagram" generate \
+              && cd .iagram/tf && "$TOFU" init -backend=false -input=false -no-color >/dev/null && "$TOFU" validate -no-color )
+          done
+      - name: import from state
+        run: |
+          "$GITHUB_WORKSPACE/iagram" import --state examples/import/terraform.tfstate -o /tmp/imported.json --name imported
+          "$GITHUB_WORKSPACE/iagram" validate -f /tmp/imported.json
       - name: example catalog check
         run: |
           mkdir -p /tmp/extcat/aws

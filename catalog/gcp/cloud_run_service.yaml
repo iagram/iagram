@@ -1,0 +1,55 @@
+id: gcp.cloud_run_service
+label: Cloud Run
+description: Serverless container. Ships with the hello image; deploy your own outside iagram.
+category: serverless
+icon: gcp/cloud_run.svg
+kind: leaf
+allowed_parents: [gcp.project]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: gcp.storage_bucket,     kind: reads_writes, label: reads/writes, terraform: {set: from, input: bucket_names, value: to.bucket_name}}
+    - {to: gcp.cloud_sql_instance, kind: connects_to,  label: connects to,  terraform: {set: from, input: cloud_sql_connection_names, value: to.connection_name}}
+props:
+  type: object
+  required: [region]
+  properties:
+    region:
+      type: string
+      title: Region
+      default: europe-west1
+      enum: [us-central1, us-east1, us-east4, us-west1, europe-west1, europe-west2, europe-west3, europe-west4, europe-north1, asia-east1, asia-southeast1, asia-northeast1, australia-southeast1]
+    image:
+      type: string
+      title: Container image
+      default: us-docker.pkg.dev/cloudrun/container/hello
+    cpu:
+      type: string
+      title: CPU
+      default: "1"
+      enum: ["1", "2", "4"]
+    memory:
+      type: string
+      title: Memory
+      default: 512Mi
+      enum: [256Mi, 512Mi, 1Gi, 2Gi, 4Gi]
+    min_instances:
+      type: integer
+      title: Min instances
+      default: 0
+      minimum: 0
+      maximum: 100
+    max_instances:
+      type: integer
+      title: Max instances
+      default: 10
+      minimum: 1
+      maximum: 1000
+    allow_unauthenticated:
+      type: boolean
+      title: Public (allow unauthenticated)
+      default: false
+terraform:
+  module: gcp/cloud_run_service
+  import: {resource: google_cloud_run_v2_service, name: name, props: {region: location}}
+outputs: [service_url, service_account_email]

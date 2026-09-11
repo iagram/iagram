@@ -1,0 +1,24 @@
+id: azure.subnet
+label: Subnet
+category: network
+icon: azure/subnet.svg
+kind: container
+allowed_parents: [azure.vnet]
+size: {w: 360, h: 260}
+props:
+  type: object
+  required: [cidr]
+  properties:
+    cidr:
+      type: string
+      title: Address prefix
+      format: cidr
+      default: 10.20.1.0/24
+terraform:
+  module: azure/subnet
+  inputs_from_parent:
+    vnet_name: parent.vnet_name
+    resource_group_name: parent.resource_group_name
+    location: parent.location
+  import: {resource: azurerm_subnet, parent: virtual_network_id, name: name, props: {cidr: address_prefixes.0}}
+outputs: [subnet_id, resource_group_name, location]

@@ -1,0 +1,32 @@
+id: azure.storage_account
+label: Storage Account
+category: storage
+icon: azure/storage_account.svg
+kind: leaf
+allowed_parents: [azure.resource_group]
+size: {w: 120, h: 90}
+props:
+  type: object
+  required: [tier, replication]
+  properties:
+    tier:
+      type: string
+      title: Tier
+      default: Standard
+      enum: [Standard, Premium]
+    replication:
+      type: string
+      title: Replication
+      default: LRS
+      enum: [LRS, ZRS, GRS, RAGRS, GZRS]
+    versioning:
+      type: boolean
+      title: Blob versioning
+      default: false
+terraform:
+  module: azure/storage_account
+  inputs_from_parent:
+    resource_group_name: parent.resource_group_name
+    location: parent.location
+  import: {resource: azurerm_storage_account, name: name, props: {tier: account_tier, replication: account_replication_type}}
+outputs: [storage_account_id, storage_account_name, primary_blob_endpoint]

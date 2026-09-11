@@ -1,0 +1,29 @@
+id: gcp.firewall_rule
+label: Firewall Rule
+description: Allows TCP ports from a source range to the instances it protects (by network tag).
+category: security
+icon: gcp/firewall.svg
+kind: leaf
+allowed_parents: [gcp.vpc]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: gcp.compute_instance, kind: protects, label: protects, terraform: {set: to, input: network_tags, value: from.target_tag}}
+props:
+  type: object
+  properties:
+    ports:
+      type: string
+      title: TCP ports
+      default: "22,443"
+    source_ranges:
+      type: string
+      title: Source range
+      format: cidr
+      default: 0.0.0.0/0
+terraform:
+  module: gcp/firewall_rule
+  inputs_from_parent:
+    network_name: parent.network_name
+  import: {resource: google_compute_firewall, parent: network, name: name}
+outputs: [target_tag]

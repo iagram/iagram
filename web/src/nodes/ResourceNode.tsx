@@ -9,7 +9,7 @@ function ResourceNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
   const icon = useStore((s) => s.rules?.iconFor(data.type, data.props))
   const planClass = usePlanClass(id)
   return (
-    <div className={`node resource ${planClass} ${selected ? 'selected' : ''}`} data-type={data.type}>
+    <div className={`node resource ${planClass} ${selected ? 'selected' : ''}`} data-type={data.type} data-provider={data.type.split('.')[0]}>
       <Handle type="target" position={Position.Left} />
       {icon && <img src={`/icons/${icon}`} alt="" draggable={false} />}
       <div className="name" title={data.name}>

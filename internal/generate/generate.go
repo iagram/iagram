@@ -84,7 +84,7 @@ func (g *gen) providerBlocks() error {
 		alias := sanitize(n.ID)
 		args["alias"] = alias
 		g.aliases[n.ID] = alias
-		g.providers[e.Provider] = append(g.providers[e.Provider], args)
+		g.providers[g.localName(e.Provider)] = append(g.providers[g.localName(e.Provider)], args)
 		used[e.Provider] = true
 	}
 	// Account-only diagrams (no region node) still get an account-level alias
@@ -102,7 +102,7 @@ func (g *gen) providerBlocks() error {
 		alias := sanitize(n.ID)
 		args["alias"] = alias
 		g.aliases[n.ID] = alias
-		g.providers[e.Provider] = append(g.providers[e.Provider], args)
+		g.providers[g.localName(e.Provider)] = append(g.providers[g.localName(e.Provider)], args)
 		used[e.Provider] = true
 	}
 	// A default (unaliased) provider per used provider keeps `tofu` happy for
@@ -165,7 +165,8 @@ func (g *gen) moduleBlocks() error {
 			},
 		}
 		if alias := g.providerAlias(n, e.Provider); alias != "" {
-			block["providers"] = map[string]any{e.Provider: e.Provider + "." + alias}
+			local := g.localName(e.Provider)
+			block["providers"] = map[string]any{local: local + "." + alias}
 		}
 		for k, v := range n.Props {
 			if v == nil || v == "" {
@@ -238,12 +239,11 @@ func (g *gen) edgeWiring() {
 func (g *gen) assemble() {
 	required := map[string]any{}
 	requiredVersion := ""
-	for p := range g.providers {
-		pc, ok := g.c.Providers[p]
-		if !ok {
+	for _, pc := range g.c.Providers {
+		if _, used := g.providers[pc.LocalName()]; !used {
 			continue
 		}
-		required[pc.Name] = map[string]any{"source": pc.Source, "version": pc.Version}
+		required[pc.LocalName()] = map[string]any{"source": pc.Source, "version": pc.Version}
 		for name, src := range pc.Extra {
 			required[name] = map[string]any{"source": src.Source, "version": src.Version}
 		}
@@ -281,6 +281,14 @@ func (g *gen) assemble() {
 		cfg["output"] = outputs
 	}
 	g.res.Config = cfg
+}
+
+// localName maps a catalog provider (gcp) to its Terraform name (google).
+func (g *gen) localName(provider string) string {
+	if pc, ok := g.c.Providers[provider]; ok {
+		return pc.LocalName()
+	}
+	return provider
 }
 
 // providerAlias finds the nearest region (then account) ancestor of the
@@ -405,7 +413,9 @@ func renderValue(v any, props map[string]any) (any, bool) {
 		return out, true
 	case map[string]any:
 		out := render(t, props)
-		if len(out) == 0 {
+		// A literal empty map (no placeholders at all) is kept: azurerm's
+		// mandatory `features {}` block is exactly that.
+		if len(out) == 0 && len(t) > 0 {
 			return nil, false
 		}
 		return out, true

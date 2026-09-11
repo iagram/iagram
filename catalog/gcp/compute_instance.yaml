@@ -1,0 +1,46 @@
+id: gcp.compute_instance
+label: Compute Engine
+category: compute
+icon: gcp/compute_engine.svg
+kind: leaf
+allowed_parents: [gcp.subnetwork]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: gcp.storage_bucket,     kind: reads_writes, label: reads/writes, terraform: {set: from, input: bucket_names, value: to.bucket_name}}
+    - {to: gcp.cloud_sql_instance, kind: connects_to,  label: connects to,  terraform: {set: to, input: client_service_accounts, value: from.service_account_email}}
+props:
+  type: object
+  required: [machine_type]
+  properties:
+    machine_type:
+      type: string
+      title: Machine type
+      default: e2-micro
+      enum: [e2-micro, e2-small, e2-medium, e2-standard-2, e2-standard-4, n2-standard-2, n2-standard-4, c3-standard-4]
+    zone:
+      type: string
+      title: Zone suffix
+      default: b
+      enum: [a, b, c]
+    image:
+      type: string
+      title: Image
+      default: debian-cloud/debian-12
+    disk_gb:
+      type: integer
+      title: Boot disk (GB)
+      default: 20
+      minimum: 10
+      maximum: 65536
+    public_ip:
+      type: boolean
+      title: External IP
+      default: false
+terraform:
+  module: gcp/compute_instance
+  inputs_from_parent:
+    subnetwork_id: parent.subnetwork_id
+    region: parent.region
+  import: {resource: google_compute_instance, parent: network_interface.0.subnetwork, name: name, props: {machine_type: machine_type, zone: "zone|last"}}
+outputs: [instance_id, internal_ip, external_ip, service_account_email]
