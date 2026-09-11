@@ -4,6 +4,9 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  IAGRAM_TELEMETRY: "0"
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -26,8 +29,35 @@ jobs:
           go vet ./...
           go test ./...
           go build -o iagram ./cmd/iagram
-      - name: smoke
+      - name: cache opentofu + providers
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.iagram/bin
+            ~/.iagram/plugin-cache
+          key: iagram-tofu-${{ hashFiles('internal/tofu/install.go', 'catalog/aws/_provider.yaml') }}
+      - name: runner e2e (real OpenTofu, no cloud)
+        run: IAGRAM_E2E=1 go test ./internal/tofu/ -run TestRunnerPlanRoundTrip -v
+      - name: generated terraform validates
         run: |
-          d=$(mktemp -d) && cd "$d"
-          "$GITHUB_WORKSPACE/iagram" init smoke
+          cd examples/aws-three-tier
           "$GITHUB_WORKSPACE/iagram" validate
+          "$GITHUB_WORKSPACE/iagram" generate
+          TOFU=$(ls ~/.iagram/bin/tofu-*)
+          cd .iagram/tf
+          "$TOFU" init -backend=false -input=false -no-color
+          "$TOFU" validate -no-color
+      - name: example catalog check
+        run: |
+          mkdir -p /tmp/extcat/aws
+          cp catalog/aws/_provider.yaml /tmp/extcat/aws/
+          cat > /tmp/extcat/aws/sqs_queue.yaml <<'YAML'
+          id: aws.sqs_queue
+          label: SQS Queue
+          category: integration
+          kind: leaf
+          allowed_parents: [aws.region]
+          props: {type: object, properties: {fifo: {type: boolean, default: false}}}
+          terraform: {module: aws/sqs_queue}
+          YAML
+          "$GITHUB_WORKSPACE/iagram" catalog check /tmp/extcat

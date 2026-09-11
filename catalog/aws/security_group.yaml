@@ -8,10 +8,10 @@ allowed_parents: [aws.vpc]
 size: {w: 120, h: 90}
 connections:
   out:
-    - {to: aws.ec2_instance,  kind: protects, label: protects}
-    - {to: aws.rds_instance,  kind: protects, label: protects}
-    - {to: aws.alb,           kind: protects, label: protects}
-    - {to: aws.lambda_function, kind: protects, label: protects}
+    - {to: aws.ec2_instance,    kind: protects, label: protects, terraform: {set: to, input: security_group_ids, value: from.security_group_id}}
+    - {to: aws.rds_instance,    kind: protects, label: protects, terraform: {set: to, input: security_group_ids, value: from.security_group_id}}
+    - {to: aws.alb,             kind: protects, label: protects, terraform: {set: to, input: security_group_ids, value: from.security_group_id}}
+    - {to: aws.lambda_function, kind: protects, label: protects, terraform: {set: to, input: security_group_ids, value: from.security_group_id}}
 props:
   type: object
   properties:
@@ -19,8 +19,18 @@ props:
       type: string
       title: Description
       default: managed by iagram
+    ingress_ports:
+      type: string
+      title: Ingress ports
+      description: Comma-separated TCP ports opened from ingress_cidr, e.g. "80,443".
+      default: "443"
+    ingress_cidr:
+      type: string
+      title: Ingress CIDR
+      format: cidr
+      default: 0.0.0.0/0
 terraform:
-  module: registry/aws/security_group
+  module: aws/security_group
   inputs_from_parent:
-    vpc_id: parent.id
+    vpc_id: parent.vpc_id
 outputs: [security_group_id]

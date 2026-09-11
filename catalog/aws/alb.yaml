@@ -7,8 +7,8 @@ allowed_parents: [aws.vpc]
 size: {w: 120, h: 90}
 connections:
   out:
-    - {to: aws.ec2_instance,    kind: routes_to, label: routes to}
-    - {to: aws.lambda_function, kind: routes_to, label: routes to}
+    - {to: aws.ec2_instance,    kind: routes_to, label: routes to, terraform: {set: from, input: target_instance_ids, value: to.instance_id}}
+    - {to: aws.lambda_function, kind: routes_to, label: routes to, terraform: {set: from, input: target_lambda_arns, value: to.function_arn}}
 props:
   type: object
   required: [scheme]
@@ -25,7 +25,9 @@ props:
       minimum: 1
       maximum: 65535
 terraform:
-  module: registry/aws/alb
+  module: aws/alb
   inputs_from_parent:
-    vpc_id: parent.id
-outputs: [dns_name]
+    vpc_id: parent.vpc_id
+  collect:
+    subnet_ids: {type: aws.subnet, under: parent, output: subnet_id}
+outputs: [dns_name, alb_arn]

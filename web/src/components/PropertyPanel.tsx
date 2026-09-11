@@ -11,6 +11,8 @@ export function PropertyPanel() {
   const docName = useStore((s) => s.docName)
   const nodeCount = useStore((s) => s.nodes.length)
   const edgeCount = useStore((s) => s.edges.length)
+  const nodePlan = useStore((s) => (s.selectedId ? s.plan?.summary.nodes[s.selectedId] : undefined))
+  const planStale = useStore((s) => s.planStale)
 
   if (!node || !rules || !selectedId) {
     return (
@@ -68,6 +70,22 @@ export function PropertyPanel() {
             </li>
           ))}
         </ul>
+      )}
+
+      {nodePlan && (
+        <details open className={`planlist ${planStale ? 'stale' : ''}`}>
+          <summary>
+            Plan: <b className={nodePlan.action}>{nodePlan.action}</b> · {nodePlan.resources.length} resource{nodePlan.resources.length === 1 ? '' : 's'}
+            {planStale && ' (stale)'}
+          </summary>
+          <ul>
+            {nodePlan.resources.map((r) => (
+              <li key={r.address} className={r.action}>
+                <span className="mono">{r.type}</span> <span className="muted mono">{r.address.replace(/^module\.[^.]+\./, '')}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {entry?.outputs && entry.outputs.length > 0 && (

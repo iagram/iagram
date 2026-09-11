@@ -62,19 +62,28 @@ func Load(path string) (*Document, error) {
 	return Decode(raw)
 }
 
-// Decode parses document JSON.
+// Decode parses document JSON, upgrading older format versions first.
+// Unknown fields are rejected so typos and drift surface immediately.
 func Decode(raw []byte) (*Document, error) {
+	var generic map[string]any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil, fmt.Errorf("decode document: %w", err)
+	}
+	if generic == nil {
+		return nil, errors.New("decode document: empty")
+	}
+	if _, err := Upgrade(generic); err != nil {
+		return nil, err
+	}
+	upgraded, err := json.Marshal(generic)
+	if err != nil {
+		return nil, err
+	}
 	var d Document
-	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec := json.NewDecoder(bytes.NewReader(upgraded))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&d); err != nil {
 		return nil, fmt.Errorf("decode document: %w", err)
-	}
-	if d.Version == 0 {
-		return nil, errors.New("document has no version")
-	}
-	if d.Version > Version {
-		return nil, fmt.Errorf("document version %d is newer than this iagram (%d)", d.Version, Version)
 	}
 	d.normalize()
 	return &d, nil

@@ -11,7 +11,7 @@ import {
 import { api } from './api'
 import { Rules } from './rules'
 import { fromDocument, makeEdge, makeNode, newId, toDocument, type RFEdge, type RFNode } from './convert'
-import type { Catalog, Problem } from './types'
+import type { Catalog, Job, PlanResult, Problem } from './types'
 import { ROOT } from './types'
 
 interface State {
@@ -27,6 +27,13 @@ interface State {
   error: string | null
   draggingType: string | null
   toast: string | null
+  past: Snapshot[]
+  future: Snapshot[]
+  plan: PlanResult | null
+  planStale: boolean
+  job: Job | null
+  jobLines: string[]
+  logOpen: boolean
 
   load: () => Promise<void>
   save: () => Promise<void>
@@ -40,7 +47,24 @@ interface State {
   select: (id: string | null) => void
   setDragging: (type: string | null) => void
   showToast: (msg: string) => void
+  /** Record the current graph before a structural change (coalesced by key). */
+  commit: (key?: string) => void
+  undo: () => void
+  redo: () => void
+  runPlan: () => Promise<void>
+  cancelPlan: () => Promise<void>
+  clearPlan: () => void
+  setLogOpen: (open: boolean) => void
 }
+
+interface Snapshot {
+  nodes: RFNode[]
+  edges: RFEdge[]
+}
+
+const HISTORY_LIMIT = 100
+let lastCommitKey: string | undefined
+let lastCommitAt = 0
 
 let validateTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -57,13 +81,21 @@ export const useStore = create<State>((set, get) => ({
   error: null,
   draggingType: null,
   toast: null,
+  past: [],
+  future: [],
+  plan: null,
+  planStale: false,
+  job: null,
+  jobLines: [],
+  logOpen: false,
 
   async load() {
     try {
       const [catalog, res] = await Promise.all([api.catalog(), api.document()])
       const rules = new Rules(catalog)
       const { nodes, edges } = fromDocument(rules, res.document)
-      set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null })
+      set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [] })
+      api.latestPlan().then((r) => r.plan && set({ plan: r.plan, planStale: false })).catch(() => undefined)
     } catch (e) {
       set({ error: (e as Error).message })
     }
@@ -103,7 +135,7 @@ export const useStore = create<State>((set, get) => ({
     )
     const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id)
     if (removed.length) {
-      get().removeNodes(removed)
+      get().removeNodes(removed) // commits
       const rest = changes.filter((c) => c.type !== 'remove')
       if (rest.length) set({ nodes: applyNodeChanges(rest, get().nodes) })
       return
@@ -114,6 +146,7 @@ export const useStore = create<State>((set, get) => ({
 
   onEdgesChange(changes) {
     const structural = changes.some((c) => c.type !== 'select')
+    if (changes.some((c) => c.type === 'remove')) get().commit()
     set({ edges: applyEdgeChanges(changes, get().edges), ...(structural ? { dirty: true } : {}) })
     if (structural) get().validateSoon()
   },
@@ -129,6 +162,7 @@ export const useStore = create<State>((set, get) => ({
       get().showToast(`${entry.label} cannot be placed ${where}`)
       return null
     }
+    get().commit()
     const count = nodes.filter((n) => n.data.type === type).length + 1
     const id = newId(entry)
     const node = makeNode(rules, {
@@ -153,12 +187,15 @@ export const useStore = create<State>((set, get) => ({
     const rule = rules.connection(src.data.type, dst.data.type)
     if (!rule) return
     if (edges.some((e) => e.source === c.source && e.target === c.target)) return
+    get().commit()
     const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: c.source, target: c.target }, rule.label ?? rule.kind)
     set({ edges: addEdge(edge, edges), dirty: true })
     get().validateSoon()
   },
 
   updateNode(id, patch) {
+    // typing in one field coalesces into a single undo step
+    get().commit(`update:${id}:${patch.name !== undefined ? 'name' : Object.keys(patch.props ?? {}).join(',')}`)
     set({
       nodes: get().nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.props ? { props: patch.props } : {}) } } : n,
@@ -169,6 +206,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   removeNodes(ids) {
+    get().commit()
     const { nodes, edges, selectedId } = get()
     const doomed = new Set(ids)
     // cascade to descendants
@@ -202,6 +240,83 @@ export const useStore = create<State>((set, get) => ({
   showToast(msg) {
     set({ toast: msg })
     setTimeout(() => set((s) => (s.toast === msg ? { toast: null } : {})), 2500)
+  },
+
+  commit(key) {
+    const now = Date.now()
+    if (key && key === lastCommitKey && now - lastCommitAt < 1000) {
+      lastCommitAt = now
+      return
+    }
+    lastCommitKey = key
+    lastCommitAt = now
+    const { nodes, edges, past, plan } = get()
+    set({ past: [...past.slice(-(HISTORY_LIMIT - 1)), { nodes, edges }], future: [], ...(plan ? { planStale: true } : {}) })
+  },
+
+  undo() {
+    const { past, future, nodes, edges } = get()
+    const prev = past[past.length - 1]
+    if (!prev) return
+    lastCommitKey = undefined
+    set({ nodes: prev.nodes, edges: prev.edges, past: past.slice(0, -1), future: [{ nodes, edges }, ...future], dirty: true, selectedId: null })
+    get().validateSoon()
+  },
+
+  async runPlan() {
+    const { dirty, save, problems } = get()
+    if (problems.some((p) => p.level === 'error')) {
+      get().showToast('Fix validation errors before planning')
+      return
+    }
+    if (dirty) await save()
+    if (get().dirty) return // save failed
+    set({ jobLines: [], logOpen: true, error: null })
+    let job: Job
+    try {
+      job = await api.startPlan()
+    } catch (e) {
+      set({ error: (e as Error).message })
+      return
+    }
+    set({ job })
+    const es = new EventSource(`/api/jobs/${job.id}/stream`)
+    es.addEventListener('line', (ev) => {
+      const line = JSON.parse((ev as MessageEvent).data) as string
+      set((s) => ({ jobLines: [...s.jobLines, line] }))
+    })
+    es.addEventListener('done', (ev) => {
+      es.close()
+      const done = JSON.parse((ev as MessageEvent).data) as Job
+      set({ job: done, ...(done.status === 'succeeded' && done.result ? { plan: done.result, planStale: false } : {}) })
+      if (done.status === 'failed') get().showToast('Plan failed; see log')
+    })
+    es.onerror = () => {
+      es.close()
+      void api.job(job.id).then((j) => set({ job: j, ...(j.result ? { plan: j.result, planStale: false } : {}) }))
+    }
+  },
+
+  async cancelPlan() {
+    const { job } = get()
+    if (job?.status === 'running') await api.cancelJob(job.id)
+  },
+
+  clearPlan() {
+    set({ plan: null, planStale: false })
+  },
+
+  setLogOpen(open) {
+    set({ logOpen: open })
+  },
+
+  redo() {
+    const { past, future, nodes, edges } = get()
+    const next = future[0]
+    if (!next) return
+    lastCommitKey = undefined
+    set({ nodes: next.nodes, edges: next.edges, past: [...past, { nodes, edges }], future: future.slice(1), dirty: true, selectedId: null })
+    get().validateSoon()
   },
 }))
 

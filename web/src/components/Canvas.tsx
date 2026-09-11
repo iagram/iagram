@@ -1,7 +1,6 @@
 import { useCallback, useMemo, type DragEvent } from 'react'
 import {
   Background,
-  Controls,
   MiniMap,
   ReactFlow,
   useReactFlow,
@@ -26,6 +25,7 @@ export function Canvas() {
   const addNode = useStore((s) => s.addNode)
   const select = useStore((s) => s.select)
   const setDragging = useStore((s) => s.setDragging)
+  const commit = useStore((s) => s.commit)
   const problems = useStore((s) => s.problems)
   const { screenToFlowPosition, getInternalNode } = useReactFlow<RFNode, RFEdge>()
 
@@ -128,6 +128,7 @@ export function Canvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={connect}
+        onNodeDragStart={() => commit()}
         isValidConnection={isValidConnection}
         onSelectionChange={({ nodes: sel }) => select(sel.length === 1 ? sel[0].id : null)}
         onPaneClick={() => select(null)}
@@ -139,7 +140,6 @@ export function Canvas() {
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} />
-        <Controls />
         <MiniMap pannable zoomable nodeStrokeWidth={2} />
       </ReactFlow>
     </div>

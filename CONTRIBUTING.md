@@ -14,8 +14,10 @@ The whole point of iagram is that the catalog is the product. Adding a type is:
 3. Decide **what it can connect to** (`connections.out` / `connections.in`), with a `kind` that says what the arrow means. Placement expresses containment; arrows express traffic, data or permission flow. Never encode the same fact both ways.
 4. Describe its **properties** as a JSON Schema object in `props`. Supported today: `string` (with `enum`, `format: cidr`, `pattern`), `integer`/`number` (with `minimum`/`maximum`), `boolean`. Give sensible defaults; the goal is that a freshly dropped element already produces a valid plan.
 5. Add an icon under `catalog/icons/<provider>/` and reference it in `icon`.
-6. Add the Terraform mapping under `terraform:` (phase 2; the module can come in the same PR or a later one).
-7. Run `make test`. `internal/catalog` tests load the shipped catalog and will fail on broken references.
+6. Add the Terraform mapping under `terraform:` and the module under `modules/<provider>/<name>/` following [`modules/README.md`](modules/README.md). Connection rules that change infrastructure carry a `terraform:` clause saying which list input on which side receives the other side's output.
+7. Run `make test`. The catalog tests validate every entry against `catalog/schema.json` and fail on broken references; CI also runs `tofu validate` on the generated example.
+
+The full contract is [docs/spec/catalog.md](docs/spec/catalog.md). To add a whole provider, see its "Adding a provider" section; a provider can start life in its own repository and be loaded with `--catalog DIR`.
 
 Keep the catalog tight. A type that always produces a working plan is worth more than ten that fail half the time.
 

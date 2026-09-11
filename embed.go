@@ -7,3 +7,8 @@ import "embed"
 //
 //go:embed catalog/schema.json catalog/*/*.yaml catalog/icons/*/*.svg
 var CatalogFS embed.FS
+
+// ModulesFS holds the Terraform modules referenced by the catalog.
+//
+//go:embed modules/*/*/*.tf
+var ModulesFS embed.FS

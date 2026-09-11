@@ -15,29 +15,44 @@ import (
 
 	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
+	"github.com/iagram/iagram/internal/jobs"
 	"github.com/iagram/iagram/internal/validate"
+	"github.com/iagram/iagram/internal/workspace"
 )
 
 // Server serves the API and the embedded web UI.
 type Server struct {
-	Catalog *catalog.Catalog
-	DocPath string
-	WebFS   fs.FS // built frontend, rooted at index.html
-	IconsFS fs.FS // catalog/icons
-	Version string
-	mu      sync.Mutex
-	mux     *http.ServeMux
+	Catalog   *catalog.Catalog
+	DocPath   string
+	WebFS     fs.FS // built frontend, rooted at index.html
+	IconsFS   fs.FS // catalog/icons
+	Version   string
+	Workspace *workspace.Workspace
+	Jobs      *jobs.Manager
+	// OnEvent receives telemetry events; nil disables. The document is passed
+	// so the caller can derive bucketed counts, never content.
+	OnEvent func(name string, props map[string]any, d *document.Document)
+
+	mu       sync.Mutex
+	mux      *http.ServeMux
+	lastPlan *workspace.PlanResult
 }
 
 // New wires the routes.
 func New(c *catalog.Catalog, docPath string, webFS, iconsFS fs.FS, version string) *Server {
-	s := &Server{Catalog: c, DocPath: docPath, WebFS: webFS, IconsFS: iconsFS, Version: version}
+	s := &Server{Catalog: c, DocPath: docPath, WebFS: webFS, IconsFS: iconsFS, Version: version, Workspace: workspace.For(docPath), Jobs: jobs.New()}
 	m := http.NewServeMux()
 	m.HandleFunc("GET /api/health", s.health)
 	m.HandleFunc("GET /api/catalog", s.catalog)
 	m.HandleFunc("GET /api/document", s.getDocument)
 	m.HandleFunc("PUT /api/document", s.putDocument)
 	m.HandleFunc("POST /api/validate", s.validateDocument)
+	m.HandleFunc("GET /api/generate", s.generate)
+	m.HandleFunc("POST /api/plan", s.startPlan)
+	m.HandleFunc("GET /api/plan/latest", s.latestPlan)
+	m.HandleFunc("GET /api/jobs/{id}", s.getJob)
+	m.HandleFunc("GET /api/jobs/{id}/stream", s.streamJob)
+	m.HandleFunc("POST /api/jobs/{id}/cancel", s.cancelJob)
 	m.Handle("GET /icons/", http.StripPrefix("/icons/", http.FileServerFS(iconsFS)))
 	m.HandleFunc("/", s.static)
 	s.mux = m

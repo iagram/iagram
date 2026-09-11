@@ -66,3 +66,30 @@ func TestDecodeRejectsUnknownAndNewer(t *testing.T) {
 		t.Error("missing version accepted")
 	}
 }
+
+func TestUpgradeAppliesMigrationsInOrder(t *testing.T) {
+	// Pretend a v0 format existed that called nodes "elements".
+	migrations[0] = func(raw map[string]any) error {
+		raw["nodes"] = raw["elements"]
+		delete(raw, "elements")
+		return nil
+	}
+	defer delete(migrations, 0)
+
+	d, err := Decode([]byte(`{"version":0,"elements":[{"id":"a","type":"aws.account","name":"x","props":{},"layout":{"x":0,"y":0}}],"edges":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Version != Version || len(d.Nodes) != 1 || d.Nodes[0].ID != "a" {
+		t.Errorf("got %+v", d)
+	}
+}
+
+func TestUpgradeRefusesUnknownOldVersion(t *testing.T) {
+	if _, err := Decode([]byte(`{"version":0,"nodes":[],"edges":[]}`)); err == nil {
+		t.Error("expected error for version without migration")
+	}
+	if _, err := Decode([]byte(`{"version":"1","nodes":[],"edges":[]}`)); err == nil {
+		t.Error("expected error for non-integer version")
+	}
+}

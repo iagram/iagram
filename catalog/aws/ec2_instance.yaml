@@ -7,8 +7,8 @@ allowed_parents: [aws.subnet]
 size: {w: 120, h: 90}
 connections:
   out:
-    - {to: aws.rds_instance, kind: connects_to,  label: connects to}
-    - {to: aws.s3_bucket,    kind: reads_writes, label: reads/writes}
+    - {to: aws.rds_instance, kind: connects_to,  label: connects to,  terraform: {set: to, input: ingress_security_group_ids, value: from.security_group_id}}
+    - {to: aws.s3_bucket,    kind: reads_writes, label: reads/writes, terraform: {set: from, input: s3_bucket_arns, value: to.bucket_arn}}
 props:
   type: object
   required: [instance_type]
@@ -34,8 +34,8 @@ props:
       title: Associate public IP
       default: false
 terraform:
-  module: registry/aws/ec2_instance
+  module: aws/ec2_instance
   inputs_from_parent:
-    subnet_id: parent.id
-    vpc_id: parent.parent.id
-outputs: [instance_id, private_ip, public_ip]
+    subnet_id: parent.subnet_id
+    vpc_id: parent.parent.vpc_id
+outputs: [instance_id, private_ip, public_ip, security_group_id]

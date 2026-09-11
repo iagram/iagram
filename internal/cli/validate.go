@@ -6,25 +6,24 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/iagram/iagram"
-	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
 	"github.com/iagram/iagram/internal/validate"
 )
 
-func runValidate(args []string, stdout io.Writer) error {
+func runValidate(args []string, stdout io.Writer) (*document.Document, error) {
 	fs_ := flag.NewFlagSet("validate", flag.ContinueOnError)
-	file := fileFlag(fs_)
+	var c common
+	c.bind(fs_)
 	if err := fs_.Parse(args); err != nil {
-		return err
+		return nil, err
 	}
-	cat, err := catalog.Load(iagram.CatalogFS)
+	cat, err := c.loadCatalog()
 	if err != nil {
-		return fmt.Errorf("load catalog: %w", err)
+		return nil, err
 	}
-	doc, err := document.Load(*file)
+	doc, err := c.loadDocument()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	res := validate.Run(cat, doc)
 	byID := doc.Index()
@@ -42,8 +41,8 @@ func runValidate(args []string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "%-7s %s: %s\n", p.Level, where, p.Message)
 	}
 	if !res.OK() {
-		return errors.New("validation failed")
+		return doc, errors.New("validation failed")
 	}
 	fmt.Fprintf(stdout, "ok: %d nodes, %d connections\n", len(doc.Nodes), len(doc.Edges))
-	return nil
+	return doc, nil
 }

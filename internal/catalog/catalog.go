@@ -20,20 +20,21 @@ const (
 
 // Entry is one drawable element.
 type Entry struct {
-	ID              string         `yaml:"id" json:"id"`
-	Label           string         `yaml:"label" json:"label"`
-	Description     string         `yaml:"description,omitempty" json:"description,omitempty"`
-	Provider        string         `yaml:"-" json:"provider"`
-	Category        string         `yaml:"category" json:"category"`
-	Icon            string         `yaml:"icon,omitempty" json:"icon,omitempty"`
-	Kind            string         `yaml:"kind" json:"kind"`
-	AllowedParents  []string       `yaml:"allowed_parents" json:"allowed_parents"`
-	AllowedChildren []string       `yaml:"allowed_children,omitempty" json:"allowed_children,omitempty"`
-	Connections     Connections    `yaml:"connections,omitempty" json:"-"`
-	Props           map[string]any `yaml:"props,omitempty" json:"props,omitempty"`
-	Terraform       *Terraform     `yaml:"terraform,omitempty" json:"terraform,omitempty"`
-	Outputs         []string       `yaml:"outputs,omitempty" json:"outputs,omitempty"`
-	Size            *Size          `yaml:"size,omitempty" json:"size,omitempty"`
+	ID              string            `yaml:"id" json:"id"`
+	Label           string            `yaml:"label" json:"label"`
+	Description     string            `yaml:"description,omitempty" json:"description,omitempty"`
+	Provider        string            `yaml:"-" json:"provider"`
+	Category        string            `yaml:"category" json:"category"`
+	Icon            string            `yaml:"icon,omitempty" json:"icon,omitempty"`
+	IconVariants    map[string]string `yaml:"icon_variants,omitempty" json:"icon_variants,omitempty"`
+	Kind            string            `yaml:"kind" json:"kind"`
+	AllowedParents  []string          `yaml:"allowed_parents" json:"allowed_parents"`
+	AllowedChildren []string          `yaml:"allowed_children,omitempty" json:"allowed_children,omitempty"`
+	Connections     Connections       `yaml:"connections,omitempty" json:"-"`
+	Props           map[string]any    `yaml:"props,omitempty" json:"props,omitempty"`
+	Terraform       *Terraform        `yaml:"terraform,omitempty" json:"terraform,omitempty"`
+	Outputs         []string          `yaml:"outputs,omitempty" json:"outputs,omitempty"`
+	Size            *Size             `yaml:"size,omitempty" json:"size,omitempty"`
 }
 
 // Size is the default canvas size of a node.
@@ -51,30 +52,82 @@ type Connections struct {
 
 // ConnRule is one authored connection rule.
 type ConnRule struct {
-	From  string `yaml:"from,omitempty"`
-	To    string `yaml:"to,omitempty"`
-	Kind  string `yaml:"kind"`
-	Label string `yaml:"label,omitempty"`
+	From      string         `yaml:"from,omitempty"`
+	To        string         `yaml:"to,omitempty"`
+	Kind      string         `yaml:"kind"`
+	Label     string         `yaml:"label,omitempty"`
+	Terraform *ConnTerraform `yaml:"terraform,omitempty"`
+}
+
+// ConnTerraform says what an edge means in Terraform: append Value (an output
+// reference on one side, "from.<output>" or "to.<output>") to the list Input
+// of the module on the Set side ("from" or "to").
+type ConnTerraform struct {
+	Set   string `yaml:"set" json:"set"`
+	Input string `yaml:"input" json:"input"`
+	Value string `yaml:"value" json:"value"`
 }
 
 // Rule is a compiled, directional connection rule.
 type Rule struct {
-	From  string `json:"from"`
-	To    string `json:"to"`
-	Kind  string `json:"kind"`
-	Label string `json:"label,omitempty"`
+	From      string         `json:"from"`
+	To        string         `json:"to"`
+	Kind      string         `json:"kind"`
+	Label     string         `json:"label,omitempty"`
+	Terraform *ConnTerraform `json:"terraform,omitempty"`
 }
 
-// Terraform describes how an entry renders (phase 2; carried but unused now).
+// Terraform describes how an entry renders.
+//
+// Role "module" (default) emits one module block per node. Roles "account"
+// and "region" configure the provider instead of creating resources.
+//
+// InputsFromParent maps a module input to an ancestor output: "parent.vpc_id"
+// or "parent.parent.vpc_id". When the ancestor is not a module node (an
+// account or region) the input is omitted, so the same entry can live under
+// several parent types.
+//
+// Collect gathers outputs from every node of a type placed under an ancestor,
+// for inputs that need a set (a DB subnet group, an ALB's subnets).
 type Terraform struct {
-	Module           string            `yaml:"module" json:"module"`
-	InputsFromParent map[string]string `yaml:"inputs_from_parent,omitempty" json:"inputs_from_parent,omitempty"`
+	Role   string `yaml:"role,omitempty" json:"role,omitempty"`
+	Module string `yaml:"module,omitempty" json:"module,omitempty"`
+	// ProviderArgs (roles account/region) is a template for the provider
+	// block: any string "${prop}" is replaced by the node's property value;
+	// keys (or list items) whose property is empty are dropped.
+	ProviderArgs     map[string]any     `yaml:"provider_args,omitempty" json:"provider_args,omitempty"`
+	InputsFromParent map[string]string  `yaml:"inputs_from_parent,omitempty" json:"inputs_from_parent,omitempty"`
+	Collect          map[string]Collect `yaml:"collect,omitempty" json:"collect,omitempty"`
+}
+
+// Collect describes one gathered list input.
+type Collect struct {
+	Type   string `yaml:"type" json:"type"`     // catalog id of nodes to gather
+	Under  string `yaml:"under" json:"under"`   // "parent", "parent.parent", ...
+	Output string `yaml:"output" json:"output"` // output of each gathered module
+}
+
+// Provider is the per-cloud Terraform provider configuration, loaded from
+// catalog/<provider>/_provider.yaml.
+type Provider struct {
+	Name            string            `yaml:"name" json:"name"`
+	Source          string            `yaml:"source" json:"source"`
+	Version         string            `yaml:"version" json:"version"`
+	RequiredVersion string            `yaml:"required_version,omitempty" json:"required_version,omitempty"`
+	Extra           map[string]Source `yaml:"extra_providers,omitempty" json:"extra_providers,omitempty"`
+}
+
+// Source is a required_providers entry.
+type Source struct {
+	Source  string `yaml:"source" json:"source"`
+	Version string `yaml:"version" json:"version"`
 }
 
 // Catalog is the loaded, validated set of entries and compiled rules.
 type Catalog struct {
-	Entries []Entry `json:"entries"`
-	Rules   []Rule  `json:"connections"`
+	Entries   []Entry             `json:"entries"`
+	Rules     []Rule              `json:"connections"`
+	Providers map[string]Provider `json:"providers"`
 
 	byID map[string]*Entry
 }
@@ -178,13 +231,26 @@ func (c *Catalog) compile() error {
 				return fmt.Errorf("%s: unknown child %q", e.ID, ch)
 			}
 		}
+		if e.Terraform != nil {
+			if e.Terraform.Role == "" {
+				e.Terraform.Role = "module"
+			}
+			if e.Terraform.Role == "module" && e.Terraform.Module == "" {
+				return fmt.Errorf("%s: terraform.module is required for role module", e.ID)
+			}
+			for input, col := range e.Terraform.Collect {
+				if _, ok := c.byID[col.Type]; !ok {
+					return fmt.Errorf("%s: collect %s: unknown type %q", e.ID, input, col.Type)
+				}
+			}
+		}
 		for _, r := range e.Connections.Out {
-			if err := c.addRule(seen, Rule{From: e.ID, To: r.To, Kind: r.Kind, Label: r.Label}); err != nil {
+			if err := c.addRule(seen, Rule{From: e.ID, To: r.To, Kind: r.Kind, Label: r.Label, Terraform: r.Terraform}); err != nil {
 				return fmt.Errorf("%s: %w", e.ID, err)
 			}
 		}
 		for _, r := range e.Connections.In {
-			if err := c.addRule(seen, Rule{From: r.From, To: e.ID, Kind: r.Kind, Label: r.Label}); err != nil {
+			if err := c.addRule(seen, Rule{From: r.From, To: e.ID, Kind: r.Kind, Label: r.Label, Terraform: r.Terraform}); err != nil {
 				return fmt.Errorf("%s: %w", e.ID, err)
 			}
 		}
@@ -211,6 +277,14 @@ func (c *Catalog) addRule(seen map[string]bool, r Rule) error {
 	key := r.From + "->" + r.To
 	if seen[key] {
 		return fmt.Errorf("connection %s declared twice", key)
+	}
+	if t := r.Terraform; t != nil {
+		if t.Set != "from" && t.Set != "to" {
+			return fmt.Errorf("connection %s: terraform.set must be from or to", key)
+		}
+		if t.Input == "" || (!strings.HasPrefix(t.Value, "from.") && !strings.HasPrefix(t.Value, "to.")) {
+			return fmt.Errorf("connection %s: terraform needs input and value (from.<output> or to.<output>)", key)
+		}
 	}
 	seen[key] = true
 	c.Rules = append(c.Rules, r)

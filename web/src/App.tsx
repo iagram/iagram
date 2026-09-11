@@ -6,6 +6,7 @@ import { Canvas } from './components/Canvas'
 import { PropertyPanel } from './components/PropertyPanel'
 import { Toolbar } from './components/Toolbar'
 import { ProblemsBar } from './components/ProblemsBar'
+import { LogDrawer } from './components/LogDrawer'
 
 export function App() {
   const load = useStore((s) => s.load)
@@ -14,6 +15,8 @@ export function App() {
   const toast = useStore((s) => s.toast)
   const catalog = useStore((s) => s.catalog)
   const dirty = useStore((s) => s.dirty)
+  const undo = useStore((s) => s.undo)
+  const redo = useStore((s) => s.redo)
 
   useEffect(() => {
     void load()
@@ -21,9 +24,20 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      const k = e.key.toLowerCase()
+      const inField = (e.target as HTMLElement)?.closest('input, select, textarea')
+      if (k === 's') {
         e.preventDefault()
         void save()
+      } else if (k === 'z' && !inField) {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+      } else if (k === 'y' && !inField) {
+        e.preventDefault()
+        redo()
       }
     }
     const onUnload = (e: BeforeUnloadEvent) => {
@@ -35,7 +49,7 @@ export function App() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('beforeunload', onUnload)
     }
-  }, [save, dirty])
+  }, [save, dirty, undo, redo])
 
   if (error && !catalog) {
     return (
@@ -56,6 +70,7 @@ export function App() {
           <Canvas />
           <PropertyPanel />
         </div>
+        <LogDrawer />
         <ProblemsBar />
         {toast && <div className="toast">{toast}</div>}
         {error && <div className="toast error">{error}</div>}

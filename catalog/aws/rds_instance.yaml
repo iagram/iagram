@@ -34,8 +34,9 @@ props:
       title: Multi-AZ
       default: false
 terraform:
-  module: registry/aws/rds_instance
+  module: aws/rds_instance
   inputs_from_parent:
-    subnet_id: parent.id
-    vpc_id: parent.parent.id
-outputs: [endpoint, port]
+    vpc_id: parent.parent.vpc_id
+  collect:
+    subnet_ids: {type: aws.subnet, under: parent.parent, output: subnet_id}
+outputs: [endpoint, address, port, security_group_id]

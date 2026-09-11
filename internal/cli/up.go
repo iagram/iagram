@@ -16,33 +16,45 @@ import (
 	"time"
 
 	"github.com/iagram/iagram"
-	"github.com/iagram/iagram/internal/catalog"
+	"github.com/iagram/iagram/internal/document"
 	"github.com/iagram/iagram/internal/server"
+	"github.com/iagram/iagram/internal/telemetry"
 	"github.com/iagram/iagram/internal/web"
 )
 
-func runUp(args []string, stdout io.Writer) error {
+func runUp(args []string, stdout io.Writer, tel *telemetry.Client) error {
 	fs_ := flag.NewFlagSet("up", flag.ContinueOnError)
-	file := fileFlag(fs_)
+	var c common
+	c.bind(fs_)
 	port := fs_.Int("port", 7777, "listen port")
 	fs_.IntVar(port, "p", 7777, "listen port")
 	noOpen := fs_.Bool("no-open", false, "do not open the browser")
 	if err := fs_.Parse(args); err != nil {
 		return err
 	}
-	if !exists(*file) {
-		return fmt.Errorf("%s not found; run `iagram init` first", *file)
+	if !exists(c.file) {
+		return fmt.Errorf("%s not found; run `iagram init` first", c.file)
 	}
-
-	cat, err := catalog.Load(iagram.CatalogFS)
+	cat, err := c.loadCatalog()
 	if err != nil {
-		return fmt.Errorf("load catalog: %w", err)
+		return err
 	}
 	icons, err := fs.Sub(iagram.CatalogFS, "catalog/icons")
 	if err != nil {
 		return err
 	}
-	srv := server.New(cat, *file, web.FS(), icons, Version)
+	srv := server.New(cat, c.file, web.FS(), icons, Version)
+	srv.OnEvent = func(name string, props map[string]any, d *document.Document) {
+		if d != nil {
+			props["nodes"] = telemetry.Bucket(len(d.Nodes))
+			props["edges"] = telemetry.Bucket(len(d.Edges))
+			props["providers"] = providersOf(d)
+		}
+		if n, ok := props["changes"].(int); ok {
+			props["changes"] = telemetry.Bucket(n)
+		}
+		tel.Send(name, props)
+	}
 
 	addr := net.JoinHostPort("127.0.0.1", fmt.Sprint(*port))
 	ln, err := net.Listen("tcp", addr)
@@ -50,7 +62,8 @@ func runUp(args []string, stdout io.Writer) error {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
 	url := "http://" + addr
-	fmt.Fprintf(stdout, "iagram %s\n  diagram: %s\n  canvas:  %s\n\nPress Ctrl+C to stop.\n", Version, *file, url)
+	fmt.Fprintf(stdout, "iagram %s\n  diagram: %s\n  canvas:  %s\n\nPress Ctrl+C to stop.\n", Version, c.file, url)
+	tel.Send("command", map[string]any{"command": "up", "outcome": "ok"})
 
 	httpSrv := &http.Server{Handler: srv, ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)

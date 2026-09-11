@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "name": "aws-three-tier",
+  "nodes": [
+    {
+      "id": "acct",
+      "type": "aws.account",
+      "name": "prod",
+      "props": {},
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "w": 1100,
+        "h": 720
+      }
+    },
+    {
+      "id": "bad",
+      "type": "aws.lambda_function",
+      "name": "fn",
+      "parent": "reg",
+      "props": {
+        "runtime": "python3.12",
+        "handler": "app.handler"
+      },
+      "layout": {
+        "x": 880,
+        "y": 260
+      }
+    },
+    {
+      "id": "bucket",
+      "type": "aws.s3_bucket",
+      "name": "assets",
+      "parent": "reg",
+      "props": {},
+      "layout": {
+        "x": 880,
+        "y": 100
+      }
+    },
+    {
+      "id": "db",
+      "type": "aws.rds_instance",
+      "name": "db-1",
+      "parent": "sub2",
+      "props": {
+        "engine": "postgres",
+        "instance_class": "db.t3.micro"
+      },
+      "layout": {
+        "x": 70,
+        "y": 70
+      }
+    },
+    {
+      "id": "lb",
+      "type": "aws.alb",
+      "name": "edge-lb",
+      "parent": "vpc",
+      "props": {
+        "scheme": "internet-facing"
+      },
+      "layout": {
+        "x": 50,
+        "y": 110
+      }
+    },
+    {
+      "id": "reg",
+      "type": "aws.region",
+      "name": "eu",
+      "parent": "acct",
+      "props": {
+        "region": "eu-west-1"
+      },
+      "layout": {
+        "x": 30,
+        "y": 50,
+        "w": 1040,
+        "h": 640
+      }
+    },
+    {
+      "id": "sg",
+      "type": "aws.security_group",
+      "name": "web-sg",
+      "parent": "vpc",
+      "props": {
+        "ingress_ports": "80,443"
+      },
+      "layout": {
+        "x": 50,
+        "y": 300
+      }
+    },
+    {
+      "id": "sub1",
+      "type": "aws.subnet",
+      "name": "public-a",
+      "parent": "vpc",
+      "props": {
+        "cidr": "10.0.1.0/24",
+        "az": "a",
+        "public": true
+      },
+      "layout": {
+        "x": 220,
+        "y": 60,
+        "w": 260,
+        "h": 200
+      }
+    },
+    {
+      "id": "sub2",
+      "type": "aws.subnet",
+      "name": "private-b",
+      "parent": "vpc",
+      "props": {
+        "cidr": "10.0.2.0/24",
+        "az": "b"
+      },
+      "layout": {
+        "x": 510,
+        "y": 60,
+        "w": 260,
+        "h": 200
+      }
+    },
+    {
+      "id": "vpc",
+      "type": "aws.vpc",
+      "name": "main",
+      "parent": "reg",
+      "props": {
+        "cidr": "10.0.0.0/16"
+      },
+      "layout": {
+        "x": 30,
+        "y": 50,
+        "w": 800,
+        "h": 480
+      }
+    },
+    {
+      "id": "web",
+      "type": "aws.ec2_instance",
+      "name": "web-1",
+      "parent": "sub1",
+      "props": {
+        "instance_type": "t3.micro"
+      },
+      "layout": {
+        "x": 70,
+        "y": 70
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "kind": "routes_to",
+      "source": "lb",
+      "target": "web"
+    },
+    {
+      "id": "e2",
+      "kind": "connects_to",
+      "source": "web",
+      "target": "db"
+    },
+    {
+      "id": "e3",
+      "kind": "reads_writes",
+      "source": "web",
+      "target": "bucket"
+    },
+    {
+      "id": "e4",
+      "kind": "protects",
+      "source": "sg",
+      "target": "web"
+    },
+    {
+      "id": "e5",
+      "kind": "reads_writes",
+      "source": "bad",
+      "target": "bucket"
+    }
+  ]
+}

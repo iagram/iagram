@@ -7,8 +7,8 @@ allowed_parents: [aws.region, aws.subnet]
 size: {w: 120, h: 90}
 connections:
   out:
-    - {to: aws.s3_bucket,    kind: reads_writes, label: reads/writes}
-    - {to: aws.rds_instance, kind: connects_to,  label: connects to}
+    - {to: aws.s3_bucket,    kind: reads_writes, label: reads/writes, terraform: {set: from, input: s3_bucket_arns, value: to.bucket_arn}}
+    - {to: aws.rds_instance, kind: connects_to,  label: connects to,  terraform: {set: to, input: ingress_security_group_ids, value: from.security_group_id}}
 props:
   type: object
   required: [runtime, handler]
@@ -35,5 +35,8 @@ props:
       minimum: 1
       maximum: 900
 terraform:
-  module: registry/aws/lambda_function
-outputs: [function_arn]
+  module: aws/lambda_function
+  inputs_from_parent:
+    subnet_id: parent.subnet_id
+    vpc_id: parent.parent.vpc_id
+outputs: [function_arn, function_name, security_group_id]

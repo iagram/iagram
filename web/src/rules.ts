@@ -38,6 +38,16 @@ export class Rules {
     return Object.values(this.byId).filter((e) => this.canContain(parentType, e.id))
   }
 
+  /** Icon path for an element, honouring icon_variants keyed by true boolean props. */
+  iconFor(type: string, props: Record<string, unknown>): string | undefined {
+    const e = this.byId[type]
+    if (!e) return undefined
+    for (const [prop, icon] of Object.entries(e.icon_variants ?? {})) {
+      if (props[prop] === true) return icon
+    }
+    return e.icon
+  }
+
   defaults(type: string): Record<string, unknown> {
     const out: Record<string, unknown> = {}
     const props = this.byId[type]?.props?.properties ?? {}

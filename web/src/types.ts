@@ -23,6 +23,7 @@ export interface Entry {
   provider: string
   category: string
   icon?: string
+  icon_variants?: Record<string, string>
   kind: Kind
   allowed_parents: string[]
   allowed_children?: string[]
@@ -86,3 +87,42 @@ export interface Validation {
 }
 
 export const ROOT = 'root'
+
+export type PlanAction = 'no-op' | 'read' | 'create' | 'update' | 'replace' | 'delete'
+
+export interface ResourceChange {
+  address: string
+  type: string
+  actions: string[]
+  action: PlanAction
+}
+
+export interface NodePlan {
+  action: PlanAction
+  resources: ResourceChange[]
+}
+
+export interface PlanSummary {
+  add: number
+  change: number
+  destroy: number
+  nodes: Record<string, NodePlan>
+  orphans?: ResourceChange[]
+}
+
+export interface PlanResult {
+  changes: boolean
+  summary: PlanSummary
+  config_path: string
+  tofu_version: string
+  duration_s: number
+  warnings?: string[]
+}
+
+export interface Job {
+  id: string
+  kind: string
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled'
+  error?: string
+  result?: PlanResult
+}
