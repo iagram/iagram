@@ -106,3 +106,25 @@ func TestForeignOriginRejected(t *testing.T) {
 		t.Errorf("status = %d", res.StatusCode)
 	}
 }
+
+func TestApplyRequiresAPlan(t *testing.T) {
+	ts, _ := newTestServer(t)
+	res, err := http.Post(ts.URL+"/api/apply", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Errorf("status = %d, want 409", res.StatusCode)
+	}
+	res, err = http.Get(ts.URL + "/api/plan/latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&out)
+	if out["plan"] != nil || out["drift"] != nil {
+		t.Errorf("latest = %v", out)
+	}
+}

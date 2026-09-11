@@ -106,3 +106,25 @@ func TestEdgeProblems(t *testing.T) {
 	expectProblem(t, r, "duplicate connection lb -> web")
 	expectProblem(t, r, "missing node")
 }
+
+func TestCollectMinimums(t *testing.T) {
+	c, d := fixture(t)
+	// Move the second subnet into the same AZ as the first: RDS and ALB need two AZs.
+	d.Nodes[4].Props["az"] = "a"
+	r := validate.Run(c, d)
+	expectProblem(t, r, "RDS Instance needs Subnets in at least 2 different az values")
+	expectProblem(t, r, "Application Load Balancer needs Subnets in at least 2 different az values")
+
+	// Remove the second subnet entirely (and the db in it): count rule.
+	c, d = fixture(t)
+	var keep []document.Node
+	for _, n := range d.Nodes {
+		if n.ID != "sub2" && n.ID != "db" {
+			keep = append(keep, n)
+		}
+	}
+	d.Nodes = keep
+	d.Edges = d.Edges[:1]
+	r = validate.Run(c, d)
+	expectProblem(t, r, "Application Load Balancer needs at least 2 Subnets in its VPC (found 1)")
+}

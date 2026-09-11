@@ -17,7 +17,13 @@ export function Toolbar() {
   const runPlan = useStore((s) => s.runPlan)
   const clearPlan = useStore((s) => s.clearPlan)
   const setLogOpen = useStore((s) => s.setLogOpen)
+  const setConfirmApply = useStore((s) => s.setConfirmApply)
+  const runDrift = useStore((s) => s.runDrift)
+  const drift = useStore((s) => s.drift)
+  const clearDrift = useStore((s) => s.clearDrift)
+  const hasDeployed = useStore((s) => s.nodes.some((n) => n.data.outputs && Object.keys(n.data.outputs).length > 0))
   const running = job?.status === 'running'
+  const canApply = !!plan && !planStale && plan.changes && !running && !dirty
   const { zoomIn, zoomOut, fitView, zoomTo } = useReactFlow()
   const { zoom } = useViewport()
   const errors = problems.filter((p) => p.level === 'error').length
@@ -73,8 +79,19 @@ export function Toolbar() {
           Clear
         </button>
       )}
+      {drift && (
+        <button className={`drift-summary ${drift.drift ? 'bad' : 'ok'}`} onClick={() => (drift.drift ? setLogOpen(true) : void clearDrift())} title={`Checked ${new Date(drift.checked_at).toLocaleString()}`}>
+          {drift.drift ? `drift: ${Object.values(drift.summary.nodes).filter((n) => n.action !== 'no-op').length} node(s)` : 'no drift ✓'}
+        </button>
+      )}
+      <button onClick={() => void runDrift()} disabled={running || !hasDeployed} title={hasDeployed ? 'Refresh-only plan: find infrastructure changed outside iagram' : 'Apply something first'}>
+        Check drift
+      </button>
       <button className="primary" onClick={() => void runPlan()} disabled={running || errors > 0} title={errors ? 'Fix validation errors first' : 'Save, generate Terraform and run tofu plan'}>
-        {running ? 'Planning…' : 'Plan'}
+        {running && job?.kind === 'plan' ? 'Planning…' : 'Plan'}
+      </button>
+      <button className={`apply ${canApply ? 'ready' : ''}`} onClick={() => setConfirmApply(true)} disabled={!canApply} title={!plan ? 'Plan first' : planStale || dirty ? 'Diagram changed; plan again' : !plan.changes ? 'Nothing to apply' : 'Apply this plan'}>
+        {running && job?.kind === 'apply' ? 'Applying…' : 'Apply'}
       </button>
     </header>
   )

@@ -58,6 +58,7 @@ export interface DocNode {
   parent?: string
   props: Record<string, unknown>
   layout: Layout
+  outputs?: Record<string, unknown>
 }
 
 export interface DocEdge {
@@ -95,6 +96,7 @@ export interface ResourceChange {
   type: string
   actions: string[]
   action: PlanAction
+  changed?: string[]
 }
 
 export interface NodePlan {
@@ -119,10 +121,25 @@ export interface PlanResult {
   warnings?: string[]
 }
 
+export interface ApplyResult {
+  outputs: Record<string, Record<string, unknown>>
+  nodes_updated: number
+  duration_s: number
+  tofu_version: string
+}
+
+export interface DriftResult {
+  drift: boolean
+  summary: PlanSummary
+  checked_at: string
+  duration_s: number
+  tofu_version: string
+}
+
 export interface Job {
   id: string
-  kind: string
+  kind: 'plan' | 'apply' | 'drift'
   status: 'running' | 'succeeded' | 'failed' | 'cancelled'
   error?: string
-  result?: PlanResult
+  result?: PlanResult | ApplyResult | DriftResult
 }

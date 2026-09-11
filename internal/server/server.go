@@ -33,9 +33,11 @@ type Server struct {
 	// so the caller can derive bucketed counts, never content.
 	OnEvent func(name string, props map[string]any, d *document.Document)
 
-	mu       sync.Mutex
-	mux      *http.ServeMux
-	lastPlan *workspace.PlanResult
+	mu           sync.Mutex
+	mux          *http.ServeMux
+	lastPlan     *workspace.PlanResult
+	lastPlanHash string
+	lastDrift    *workspace.DriftResult
 }
 
 // New wires the routes.
@@ -50,6 +52,9 @@ func New(c *catalog.Catalog, docPath string, webFS, iconsFS fs.FS, version strin
 	m.HandleFunc("GET /api/generate", s.generate)
 	m.HandleFunc("POST /api/plan", s.startPlan)
 	m.HandleFunc("GET /api/plan/latest", s.latestPlan)
+	m.HandleFunc("POST /api/apply", s.startApply)
+	m.HandleFunc("POST /api/drift", s.startDrift)
+	m.HandleFunc("DELETE /api/drift", s.clearDrift)
 	m.HandleFunc("GET /api/jobs/{id}", s.getJob)
 	m.HandleFunc("GET /api/jobs/{id}/stream", s.streamJob)
 	m.HandleFunc("POST /api/jobs/{id}/cancel", s.cancelJob)

@@ -31,3 +31,18 @@ func TestSummarizeAggregatesBySeverity(t *testing.T) {
 		t.Errorf("orphans = %+v", s.Orphans)
 	}
 }
+
+func TestChangedKeysOnUpdate(t *testing.T) {
+	p := &tfjson.Plan{ResourceChanges: []*tfjson.ResourceChange{
+		{Address: "module.web.aws_instance.this", Type: "aws_instance", Change: &tfjson.Change{
+			Actions: tfjson.Actions{tfjson.ActionUpdate},
+			Before:  map[string]any{"instance_type": "t3.micro", "tags": map[string]any{"a": "1"}, "id": "i-1"},
+			After:   map[string]any{"instance_type": "t3.small", "tags": map[string]any{"a": "1"}, "id": "i-1", "extra": true},
+		}},
+	}}
+	s := tofu.Summarize(p, map[string]string{"web": "web"})
+	got := s.Nodes["web"].Resources[0].Changed
+	if len(got) != 2 || got[0] != "extra" || got[1] != "instance_type" {
+		t.Errorf("changed = %v", got)
+	}
+}

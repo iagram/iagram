@@ -13,6 +13,7 @@ export function PropertyPanel() {
   const edgeCount = useStore((s) => s.edges.length)
   const nodePlan = useStore((s) => (s.selectedId ? s.plan?.summary.nodes[s.selectedId] : undefined))
   const planStale = useStore((s) => s.planStale)
+  const nodeDrift = useStore((s) => (s.selectedId ? s.drift?.summary.nodes[s.selectedId] : undefined))
 
   if (!node || !rules || !selectedId) {
     return (
@@ -88,11 +89,47 @@ export function PropertyPanel() {
         </details>
       )}
 
-      {entry?.outputs && entry.outputs.length > 0 && (
-        <details>
-          <summary>Outputs after deploy</summary>
-          <p className="muted mono">{entry.outputs.join(', ')}</p>
+      {nodeDrift && nodeDrift.action !== 'no-op' && (
+        <details open className="driftlist">
+          <summary>
+            <b>Drift</b> · changed outside iagram
+          </summary>
+          <ul>
+            {nodeDrift.resources
+              .filter((r) => r.action !== 'no-op')
+              .map((r) => (
+                <li key={r.address}>
+                  <span className="mono">{r.address.replace(/^module\.[^.]+\./, '')}</span>
+                  {r.changed && r.changed.length > 0 && <div className="muted mono">{r.changed.join(', ')}</div>}
+                </li>
+              ))}
+          </ul>
+          <p className="muted">Run Plan to see how iagram would reconcile it, or update the diagram to match.</p>
         </details>
+      )}
+
+      {node.data.outputs && Object.keys(node.data.outputs).length > 0 ? (
+        <details open>
+          <summary>Outputs</summary>
+          <dl className="outputs">
+            {Object.entries(node.data.outputs).map(([k, v]) => (
+              <div key={k}>
+                <dt className="mono">{k}</dt>
+                <dd className="mono" title="click to copy" onClick={() => void navigator.clipboard?.writeText(String(v ?? ''))}>
+                  {v === null || v === '' ? <span className="muted">(empty)</span> : String(v)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      ) : (
+        entry?.outputs &&
+        entry.outputs.length > 0 && (
+          <details>
+            <summary>Outputs after apply</summary>
+            <p className="muted mono">{entry.outputs.join(', ')}</p>
+          </details>
+        )
       )}
 
       <button className="danger" onClick={() => removeNodes([node.id])}>

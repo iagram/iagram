@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +41,7 @@ func (s *Server) startPlan(w http.ResponseWriter, _ *http.Request) {
 			props["changes"] = res.Summary.Add + res.Summary.Change + res.Summary.Destroy
 			s.mu.Lock()
 			s.lastPlan = res
+			s.lastPlanHash = hashDoc(d)
 			s.mu.Unlock()
 		}
 		s.event("command", props, d)
@@ -60,13 +63,124 @@ func (s *Server) startPlan(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) latestPlan(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
-	p := s.lastPlan
+	p, dr := s.lastPlan, s.lastDrift
 	s.mu.Unlock()
-	if p == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"plan": nil})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "drift": dr})
+}
+
+// startApply applies the last plan. It refuses if the saved diagram differs
+// from the one that was planned, mirroring `terraform apply plan.tfplan`
+// semantics: what you reviewed is what runs.
+func (s *Server) startApply(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	plan, planHash := s.lastPlan, s.lastPlanHash
+	s.mu.Unlock()
+	if plan == nil {
+		writeError(w, http.StatusConflict, errors.New("no plan to apply; run plan first"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plan": p})
+	s.mu.Lock()
+	d, err := document.Load(s.DocPath)
+	s.mu.Unlock()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if hashDoc(d) != planHash {
+		writeError(w, http.StatusConflict, errors.New("the diagram changed since it was planned; plan again"))
+		return
+	}
+	job, err := s.Jobs.Start("apply", func(ctx context.Context, log *jobs.Log) (any, error) {
+		start := time.Now()
+		res, err := s.Workspace.Apply(ctx, s.Catalog, d, log)
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+			if ctx.Err() != nil {
+				outcome = "cancelled"
+			}
+		}
+		s.mu.Lock()
+		s.lastPlan, s.lastPlanHash = nil, "" // the plan file is consumed either way
+		s.mu.Unlock()
+		s.event("command", map[string]any{"command": "apply", "outcome": outcome, "duration_s": int(time.Since(start).Seconds())}, d)
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+	})
+	if errors.Is(err, jobs.ErrBusy) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+// startDrift runs a refresh-only plan and stores the result for the overlay.
+func (s *Server) startDrift(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	d, err := document.Load(s.DocPath)
+	s.mu.Unlock()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	job, err := s.Jobs.Start("drift", func(ctx context.Context, log *jobs.Log) (any, error) {
+		start := time.Now()
+		res, err := s.Workspace.Drift(ctx, s.Catalog, d, log)
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+			if ctx.Err() != nil {
+				outcome = "cancelled"
+			}
+		}
+		if res != nil {
+			s.mu.Lock()
+			s.lastDrift = res
+			s.mu.Unlock()
+		}
+		s.event("command", map[string]any{"command": "drift", "outcome": outcome, "duration_s": int(time.Since(start).Seconds())}, d)
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+	})
+	if errors.Is(err, jobs.ErrBusy) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) clearDrift(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	s.lastDrift = nil
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// hashDoc fingerprints the semantic content of a document (layout and
+// outputs excluded) so cosmetic moves do not invalidate a plan.
+func hashDoc(d *document.Document) string {
+	h := sha256.New()
+	for _, n := range d.Nodes {
+		props, _ := json.Marshal(n.Props)
+		fmt.Fprintf(h, "n|%s|%s|%s|%s|%s\n", n.ID, n.Type, n.Name, n.Parent, props)
+	}
+	for _, e := range d.Edges {
+		fmt.Fprintf(h, "e|%s|%s|%s|%s\n", e.ID, e.Kind, e.Source, e.Target)
+	}
+	fmt.Fprintf(h, "name|%s", d.Name)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {

@@ -34,6 +34,15 @@ func TestRunnerPlanRoundTrip(t *testing.T) {
 resource "terraform_data" "this" { input = var.name }
 resource "terraform_data" "other" { input = "${var.name}-2" }
 output "id" { value = terraform_data.this.id }`
+	root := `{
+  "module": {
+    "web_1": {"source": "./modules/thing", "name": "web"},
+    "db_1":  {"source": "./modules/thing", "name": "db"}
+  },
+  "output": {"web": {"value": {"id": "${module.web_1.id}"}}}
+}`
+	_ = cfg
+	cfg = root
 	if err := os.MkdirAll(filepath.Join(dir, "modules", "thing"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +90,25 @@ output "id" { value = terraform_data.this.id }`
 	if changes {
 		t.Error("expected no changes after apply")
 	}
+	// Outputs are readable after apply, and a refresh-only plan is clean.
+	outs, err := r.Outputs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := outs["web"]; !ok {
+		t.Errorf("outputs = %v", outs)
+	}
+	drift, err := r.RefreshOnlyPlan(ctx, &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if drift {
+		t.Error("unexpected drift on terraform_data")
+	}
+	if err := r.Init(ctx, &log); err != nil {
+		t.Fatal(err)
+	}
+
 	// Remove db_1 from config: its resources become orphans that the summary reports.
 	if err := os.WriteFile(filepath.Join(dir, "main.tf.json"), []byte(`{"module":{"web_1":{"source":"./modules/thing","name":"web"}}}`), 0o644); err != nil {
 		t.Fatal(err)

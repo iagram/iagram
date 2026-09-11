@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 
 	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
@@ -50,6 +51,7 @@ func Run(c *catalog.Catalog, d *document.Document) Result {
 	v.props()
 	v.edges()
 	v.cidrs()
+	v.collects()
 	sort.SliceStable(v.out, func(i, j int) bool { return v.out[i].Level < v.out[j].Level })
 	if v.out == nil {
 		v.out = []Problem{}
@@ -302,4 +304,88 @@ func toFloat(v any) (float64, bool) {
 		return float64(n), true
 	}
 	return 0, false
+}
+
+// collects enforces catalog terraform.collect minimums: an element that
+// gathers nodes of a type under an ancestor needs at least Min of them,
+// with distinct values of the Distinct property when set.
+func (v *validator) collects() {
+	for i := range v.d.Nodes {
+		n := &v.d.Nodes[i]
+		e, ok := v.c.Get(n.Type)
+		if !ok || e.Terraform == nil {
+			continue
+		}
+		for _, col := range e.Terraform.Collect {
+			if col.Min == 0 {
+				continue
+			}
+			anc := v.ancestorAt(n, col.Under)
+			if anc == nil {
+				continue
+			}
+			ce, _ := v.c.Get(col.Type)
+			ae, _ := v.c.Get(anc.Type)
+			what, where := col.Type, anc.Type
+			if ce != nil {
+				what = ce.Label + "s"
+			}
+			if ae != nil {
+				where = ae.Label
+			}
+			count := 0
+			distinct := map[string]bool{}
+			for j := range v.d.Nodes {
+				m := &v.d.Nodes[j]
+				if m.Type != col.Type || !v.isUnder(m, anc.ID) {
+					continue
+				}
+				count++
+				if col.Distinct != "" {
+					distinct[fmt.Sprint(m.Props[col.Distinct])] = true
+				}
+			}
+			switch {
+			case count < col.Min:
+				v.add(Problem{Level: Error, Node: n.ID, Message: fmt.Sprintf("%s needs at least %d %s in its %s (found %d)", e.Label, col.Min, what, where, count)})
+			case col.Distinct != "" && len(distinct) < col.Min:
+				v.add(Problem{Level: Error, Node: n.ID, Message: fmt.Sprintf("%s needs %s in at least %d different %s values in its %s (found %d)", e.Label, what, col.Min, col.Distinct, where, len(distinct))})
+			}
+		}
+	}
+}
+
+func (v *validator) ancestorAt(n *document.Node, path string) *document.Node {
+	depth := strings.Count(path, "parent")
+	cur := n
+	for i := 0; i < depth; i++ {
+		if cur.Parent == "" {
+			return nil
+		}
+		p, ok := v.nodes[cur.Parent]
+		if !ok {
+			return nil
+		}
+		cur = p
+	}
+	if cur == n {
+		return nil
+	}
+	return cur
+}
+
+func (v *validator) isUnder(n *document.Node, ancestorID string) bool {
+	seen := map[string]bool{}
+	for cur := n; cur.Parent != "" && !seen[cur.ID]; {
+		seen[cur.ID] = true
+		if cur.Parent == ancestorID {
+			return true
+		}
+		p, ok := v.nodes[cur.Parent]
+		if !ok {
+			return false
+		}
+		cur = p
+	}
+	return false
 }

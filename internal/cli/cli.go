@@ -50,7 +50,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "plan":
 		doc, err = runPlan(args[1:], stdout)
 	case "apply":
-		err = runApply(args[1:], stdout)
+		doc, err = runApply(args[1:], stdout)
+	case "drift":
+		doc, err = runDrift(args[1:], stdout)
 	case "catalog":
 		err = runCatalog(args[1:], stdout)
 	case "telemetry":
@@ -66,7 +68,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch cmd {
-	case "init", "validate", "generate", "plan", "apply":
+	case "init", "validate", "generate", "plan", "apply", "drift":
 		outcome := "ok"
 		if err != nil {
 			outcome = "error"
@@ -126,7 +128,8 @@ Usage:
   iagram validate [flags]      check iagram.json against the catalog
   iagram generate [flags]      write Terraform to .iagram/tf/main.tf.json
   iagram plan [flags]          generate, then run OpenTofu init + plan
-  iagram apply [flags]         apply the last plan
+  iagram apply [flags]         apply the last plan, write outputs back onto the diagram
+  iagram drift [flags]         refresh-only plan: report infrastructure that no longer matches state
   iagram catalog check DIR     validate an external catalog directory
   iagram telemetry on|off|status
   iagram version

@@ -114,3 +114,18 @@ func (r *Runner) VersionString(ctx context.Context) string {
 	line, _, _ := strings.Cut(buf.String(), "\n")
 	return strings.TrimSpace(line)
 }
+
+// RefreshOnlyPlan writes PlanFile from `plan -refresh-only`: the changes it
+// contains are differences between real infrastructure and state, i.e. drift.
+func (r *Runner) RefreshOnlyPlan(ctx context.Context, out io.Writer) (drift bool, err error) {
+	c := r.cmd(ctx, out, "plan", "-no-color", "-input=false", "-refresh-only", "-detailed-exitcode", "-out="+PlanFile)
+	err = c.Run()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 2 {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("tofu plan -refresh-only: %w", err)
+	}
+	return false, nil
+}

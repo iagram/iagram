@@ -75,7 +75,7 @@ terraform:
     subnet_id: parent.subnet_id
     vpc_id: parent.parent.vpc_id
   collect:                    # input <- outputs of all nodes of a type under an ancestor
-    subnet_ids: {type: aws.subnet, under: parent.parent, output: subnet_id}
+    subnet_ids: {type: aws.subnet, under: parent.parent, output: subnet_id, min: 2, distinct: az}
 outputs: [instance_id, private_ip]   # module outputs written back after apply
 ```
 
@@ -114,12 +114,16 @@ outputs: [instance_id, private_ip]   # module outputs written back after apply
   is omitted, so one entry can accept several parent types (a Lambda in a
   region or in a subnet).
 - `collect`: gathers `${module.X.<output>}` for every node of `type` placed
-  anywhere under the named ancestor, as a list.
+  anywhere under the named ancestor, as a list. `min` makes the validator
+  require that many gathered nodes; `distinct` names a property that must
+  differ across at least `min` of them (two subnets in different AZs for a
+  DB subnet group or a load balancer).
 - Connection `terraform`: `{set: from|to, input, value: from.<output>|to.<output>}`
   appends the referenced output to the list `input` of the module on the `set`
   side. Lists are sorted for deterministic output.
-- Outputs: the root emits `output "<module>" { value = {<outputs...>} }` so
-  values can be written back onto the diagram.
+- Outputs: the root emits `output "<module>" { value = {<outputs...>} }`;
+  `iagram apply` reads them and writes them onto `nodes[].outputs` in the
+  diagram file.
 
 ### Module contract
 

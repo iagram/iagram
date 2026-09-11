@@ -32,6 +32,7 @@ indent, trailing newline) so that diffs and code review work. Commit it.
 | `nodes[].type` | Catalog id. |
 | `nodes[].parent` | Id of the containing node; absent for top-level nodes. |
 | `nodes[].props` | Properties per the catalog `props` schema. Always present (`{}` when empty). |
+| `nodes[].outputs` | Optional. Written by `iagram apply` from the module outputs the catalog declares (endpoint, ids, IPs). Informational: never read by the generator, never validated. |
 | `nodes[].layout` | `x`,`y` relative to the parent; `w`,`h` for containers only. Layout never affects the generated infrastructure. |
 | `edges[]` | Typed connections; `kind` must match the catalog rule for the pair of node types. |
 

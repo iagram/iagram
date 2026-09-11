@@ -1,6 +1,7 @@
 package tofu
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -35,12 +36,14 @@ type NodePlan struct {
 	Resources []ResourceChange `json:"resources"`
 }
 
-// ResourceChange is one resource in the plan.
+// ResourceChange is one resource in the plan. Changed lists the top-level
+// attributes whose value differs between before and after (drift detail).
 type ResourceChange struct {
 	Address string   `json:"address"`
 	Type    string   `json:"type"`
 	Actions []string `json:"actions"`
 	Action  string   `json:"action"`
+	Changed []string `json:"changed,omitempty"`
 }
 
 // Summarize maps plan resource changes back to nodes. moduleToNode maps the
@@ -56,6 +59,9 @@ func Summarize(p *tfjson.Plan, moduleToNode map[string]string) Summary {
 			change.Actions = append(change.Actions, string(a))
 		}
 		change.Action = actionOf(rc.Change.Actions)
+		if change.Action == ActionUpdate || change.Action == ActionReplace {
+			change.Changed = changedKeys(rc.Change.Before, rc.Change.After)
+		}
 		switch change.Action {
 		case ActionCreate:
 			s.Add++
@@ -128,4 +134,35 @@ func severity(a string) int {
 		return 1
 	}
 	return 0
+}
+
+// changedKeys lists top-level attribute names that differ between before and
+// after (both are maps for managed resources). Unknown-after values count as
+// changed.
+func changedKeys(before, after any) []string {
+	b, _ := before.(map[string]any)
+	a, _ := after.(map[string]any)
+	keys := map[string]bool{}
+	for k, bv := range b {
+		if av, ok := a[k]; !ok || !equalJSON(bv, av) {
+			keys[k] = true
+		}
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			keys[k] = true
+		}
+	}
+	out := make([]string, 0, len(keys))
+	for k := range keys {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func equalJSON(x, y any) bool {
+	xb, _ := json.Marshal(x)
+	yb, _ := json.Marshal(y)
+	return string(xb) == string(yb)
 }

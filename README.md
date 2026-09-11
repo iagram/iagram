@@ -22,9 +22,9 @@ iagram is a single local binary, like `terraform`:
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Canvas, palette, containment and connection rules, property panel, validation, undo/redo, save/load | done |
-| 2 | Terraform generation (`.tf.json` module calls), OpenTofu install + `plan`, plan overlay on the canvas, `iagram plan/apply` CLI | done |
-| 3 | Apply from the UI, streamed progress, outputs written back onto nodes, drift check | next |
-| 4 | GCP and Azure catalogs, state → diagram import | |
+| 2 | Terraform generation (`.tf.json` module calls), OpenTofu install + `plan`, plan overlay on the canvas, `iagram plan` CLI | done |
+| 3 | Apply from the UI with confirmation, outputs written back onto nodes, drift check (refresh-only plan) painted on the canvas | done |
+| 4 | GCP and Azure catalogs, state → diagram import | next |
 
 Shipped catalog: AWS (account, region, VPC, subnet, security group, EC2, RDS, S3, ALB, Lambda). Every module defaults to encrypted storage, IMDSv2, private databases and IAM derived from the arrows you draw.
 
@@ -38,6 +38,8 @@ iagram.json ──validate──▶ generate ──▶ .iagram/tf/main.tf.json +
 - Containment becomes wiring: a node inside a subnet inside a VPC gets `subnet_id` and `vpc_id` from those modules' outputs.
 - Arrows become inputs: `ALB → EC2` appends the instance to the ALB's targets; `SG → RDS` attaches the group; `EC2 → RDS` opens the database port to the instance's identity group; `Lambda → S3` grants an IAM policy.
 - Account and region nodes become provider blocks (aliased per region), so one diagram can span regions.
+- Apply runs the exact plan you reviewed (it is refused if the diagram changed since), then reads the module outputs the catalog declares (endpoint, ids, IPs) and writes them onto the nodes in `iagram.json`; deployed nodes show a green dot and their outputs in the panel.
+- Drift check runs `tofu plan -refresh-only`: nodes whose real infrastructure no longer matches state get an amber dotted ring and the list of changed attributes.
 
 The whole mapping lives in YAML, specified in [docs/spec/catalog.md](docs/spec/catalog.md) and enforced by [`catalog/schema.json`](catalog/schema.json). The file format is specified in [docs/spec/document.md](docs/spec/document.md), versioned, with a migration path.
 
@@ -49,7 +51,8 @@ iagram up [-p PORT] [--no-open]
 iagram validate               catalog rules, headless (exit 1 on errors)
 iagram generate               write .iagram/tf/main.tf.json
 iagram plan                   generate + tofu init + plan, summarised per node
-iagram apply                  apply the last plan
+iagram apply                  apply the last plan, write outputs back onto the diagram
+iagram drift                  refresh-only plan; exit 1 when infrastructure drifted
 iagram catalog check DIR      validate an external catalog
 iagram telemetry on|off|status
 ```

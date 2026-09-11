@@ -86,33 +86,85 @@ func runPlan(args []string, stdout io.Writer) (*document.Document, error) {
 	return doc, nil
 }
 
-func runApply(args []string, stdout io.Writer) error {
+func runApply(args []string, stdout io.Writer) (*document.Document, error) {
 	fs_ := flag.NewFlagSet("apply", flag.ContinueOnError)
 	var c common
 	c.bind(fs_)
 	if err := fs_.Parse(args); err != nil {
-		return err
+		return nil, err
 	}
-	if !exists(c.file) {
-		return fmt.Errorf("%s not found", c.file)
+	cat, err := c.loadCatalog()
+	if err != nil {
+		return nil, err
+	}
+	doc, err := c.loadDocument()
+	if err != nil {
+		return nil, err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	ws := workspace.For(c.file)
-	if err := ws.Apply(ctx, stdout); err != nil {
-		return err
-	}
-	bin, err := tofu.Ensure(ctx, io.Discard)
+	res, err := workspace.For(c.file).Apply(ctx, cat, doc, stdout)
 	if err != nil {
-		return nil
+		return doc, err
 	}
-	r := &tofu.Runner{Bin: bin, Dir: ws.Dir}
-	outs, err := r.Outputs(ctx)
+	byID := doc.Index()
+	ids := make([]string, 0, len(res.Outputs))
+	for id := range res.Outputs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		n := byID[id]
+		fmt.Fprintf(stdout, "\n%s (%s)\n", n.Name, n.Type)
+		keys := make([]string, 0, len(res.Outputs[id]))
+		for k := range res.Outputs[id] {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(stdout, "  %-20s %v\n", k, res.Outputs[id][k])
+		}
+	}
+	fmt.Fprintf(stdout, "\nApplied in %.0fs; outputs written to %s.\n", res.DurationS, c.file)
+	return doc, nil
+}
+
+func runDrift(args []string, stdout io.Writer) (*document.Document, error) {
+	fs_ := flag.NewFlagSet("drift", flag.ContinueOnError)
+	var c common
+	c.bind(fs_)
+	if err := fs_.Parse(args); err != nil {
+		return nil, err
+	}
+	cat, err := c.loadCatalog()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	if len(outs) > 0 {
-		fmt.Fprintf(stdout, "\nOutputs are available with: %s -chdir=%s output -json\n", bin, ws.Dir)
+	doc, err := c.loadDocument()
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	res, err := workspace.For(c.file).Drift(ctx, cat, doc, stdout)
+	if err != nil {
+		return doc, err
+	}
+	byID := doc.Index()
+	for id, np := range res.Summary.Nodes {
+		if np.Action == tofu.ActionNoop {
+			continue
+		}
+		n := byID[id]
+		fmt.Fprintf(stdout, "  drifted  %-22s %s\n", n.Type, n.Name)
+		for _, r := range np.Resources {
+			if r.Action != tofu.ActionNoop {
+				fmt.Fprintf(stdout, "           %s: %v\n", r.Address, r.Changed)
+			}
+		}
+	}
+	if res.Drift {
+		return doc, fmt.Errorf("drift detected")
+	}
+	return doc, nil
 }

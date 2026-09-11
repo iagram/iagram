@@ -30,6 +30,10 @@ type Node struct {
 	Parent string         `json:"parent,omitempty"`
 	Props  map[string]any `json:"props"`
 	Layout Layout         `json:"layout"`
+	// Outputs are written back by `iagram apply` from the module outputs the
+	// catalog declares (endpoints, ids, IPs). They are informational: the
+	// generator never reads them and they never affect validation.
+	Outputs map[string]any `json:"outputs,omitempty"`
 }
 
 // Layout is position (relative to the parent) and, for containers, size.

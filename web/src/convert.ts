@@ -8,6 +8,7 @@ export interface NodeData extends Record<string, unknown> {
   type: string
   name: string
   props: Record<string, unknown>
+  outputs?: Record<string, unknown>
 }
 
 export interface EdgeData extends Record<string, unknown> {
@@ -30,7 +31,7 @@ export function makeNode(rules: Rules, n: DocNode): RFNode {
     id: n.id,
     type: container ? 'container' : 'resource',
     position: { x: n.layout.x, y: n.layout.y },
-    data: { type: n.type, name: n.name, props: n.props ?? {} },
+    data: { type: n.type, name: n.name, props: n.props ?? {}, outputs: n.outputs },
     parentId: n.parent || undefined,
     extent: n.parent ? 'parent' : undefined,
     style: { width: w, height: h },
@@ -92,6 +93,7 @@ export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[]): Docu
         name: n.data.name,
         parent: n.parentId || undefined,
         props: n.data.props,
+        ...(n.data.outputs && Object.keys(n.data.outputs).length ? { outputs: n.data.outputs } : {}),
         layout: {
           x: round(n.position.x),
           y: round(n.position.y),

@@ -7,6 +7,7 @@ import { PropertyPanel } from './components/PropertyPanel'
 import { Toolbar } from './components/Toolbar'
 import { ProblemsBar } from './components/ProblemsBar'
 import { LogDrawer } from './components/LogDrawer'
+import { ConfirmApply } from './components/ConfirmApply'
 
 export function App() {
   const load = useStore((s) => s.load)
@@ -71,6 +72,7 @@ export function App() {
           <PropertyPanel />
         </div>
         <LogDrawer />
+        <ConfirmApply />
         <ProblemsBar />
         {toast && <div className="toast">{toast}</div>}
         {error && <div className="toast error">{error}</div>}

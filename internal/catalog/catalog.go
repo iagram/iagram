@@ -105,6 +105,12 @@ type Collect struct {
 	Type   string `yaml:"type" json:"type"`     // catalog id of nodes to gather
 	Under  string `yaml:"under" json:"under"`   // "parent", "parent.parent", ...
 	Output string `yaml:"output" json:"output"` // output of each gathered module
+	// Min is the minimum number of gathered nodes for the element to be valid
+	// (e.g. an RDS subnet group needs two subnets). Distinct names a property
+	// of the gathered nodes that must differ across at least Min of them
+	// (e.g. two subnets in different availability zones).
+	Min      int    `yaml:"min,omitempty" json:"min,omitempty"`
+	Distinct string `yaml:"distinct,omitempty" json:"distinct,omitempty"`
 }
 
 // Provider is the per-cloud Terraform provider configuration, loaded from

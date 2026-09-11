@@ -11,7 +11,7 @@ import {
 import { api } from './api'
 import { Rules } from './rules'
 import { fromDocument, makeEdge, makeNode, newId, toDocument, type RFEdge, type RFNode } from './convert'
-import type { Catalog, Job, PlanResult, Problem } from './types'
+import type { ApplyResult, Catalog, DriftResult, Job, PlanResult, Problem } from './types'
 import { ROOT } from './types'
 
 interface State {
@@ -31,9 +31,12 @@ interface State {
   future: Snapshot[]
   plan: PlanResult | null
   planStale: boolean
+  drift: DriftResult | null
   job: Job | null
   jobLines: string[]
   logOpen: boolean
+  confirmApply: boolean
+  lastApply: ApplyResult | null
 
   load: () => Promise<void>
   save: () => Promise<void>
@@ -52,9 +55,13 @@ interface State {
   undo: () => void
   redo: () => void
   runPlan: () => Promise<void>
+  runApply: () => Promise<void>
+  runDrift: () => Promise<void>
   cancelPlan: () => Promise<void>
   clearPlan: () => void
+  clearDrift: () => Promise<void>
   setLogOpen: (open: boolean) => void
+  setConfirmApply: (open: boolean) => void
 }
 
 interface Snapshot {
@@ -85,9 +92,12 @@ export const useStore = create<State>((set, get) => ({
   future: [],
   plan: null,
   planStale: false,
+  drift: null,
   job: null,
   jobLines: [],
   logOpen: false,
+  confirmApply: false,
+  lastApply: null,
 
   async load() {
     try {
@@ -95,7 +105,7 @@ export const useStore = create<State>((set, get) => ({
       const rules = new Rules(catalog)
       const { nodes, edges } = fromDocument(rules, res.document)
       set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [] })
-      api.latestPlan().then((r) => r.plan && set({ plan: r.plan, planStale: false })).catch(() => undefined)
+      api.latestPlan().then((r) => set({ ...(r.plan ? { plan: r.plan, planStale: false } : {}), drift: r.drift })).catch(() => undefined)
     } catch (e) {
       set({ error: (e as Error).message })
     }
@@ -271,30 +281,39 @@ export const useStore = create<State>((set, get) => ({
     }
     if (dirty) await save()
     if (get().dirty) return // save failed
-    set({ jobLines: [], logOpen: true, error: null })
-    let job: Job
-    try {
-      job = await api.startPlan()
-    } catch (e) {
-      set({ error: (e as Error).message })
-      return
-    }
-    set({ job })
-    const es = new EventSource(`/api/jobs/${job.id}/stream`)
-    es.addEventListener('line', (ev) => {
-      const line = JSON.parse((ev as MessageEvent).data) as string
-      set((s) => ({ jobLines: [...s.jobLines, line] }))
+    await streamJob(set, get, api.startPlan, (done) => {
+      if (done.status === 'succeeded' && done.result) set({ plan: done.result as PlanResult, planStale: false })
+      else if (done.status === 'failed') get().showToast('Plan failed; see log')
     })
-    es.addEventListener('done', (ev) => {
-      es.close()
-      const done = JSON.parse((ev as MessageEvent).data) as Job
-      set({ job: done, ...(done.status === 'succeeded' && done.result ? { plan: done.result, planStale: false } : {}) })
-      if (done.status === 'failed') get().showToast('Plan failed; see log')
+  },
+
+  async runApply() {
+    set({ confirmApply: false })
+    await streamJob(set, get, api.startApply, (done) => {
+      set({ plan: null, planStale: false })
+      if (done.status === 'succeeded' && done.result) {
+        set({ lastApply: done.result as ApplyResult })
+        get().showToast(`Applied; outputs written for ${(done.result as ApplyResult).nodes_updated} node(s)`)
+        void get().load() // the file now carries outputs
+      } else if (done.status === 'failed') {
+        get().showToast('Apply failed; see log')
+      }
     })
-    es.onerror = () => {
-      es.close()
-      void api.job(job.id).then((j) => set({ job: j, ...(j.result ? { plan: j.result, planStale: false } : {}) }))
-    }
+  },
+
+  async runDrift() {
+    const { dirty, save } = get()
+    if (dirty) await save()
+    if (get().dirty) return
+    await streamJob(set, get, api.startDrift, (done) => {
+      if (done.status === 'succeeded' && done.result) {
+        const d = done.result as DriftResult
+        set({ drift: d })
+        get().showToast(d.drift ? 'Drift detected' : 'No drift: infrastructure matches state')
+      } else if (done.status === 'failed') {
+        get().showToast('Drift check failed; see log')
+      }
+    })
   },
 
   async cancelPlan() {
@@ -304,6 +323,15 @@ export const useStore = create<State>((set, get) => ({
 
   clearPlan() {
     set({ plan: null, planStale: false })
+  },
+
+  async clearDrift() {
+    await api.clearDrift().catch(() => undefined)
+    set({ drift: null })
+  },
+
+  setConfirmApply(open) {
+    set({ confirmApply: open })
   },
 
   setLogOpen(open) {
@@ -319,6 +347,37 @@ export const useStore = create<State>((set, get) => ({
     get().validateSoon()
   },
 }))
+
+/** Start a job and stream its log into the store; onDone runs with the final job. */
+async function streamJob(set: (p: Partial<State>) => void, get: () => State, start: () => Promise<Job>, onDone: (j: Job) => void) {
+  set({ jobLines: [], logOpen: true, error: null })
+  let job: Job
+  try {
+    job = await start()
+  } catch (e) {
+    set({ error: (e as Error).message })
+    return
+  }
+  set({ job })
+  const es = new EventSource(`/api/jobs/${job.id}/stream`)
+  es.addEventListener('line', (ev) => {
+    const line = JSON.parse((ev as MessageEvent).data) as string
+    set({ jobLines: [...get().jobLines, line] })
+  })
+  es.addEventListener('done', (ev) => {
+    es.close()
+    const done = JSON.parse((ev as MessageEvent).data) as Job
+    set({ job: done })
+    onDone(done)
+  })
+  es.onerror = () => {
+    es.close()
+    void api.job(job.id).then((j) => {
+      set({ job: j })
+      if (j.status !== 'running') onDone(j)
+    })
+  }
+}
 
 /** Problems indexed by node id and edge id, computed once per render. */
 export function indexProblems(problems: Problem[]) {
