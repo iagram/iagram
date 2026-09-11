@@ -52,31 +52,64 @@ type GeneratedSummary struct {
 	Attachment bool   `json:"attachment"` // configured inside another element
 }
 
-// attachmentWords mark resource types that configure another resource rather
-// than standing on their own, even when their service has an icon.
-var attachmentWords = []string{
-	"_association", "_attachment", "_permission", "_subscription", "_rule", "_versioning", "_configuration", "_acl", "_policy", "_notification",
-	"_lifecycle", "_logging", "_cors", "_encryption", "_public_access_block", "_ownership_controls", "_website", "_object", "_member", "_binding",
-	"_assignment", "_registration", "_mapping", "_target", "_record", "_entry", "_option", "_parameter", "_setting", "_tag", "_alias", "_grant",
-	"_access_point", "_access_key", "_login_profile", "_ssh_key", "_signing_certificate", "_service_specific_credential", "_replication",
-	"_inventory", "_metric", "_intelligent_tiering", "_request_payment", "_analytics", "_accelerate", "_provisioned_concurrency", "_event_source",
-	"_function_url", "_layer_version", "_code_signing", "_invocation", "_domain_identity", "_receipt", "_identity_notification", "_route",
-	"_listener", "_certificate_validation", "_default_", "_peering", "_endpoint_service", "_network_interface_attachment", "_volume_attachment",
-	"_iam_", "_secret_version", "_key_version", "_integration", "_response", "_deployment", "_stage", "_authorizer", "_model", "_usage_plan",
-	"_api_key", "_domain_name", "_base_path", "_vpc_link", "_resource", "_method", "_gateway_response", "_documentation", "_request_validator",
+// attachmentSuffixes mark resource types that configure another resource
+// rather than standing on their own, even when their service has an icon.
+// Matched as whole trailing words of the type name (aws_s3_bucket_versioning,
+// google_project_iam_member, azurerm_role_assignment).
+var attachmentSuffixes = []string{
+	"association", "attachment", "permission", "subscription", "rule", "versioning", "configuration", "acl", "policy", "notification",
+	"lifecycle", "logging", "cors", "encryption", "public_access_block", "ownership_controls", "website", "object", "member", "binding",
+	"assignment", "registration", "mapping", "target", "record", "record_set", "entry", "option", "parameter", "setting", "tag", "alias", "grant",
+	"access_point", "access_key", "login_profile", "ssh_key", "signing_certificate", "service_specific_credential", "replication",
+	"inventory", "metric", "analytics", "provisioned_concurrency_config", "event_source_mapping", "function_url", "layer_version",
+	"code_signing_config", "invocation", "domain_identity", "certificate_validation", "peering", "peering_connection", "endpoint_service",
+	"volume_attachment", "network_interface_attachment", "secret_version", "key_version", "integration", "response", "deployment", "stage",
+	"authorizer", "usage_plan", "usage_plan_key", "api_key", "domain_name", "base_path_mapping", "vpc_link", "resource", "method",
+	"gateway_response", "documentation_part", "documentation_version", "request_validator", "route", "listener", "listener_rule",
+	"target_group_attachment", "group_membership", "user_group_membership", "role_policy", "group_policy", "user_policy", "policy_attachment",
+	"membership", "label", "annotation", "condition", "exclusion", "sink", "metric_filter", "dashboard", "widget", "hook", "trigger",
 }
 
 // IsAttachmentType reports whether a Terraform resource type configures
 // another resource rather than being drawn on its own.
 func IsAttachmentType(tfType string) bool {
 	_, rest, _ := strings.Cut(tfType, "_")
-	rest = "_" + rest
-	for _, w := range attachmentWords {
-		if strings.Contains(rest, w) {
+	if strings.Contains("_"+rest+"_", "_default_") {
+		return true
+	}
+	for _, sfx := range attachmentSuffixes {
+		if rest == sfx || strings.HasSuffix(rest, "_"+sfx) {
 			return true
 		}
 	}
 	return false
+}
+
+// AttachmentBinding returns the attribute/output through which an attachment
+// type binds to a parent element, if the schemas suggest one.
+func (c *Catalog) AttachmentBinding(childID, parentID string) (attr, output string, ok bool) {
+	child, cok := c.Get(childID)
+	parent, pok := c.Get(parentID)
+	if !cok || !pok || child.Terraform == nil || child.Terraform.Role != RoleResource || c.registry == nil {
+		return "", "", false
+	}
+	parentTF := ""
+	if parent.Terraform != nil {
+		if parent.Terraform.Role == RoleResource {
+			parentTF = parent.Terraform.Resource
+		} else if parent.Terraform.Import != nil {
+			parentTF = parent.Terraform.Import.Resource
+		}
+	}
+	if parentTF == "" {
+		return "", "", false
+	}
+	props, _, _, rok := c.registry.Resource(child.Terraform.Resource)
+	if !rok {
+		return "", "", false
+	}
+	attr, output = bindingFor(child.Terraform.Resource, parentTF, parentTokens(parentTF), props, parent)
+	return attr, output, attr != ""
 }
 
 // Generated lists the generated elements of a catalog provider (aws, gcp, azure).

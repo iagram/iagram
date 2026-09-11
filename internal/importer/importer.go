@@ -553,8 +553,9 @@ func nodeID(e *catalog.Entry, seed string) string {
 }
 
 // attachToParents moves attachment elements (not drawn on their own) under
-// the element their binding attribute references, so they show up in that
-// element's settings rather than floating in a region.
+// the element they configure: the reference whose attribute is the schema
+// binding for that parent type wins (topic_arn for a subscription), else the
+// first reference to a graphical element of the same provider.
 func attachToParents(c *catalog.Catalog, d *document.Document) {
 	byID := d.Index()
 	for i := range d.Nodes {
@@ -563,6 +564,7 @@ func attachToParents(c *catalog.Catalog, d *document.Document) {
 		if !ok || !e.Attachment {
 			continue
 		}
+		fallback := ""
 		for _, edge := range d.Edges {
 			if edge.Source != n.ID || edge.Kind != catalog.ReferencesKind {
 				continue
@@ -571,10 +573,20 @@ func attachToParents(c *catalog.Catalog, d *document.Document) {
 			if !ok || target.ID == n.ID {
 				continue
 			}
-			if te, ok := c.Get(target.Type); ok && !te.Attachment && te.Provider == e.Provider {
-				n.Parent = target.ID
+			te, ok := c.Get(target.Type)
+			if !ok || te.Attachment || te.Provider != e.Provider {
+				continue
+			}
+			if attr, _, ok := c.AttachmentBinding(n.Type, target.Type); ok && attr == edge.Attr {
+				fallback = target.ID
 				break
 			}
+			if fallback == "" {
+				fallback = target.ID
+			}
+		}
+		if fallback != "" {
+			n.Parent = fallback
 		}
 	}
 }

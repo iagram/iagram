@@ -174,13 +174,26 @@ func TestGraphicalVersusAttachment(t *testing.T) {
 	if g := byRes["aws_iam_role_policy_attachment"]; g.Graphical {
 		t.Errorf("policy attachment should be an attachment: %+v", g)
 	}
+	for _, res := range []string{"aws_iam_role", "aws_route53_zone", "aws_lb_target_group", "aws_api_gateway_rest_api", "aws_lambda_function", "aws_ecs_cluster"} {
+		if g := byRes[res]; !g.Graphical {
+			t.Errorf("%s should be graphical: %+v", res, g)
+		}
+	}
+	for _, res := range []string{"aws_route", "aws_security_group_rule", "aws_lambda_permission", "aws_cloudwatch_event_target", "aws_api_gateway_method", "aws_lb_listener"} {
+		if g := byRes[res]; g.Graphical {
+			t.Errorf("%s should be an attachment: %+v", res, g)
+		}
+	}
+	if attr, out, ok := c.AttachmentBinding("aws.res.aws_sns_topic_subscription", "aws.res.aws_sns_topic"); !ok || attr != "topic_arn" || out != "arn" {
+		t.Errorf("binding = %s %s %v", attr, out, ok)
+	}
 	graphical := 0
 	for _, g := range list {
 		if g.Graphical {
 			graphical++
 		}
 	}
-	if graphical < 300 || graphical > 900 {
+	if graphical < 300 || graphical > 1300 {
 		t.Errorf("aws graphical count = %d (palette should be a few hundred, not 1700)", graphical)
 	}
 	// attachments for the curated bucket and for a generated topic
