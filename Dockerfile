@@ -19,10 +19,14 @@ ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/iagram/iagram/internal/cli.Version=${VERSION}" -o /out/iagram ./cmd/iagram
 
 FROM alpine:3.21
+# HOME is fixed so the cloud credential chains look in /home/iagram/.aws etc.
+# whatever uid the container runs as; compose passes your host uid/gid so files
+# written to the mounted work directory stay yours.
 RUN apk add --no-cache ca-certificates git \
- && adduser -D -h /home/iagram iagram
+ && mkdir -p /home/iagram/.iagram /work \
+ && chmod 0777 /home/iagram /home/iagram/.iagram /work
+ENV HOME=/home/iagram IAGRAM_HOME=/home/iagram/.iagram
 COPY --from=build /out/iagram /usr/local/bin/iagram
-USER iagram
 WORKDIR /work
 VOLUME ["/home/iagram/.iagram"]
 EXPOSE 7777

@@ -3,6 +3,7 @@
 # mounted read-only from your home directory, exactly what the binary would
 # read if you ran it natively. Nothing is stored in the image.
 #
+#   export IAGRAM_UID=$(id -u) IAGRAM_GID=$(id -g)   # Linux: keep files owned by you
 #   docker compose up            # http://localhost:7777
 #   docker compose run --rm iagram plan
 #   docker compose run --rm iagram apply
@@ -13,6 +14,9 @@ services:
       context: .
       args:
         VERSION: ${IAGRAM_VERSION:-dev}
+    # Run as your host user so iagram.json and .iagram/ stay owned by you (Linux).
+    # Docker Desktop on macOS/Windows maps ownership itself; the default is fine there.
+    user: "${IAGRAM_UID:-1000}:${IAGRAM_GID:-1000}"
     ports:
       - "127.0.0.1:7777:7777"
     working_dir: /work

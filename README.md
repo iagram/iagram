@@ -161,7 +161,7 @@ docker compose run --rm iagram plan
 docker compose run --rm iagram apply
 ```
 
-It publishes the port on `127.0.0.1` only, mounts `~/.aws`, `~/.config/gcloud` and `~/.azure` read-only (the same files the binary would read natively), passes the usual credential environment variables through, and keeps OpenTofu and the provider cache in a named volume. Build locally with `docker compose build`, or pull `ghcr.io/iagram/iagram:<version>` (multi-arch images are published by the release pipeline).
+It publishes the port on `127.0.0.1` only, mounts `~/.aws`, `~/.config/gcloud` and `~/.azure` read-only (the same files the binary would read natively), passes the usual credential environment variables through, runs as your host uid/gid (`IAGRAM_UID`/`IAGRAM_GID`, so files in the mounted directory stay yours on Linux), and keeps OpenTofu and the provider cache in a named volume. Build locally with `docker compose build`, or pull `ghcr.io/iagram/iagram:<version>` (multi-arch images are published by the release pipeline).
 
 ## Security posture
 
