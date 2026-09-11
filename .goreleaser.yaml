@@ -51,8 +51,29 @@ release:
     ```
     brew install --cask iagram/tap/iagram   # macOS / Linux
     curl -fsSL https://raw.githubusercontent.com/iagram/iagram/main/install.sh | sh
+    pip install iagram
+    docker run --rm -it -p 127.0.0.1:7777:7777 -v "$PWD:/work" ghcr.io/iagram/iagram:{{ .Version }}
     ```
     Binaries are verified against `{{ .ProjectName }}_{{ .Version }}_SHA256SUMS`.
+
+# Container images on GHCR (multi-arch manifest). The Dockerfile.release
+# copies the already-built binary instead of rebuilding.
+dockers:
+  - image_templates: ["ghcr.io/iagram/iagram:{{ .Version }}-amd64"]
+    dockerfile: Dockerfile.release
+    use: buildx
+    goarch: amd64
+    build_flag_templates: ["--platform=linux/amd64", "--label=org.opencontainers.image.source=https://github.com/iagram/iagram", "--label=org.opencontainers.image.version={{ .Version }}", "--label=org.opencontainers.image.licenses=Apache-2.0"]
+  - image_templates: ["ghcr.io/iagram/iagram:{{ .Version }}-arm64"]
+    dockerfile: Dockerfile.release
+    use: buildx
+    goarch: arm64
+    build_flag_templates: ["--platform=linux/arm64", "--label=org.opencontainers.image.source=https://github.com/iagram/iagram", "--label=org.opencontainers.image.version={{ .Version }}", "--label=org.opencontainers.image.licenses=Apache-2.0"]
+docker_manifests:
+  - name_template: "ghcr.io/iagram/iagram:{{ .Version }}"
+    image_templates: ["ghcr.io/iagram/iagram:{{ .Version }}-amd64", "ghcr.io/iagram/iagram:{{ .Version }}-arm64"]
+  - name_template: "ghcr.io/iagram/iagram:latest"
+    image_templates: ["ghcr.io/iagram/iagram:{{ .Version }}-amd64", "ghcr.io/iagram/iagram:{{ .Version }}-arm64"]
 
 # Homebrew cask pushed to github.com/iagram/homebrew-tap. Skipped when the
 # HOMEBREW_TAP_GITHUB_TOKEN secret is not configured, so releases never fail

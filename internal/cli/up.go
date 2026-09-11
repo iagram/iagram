@@ -29,6 +29,7 @@ func runUp(args []string, stdout io.Writer, tel *telemetry.Client) error {
 	port := fs_.Int("port", 7777, "listen port")
 	fs_.IntVar(port, "p", 7777, "listen port")
 	noOpen := fs_.Bool("no-open", false, "do not open the browser")
+	host := fs_.String("host", "127.0.0.1", "listen address; 0.0.0.0 only inside a container whose port is published to localhost")
 	if err := fs_.Parse(args); err != nil {
 		return err
 	}
@@ -56,12 +57,15 @@ func runUp(args []string, stdout io.Writer, tel *telemetry.Client) error {
 		tel.Send(name, props)
 	}
 
-	addr := net.JoinHostPort("127.0.0.1", fmt.Sprint(*port))
+	addr := net.JoinHostPort(*host, fmt.Sprint(*port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
-	url := "http://" + addr
+	url := "http://" + net.JoinHostPort("127.0.0.1", fmt.Sprint(*port))
+	if *host != "127.0.0.1" && *host != "localhost" {
+		fmt.Fprintf(stdout, "warning: listening on %s; anyone who can reach this address can plan and apply with your credentials.\n", addr)
+	}
 	fmt.Fprintf(stdout, "iagram %s\n  diagram: %s\n  canvas:  %s\n\nPress Ctrl+C to stop.\n", Version, c.file, url)
 	tel.Send("command", map[string]any{"command": "up", "outcome": "ok"})
 

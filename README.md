@@ -1,101 +1,236 @@
-# iagram
+<p align="center">
+  <strong>iagram</strong><br>
+  <em>Infrastructure as diagram.</em> Draw your cloud architecture on a canvas that only lets you draw things that can exist; OpenTofu builds it.
+</p>
 
-**Infrastructure as diagram.** Draw your cloud architecture on a canvas that only lets you draw things that can exist, then let Terraform build it. The diagram is the source of truth; OpenTofu is the engine.
+<p align="center">
+  <a href="https://github.com/iagram/iagram/actions/workflows/ci.yml"><img alt="ci" src="https://github.com/iagram/iagram/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+  <a href="https://github.com/iagram/iagram/releases"><img alt="release" src="https://img.shields.io/github/v/release/iagram/iagram?include_prereleases"></a>
+</p>
+
+---
+
+**The diagram is the source of truth. Terraform is the engine.** iagram is a single local binary, like `terraform`: no server, no account, no hosted component. You draw; it generates Terraform, runs OpenTofu with the credentials already on your machine, and paints the plan back onto the drawing.
 
 ```
-$ brew install --cask iagram/tap/iagram   # or: curl -fsSL https://raw.githubusercontent.com/iagram/iagram/main/install.sh | sh
 $ iagram init
-$ iagram up            # opens http://localhost:7777, draw, hit Plan
-$ iagram plan          # same thing headless
-$ iagram apply
+$ iagram up            # opens http://localhost:7777
+   draw → Plan → review the colours → Apply
+$ git add iagram.json  # the diagram is a file; commit it like code
 ```
 
-Releases are built by GoReleaser for macOS, Linux (amd64/arm64) and Windows, with a `SHA256SUMS` file; `install.sh` verifies it.
+## Contents
 
-iagram is a single local binary, like `terraform`:
+- [Why](#why)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [The editor](#the-editor)
+- [Commands](#commands)
+- [Providers and elements](#providers-and-elements)
+- [Bringing existing infrastructure](#bringing-existing-infrastructure)
+- [Running in Docker](#running-in-docker)
+- [Security posture](#security-posture)
+- [Extending iagram](#extending-iagram)
+- [Project layout](#project-layout)
+- [Development](#development)
+- [Roadmap and status](#roadmap-and-status)
+- [License](#license)
 
-- **Local only.** No server, account or hosted component. The UI, the validator, the generator and the OpenTofu runner are one process on your machine. OpenTofu is downloaded once, version-pinned and checksum-verified, into `~/.iagram/bin`.
-- **Your credentials never leave your machine.** iagram does not store, prompt for or transmit cloud credentials. `tofu` inherits your shell's credential chain (`AWS_PROFILE`, SSO, `gcloud auth application-default`, `az login`) exactly as `terraform` would. See [SECURITY.md](SECURITY.md) for the complete list of network calls the binary makes.
-- **Git-friendly.** The diagram is `iagram.json`, written deterministically so diffs are readable; commit it next to your code. Generated Terraform lands in `.iagram/tf/main.tf.json` with the modules alongside; you can eject to plain Terraform at any time.
-- **Editor you can live in.** Drag an element into another container to move it there (refused with a message if the catalog forbids it), shift-drag to multi-select, ⌘C/⌘V/⌘D to copy, paste and duplicate subtrees, undo/redo throughout.
-- **Nothing invalid is drawable.** A catalog defines every element, where it may be placed, what it may connect to and which properties it takes. An EC2 instance can only be dropped into a subnet; an ALB can only be wired to targets it can route to; sibling subnets cannot overlap. The plan is painted back onto the diagram: green create, amber update, red destroy.
-- **Cloud-agnostic core.** No code in iagram names a cloud. AWS, Google Cloud and Azure ship as catalog directories plus Terraform modules; adding a fourth is [a directory of YAML and modules](docs/spec/catalog.md#adding-a-provider). External catalogs load with `--catalog DIR`.
-- **Bring existing infrastructure.** `iagram import --state terraform.tfstate` rebuilds nodes and containment from any Terraform state using the catalog's import mappings; you draw the arrows and plan to see the gap.
+## Why
 
-## Status
+Infrastructure diagrams and infrastructure code drift apart the day after they are drawn. iagram removes the gap by making the drawing *be* the definition:
 
-| Phase | Scope | State |
-|---|---|---|
-| 1 | Canvas, palette, containment and connection rules, property panel, validation, undo/redo, save/load | done |
-| 2 | Terraform generation (`.tf.json` module calls), OpenTofu install + `plan`, plan overlay on the canvas, `iagram plan` CLI | done |
-| 3 | Apply from the UI with confirmation, outputs written back onto nodes, drift check (refresh-only plan) painted on the canvas | done |
-| 4 | Google Cloud and Azure catalogs with official icons, provider switcher, `iagram import` from an existing Terraform state | done |
-| 5 | Re-parenting by drag, multi-select, copy/paste/duplicate; GoReleaser releases, Homebrew tap, verified install script; Kubernetes, messaging and data elements for all three providers | done |
-| 6 | Dark theme, connection inspector and label toggle, `iagram destroy` (CLI and UI, typed confirmation), CloudFront + Route 53, Cloud DNS, Azure DNS | done |
+- **Nothing invalid is drawable.** A catalog defines every element, where it may be placed, what it may connect to and which properties it takes. An EC2 instance can only be dropped into a subnet; an ALB can only be wired to targets it can route to; sibling subnets cannot overlap; RDS needs two subnets in two AZs, and the canvas tells you before Terraform would.
+- **Placement is containment, arrows are meaning.** A node inside a subnet inside a VPC gets `subnet_id` and `vpc_id`. An arrow from a load balancer to an instance registers the target; from a workload to a bucket grants an IAM policy; from a security group to a database attaches it. The connection inspector shows exactly what each arrow does in Terraform.
+- **The plan is painted on the diagram.** Green create, amber update, red destroy, per element, with the resource list in the panel. Apply runs the exact plan you reviewed and writes outputs (IPs, endpoints, ARNs) back onto the nodes. Drift checks paint what changed outside iagram.
+- **Local, boring, auditable.** One binary. Credentials come from the same local chain the cloud CLIs use and never pass through iagram. Every outbound call the binary makes is listed in [SECURITY.md](SECURITY.md). Telemetry is off unless you turn it on.
+- **Cloud-agnostic core.** No code in iagram names a cloud. AWS, Google Cloud and Azure ship as catalog directories plus Terraform modules; a fourth is a directory of YAML and modules.
 
-Shipped catalogs:
+## Install
 
-| Provider | Elements |
+| Method | Command |
 |---|---|
-| AWS | account, region, VPC, subnet, security group, EC2, RDS, S3, ALB, Lambda, SQS, DynamoDB, EKS, CloudFront, Route 53 |
-| Google Cloud | project, VPC network (with private services access), subnetwork, firewall rule, Compute Engine, Cloud SQL, Cloud Storage, Cloud Run, Pub/Sub, BigQuery, GKE, Cloud DNS |
-| Azure | subscription, resource group, virtual network, subnet, network security group, Linux VM, storage account, PostgreSQL Flexible Server, Key Vault, Container Registry, AKS, DNS zone |
+| Homebrew (macOS, Linux) | `brew install --cask iagram/tap/iagram` |
+| Script (macOS, Linux; verifies `SHA256SUMS`) | `curl -fsSL https://raw.githubusercontent.com/iagram/iagram/main/install.sh \| sh` |
+| pip (any platform; downloads the matching release on first run, verified) | `pip install iagram` |
+| Docker | `docker run --rm -it -p 127.0.0.1:7777:7777 -v "$PWD:/work" ghcr.io/iagram/iagram` (see [Running in Docker](#running-in-docker)) |
+| Binary | [Releases](https://github.com/iagram/iagram/releases): macOS and Linux (amd64, arm64), Windows (amd64) |
+| From source | `make build` (Go 1.26+, Node 22+) |
 
-Every module defaults to the secure option (encrypted storage, IMDSv2, private databases, no public buckets, least-privilege IAM/roles derived from the arrows you draw). One diagram can hold several providers; each gets its own provider block.
+OpenTofu is downloaded once on first `plan`, version-pinned and checksum-verified, into `~/.iagram/bin`. Set `IAGRAM_TOFU_PATH` to use your own `tofu` or `terraform` binary instead.
+
+## Quick start
+
+```
+mkdir my-infra && cd my-infra
+iagram init                # creates iagram.json and .iagram/ (state, plans; gitignored)
+iagram up                  # opens the canvas
+```
+
+In the canvas:
+
+1. Pick a provider tab (AWS, Azure, Google Cloud) and drag an **Account** (or Project / Subscription) onto the canvas, then a **Region**, a **VPC**, **Subnets**, and the resources inside them. Containers turn green or red while you drag to show where a drop is allowed.
+2. Click an element to configure it in the panel on the right: typed fields, dropdowns, required markers, inline validation, grouped into sections.
+3. Connect elements by dragging from the right handle of one to the left handle of another. Only meaningful connections snap. Click an arrow to see what it does.
+4. **Plan**. iagram saves, generates Terraform under `.iagram/tf/`, runs `tofu init` and `tofu plan`, streams the log, and colours the nodes.
+5. **Apply**. Confirm the summary (destroys are called out in red). Outputs appear on the nodes when it finishes.
+6. Later: **Check drift** to see what changed outside iagram; edit the diagram and Plan again to reconcile; **⋯ → Destroy infrastructure…** to tear everything down (asks you to type the diagram name).
+
+Or headless, for CI and scripts:
+
+```
+iagram validate && iagram plan && iagram apply
+```
+
+Try the examples: `cd examples/aws-three-tier && iagram up` (also `gcp-web`, `azure-web`).
 
 ## How it works
 
 ```
-iagram.json ──validate──▶ generate ──▶ .iagram/tf/main.tf.json + modules/ ──▶ tofu init/plan ──▶ plan JSON ──▶ painted on the canvas
+iagram.json ──validate──▶ generate ──▶ .iagram/tf/main.tf.json + modules/ ──▶ tofu init / plan ──▶ plan JSON ──▶ canvas
+                                                                                     └─ apply ──▶ outputs ──▶ nodes[].outputs
 ```
 
-- One `module` block per node, named after the node id, `source = ./modules/<provider>/<type>`.
-- Containment becomes wiring: a node inside a subnet inside a VPC gets `subnet_id` and `vpc_id` from those modules' outputs.
-- Arrows become inputs: `ALB → EC2` appends the instance to the ALB's targets; `SG → RDS` attaches the group; `EC2 → RDS` opens the database port to the instance's identity group; `Lambda → S3` grants an IAM policy.
-- Account and region nodes become provider blocks (aliased per region), so one diagram can span regions.
-- Apply runs the exact plan you reviewed (it is refused if the diagram changed since), then reads the module outputs the catalog declares (endpoint, ids, IPs) and writes them onto the nodes in `iagram.json`; deployed nodes show a green dot and their outputs in the panel.
-- Drift check runs `tofu plan -refresh-only`: nodes whose real infrastructure no longer matches state get an amber dotted ring and the list of changed attributes.
+- **`iagram.json`** is the diagram: nodes (type, name, parent, properties, layout), edges (kind, source, target). Deterministic JSON, readable diffs, versioned with a migration path. Spec: [docs/spec/document.md](docs/spec/document.md).
+- **The catalog** (`catalog/<provider>/*.yaml`) is the single source of truth: one YAML file per element drives the palette entry, the drop rules, the connection rules, the settings panel, validation, the Terraform module call and the import mapping. Spec: [docs/spec/catalog.md](docs/spec/catalog.md), enforced by [`catalog/schema.json`](catalog/schema.json).
+- **Generation** emits one `module` block per node (named after the node id, `source = ./modules/<provider>/<type>`), provider blocks from account/region nodes (aliased per region, so one diagram can span regions and clouds), inputs wired from the containment chain and the arrows, and root outputs per node. Modules are embedded in the binary and materialised next to the config, so `.iagram/tf/` is plain Terraform you can inspect or eject to at any time.
+- **Execution** is OpenTofu, run as a subprocess that inherits your shell environment. Plan and apply stream over a local job API; the plan JSON is mapped back to nodes by module name. State is local under `.iagram/tf/` by default, like a fresh Terraform project (configure a remote backend there if you want one).
 
-The whole mapping lives in YAML, specified in [docs/spec/catalog.md](docs/spec/catalog.md) and enforced by [`catalog/schema.json`](catalog/schema.json). The file format is specified in [docs/spec/document.md](docs/spec/document.md), versioned, with a migration path.
+## The editor
+
+| Area | What it does |
+|---|---|
+| **Palette** (left) | Provider tabs; elements grouped by category; items that fit the selected container are highlighted, the rest dimmed. Drag onto the canvas. |
+| **Canvas** | Nested containers (account → region → VPC → subnet), typed arrows with labels, plan and drift overlays, minimap. Shift-drag to select several, ⌘-click to add. Drag an element into another container to move it there (refused with a message if the catalog forbids it). |
+| **Settings panel** (right) | Name, properties in sections (`Compute`, `Networking`, `Advanced`…), validation messages, planned resource changes, drift details, live outputs after apply (click to copy), delete. Click an arrow for the connection inspector. |
+| **Toolbar** | Undo/redo, zoom, label toggle, dark/light theme, validation status, Save, Check drift, Plan, Apply, ⋯ menu (Destroy). |
+| **Log drawer** | Streams `tofu` output for plan/apply/drift; lists orphaned state that a plan would destroy. |
+
+Shortcuts: ⌘S save · ⌘Z / ⌘⇧Z undo, redo · ⌘C / ⌘V / ⌘D copy, paste, duplicate · ⌫ delete · double-click an element to focus its settings. Deep links: `?theme=dark`, `#select=<node id>`.
 
 ## Commands
 
 ```
-iagram init [name]            create iagram.json and .iagram/
-iagram up [-p PORT] [--no-open]
-iagram validate               catalog rules, headless (exit 1 on errors)
-iagram generate               write .iagram/tf/main.tf.json
-iagram plan                   generate + tofu init + plan, summarised per node
-iagram apply                  apply the last plan, write outputs back onto the diagram
-iagram drift                  refresh-only plan; exit 1 when infrastructure drifted
-iagram destroy [--yes]        plan the teardown, ask for the diagram name, apply; clears outputs
-iagram import --state FILE    build a diagram from a terraform.tfstate or `tofu show -json` (nodes and containment; draw the arrows)
-iagram catalog check DIR      validate an external catalog
+iagram init [name]            create iagram.json and .iagram/ in the current directory
+iagram up [-p PORT] [--host ADDR] [--no-open]
+                              open the canvas (127.0.0.1 by default; 0.0.0.0 only inside Docker)
+iagram validate               check the diagram against the catalog; exit 1 on errors
+iagram generate               write .iagram/tf/main.tf.json and modules/
+iagram plan                   generate + tofu init + plan, summarised per element
+iagram apply                  apply the last plan; write outputs back onto the diagram
+iagram drift                  refresh-only plan; exit 1 if infrastructure drifted
+iagram destroy [--yes]        plan the teardown, ask for the diagram name, apply; clear outputs
+iagram import --state FILE    build a diagram from a terraform.tfstate or `tofu show -json`
+iagram catalog check DIR      validate an external catalog directory
 iagram telemetry on|off|status
+iagram version
 ```
 
-All diagram commands accept `-f FILE` and repeatable `--catalog DIR`. `IAGRAM_TOFU_PATH` points at your own tofu/terraform binary instead of the managed download; `IAGRAM_HOME` relocates `~/.iagram`.
+Diagram commands accept `-f FILE` and repeatable `--catalog DIR`. Environment: `IAGRAM_TOFU_PATH` (your own tofu/terraform), `IAGRAM_HOME` (default `~/.iagram`), `IAGRAM_TELEMETRY=0`.
 
-## Telemetry
+## Providers and elements
 
-Off by default. iagram sends nothing unless you run `iagram telemetry on`; if you do, it sends a few anonymous usage events (command name, version, OS, bucketed counts), never names, properties, ids, account ids, paths or errors. The exact payload is in [docs/telemetry.md](docs/telemetry.md); the code is one file with tests that assert the default and the whitelist.
+| Provider | Containers | Elements |
+|---|---|---|
+| **AWS** | account, region, VPC, subnet | security group, EC2, RDS, S3, ALB, Lambda, SQS, DynamoDB, EKS, CloudFront, Route 53 |
+| **Google Cloud** | project, VPC network, subnetwork | firewall rule, Compute Engine, Cloud SQL, Cloud Storage, Cloud Run, Pub/Sub, BigQuery, GKE, Cloud DNS |
+| **Azure** | subscription, resource group, virtual network, subnet | network security group, Linux VM, storage account, PostgreSQL Flexible Server, Key Vault, Container Registry, AKS, DNS zone |
 
-## Build from source
+Arrows and what they generate (examples): `routes_to` (ALB → EC2/Lambda: target groups), `protects` (security group / NSG / firewall → workload), `connects_to` (workload → database: ingress from the workload's identity group, or Cloud SQL client role), `reads_writes` / `publishes_to` / `sends_to` (workload → bucket / table / topic / queue: least-privilege IAM), `triggers` (SQS → Lambda: event source mapping), `pulls_from` (AKS → ACR), `reads_secrets` (VM → Key Vault), `serves_from` (CloudFront → S3/ALB), `resolves_to` (DNS zone → load balancer / distribution / VM).
+
+Modules default to the secure option: encrypted storage, IMDSv2, private databases, no public buckets, generated SSH keys and system identities, and roles derived only from the arrows you drew. Each example under `examples/` is validated against the real providers in CI.
+
+## Bringing existing infrastructure
+
+```
+iagram import --state terraform.tfstate -o iagram.json      # or: tofu show -json | iagram import --state - -o iagram.json
+iagram up
+```
+
+Import rebuilds nodes and containment from any Terraform state (format 4, or `show -json` output) using the catalog's import mappings, synthesises account/region containers from ARNs, project attributes or ARM ids, and lays everything out in a grid. Arrows are not recovered: draw them, then `plan` shows the gap. The report lists resource types with no mapping and elements placed by fallback. Example: `examples/import/`.
+
+## Running in Docker
+
+`compose.yaml` runs the canvas from a container against the diagram in the current directory:
+
+```
+docker compose up                    # http://localhost:7777
+docker compose run --rm iagram plan
+docker compose run --rm iagram apply
+```
+
+It publishes the port on `127.0.0.1` only, mounts `~/.aws`, `~/.config/gcloud` and `~/.azure` read-only (the same files the binary would read natively), passes the usual credential environment variables through, and keeps OpenTofu and the provider cache in a named volume. Build locally with `docker compose build`, or pull `ghcr.io/iagram/iagram:<version>` (multi-arch images are published by the release pipeline).
+
+## Security posture
+
+- **Credentials never pass through iagram.** `tofu` runs as a child process with your shell's environment; providers authenticate the way they always do. The only code that launches it is [`internal/tofu/run.go`](internal/tofu/run.go).
+- **Network.** The binary contacts GitHub once to download the pinned, checksum-verified OpenTofu; everything else is `tofu` talking to registries and your cloud. Telemetry is **off by default** and, when opted in, sends only the whitelisted fields in [docs/telemetry.md](docs/telemetry.md).
+- **Local server.** `iagram up` listens on loopback, rejects foreign `Origin` headers, and exposes only the current directory's diagram and operations. Do not port-forward it.
+- **Files.** `iagram.json` has no secrets and is meant to be committed. `.iagram/` (generated Terraform, plans, state) is gitignored; state may contain secrets, as any Terraform state does.
+
+Full statement and reporting instructions: [SECURITY.md](SECURITY.md).
+
+## Extending iagram
+
+- **Add an element**: one YAML file under `catalog/<provider>/` plus a Terraform module under `modules/<provider>/<name>/`. The YAML declares placement, connections, properties (JSON Schema with `group`/`advanced` panel hints), the module mapping and the import mapping. Guide: [CONTRIBUTING.md](CONTRIBUTING.md); contract: [docs/spec/catalog.md](docs/spec/catalog.md).
+- **Add a provider**: a directory with `_provider.yaml`, an account-role entry, usually a region-role entry, containers, leaves, icons and modules. [Recipe](docs/spec/catalog.md#adding-a-provider). Providers can live in their own repository and load with `--catalog DIR`; `iagram catalog check DIR` validates them.
+- **Document format**: [docs/spec/document.md](docs/spec/document.md) and [`document.schema.json`](docs/spec/document.schema.json). Additive changes never bump the version; breaking ones come with a migration.
+
+## Project layout
+
+```
+cmd/iagram/            entry point
+internal/cli           commands
+internal/catalog       catalog model, loader, rules, schema check
+internal/document      iagram.json model, canonical save, migrations
+internal/validate      the authoritative validator (also runs headless)
+internal/generate      document -> main.tf.json
+internal/tofu          OpenTofu install (pinned, verified), runner, plan summary
+internal/workspace     .iagram/tf orchestration: generate, plan, apply, drift, destroy
+internal/importer      Terraform state -> diagram
+internal/layout        grid auto-layout for imports
+internal/jobs          one-at-a-time background jobs with streaming logs
+internal/server        local HTTP API + embedded UI
+internal/telemetry     opt-in usage events (whitelisted)
+catalog/               the specification of what can be drawn (YAML + icons)
+modules/               Terraform modules embedded in the binary
+web/                   React + React Flow editor (built into internal/web/dist)
+examples/              diagrams validated in CI against real providers
+packaging/pypi         the pip launcher
+docs/spec              catalog and document specifications
+```
+
+## Development
 
 Requires Go 1.26+ and Node 22+.
 
 ```
-make build       # builds web/ and embeds it into ./iagram
-make test        # go vet + tests + frontend typecheck
-IAGRAM_E2E=1 go test ./internal/tofu/   # exercises a real OpenTofu binary (downloads it once)
+make build                 # web build embedded into ./iagram
+make test                  # go vet + tests + frontend checks
+IAGRAM_E2E=1 go test ./internal/tofu/     # real OpenTofu (downloaded once), no cloud
 ```
 
-For UI work: `go run ./cmd/iagram up --no-open` in a directory with an `iagram.json`, then `cd web && npm run dev` (Vite proxies `/api` and `/icons` to the Go process).
+UI work: `go run ./cmd/iagram up --no-open` in a directory with an `iagram.json`, then `cd web && npm run dev` (Vite on :5173 proxies `/api` and `/icons` to the Go process).
 
-## Contributing
+Releases: tag `vX.Y.Z` and push; GoReleaser builds binaries, checksums, GHCR images and the Homebrew cask, and the PyPI launcher is published from the same tag.
 
-Adding a resource type is a YAML file plus a Terraform module; adding a provider is a directory of those. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [catalog spec](docs/spec/catalog.md). Contributions require the [CLA](CLA.md).
+## Roadmap and status
+
+| Phase | Scope | State |
+|---|---|---|
+| 1 | Canvas, palette, containment and connection rules, settings panel, validation, undo/redo | done |
+| 2 | Terraform generation, OpenTofu install + plan, plan overlay | done |
+| 3 | Apply with confirmation, outputs written back, drift detection | done |
+| 4 | Google Cloud and Azure catalogs, provider switcher, `iagram import` | done |
+| 5 | Drag re-parenting, multi-select, clipboard; GoReleaser, Homebrew, install script; Kubernetes, messaging and data elements | done |
+| 6 | Dark theme, connection inspector, `iagram destroy`, DNS/CDN elements, grouped settings | done |
+| 7 | Docker Compose, pip launcher, comprehensive docs | done |
+| next | Visual identity; first real plan/apply validation per cloud; more elements | |
+
+Early software: the shipped catalogs are validated against the real providers, but the first production apply should be reviewed plan by plan, as with any Terraform.
 
 ## License
 
-Everything outside `ee/` is [Apache-2.0](LICENSE). Code under `ee/` is source-available under the [Elastic License 2.0](ee/LICENSE); today that directory is empty. AWS icons are used under the [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/) terms, see [catalog/icons/aws/NOTICE.md](catalog/icons/aws/NOTICE.md). "iagram" is a trademark; see [TRADEMARK.md](TRADEMARK.md).
+Everything outside `ee/` is [Apache-2.0](LICENSE). `ee/` is reserved for source-available code under the [Elastic License 2.0](ee/LICENSE) and is empty today. Contributions require the [CLA](CLA.md). "iagram" is a trademark; see [TRADEMARK.md](TRADEMARK.md). Cloud provider icons are used under their owners' terms; see the `NOTICE.md` in each `catalog/icons/<provider>/` directory.

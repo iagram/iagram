@@ -141,6 +141,7 @@ Flags for up/validate/generate/plan/apply:
   -f, --file FILE      diagram file (default "iagram.json")
       --catalog DIR    layer an extra catalog directory (repeatable)
   -p, --port PORT      listen port for up (default 7777)
+      --host ADDR      listen address for up (default 127.0.0.1; 0.0.0.0 inside Docker)
       --no-open        do not open the browser
 
 iagram never stores or transmits cloud credentials; OpenTofu inherits your

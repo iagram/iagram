@@ -30,3 +30,8 @@ Keep the catalog tight. A type that always produces a working plan is worth more
 ## Reporting problems
 
 Open an issue with the `iagram.json` that reproduces it (strip anything sensitive; the file never contains credentials, but it may contain account ids).
+
+## Packaging
+
+- `make build` produces the binary; `make docker` the image (`Dockerfile`); `make pypi` the pip launcher under `packaging/pypi/` (a thin launcher that downloads the release binary, it contains no logic of its own).
+- Releases are cut by tagging `vX.Y.Z`; `.github/workflows/release.yml` runs GoReleaser (binaries, checksums, GHCR images, Homebrew cask) and publishes the PyPI launcher with the tag version.

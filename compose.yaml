@@ -1,0 +1,41 @@
+# Run the iagram canvas from a container against the diagram in the current
+# directory. The port is published on 127.0.0.1 only; cloud credentials are
+# mounted read-only from your home directory, exactly what the binary would
+# read if you ran it natively. Nothing is stored in the image.
+#
+#   docker compose up            # http://localhost:7777
+#   docker compose run --rm iagram plan
+#   docker compose run --rm iagram apply
+services:
+  iagram:
+    image: ghcr.io/iagram/iagram:latest
+    build:
+      context: .
+      args:
+        VERSION: ${IAGRAM_VERSION:-dev}
+    ports:
+      - "127.0.0.1:7777:7777"
+    working_dir: /work
+    volumes:
+      - .:/work                                  # your iagram.json and .iagram/ (state, plans)
+      - iagram-home:/home/iagram/.iagram         # pinned OpenTofu + provider cache, downloaded once
+      - ${HOME}/.aws:/home/iagram/.aws:ro        # AWS profiles / SSO cache
+      - ${HOME}/.config/gcloud:/home/iagram/.config/gcloud:ro   # gcloud ADC
+      - ${HOME}/.azure:/home/iagram/.azure:ro    # az login
+    environment:
+      # Pass credentials through when you use environment variables instead of files.
+      - AWS_PROFILE
+      - AWS_REGION
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - GOOGLE_APPLICATION_CREDENTIALS
+      - CLOUDSDK_CORE_PROJECT
+      - ARM_SUBSCRIPTION_ID
+      - ARM_TENANT_ID
+      - ARM_CLIENT_ID
+      - ARM_CLIENT_SECRET
+      - IAGRAM_TELEMETRY=0
+
+volumes:
+  iagram-home:

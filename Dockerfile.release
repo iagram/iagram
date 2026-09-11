@@ -1,0 +1,12 @@
+# Used by GoReleaser: the binary is already built for the target arch.
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates git \
+ && adduser -D -h /home/iagram iagram
+COPY iagram /usr/local/bin/iagram
+USER iagram
+WORKDIR /work
+VOLUME ["/home/iagram/.iagram"]
+EXPOSE 7777
+ENV IAGRAM_TELEMETRY=0
+ENTRYPOINT ["iagram"]
+CMD ["up", "--no-open", "--host", "0.0.0.0"]

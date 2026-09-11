@@ -64,3 +64,34 @@ jobs:
           terraform: {module: aws/sqs_queue}
           YAML
           "$GITHUB_WORKSPACE/iagram" catalog check /tmp/extcat
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: build image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: iagram:ci
+          build-args: VERSION=ci
+      - name: smoke
+        run: |
+          docker run --rm iagram:ci version
+          d=$(mktemp -d) && docker run --rm -v "$d:/work" iagram:ci init smoke && test -f "$d/iagram.json"
+
+  pypi-launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build && python -m build packaging/pypi --outdir dist && pip install dist/*.whl
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build -o /usr/local/bin/iagram-real ./cmd/iagram && IAGRAM_BINARY=/usr/local/bin/iagram-real iagram version

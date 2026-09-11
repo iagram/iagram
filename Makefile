@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X github.com/iagram/iagram/internal/cli.Version=$(VERSION)
 
-.PHONY: all build web go test lint dev clean
+.PHONY: all build web go test lint dev clean docker pypi
 
 all: build
 
@@ -32,3 +32,11 @@ dev:
 clean:
 	rm -rf iagram dist internal/web/dist/* web/dist
 	@touch internal/web/dist/.gitkeep
+
+## docker: build the container image locally
+docker:
+	docker build --build-arg VERSION=$(VERSION) -t iagram:local .
+
+## pypi: build the pip launcher (sdist + wheel) into dist/pypi
+pypi:
+	python3 -m pip install -q build && python3 -m build packaging/pypi --outdir dist/pypi
