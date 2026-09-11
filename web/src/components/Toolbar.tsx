@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useReactFlow, useViewport } from '@xyflow/react'
 import { useStore } from '../store'
 
@@ -24,6 +25,12 @@ export function Toolbar() {
   const hasDeployed = useStore((s) => s.nodes.some((n) => n.data.outputs && Object.keys(n.data.outputs).length > 0))
   const running = job?.status === 'running'
   const canApply = !!plan && !planStale && plan.changes && !running && !dirty
+  const theme = useStore((s) => s.theme)
+  const setTheme = useStore((s) => s.setTheme)
+  const showLabels = useStore((s) => s.showLabels)
+  const setShowLabels = useStore((s) => s.setShowLabels)
+  const runDestroyPlan = useStore((s) => s.runDestroyPlan)
+  const [menu, setMenu] = useState(false)
   const { zoomIn, zoomOut, fitView, zoomTo } = useReactFlow()
   const { zoom } = useViewport()
   const errors = problems.filter((p) => p.level === 'error').length
@@ -61,6 +68,15 @@ export function Toolbar() {
         </button>
       </span>
 
+      <span className="group">
+        <button className={showLabels ? 'on' : ''} onClick={() => setShowLabels(!showLabels)} title={showLabels ? 'Hide connection labels (shown on hover)' : 'Show connection labels'}>
+          Aa
+        </button>
+        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? 'Light theme' : 'Dark theme'}>
+          {theme === 'dark' ? '☀' : '☾'}
+        </button>
+      </span>
+
       <span className="spacer" />
       <span className={`status ${errors ? 'error' : warnings ? 'warning' : 'ok'}`}>
         {errors ? `${errors} error${errors > 1 ? 's' : ''}` : warnings ? `${warnings} warning${warnings > 1 ? 's' : ''}` : 'valid'}
@@ -90,8 +106,29 @@ export function Toolbar() {
       <button className="primary" onClick={() => void runPlan()} disabled={running || errors > 0} title={errors ? 'Fix validation errors first' : 'Save, generate Terraform and run tofu plan'}>
         {running && job?.kind === 'plan' ? 'Planning…' : 'Plan'}
       </button>
-      <button className={`apply ${canApply ? 'ready' : ''}`} onClick={() => setConfirmApply(true)} disabled={!canApply} title={!plan ? 'Plan first' : planStale || dirty ? 'Diagram changed; plan again' : !plan.changes ? 'Nothing to apply' : 'Apply this plan'}>
-        {running && job?.kind === 'apply' ? 'Applying…' : 'Apply'}
+      <span className="menu-wrap">
+        <button onClick={() => setMenu((m) => !m)} title="More" aria-haspopup="menu" aria-expanded={menu}>
+          ⋯
+        </button>
+        {menu && (
+          <div className="menu" role="menu" onMouseLeave={() => setMenu(false)}>
+            <button
+              role="menuitem"
+              className="danger-item"
+              disabled={running || !hasDeployed}
+              onClick={() => {
+                setMenu(false)
+                void runDestroyPlan()
+              }}
+              title={hasDeployed ? 'Plan the teardown of everything this diagram manages' : 'Nothing deployed'}
+            >
+              Destroy infrastructure…
+            </button>
+          </div>
+        )}
+      </span>
+      <button className={`apply ${canApply ? 'ready' : ''} ${plan?.destroy ? 'destroy' : ''}`} onClick={() => setConfirmApply(true)} disabled={!canApply} title={!plan ? 'Plan first' : planStale || dirty ? 'Diagram changed; plan again' : !plan.changes ? 'Nothing to apply' : 'Apply this plan'}>
+        {running && job?.kind === 'apply' ? (plan?.destroy ? 'Destroying…' : 'Applying…') : plan?.destroy ? 'Destroy' : 'Apply'}
       </button>
     </header>
   )

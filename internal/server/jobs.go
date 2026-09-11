@@ -18,7 +18,16 @@ import (
 
 // startPlan plans the document as saved on disk (save first from the UI), so
 // what gets planned is exactly what is in the file, like terraform.
-func (s *Server) startPlan(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) startPlan(w http.ResponseWriter, r *http.Request) {
+	s.startPlanKind(w, r, false)
+}
+
+// startDestroyPlan produces a destroy plan; Apply then runs it.
+func (s *Server) startDestroyPlan(w http.ResponseWriter, r *http.Request) {
+	s.startPlanKind(w, r, true)
+}
+
+func (s *Server) startPlanKind(w http.ResponseWriter, _ *http.Request, destroy bool) {
 	s.mu.Lock()
 	d, err := document.Load(s.DocPath)
 	s.mu.Unlock()
@@ -28,7 +37,12 @@ func (s *Server) startPlan(w http.ResponseWriter, _ *http.Request) {
 	}
 	job, err := s.Jobs.Start("plan", func(ctx context.Context, log *jobs.Log) (any, error) {
 		start := time.Now()
-		res, err := s.Workspace.Plan(ctx, s.Catalog, d, log)
+		var res *workspace.PlanResult
+		if destroy {
+			res, err = s.Workspace.PlanDestroy(ctx, s.Catalog, d, log)
+		} else {
+			res, err = s.Workspace.Plan(ctx, s.Catalog, d, log)
+		}
 		outcome := "ok"
 		if err != nil {
 			outcome = "error"
@@ -36,7 +50,11 @@ func (s *Server) startPlan(w http.ResponseWriter, _ *http.Request) {
 				outcome = "cancelled"
 			}
 		}
-		props := map[string]any{"command": "plan", "outcome": outcome, "duration_s": int(time.Since(start).Seconds())}
+		cmd := "plan"
+		if destroy {
+			cmd = "destroy"
+		}
+		props := map[string]any{"command": cmd, "outcome": outcome, "duration_s": int(time.Since(start).Seconds())}
 		if res != nil {
 			props["changes"] = res.Summary.Add + res.Summary.Change + res.Summary.Destroy
 			s.mu.Lock()

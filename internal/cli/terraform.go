@@ -168,3 +168,57 @@ func runDrift(args []string, stdout io.Writer) (*document.Document, error) {
 	}
 	return doc, nil
 }
+
+// runDestroy plans the teardown, shows it, asks for the diagram name (unless
+// --yes) and applies. Outputs are cleared from the diagram afterwards.
+func runDestroy(args []string, stdout io.Writer) (*document.Document, error) {
+	fs_ := flag.NewFlagSet("destroy", flag.ContinueOnError)
+	var c common
+	c.bind(fs_)
+	yes := fs_.Bool("yes", false, "skip the confirmation prompt")
+	if err := fs_.Parse(args); err != nil {
+		return nil, err
+	}
+	cat, err := c.loadCatalog()
+	if err != nil {
+		return nil, err
+	}
+	doc, err := c.loadDocument()
+	if err != nil {
+		return nil, err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	ws := workspace.For(c.file)
+	res, err := ws.PlanDestroy(ctx, cat, doc, stdout)
+	if err != nil {
+		return doc, err
+	}
+	if !res.Changes {
+		fmt.Fprintln(stdout, "\nNothing to destroy.")
+		return doc, nil
+	}
+	byID := doc.Index()
+	for id, np := range res.Summary.Nodes {
+		if np.Action != tofu.ActionNoop {
+			fmt.Fprintf(stdout, "  %-8s %-22s %s (%d resources)\n", np.Action, byID[id].Type, byID[id].Name, len(np.Resources))
+		}
+	}
+	name := doc.Name
+	if name == "" {
+		name = "destroy"
+	}
+	if !*yes {
+		fmt.Fprintf(stdout, "\nThis destroys %d resource(s). Type the diagram name (%q) to confirm: ", res.Summary.Destroy, name)
+		var typed string
+		fmt.Fscanln(os.Stdin, &typed)
+		if typed != name {
+			return doc, fmt.Errorf("aborted")
+		}
+	}
+	if _, err := ws.Apply(ctx, cat, doc, stdout); err != nil {
+		return doc, err
+	}
+	fmt.Fprintln(stdout, "\nDestroyed. Outputs cleared from the diagram.")
+	return doc, nil
+}

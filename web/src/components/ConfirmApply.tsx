@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useStore } from '../store'
 
 export function ConfirmApply() {
@@ -6,14 +7,19 @@ export function ConfirmApply() {
   const nodes = useStore((s) => s.nodes)
   const runApply = useStore((s) => s.runApply)
   const setConfirmApply = useStore((s) => s.setConfirmApply)
+  const docName = useStore((s) => s.docName)
+  const [typed, setTyped] = useState('')
   if (!open || !plan) return null
+  const isDestroy = !!plan.destroy
+  const confirmWord = docName || 'destroy'
+  const armed = !isDestroy || typed === confirmWord
   const { add, change, destroy, nodes: perNode, orphans } = plan.summary
   const nameOf = (id: string) => nodes.find((n) => n.id === id)?.data.name ?? id
   const affected = Object.entries(perNode).filter(([, p]) => p.action !== 'no-op')
   return (
     <div className="modal-backdrop" onClick={() => setConfirmApply(false)}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Apply this plan?</h2>
+        <h2>{isDestroy ? 'Destroy this infrastructure?' : 'Apply this plan?'}</h2>
         <p>
           OpenTofu will <b className="create">create {add}</b>, <b className="update">change {change}</b> and <b className="delete">destroy {destroy}</b> resource{add + change + destroy === 1 ? '' : 's'} in your cloud account using
           your local credentials.
@@ -31,10 +37,18 @@ export function ConfirmApply() {
           ))}
         </ul>
         {destroy > 0 && <p className="warn">This plan destroys resources. Destroyed data is not recoverable.</p>}
+        {isDestroy && (
+          <label className="field">
+            <span>
+              Type <b className="mono">{confirmWord}</b> to confirm
+            </span>
+            <input autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={confirmWord} />
+          </label>
+        )}
         <div className="actions">
           <button onClick={() => setConfirmApply(false)}>Cancel</button>
-          <button className={destroy > 0 ? 'danger' : 'primary'} onClick={() => void runApply()}>
-            {destroy > 0 ? `Apply and destroy ${destroy}` : 'Apply'}
+          <button className={destroy > 0 ? 'danger' : 'primary'} disabled={!armed} onClick={() => void runApply()}>
+            {isDestroy ? `Destroy ${destroy} resources` : destroy > 0 ? `Apply and destroy ${destroy}` : 'Apply'}
           </button>
         </div>
       </div>

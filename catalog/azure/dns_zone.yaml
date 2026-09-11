@@ -1,0 +1,25 @@
+id: azure.dns_zone
+label: DNS Zone
+description: Public DNS zone. Arrows to VMs with a public IP create <vm name>.<domain> A records.
+category: network
+icon: azure/dns_zone.svg
+kind: leaf
+allowed_parents: [azure.resource_group]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: azure.virtual_machine, kind: resolves_to, label: resolves to, terraform: {set: from, input: a_records, value: to.dns_record}}
+props:
+  type: object
+  required: [domain]
+  properties:
+    domain:
+      type: string
+      title: Domain
+      pattern: "^([a-z0-9-]+\\.)+[a-z]{2,}$"
+terraform:
+  module: azure/dns_zone
+  inputs_from_parent:
+    resource_group_name: parent.resource_group_name
+  import: {resource: azurerm_dns_zone, name: name, props: {domain: name}}
+outputs: [zone_id, name_servers]

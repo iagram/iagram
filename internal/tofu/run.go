@@ -73,6 +73,20 @@ func (r *Runner) Plan(ctx context.Context, out io.Writer) (changes bool, err err
 	return false, nil
 }
 
+// PlanDestroy writes a destroy plan to PlanFile.
+func (r *Runner) PlanDestroy(ctx context.Context, out io.Writer) (changes bool, err error) {
+	c := r.cmd(ctx, out, "plan", "-destroy", "-no-color", "-input=false", "-detailed-exitcode", "-out="+PlanFile)
+	err = c.Run()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 2 {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("tofu plan -destroy: %w", err)
+	}
+	return false, nil
+}
+
 // ShowPlan decodes PlanFile as JSON.
 func (r *Runner) ShowPlan(ctx context.Context) (*tfjson.Plan, error) {
 	var buf bytes.Buffer

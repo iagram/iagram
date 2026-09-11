@@ -29,6 +29,7 @@ export const api = {
       body: JSON.stringify(doc),
     }).then((r) => json<Validation>(r)),
   startPlan: () => fetch('/api/plan', { method: 'POST' }).then((r) => json<Job>(r)),
+  startDestroyPlan: () => fetch('/api/plan/destroy', { method: 'POST' }).then((r) => json<Job>(r)),
   latestPlan: () => fetch('/api/plan/latest').then((r) => json<{ plan: PlanResult | null; drift: DriftResult | null }>(r)),
   startApply: () => fetch('/api/apply', { method: 'POST' }).then((r) => json<Job>(r)),
   startDrift: () => fetch('/api/drift', { method: 'POST' }).then((r) => json<Job>(r)),

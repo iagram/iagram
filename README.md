@@ -31,14 +31,15 @@ iagram is a single local binary, like `terraform`:
 | 3 | Apply from the UI with confirmation, outputs written back onto nodes, drift check (refresh-only plan) painted on the canvas | done |
 | 4 | Google Cloud and Azure catalogs with official icons, provider switcher, `iagram import` from an existing Terraform state | done |
 | 5 | Re-parenting by drag, multi-select, copy/paste/duplicate; GoReleaser releases, Homebrew tap, verified install script; Kubernetes, messaging and data elements for all three providers | done |
+| 6 | Dark theme, connection inspector and label toggle, `iagram destroy` (CLI and UI, typed confirmation), CloudFront + Route 53, Cloud DNS, Azure DNS | done |
 
 Shipped catalogs:
 
 | Provider | Elements |
 |---|---|
-| AWS | account, region, VPC, subnet, security group, EC2, RDS, S3, ALB, Lambda, SQS, DynamoDB, EKS |
-| Google Cloud | project, VPC network (with private services access), subnetwork, firewall rule, Compute Engine, Cloud SQL, Cloud Storage, Cloud Run, Pub/Sub, BigQuery, GKE |
-| Azure | subscription, resource group, virtual network, subnet, network security group, Linux VM, storage account, PostgreSQL Flexible Server, Key Vault, Container Registry, AKS |
+| AWS | account, region, VPC, subnet, security group, EC2, RDS, S3, ALB, Lambda, SQS, DynamoDB, EKS, CloudFront, Route 53 |
+| Google Cloud | project, VPC network (with private services access), subnetwork, firewall rule, Compute Engine, Cloud SQL, Cloud Storage, Cloud Run, Pub/Sub, BigQuery, GKE, Cloud DNS |
+| Azure | subscription, resource group, virtual network, subnet, network security group, Linux VM, storage account, PostgreSQL Flexible Server, Key Vault, Container Registry, AKS, DNS zone |
 
 Every module defaults to the secure option (encrypted storage, IMDSv2, private databases, no public buckets, least-privilege IAM/roles derived from the arrows you draw). One diagram can hold several providers; each gets its own provider block.
 
@@ -67,6 +68,7 @@ iagram generate               write .iagram/tf/main.tf.json
 iagram plan                   generate + tofu init + plan, summarised per node
 iagram apply                  apply the last plan, write outputs back onto the diagram
 iagram drift                  refresh-only plan; exit 1 when infrastructure drifted
+iagram destroy [--yes]        plan the teardown, ask for the diagram name, apply; clears outputs
 iagram import --state FILE    build a diagram from a terraform.tfstate or `tofu show -json` (nodes and containment; draw the arrows)
 iagram catalog check DIR      validate an external catalog
 iagram telemetry on|off|status

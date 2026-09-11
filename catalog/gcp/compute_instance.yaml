@@ -15,26 +15,32 @@ props:
   properties:
     machine_type:
       type: string
+      group: Compute
       title: Machine type
       default: e2-micro
       enum: [e2-micro, e2-small, e2-medium, e2-standard-2, e2-standard-4, n2-standard-2, n2-standard-4, c3-standard-4]
     zone:
       type: string
+      group: Compute
       title: Zone suffix
       default: b
       enum: [a, b, c]
     image:
       type: string
+      group: Compute
+      advanced: true
       title: Image
       default: debian-cloud/debian-12
     disk_gb:
       type: integer
+      group: Storage
       title: Boot disk (GB)
       default: 20
       minimum: 10
       maximum: 65536
     public_ip:
       type: boolean
+      group: Networking
       title: External IP
       default: false
 terraform:
@@ -43,4 +49,4 @@ terraform:
     subnetwork_id: parent.subnetwork_id
     region: parent.region
   import: {resource: google_compute_instance, parent: network_interface.0.subnetwork, name: name, props: {machine_type: machine_type, zone: "zone|last"}}
-outputs: [instance_id, internal_ip, external_ip, service_account_email]
+outputs: [instance_id, internal_ip, external_ip, service_account_email, dns_record]

@@ -97,6 +97,10 @@ would shadow meta-arguments or the inputs the generator sets.
 - **Properties** support JSON Schema types `string` (`enum`, `pattern`,
   `format: cidr`), `integer`/`number` (`minimum`, `maximum`) and `boolean`.
   `default` values are applied when a node is created. `required` is enforced.
+  Two iagram annotations shape the settings panel: `group: <section title>`
+  puts the field under a collapsible section (default "Settings"), and
+  `advanced: true` moves it under a collapsed "Advanced" section. `title` and
+  `description` are shown as the field label and help text.
 - **CIDR rules** are generic: any node with a `cidr` property must lie within
   the nearest ancestor that has one, and siblings must not overlap.
 

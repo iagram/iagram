@@ -121,6 +121,8 @@ output "vm_id" { value = azurerm_linux_virtual_machine.this.id }
 output "private_ip" { value = azurerm_network_interface.this.private_ip_address }
 output "public_ip" { value = var.public_ip ? azurerm_public_ip.this[0].ip_address : "" }
 output "principal_id" { value = azurerm_linux_virtual_machine.this.identity[0].principal_id }
+# "<name>|<ip>" consumed by DNS zone A records (empty ip when no public address).
+output "dns_record" { value = "${var.name}|${var.public_ip ? azurerm_public_ip.this[0].ip_address : ""}" }
 output "ssh_private_key" {
   value     = tls_private_key.ssh.private_key_openssh
   sensitive = true

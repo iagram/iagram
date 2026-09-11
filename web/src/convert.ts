@@ -46,6 +46,9 @@ export function makeEdge(e: DocEdge, label: string): RFEdge {
     target: e.target,
     type: 'smoothstep',
     label,
+    labelBgPadding: [6, 3],
+    labelBgBorderRadius: 8,
+    labelShowBg: true,
     data: { kind: e.kind, label },
     markerEnd: { type: MarkerType.ArrowClosed },
   }

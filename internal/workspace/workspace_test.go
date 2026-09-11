@@ -13,9 +13,10 @@ import (
 func TestWriteOutputsRoundTripsThroughTheFile(t *testing.T) {
 	d := document.New("t")
 	d.Nodes = []document.Node{{ID: "web", Type: "aws.ec2_instance", Name: "web", Props: map[string]any{}}, {ID: "db", Type: "aws.rds_instance", Name: "db", Props: map[string]any{}}}
+	d.Nodes[1].Outputs = map[string]any{"endpoint": "old"}
 	n := workspace.WriteOutputs(d, map[string]map[string]any{"web": {"instance_id": "i-123", "private_ip": "10.0.1.5"}})
 	if n != 1 || d.Nodes[1].Outputs != nil || d.Nodes[0].Outputs["instance_id"] != "i-123" {
-		t.Fatalf("n=%d nodes=%+v", n, d.Nodes)
+		t.Fatalf("n=%d nodes=%+v (stale outputs must be cleared)", n, d.Nodes)
 	}
 	p := filepath.Join(t.TempDir(), "iagram.json")
 	if err := d.Save(p); err != nil {
@@ -27,6 +28,9 @@ func TestWriteOutputsRoundTripsThroughTheFile(t *testing.T) {
 	}
 	if back.Nodes[1].Outputs["private_ip"] != "10.0.1.5" { // sorted by id: db, web
 		t.Errorf("outputs lost: %+v", back.Nodes)
+	}
+	if workspace.WriteOutputs(back, nil) != 0 || back.Nodes[1].Outputs != nil {
+		t.Error("destroy (no outputs) must clear everything")
 	}
 }
 

@@ -1,0 +1,23 @@
+id: gcp.cloud_dns_zone
+label: Cloud DNS Zone
+description: Public managed zone. Arrows to instances with an external IP create <instance name>.<domain> A records.
+category: network
+icon: gcp/cloud_dns.svg
+kind: leaf
+allowed_parents: [gcp.project]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: gcp.compute_instance, kind: resolves_to, label: resolves to, terraform: {set: from, input: a_records, value: to.dns_record}}
+props:
+  type: object
+  required: [domain]
+  properties:
+    domain:
+      type: string
+      title: Domain
+      pattern: "^([a-z0-9-]+\\.)+[a-z]{2,}$"
+terraform:
+  module: gcp/cloud_dns_zone
+  import: {resource: google_dns_managed_zone, name: name, props: {domain: dns_name}}
+outputs: [zone_name, name_servers]

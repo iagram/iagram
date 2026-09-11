@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useRef, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, type DragEvent } from 'react'
 import {
   Background,
   MiniMap,
   ReactFlow,
   useReactFlow,
+  useStoreApi,
   type IsValidConnection,
   type XYPosition,
 } from '@xyflow/react'
@@ -30,9 +31,28 @@ export function Canvas() {
   const reparent = useStore((s) => s.reparent)
   const showToast = useStore((s) => s.showToast)
   const problems = useStore((s) => s.problems)
+  const theme = useStore((s) => s.theme)
+  const showLabels = useStore((s) => s.showLabels)
+  const selectedEdgeId = useStore((s) => s.selectedEdgeId)
+  const hoveredEdgeId = useStore((s) => s.hoveredEdgeId)
+  const selectEdge = useStore((s) => s.selectEdge)
+  const hoverEdge = useStore((s) => s.hoverEdge)
   // Positions at drag start, to snap back when a drop target is not allowed.
   const dragStart = useRef<Map<string, { x: number; y: number }>>(new Map())
   const { screenToFlowPosition, getInternalNode } = useReactFlow<RFNode, RFEdge>()
+  const rfStore = useStoreApi<RFNode, RFEdge>()
+  const pendingSelect = useStore((s) => s.pendingSelect)
+
+  // Programmatic selection goes through React Flow so its selection state and
+  // ours never fight (see store.select).
+  useEffect(() => {
+    if (!pendingSelect) return
+    if (nodes.some((n) => n.id === pendingSelect)) {
+      const { addSelectedNodes } = rfStore.getState()
+      addSelectedNodes([pendingSelect])
+      useStore.setState({ pendingSelect: null })
+    }
+  }, [pendingSelect, nodes, rfStore])
 
   /** Absolute rect of a node, using React Flow's measured internals. */
   const absRect = useCallback(
@@ -178,7 +198,15 @@ export function Canvas() {
   )
 
   const badEdges = useMemo(() => new Set(problems.filter((p) => p.edge).map((p) => p.edge!)), [problems])
-  const styledEdges = useMemo(() => edges.map((e) => (badEdges.has(e.id) ? { ...e, className: 'edge-error' } : e)), [edges, badEdges])
+  // Labels are shown for all edges when enabled, otherwise only on hover/selection.
+  const styledEdges = useMemo(
+    () =>
+      edges.map((e) => {
+        const visible = showLabels || e.id === hoveredEdgeId || e.id === selectedEdgeId
+        return { ...e, label: visible ? e.data?.label : undefined, className: badEdges.has(e.id) ? 'edge-error' : undefined }
+      }),
+    [edges, badEdges, showLabels, hoveredEdgeId, selectedEdgeId],
+  )
 
   return (
     <div className="canvas" onDrop={onDrop} onDragOver={onDragOver}>
@@ -196,8 +224,21 @@ export function Canvas() {
         selectionKeyCode="Shift"
         multiSelectionKeyCode={['Meta', 'Control']}
         isValidConnection={isValidConnection}
-        onSelectionChange={({ nodes: sel }) => select(sel.length === 1 ? sel[0].id : null)}
-        onPaneClick={() => select(null)}
+        onSelectionChange={({ nodes: sel, edges: selE }) => {
+          select(sel.length === 1 ? sel[0].id : null)
+          selectEdge(sel.length === 0 && selE.length === 1 ? selE[0].id : null)
+        }}
+        onNodeDoubleClick={(_, n) => {
+          select(n.id)
+          requestAnimationFrame(() => (document.querySelector('.panel input, .panel select') as HTMLElement | null)?.focus())
+        }}
+        onEdgeMouseEnter={(_, e) => hoverEdge(e.id)}
+        onEdgeMouseLeave={() => hoverEdge(null)}
+        onPaneClick={() => {
+          select(null)
+          selectEdge(null)
+        }}
+        colorMode={theme}
         deleteKeyCode={['Backspace', 'Delete']}
         fitView
         snapToGrid

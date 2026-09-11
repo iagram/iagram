@@ -16,6 +16,10 @@ export function App() {
   const toast = useStore((s) => s.toast)
   const catalog = useStore((s) => s.catalog)
   const dirty = useStore((s) => s.dirty)
+  const theme = useStore((s) => s.theme)
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
   const undo = useStore((s) => s.undo)
   const redo = useStore((s) => s.redo)
   const copySelection = useStore((s) => s.copySelection)
@@ -23,7 +27,14 @@ export function App() {
   const duplicateSelection = useStore((s) => s.duplicateSelection)
 
   useEffect(() => {
-    void load()
+    // Deep links: #select=<node id> focuses an element, ?theme=dark|light forces a theme.
+    void load().then(() => {
+      const params = new URLSearchParams(location.search)
+      const t = params.get('theme')
+      if (t === 'dark' || t === 'light') useStore.getState().setTheme(t)
+      const m = /select=([^&]+)/.exec(location.hash)
+      if (m) useStore.getState().requestSelect(decodeURIComponent(m[1]))
+    })
   }, [load])
 
   useEffect(() => {

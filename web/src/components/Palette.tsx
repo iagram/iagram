@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent } from 'react'
+import { useMemo, useState, type DragEvent } from 'react'
 import { useStore } from '../store'
 import type { Entry } from '../types'
 import { ROOT } from '../types'
@@ -18,11 +18,10 @@ export function Palette() {
 
   const providers = useMemo(() => [...new Set((catalog?.entries ?? []).map((e) => e.provider))].sort(), [catalog])
   const inUse = useMemo(() => [...new Set(nodes.map((n) => n.data.type.split('.')[0]))], [nodes])
-  const [provider, setProvider] = useState<string>('')
-  useEffect(() => {
-    // Default to the provider the diagram already uses, else the first one.
-    if (!provider && providers.length) setProvider(inUse[0] && providers.includes(inUse[0]) ? inUse[0] : providers[0])
-  }, [providers, inUse, provider])
+  // The tab the user picked; until then, derive it (no effect, no setState loop).
+  const [chosen, setChosen] = useState<string | null>(null)
+  const provider = chosen && providers.includes(chosen) ? chosen : inUse.find((p) => providers.includes(p)) ?? providers[0] ?? ''
+  const setProvider = setChosen
 
   if (!catalog || !rules) return <aside className="palette" />
 

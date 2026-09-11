@@ -108,3 +108,5 @@ output "instance_id" { value = google_compute_instance.this.id }
 output "internal_ip" { value = google_compute_instance.this.network_interface[0].network_ip }
 output "external_ip" { value = var.public_ip ? google_compute_instance.this.network_interface[0].access_config[0].nat_ip : "" }
 output "service_account_email" { value = google_service_account.this.email }
+# "<name>|<ip>" consumed by Cloud DNS A records (empty ip when no external address).
+output "dns_record" { value = "${var.name}|${var.public_ip ? google_compute_instance.this.network_interface[0].access_config[0].nat_ip : ""}" }

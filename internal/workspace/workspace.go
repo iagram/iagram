@@ -105,6 +105,7 @@ func (w *Workspace) ensureGitignore() error {
 
 // PlanResult is what `iagram plan` and the UI consume.
 type PlanResult struct {
+	Destroy     bool         `json:"destroy"` // true for `plan -destroy`
 	Changes     bool         `json:"changes"`
 	Summary     tofu.Summary `json:"summary"`
 	ConfigPath  string       `json:"config_path"`
@@ -116,6 +117,16 @@ type PlanResult struct {
 // Plan generates, installs tofu if needed, runs init and plan, and maps the
 // result back onto nodes. All tofu output goes to log.
 func (w *Workspace) Plan(ctx context.Context, c *catalog.Catalog, d *document.Document, log io.Writer) (*PlanResult, error) {
+	return w.plan(ctx, c, d, log, false)
+}
+
+// PlanDestroy is Plan with `-destroy`: the resulting plan file tears down
+// everything the diagram manages, and Apply runs it like any other plan.
+func (w *Workspace) PlanDestroy(ctx context.Context, c *catalog.Catalog, d *document.Document, log io.Writer) (*PlanResult, error) {
+	return w.plan(ctx, c, d, log, true)
+}
+
+func (w *Workspace) plan(ctx context.Context, c *catalog.Catalog, d *document.Document, log io.Writer, destroy bool) (*PlanResult, error) {
 	start := time.Now()
 	fmt.Fprintln(log, "Generating Terraform...")
 	res, err := w.Generate(c, d)
@@ -138,8 +149,14 @@ func (w *Workspace) Plan(ctx context.Context, c *catalog.Catalog, d *document.Do
 	if err := r.Init(ctx, log); err != nil {
 		return nil, err
 	}
-	fmt.Fprintln(log, "\n$ tofu plan")
-	changes, err := r.Plan(ctx, log)
+	var changes bool
+	if destroy {
+		fmt.Fprintln(log, "\n$ tofu plan -destroy")
+		changes, err = r.PlanDestroy(ctx, log)
+	} else {
+		fmt.Fprintln(log, "\n$ tofu plan")
+		changes, err = r.Plan(ctx, log)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -150,6 +167,7 @@ func (w *Workspace) Plan(ctx context.Context, c *catalog.Catalog, d *document.Do
 	sum := tofu.Summarize(plan, res.ModuleToNode)
 	fmt.Fprintf(log, "\nPlan: %d to add, %d to change, %d to destroy.\n", sum.Add, sum.Change, sum.Destroy)
 	return &PlanResult{
+		Destroy:     destroy,
 		Changes:     changes,
 		Summary:     sum,
 		ConfigPath:  filepath.Join(w.Dir, ConfigFile),
@@ -218,7 +236,8 @@ func (w *Workspace) Apply(ctx context.Context, c *catalog.Catalog, d *document.D
 }
 
 // WriteOutputs sets node outputs from a node id -> outputs map and clears
-// outputs of nodes no longer present in it. Returns the number of nodes set.
+// the outputs of every other node (after a destroy, nothing is deployed).
+// Returns the number of nodes set.
 func WriteOutputs(d *document.Document, outputs map[string]map[string]any) int {
 	n := 0
 	for i := range d.Nodes {
@@ -226,6 +245,8 @@ func WriteOutputs(d *document.Document, outputs map[string]map[string]any) int {
 		if vals, ok := outputs[node.ID]; ok {
 			node.Outputs = vals
 			n++
+		} else {
+			node.Outputs = nil
 		}
 	}
 	return n

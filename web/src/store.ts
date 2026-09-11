@@ -37,6 +37,12 @@ interface State {
   logOpen: boolean
   confirmApply: boolean
   lastApply: ApplyResult | null
+  theme: 'light' | 'dark'
+  showLabels: boolean
+  selectedEdgeId: string | null
+  hoveredEdgeId: string | null
+  /** A node id the canvas should select through React Flow (deep links). */
+  pendingSelect: string | null
 
   load: () => Promise<void>
   save: () => Promise<void>
@@ -48,6 +54,7 @@ interface State {
   updateNode: (id: string, patch: { name?: string; props?: Record<string, unknown> }) => void
   removeNodes: (ids: string[]) => void
   select: (id: string | null) => void
+  requestSelect: (id: string | null) => void
   setDragging: (type: string | null) => void
   showToast: (msg: string) => void
   /** Record the current graph before a structural change (coalesced by key). */
@@ -55,6 +62,7 @@ interface State {
   undo: () => void
   redo: () => void
   runPlan: () => Promise<void>
+  runDestroyPlan: () => Promise<void>
   runApply: () => Promise<void>
   runDrift: () => Promise<void>
   cancelPlan: () => Promise<void>
@@ -68,7 +76,29 @@ interface State {
   paste: () => void
   duplicateSelection: () => void
   selectedIds: () => string[]
+  setTheme: (t: 'light' | 'dark') => void
+  setShowLabels: (v: boolean) => void
+  selectEdge: (id: string | null) => void
+  hoverEdge: (id: string | null) => void
+  removeEdge: (id: string) => void
 }
+
+function stored<T>(key: string, fallback: T): T {
+  try {
+    const v = localStorage.getItem(key)
+    return v === null ? fallback : (JSON.parse(v) as T)
+  } catch {
+    return fallback
+  }
+}
+function persist(key: string, v: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(v))
+  } catch {
+    /* private mode */
+  }
+}
+const systemDark = typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
 
 interface Clipboard {
   nodes: RFNode[]
@@ -111,6 +141,11 @@ export const useStore = create<State>((set, get) => ({
   logOpen: false,
   confirmApply: false,
   lastApply: null,
+  theme: stored<'light' | 'dark'>('iagram.theme', systemDark ? 'dark' : 'light'),
+  showLabels: stored('iagram.labels', true),
+  selectedEdgeId: null,
+  hoveredEdgeId: null,
+  pendingSelect: null,
 
   async load() {
     try {
@@ -253,7 +288,13 @@ export const useStore = create<State>((set, get) => ({
   },
 
   select(id) {
-    set({ selectedId: id })
+    // selectedId mirrors React Flow's selection; the flags on nodes are owned
+    // by React Flow's change pipeline (see requestSelect for programmatic use).
+    if (id !== get().selectedId) set({ selectedId: id })
+  },
+
+  requestSelect(id) {
+    set({ pendingSelect: id })
   },
 
   setDragging(type) {
@@ -297,6 +338,20 @@ export const useStore = create<State>((set, get) => ({
     await streamJob(set, get, api.startPlan, (done) => {
       if (done.status === 'succeeded' && done.result) set({ plan: done.result as PlanResult, planStale: false })
       else if (done.status === 'failed') get().showToast('Plan failed; see log')
+    })
+  },
+
+  async runDestroyPlan() {
+    const { dirty, save } = get()
+    if (dirty) await save()
+    if (get().dirty) return
+    await streamJob(set, get, api.startDestroyPlan, (done) => {
+      if (done.status === 'succeeded' && done.result) {
+        const p = done.result as PlanResult
+        set({ plan: { ...p, destroy: true }, planStale: false })
+        if (p.changes) set({ confirmApply: true })
+        else get().showToast('Nothing to destroy')
+      } else if (done.status === 'failed') get().showToast('Destroy plan failed; see log')
     })
   },
 
@@ -345,6 +400,30 @@ export const useStore = create<State>((set, get) => ({
 
   setConfirmApply(open) {
     set({ confirmApply: open })
+  },
+
+  setTheme(t) {
+    persist('iagram.theme', t)
+    set({ theme: t })
+  },
+
+  setShowLabels(v) {
+    persist('iagram.labels', v)
+    set({ showLabels: v })
+  },
+
+  selectEdge(id) {
+    set({ selectedEdgeId: id, ...(id ? { selectedId: null } : {}) })
+  },
+
+  hoverEdge(id) {
+    set({ hoveredEdgeId: id })
+  },
+
+  removeEdge(id) {
+    get().commit()
+    set({ edges: get().edges.filter((e) => e.id !== id), selectedEdgeId: null, dirty: true })
+    get().validateSoon()
   },
 
   reparent(id, parentId, position) {

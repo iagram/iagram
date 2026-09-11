@@ -139,5 +139,7 @@ resource "aws_lb_listener" "this" {
 }
 
 output "dns_name" { value = aws_lb.this.dns_name }
+# "<name>|<dns>|<hosted zone>" consumed by Route 53 alias records.
+output "alias_target" { value = "${var.name}|${aws_lb.this.dns_name}|${aws_lb.this.zone_id}" }
 output "alb_arn" { value = aws_lb.this.arn }
 output "security_group_id" { value = aws_security_group.lb.id }

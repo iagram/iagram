@@ -14,6 +14,9 @@ export interface JSONSchema {
   pattern?: string
   required?: string[]
   properties?: Record<string, JSONSchema>
+  /** iagram annotations: panel section and collapsed-by-default flag */
+  group?: string
+  advanced?: boolean
 }
 
 export interface Entry {
@@ -37,6 +40,7 @@ export interface Rule {
   to: string
   kind: string
   label?: string
+  terraform?: { set: 'from' | 'to'; input: string; value: string }
 }
 
 export interface Catalog {
@@ -113,6 +117,7 @@ export interface PlanSummary {
 }
 
 export interface PlanResult {
+  destroy?: boolean
   changes: boolean
   summary: PlanSummary
   config_path: string
