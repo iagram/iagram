@@ -1,0 +1,30 @@
+id: gcp.bigquery_dataset
+label: BigQuery Dataset
+category: database
+icon: gcp/bigquery.svg
+kind: leaf
+allowed_parents: [gcp.project]
+size: {w: 120, h: 90}
+connections:
+  in:
+    - {from: gcp.compute_instance,  kind: reads_writes, label: reads/writes, terraform: {set: from, input: bigquery_datasets, value: to.dataset_id}}
+    - {from: gcp.cloud_run_service, kind: reads_writes, label: reads/writes, terraform: {set: from, input: bigquery_datasets, value: to.dataset_id}}
+props:
+  type: object
+  required: [location]
+  properties:
+    location:
+      type: string
+      title: Location
+      default: EU
+      enum: [EU, US, europe-west1, europe-west4, us-central1, us-east1, asia-east1]
+    table_expiration_days:
+      type: integer
+      title: Default table expiration (days, 0 = never)
+      default: 0
+      minimum: 0
+      maximum: 3650
+terraform:
+  module: gcp/bigquery_dataset
+  import: {resource: google_bigquery_dataset, name: dataset_id, props: {location: location}}
+outputs: [dataset_id]

@@ -33,7 +33,6 @@ export function makeNode(rules: Rules, n: DocNode): RFNode {
     position: { x: n.layout.x, y: n.layout.y },
     data: { type: n.type, name: n.name, props: n.props ?? {}, outputs: n.outputs },
     parentId: n.parent || undefined,
-    extent: n.parent ? 'parent' : undefined,
     style: { width: w, height: h },
     // containers sit under their children in z-order
     zIndex: container ? 0 : 1,

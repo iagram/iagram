@@ -18,6 +18,9 @@ export function App() {
   const dirty = useStore((s) => s.dirty)
   const undo = useStore((s) => s.undo)
   const redo = useStore((s) => s.redo)
+  const copySelection = useStore((s) => s.copySelection)
+  const paste = useStore((s) => s.paste)
+  const duplicateSelection = useStore((s) => s.duplicateSelection)
 
   useEffect(() => {
     void load()
@@ -39,6 +42,14 @@ export function App() {
       } else if (k === 'y' && !inField) {
         e.preventDefault()
         redo()
+      } else if (k === 'c' && !inField) {
+        copySelection()
+      } else if (k === 'v' && !inField) {
+        e.preventDefault()
+        paste()
+      } else if (k === 'd' && !inField) {
+        e.preventDefault()
+        duplicateSelection()
       }
     }
     const onUnload = (e: BeforeUnloadEvent) => {
@@ -50,7 +61,7 @@ export function App() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('beforeunload', onUnload)
     }
-  }, [save, dirty, undo, redo])
+  }, [save, dirty, undo, redo, copySelection, paste, duplicateSelection])
 
   if (error && !catalog) {
     return (

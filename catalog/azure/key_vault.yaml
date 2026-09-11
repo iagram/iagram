@@ -1,0 +1,31 @@
+id: azure.key_vault
+label: Key Vault
+description: RBAC-authorised vault; VMs connected with an arrow get Key Vault Secrets User.
+category: security
+icon: azure/key_vault.svg
+kind: leaf
+allowed_parents: [azure.resource_group]
+size: {w: 120, h: 90}
+connections:
+  in:
+    - {from: azure.virtual_machine, kind: reads_secrets, label: reads secrets, terraform: {set: from, input: key_vault_ids, value: to.key_vault_id}}
+props:
+  type: object
+  required: [sku]
+  properties:
+    sku:
+      type: string
+      title: SKU
+      default: standard
+      enum: [standard, premium]
+    purge_protection:
+      type: boolean
+      title: Purge protection
+      default: false
+terraform:
+  module: azure/key_vault
+  inputs_from_parent:
+    resource_group_name: parent.resource_group_name
+    location: parent.location
+  import: {resource: azurerm_key_vault, name: name, props: {sku: sku_name, purge_protection: purge_protection_enabled}}
+outputs: [key_vault_id, vault_uri]

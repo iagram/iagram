@@ -1,0 +1,27 @@
+id: azure.container_registry
+label: Container Registry
+category: storage
+icon: azure/container_registry.svg
+kind: leaf
+allowed_parents: [azure.resource_group]
+size: {w: 120, h: 90}
+props:
+  type: object
+  required: [sku]
+  properties:
+    sku:
+      type: string
+      title: SKU
+      default: Basic
+      enum: [Basic, Standard, Premium]
+    admin_enabled:
+      type: boolean
+      title: Admin user
+      default: false
+terraform:
+  module: azure/container_registry
+  inputs_from_parent:
+    resource_group_name: parent.resource_group_name
+    location: parent.location
+  import: {resource: azurerm_container_registry, name: name, props: {sku: sku, admin_enabled: admin_enabled}}
+outputs: [registry_id, login_server]

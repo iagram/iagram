@@ -33,6 +33,14 @@ variable "bucket_names" {
   type    = list(string)
   default = []
 }
+variable "pubsub_topics" {
+  type    = list(string)
+  default = []
+}
+variable "bigquery_datasets" {
+  type    = list(string)
+  default = []
+}
 
 locals {
   labels = { for k, v in var.tags : replace(lower(k), "/[^a-z0-9_-]/", "_") => replace(lower(v), "/[^a-z0-9_-]/", "_") }
@@ -41,6 +49,20 @@ locals {
 resource "google_service_account" "this" {
   account_id   = substr(replace(lower(var.name), "/[^a-z0-9-]/", "-"), 0, 28)
   display_name = var.name
+}
+
+resource "google_pubsub_topic_iam_member" "publisher" {
+  count  = length(var.pubsub_topics)
+  topic  = var.pubsub_topics[count.index]
+  role   = "roles/pubsub.publisher"
+  member = "serviceAccount:${google_service_account.this.email}"
+}
+
+resource "google_bigquery_dataset_iam_member" "editor" {
+  count      = length(var.bigquery_datasets)
+  dataset_id = var.bigquery_datasets[count.index]
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.this.email}"
 }
 
 resource "google_storage_bucket_iam_member" "objects" {

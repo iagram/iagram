@@ -15,6 +15,20 @@ export function PropertyPanel() {
   const planStale = useStore((s) => s.planStale)
   const nodeDrift = useStore((s) => (s.selectedId ? s.drift?.summary.nodes[s.selectedId] : undefined))
 
+  const selectedCount = useStore((s) => s.nodes.filter((n) => n.selected).length)
+  const removeNodes2 = useStore((s) => s.removeNodes)
+  const selIds = useStore((s) => s.nodes.filter((n) => n.selected).map((n) => n.id))
+  if (selectedCount > 1 && rules) {
+    return (
+      <aside className="panel">
+        <h2>{selectedCount} elements selected</h2>
+        <p className="muted">⌘C copy · ⌘V paste · ⌘D duplicate · ⌫ delete. Drag to move them together; drop into another container to re-parent.</p>
+        <button className="danger" onClick={() => removeNodes2(selIds)}>
+          Delete {selectedCount} elements
+        </button>
+      </aside>
+    )
+  }
   if (!node || !rules || !selectedId) {
     return (
       <aside className="panel">
@@ -23,6 +37,7 @@ export function PropertyPanel() {
           {nodeCount} elements, {edgeCount} connections.
         </p>
         <p className="muted">Select an element to edit its properties. Drag from the palette to add one; connect elements by dragging from the right handle to the left handle of another.</p>
+        <p className="muted">Shift+drag selects several; ⌘-click adds to the selection. Drag an element into another container to move it there.</p>
       </aside>
     )
   }

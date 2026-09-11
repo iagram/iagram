@@ -30,6 +30,14 @@ variable "s3_bucket_arns" {
   type    = list(string)
   default = []
 }
+variable "sqs_queue_arns" {
+  type    = list(string)
+  default = []
+}
+variable "dynamodb_table_arns" {
+  type    = list(string)
+  default = []
+}
 
 data "aws_ssm_parameter" "al2023" {
   count = var.ami == "al2023-latest" ? 1 : 0
@@ -76,19 +84,42 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-data "aws_iam_policy_document" "s3" {
-  count = length(var.s3_bucket_arns) > 0 ? 1 : 0
-  statement {
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
-    resources = concat(var.s3_bucket_arns, [for a in var.s3_bucket_arns : "${a}/*"])
+locals {
+  has_data_access = length(var.s3_bucket_arns) + length(var.sqs_queue_arns) + length(var.dynamodb_table_arns) > 0
+}
+
+# One policy derived from the arrows: buckets, queues and tables this
+# workload was connected to, nothing else.
+data "aws_iam_policy_document" "data_access" {
+  count = local.has_data_access ? 1 : 0
+  dynamic "statement" {
+    for_each = length(var.s3_bucket_arns) > 0 ? [1] : []
+    content {
+      actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
+      resources = concat(var.s3_bucket_arns, [for a in var.s3_bucket_arns : "${a}/*"])
+    }
+  }
+  dynamic "statement" {
+    for_each = length(var.sqs_queue_arns) > 0 ? [1] : []
+    content {
+      actions   = ["sqs:SendMessage", "sqs:GetQueueUrl", "sqs:GetQueueAttributes"]
+      resources = var.sqs_queue_arns
+    }
+  }
+  dynamic "statement" {
+    for_each = length(var.dynamodb_table_arns) > 0 ? [1] : []
+    content {
+      actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem"]
+      resources = concat(var.dynamodb_table_arns, [for a in var.dynamodb_table_arns : "${a}/index/*"])
+    }
   }
 }
 
-resource "aws_iam_role_policy" "s3" {
-  count  = length(var.s3_bucket_arns) > 0 ? 1 : 0
-  name   = "s3-access"
+resource "aws_iam_role_policy" "data_access" {
+  count  = local.has_data_access ? 1 : 0
+  name   = "data-access"
   role   = aws_iam_role.this.id
-  policy = data.aws_iam_policy_document.s3[0].json
+  policy = data.aws_iam_policy_document.data_access[0].json
 }
 
 resource "aws_iam_instance_profile" "this" {

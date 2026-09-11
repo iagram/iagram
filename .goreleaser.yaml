@@ -1,0 +1,77 @@
+# Release pipeline: `git tag vX.Y.Z && git push --tags` triggers
+# .github/workflows/release.yml, which runs this. The frontend is built first
+# so `go build` embeds it.
+version: 2
+project_name: iagram
+
+before:
+  hooks:
+    - sh -c "cd web && npm ci --silent && npm run build"
+    - go mod tidy
+
+builds:
+  - id: iagram
+    main: ./cmd/iagram
+    binary: iagram
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X github.com/iagram/iagram/internal/cli.Version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md, SECURITY.md]
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^ci:", "^test:"]
+
+release:
+  github:
+    owner: iagram
+    name: iagram
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Install
+    ```
+    brew install --cask iagram/tap/iagram   # macOS / Linux
+    curl -fsSL https://raw.githubusercontent.com/iagram/iagram/main/install.sh | sh
+    ```
+    Binaries are verified against `{{ .ProjectName }}_{{ .Version }}_SHA256SUMS`.
+
+# Homebrew cask pushed to github.com/iagram/homebrew-tap. Skipped when the
+# HOMEBREW_TAP_GITHUB_TOKEN secret is not configured, so releases never fail
+# because the tap is not set up yet.
+homebrew_casks:
+  - name: iagram
+    repository:
+      owner: iagram
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/iagram/iagram
+    description: "Infrastructure as diagram: draw your cloud architecture, OpenTofu builds it. Local-only."
+    license: Apache-2.0
+    binaries: [iagram]
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/iagram"]
+          end

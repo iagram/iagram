@@ -30,6 +30,10 @@ variable "storage_account_ids" {
   type    = list(string)
   default = []
 }
+variable "key_vault_ids" {
+  type    = list(string)
+  default = []
+}
 
 resource "tls_private_key" "ssh" {
   algorithm = "RSA"
@@ -103,6 +107,13 @@ resource "azurerm_role_assignment" "storage" {
   count                = length(var.storage_account_ids)
   scope                = var.storage_account_ids[count.index]
   role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_linux_virtual_machine.this.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "secrets" {
+  count                = length(var.key_vault_ids)
+  scope                = var.key_vault_ids[count.index]
+  role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_linux_virtual_machine.this.identity[0].principal_id
 }
 

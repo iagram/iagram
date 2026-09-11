@@ -3,17 +3,21 @@
 **Infrastructure as diagram.** Draw your cloud architecture on a canvas that only lets you draw things that can exist, then let Terraform build it. The diagram is the source of truth; OpenTofu is the engine.
 
 ```
+$ brew install --cask iagram/tap/iagram   # or: curl -fsSL https://raw.githubusercontent.com/iagram/iagram/main/install.sh | sh
 $ iagram init
 $ iagram up            # opens http://localhost:7777, draw, hit Plan
 $ iagram plan          # same thing headless
 $ iagram apply
 ```
 
+Releases are built by GoReleaser for macOS, Linux (amd64/arm64) and Windows, with a `SHA256SUMS` file; `install.sh` verifies it.
+
 iagram is a single local binary, like `terraform`:
 
 - **Local only.** No server, account or hosted component. The UI, the validator, the generator and the OpenTofu runner are one process on your machine. OpenTofu is downloaded once, version-pinned and checksum-verified, into `~/.iagram/bin`.
 - **Your credentials never leave your machine.** iagram does not store, prompt for or transmit cloud credentials. `tofu` inherits your shell's credential chain (`AWS_PROFILE`, SSO, `gcloud auth application-default`, `az login`) exactly as `terraform` would. See [SECURITY.md](SECURITY.md) for the complete list of network calls the binary makes.
 - **Git-friendly.** The diagram is `iagram.json`, written deterministically so diffs are readable; commit it next to your code. Generated Terraform lands in `.iagram/tf/main.tf.json` with the modules alongside; you can eject to plain Terraform at any time.
+- **Editor you can live in.** Drag an element into another container to move it there (refused with a message if the catalog forbids it), shift-drag to multi-select, ⌘C/⌘V/⌘D to copy, paste and duplicate subtrees, undo/redo throughout.
 - **Nothing invalid is drawable.** A catalog defines every element, where it may be placed, what it may connect to and which properties it takes. An EC2 instance can only be dropped into a subnet; an ALB can only be wired to targets it can route to; sibling subnets cannot overlap. The plan is painted back onto the diagram: green create, amber update, red destroy.
 - **Cloud-agnostic core.** No code in iagram names a cloud. AWS, Google Cloud and Azure ship as catalog directories plus Terraform modules; adding a fourth is [a directory of YAML and modules](docs/spec/catalog.md#adding-a-provider). External catalogs load with `--catalog DIR`.
 - **Bring existing infrastructure.** `iagram import --state terraform.tfstate` rebuilds nodes and containment from any Terraform state using the catalog's import mappings; you draw the arrows and plan to see the gap.
@@ -26,15 +30,15 @@ iagram is a single local binary, like `terraform`:
 | 2 | Terraform generation (`.tf.json` module calls), OpenTofu install + `plan`, plan overlay on the canvas, `iagram plan` CLI | done |
 | 3 | Apply from the UI with confirmation, outputs written back onto nodes, drift check (refresh-only plan) painted on the canvas | done |
 | 4 | Google Cloud and Azure catalogs with official icons, provider switcher, `iagram import` from an existing Terraform state | done |
-| 5 | Re-parenting by drag, multi-select, copy/paste; GoReleaser + Homebrew tap; more elements per provider | next |
+| 5 | Re-parenting by drag, multi-select, copy/paste/duplicate; GoReleaser releases, Homebrew tap, verified install script; Kubernetes, messaging and data elements for all three providers | done |
 
 Shipped catalogs:
 
 | Provider | Elements |
 |---|---|
-| AWS | account, region, VPC, subnet, security group, EC2, RDS, S3, ALB, Lambda |
-| Google Cloud | project, VPC network (with private services access), subnetwork, firewall rule, Compute Engine, Cloud SQL, Cloud Storage, Cloud Run |
-| Azure | subscription, resource group, virtual network, subnet, network security group, Linux VM, storage account, PostgreSQL Flexible Server |
+| AWS | account, region, VPC, subnet, security group, EC2, RDS, S3, ALB, Lambda, SQS, DynamoDB, EKS |
+| Google Cloud | project, VPC network (with private services access), subnetwork, firewall rule, Compute Engine, Cloud SQL, Cloud Storage, Cloud Run, Pub/Sub, BigQuery, GKE |
+| Azure | subscription, resource group, virtual network, subnet, network security group, Linux VM, storage account, PostgreSQL Flexible Server, Key Vault, Container Registry, AKS |
 
 Every module defaults to the secure option (encrypted storage, IMDSv2, private databases, no public buckets, least-privilege IAM/roles derived from the arrows you draw). One diagram can hold several providers; each gets its own provider block.
 

@@ -1,0 +1,40 @@
+id: gcp.gke_cluster
+label: GKE Cluster
+description: Autopilot (or standard) regional Kubernetes cluster on the enclosing subnetwork.
+category: compute
+icon: gcp/gke.svg
+kind: leaf
+allowed_parents: [gcp.subnetwork]
+size: {w: 120, h: 90}
+props:
+  type: object
+  required: [release_channel]
+  properties:
+    autopilot:
+      type: boolean
+      title: Autopilot
+      default: true
+    release_channel:
+      type: string
+      title: Release channel
+      default: REGULAR
+      enum: [RAPID, REGULAR, STABLE]
+    node_count:
+      type: integer
+      title: Nodes per zone (standard mode only)
+      default: 1
+      minimum: 1
+      maximum: 100
+    machine_type:
+      type: string
+      title: Node machine type (standard mode only)
+      default: e2-standard-2
+      enum: [e2-standard-2, e2-standard-4, n2-standard-2, n2-standard-4]
+terraform:
+  module: gcp/gke_cluster
+  inputs_from_parent:
+    subnetwork_id: parent.subnetwork_id
+    region: parent.region
+    network_id: parent.parent.network_id
+  import: {resource: google_container_cluster, parent: subnetwork, name: name, props: {autopilot: enable_autopilot}}
+outputs: [cluster_name, cluster_id, endpoint]

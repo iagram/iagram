@@ -1,0 +1,43 @@
+id: aws.eks_cluster
+label: EKS Cluster
+description: Managed Kubernetes control plane plus one managed node group across the VPC's subnets.
+category: compute
+icon: aws/eks.svg
+kind: leaf
+allowed_parents: [aws.vpc]
+size: {w: 120, h: 90}
+connections:
+  in:
+    - {from: aws.security_group, kind: protects, label: protects, terraform: {set: to, input: security_group_ids, value: from.security_group_id}}
+props:
+  type: object
+  required: [kubernetes_version, node_instance_type]
+  properties:
+    kubernetes_version:
+      type: string
+      title: Kubernetes version
+      default: "1.33"
+      enum: ["1.31", "1.32", "1.33"]
+    node_instance_type:
+      type: string
+      title: Node instance type
+      default: t3.medium
+      enum: [t3.medium, t3.large, m6i.large, m6i.xlarge, c6i.large, c6i.xlarge]
+    desired_nodes:
+      type: integer
+      title: Desired nodes
+      default: 2
+      minimum: 1
+      maximum: 100
+    public_endpoint:
+      type: boolean
+      title: Public API endpoint
+      default: true
+terraform:
+  module: aws/eks_cluster
+  inputs_from_parent:
+    vpc_id: parent.vpc_id
+  collect:
+    subnet_ids: {type: aws.subnet, under: parent, output: subnet_id, min: 2, distinct: az}
+  import: {resource: aws_eks_cluster, parent: vpc_config.0.vpc_id, name: name, props: {kubernetes_version: version}}
+outputs: [cluster_name, cluster_arn, cluster_endpoint]

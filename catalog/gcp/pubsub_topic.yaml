@@ -1,0 +1,24 @@
+id: gcp.pubsub_topic
+label: Pub/Sub Topic
+category: integration
+icon: gcp/pubsub.svg
+kind: leaf
+allowed_parents: [gcp.project]
+size: {w: 120, h: 90}
+connections:
+  in:
+    - {from: gcp.compute_instance,  kind: publishes_to, label: publishes to, terraform: {set: from, input: pubsub_topics, value: to.topic_id}}
+    - {from: gcp.cloud_run_service, kind: publishes_to, label: publishes to, terraform: {set: from, input: pubsub_topics, value: to.topic_id}}
+props:
+  type: object
+  properties:
+    retention_days:
+      type: integer
+      title: Message retention (days)
+      default: 7
+      minimum: 1
+      maximum: 31
+terraform:
+  module: gcp/pubsub_topic
+  import: {resource: google_pubsub_topic, name: name}
+outputs: [topic_id, topic_name]

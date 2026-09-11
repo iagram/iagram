@@ -54,6 +54,31 @@
       }
     },
     {
+      "id": "jobs",
+      "type": "aws.sqs_queue",
+      "name": "jobs",
+      "parent": "reg",
+      "props": {},
+      "layout": {
+        "x": 880,
+        "y": 420
+      }
+    },
+    {
+      "id": "k8s",
+      "type": "aws.eks_cluster",
+      "name": "k8s",
+      "parent": "vpc",
+      "props": {
+        "kubernetes_version": "1.33",
+        "node_instance_type": "t3.medium"
+      },
+      "layout": {
+        "x": 560,
+        "y": 330
+      }
+    },
+    {
       "id": "lb",
       "type": "aws.alb",
       "name": "edge-lb",
@@ -79,6 +104,19 @@
         "y": 50,
         "w": 1040,
         "h": 640
+      }
+    },
+    {
+      "id": "sessions",
+      "type": "aws.dynamodb_table",
+      "name": "sessions",
+      "parent": "reg",
+      "props": {
+        "hash_key": "id"
+      },
+      "layout": {
+        "x": 880,
+        "y": 560
       }
     },
     {
@@ -186,6 +224,30 @@
       "kind": "reads_writes",
       "source": "bad",
       "target": "bucket"
+    },
+    {
+      "id": "e6",
+      "kind": "triggers",
+      "source": "jobs",
+      "target": "bad"
+    },
+    {
+      "id": "e7",
+      "kind": "reads_writes",
+      "source": "web",
+      "target": "sessions"
+    },
+    {
+      "id": "e8",
+      "kind": "sends_to",
+      "source": "web",
+      "target": "jobs"
+    },
+    {
+      "id": "e9",
+      "kind": "protects",
+      "source": "sg",
+      "target": "k8s"
     }
   ]
 }

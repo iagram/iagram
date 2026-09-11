@@ -2,18 +2,190 @@
   "version": 1,
   "name": "azure-web",
   "nodes": [
-    {"id": "db", "type": "azure.postgres_flexible_server", "name": "orders-db", "parent": "rg", "props": {"pg_version": "16", "sku_name": "B_Standard_B1ms"}, "layout": {"x": 880, "y": 300}},
-    {"id": "nsg", "type": "azure.network_security_group", "name": "web-nsg", "parent": "vnet", "props": {"inbound_ports": "22,443"}, "layout": {"x": 60, "y": 300}},
-    {"id": "rg", "type": "azure.resource_group", "name": "rg-demo", "parent": "sub", "props": {"location": "westeurope"}, "layout": {"x": 40, "y": 60, "w": 1040, "h": 640}},
-    {"id": "sa", "type": "azure.storage_account", "name": "assets", "parent": "rg", "props": {"tier": "Standard", "replication": "LRS"}, "layout": {"x": 880, "y": 120}},
-    {"id": "snet", "type": "azure.subnet", "name": "web", "parent": "vnet", "props": {"cidr": "10.20.1.0/24"}, "layout": {"x": 60, "y": 60, "w": 360, "h": 200}},
-    {"id": "sub", "type": "azure.subscription", "name": "demo", "props": {"subscription_id": "00000000-0000-0000-0000-000000000000"}, "layout": {"x": 0, "y": 0, "w": 1120, "h": 720}},
-    {"id": "vm", "type": "azure.virtual_machine", "name": "web-1", "parent": "snet", "props": {"size": "Standard_B1s", "public_ip": true}, "layout": {"x": 40, "y": 60}},
-    {"id": "vnet", "type": "azure.vnet", "name": "core", "parent": "rg", "props": {"cidr": "10.20.0.0/16"}, "layout": {"x": 40, "y": 60, "w": 780, "h": 480}}
+    {
+      "id": "acr",
+      "type": "azure.container_registry",
+      "name": "images",
+      "parent": "rg",
+      "props": {
+        "sku": "Basic"
+      },
+      "layout": {
+        "x": 880,
+        "y": 560
+      }
+    },
+    {
+      "id": "db",
+      "type": "azure.postgres_flexible_server",
+      "name": "orders-db",
+      "parent": "rg",
+      "props": {
+        "pg_version": "16",
+        "sku_name": "B_Standard_B1ms"
+      },
+      "layout": {
+        "x": 880,
+        "y": 300
+      }
+    },
+    {
+      "id": "k8s",
+      "type": "azure.aks_cluster",
+      "name": "k8s",
+      "parent": "snet",
+      "props": {
+        "node_size": "Standard_D2s_v5"
+      },
+      "layout": {
+        "x": 200,
+        "y": 60
+      }
+    },
+    {
+      "id": "kv",
+      "type": "azure.key_vault",
+      "name": "secrets",
+      "parent": "rg",
+      "props": {
+        "sku": "standard"
+      },
+      "layout": {
+        "x": 880,
+        "y": 440
+      }
+    },
+    {
+      "id": "nsg",
+      "type": "azure.network_security_group",
+      "name": "web-nsg",
+      "parent": "vnet",
+      "props": {
+        "inbound_ports": "22,443"
+      },
+      "layout": {
+        "x": 60,
+        "y": 300
+      }
+    },
+    {
+      "id": "rg",
+      "type": "azure.resource_group",
+      "name": "rg-demo",
+      "parent": "sub",
+      "props": {
+        "location": "westeurope"
+      },
+      "layout": {
+        "x": 40,
+        "y": 60,
+        "w": 1040,
+        "h": 640
+      }
+    },
+    {
+      "id": "sa",
+      "type": "azure.storage_account",
+      "name": "assets",
+      "parent": "rg",
+      "props": {
+        "tier": "Standard",
+        "replication": "LRS"
+      },
+      "layout": {
+        "x": 880,
+        "y": 120
+      }
+    },
+    {
+      "id": "snet",
+      "type": "azure.subnet",
+      "name": "web",
+      "parent": "vnet",
+      "props": {
+        "cidr": "10.20.1.0/24"
+      },
+      "layout": {
+        "x": 60,
+        "y": 60,
+        "w": 360,
+        "h": 200
+      }
+    },
+    {
+      "id": "sub",
+      "type": "azure.subscription",
+      "name": "demo",
+      "props": {
+        "subscription_id": "00000000-0000-0000-0000-000000000000"
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "w": 1120,
+        "h": 720
+      }
+    },
+    {
+      "id": "vm",
+      "type": "azure.virtual_machine",
+      "name": "web-1",
+      "parent": "snet",
+      "props": {
+        "size": "Standard_B1s",
+        "public_ip": true
+      },
+      "layout": {
+        "x": 40,
+        "y": 60
+      }
+    },
+    {
+      "id": "vnet",
+      "type": "azure.vnet",
+      "name": "core",
+      "parent": "rg",
+      "props": {
+        "cidr": "10.20.0.0/16"
+      },
+      "layout": {
+        "x": 40,
+        "y": 60,
+        "w": 780,
+        "h": 480
+      }
+    }
   ],
   "edges": [
-    {"id": "e1", "kind": "protects", "source": "nsg", "target": "vm"},
-    {"id": "e2", "kind": "connects_to", "source": "vm", "target": "db"},
-    {"id": "e3", "kind": "reads_writes", "source": "vm", "target": "sa"}
+    {
+      "id": "e1",
+      "kind": "protects",
+      "source": "nsg",
+      "target": "vm"
+    },
+    {
+      "id": "e2",
+      "kind": "connects_to",
+      "source": "vm",
+      "target": "db"
+    },
+    {
+      "id": "e3",
+      "kind": "reads_writes",
+      "source": "vm",
+      "target": "sa"
+    },
+    {
+      "id": "e4",
+      "kind": "reads_secrets",
+      "source": "vm",
+      "target": "kv"
+    },
+    {
+      "id": "e5",
+      "kind": "pulls_from",
+      "source": "k8s",
+      "target": "acr"
+    }
   ]
 }

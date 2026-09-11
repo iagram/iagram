@@ -62,7 +62,20 @@ interface State {
   clearDrift: () => Promise<void>
   setLogOpen: (open: boolean) => void
   setConfirmApply: (open: boolean) => void
+  /** Move a node (and its subtree) under a new parent at a position relative to it. */
+  reparent: (id: string, parentId: string | null, position: XYPosition) => void
+  copySelection: () => void
+  paste: () => void
+  duplicateSelection: () => void
+  selectedIds: () => string[]
 }
+
+interface Clipboard {
+  nodes: RFNode[]
+  edges: RFEdge[]
+}
+let clipboard: Clipboard | null = null
+let pasteCount = 0
 
 interface Snapshot {
   nodes: RFNode[]
@@ -334,6 +347,73 @@ export const useStore = create<State>((set, get) => ({
     set({ confirmApply: open })
   },
 
+  reparent(id, parentId, position) {
+    // The drag already committed a snapshot at drag start; do not commit again.
+    set({
+      nodes: get().nodes.map((n) => (n.id === id ? { ...n, parentId: parentId ?? undefined, position } : n)),
+      dirty: true,
+    })
+    get().validateSoon()
+  },
+
+  selectedIds() {
+    return get().nodes.filter((n) => n.selected).map((n) => n.id)
+  },
+
+  copySelection() {
+    const { nodes, edges } = get()
+    const ids = new Set(get().selectedIds())
+    if (ids.size === 0) return
+    // Include everything inside selected containers.
+    let grew = true
+    while (grew) {
+      grew = false
+      for (const n of nodes) if (n.parentId && ids.has(n.parentId) && !ids.has(n.id)) (ids.add(n.id), (grew = true))
+    }
+    clipboard = {
+      nodes: nodes.filter((n) => ids.has(n.id)).map((n) => ({ ...n, selected: false, data: { ...n.data, props: { ...n.data.props }, outputs: undefined } })),
+      edges: edges.filter((e) => ids.has(e.source) && ids.has(e.target)).map((e) => ({ ...e, selected: false })),
+    }
+    pasteCount = 0
+    get().showToast(`Copied ${clipboard.nodes.length} element${clipboard.nodes.length === 1 ? '' : 's'}`)
+  },
+
+  paste() {
+    const { rules } = get()
+    if (!clipboard || !rules) return
+    pasteCount++
+    const offset = 40 * pasteCount
+    const idMap = new Map<string, string>()
+    for (const n of clipboard.nodes) idMap.set(n.id, newId(rules.entry(n.data.type)!))
+    const existingNames = new Set(get().nodes.map((n) => n.data.name))
+    get().commit()
+    const nodes: RFNode[] = clipboard.nodes.map((n) => {
+      const parentInside = n.parentId && idMap.has(n.parentId)
+      let name = n.data.name
+      if (!parentInside || !n.parentId) {
+        // top-level pasted nodes get a fresh name; nested ones keep theirs (they live in a new parent)
+        name = uniqueName(n.data.name, existingNames)
+        existingNames.add(name)
+      }
+      return {
+        ...n,
+        id: idMap.get(n.id)!,
+        parentId: parentInside ? idMap.get(n.parentId!) : n.parentId,
+        position: parentInside ? n.position : { x: n.position.x + offset, y: n.position.y + offset },
+        selected: true,
+        data: { ...n.data, name, props: { ...n.data.props } },
+      }
+    })
+    const edges: RFEdge[] = clipboard.edges.map((e) => ({ ...e, id: `e-${Math.random().toString(36).slice(2, 8)}`, source: idMap.get(e.source)!, target: idMap.get(e.target)! }))
+    set({ nodes: [...get().nodes.map((n) => ({ ...n, selected: false })), ...nodes], edges: [...get().edges, ...edges], dirty: true, selectedId: nodes.length === 1 ? nodes[0].id : null })
+    get().validateSoon()
+  },
+
+  duplicateSelection() {
+    get().copySelection()
+    if (clipboard) get().paste()
+  },
+
   setLogOpen(open) {
     set({ logOpen: open })
   },
@@ -347,6 +427,13 @@ export const useStore = create<State>((set, get) => ({
     get().validateSoon()
   },
 }))
+
+function uniqueName(base: string, taken: Set<string>): string {
+  const stem = base.replace(/-copy(-\d+)?$/, '')
+  let candidate = `${stem}-copy`
+  for (let i = 2; taken.has(candidate); i++) candidate = `${stem}-copy-${i}`
+  return candidate
+}
 
 /** Start a job and stream its log into the store; onDone runs with the final job. */
 async function streamJob(set: (p: Partial<State>) => void, get: () => State, start: () => Promise<Job>, onDone: (j: Job) => void) {

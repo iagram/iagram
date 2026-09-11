@@ -1,0 +1,32 @@
+id: aws.dynamodb_table
+label: DynamoDB Table
+category: database
+icon: aws/dynamodb.svg
+kind: leaf
+allowed_parents: [aws.region]
+size: {w: 120, h: 90}
+connections:
+  in:
+    - {from: aws.ec2_instance,    kind: reads_writes, label: reads/writes, terraform: {set: from, input: dynamodb_table_arns, value: to.table_arn}}
+    - {from: aws.lambda_function, kind: reads_writes, label: reads/writes, terraform: {set: from, input: dynamodb_table_arns, value: to.table_arn}}
+props:
+  type: object
+  required: [hash_key]
+  properties:
+    hash_key:
+      type: string
+      title: Partition key
+      default: id
+    billing_mode:
+      type: string
+      title: Billing
+      default: PAY_PER_REQUEST
+      enum: [PAY_PER_REQUEST, PROVISIONED]
+    point_in_time_recovery:
+      type: boolean
+      title: Point-in-time recovery
+      default: true
+terraform:
+  module: aws/dynamodb_table
+  import: {resource: aws_dynamodb_table, name: name, props: {hash_key: hash_key, billing_mode: billing_mode}}
+outputs: [table_arn, table_name]
