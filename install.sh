@@ -20,8 +20,16 @@ case "$os" in
   *) echo "unsupported OS: $os (download a release manually from https://github.com/$REPO/releases)" >&2; exit 1 ;;
 esac
 
-tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
-[ -n "$tag" ] || { echo "could not determine latest release" >&2; exit 1; }
+# IAGRAM_VERSION=v0.1.0-beta pins a version. Otherwise the latest stable
+# release, falling back to the newest pre-release while none is stable yet.
+tag="${IAGRAM_VERSION:-}"
+if [ -z "$tag" ]; then
+  tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+fi
+if [ -z "$tag" ]; then
+  tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+fi
+[ -n "$tag" ] || { echo "could not determine a release to install" >&2; exit 1; }
 version=${tag#v}
 archive="iagram_${version}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/$tag"

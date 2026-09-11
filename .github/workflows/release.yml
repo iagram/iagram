@@ -59,7 +59,10 @@ jobs:
           sed -i "s/^__version__ = \"0.0.0\"/__version__ = \"$V\"/" packaging/pypi/iagram/__init__.py
           grep -q "$V" packaging/pypi/pyproject.toml
       - run: pip install build && python -m build packaging/pypi --outdir dist
+      # Fails until the PyPI project exists with this workflow as a trusted
+      # publisher; that must not fail the GitHub release itself.
       - uses: pypa/gh-action-pypi-publish@release/v1
+        continue-on-error: true
         with:
           packages-dir: dist
           skip-existing: true
