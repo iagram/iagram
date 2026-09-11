@@ -26,9 +26,16 @@ func TestOnlyWhitelistedPropsAreSent(t *testing.T) {
 	t.Setenv("DO_NOT_TRACK", "")
 	t.Setenv("CI", "")
 
-	c := Load(t.TempDir(), "test")
+	home := t.TempDir()
+	if Load(home, "test").Enabled() {
+		t.Fatal("telemetry must be off by default")
+	}
+	c := Load(home, "test")
+	if err := c.Set(true); err != nil {
+		t.Fatal(err)
+	}
 	if !c.Enabled() {
-		t.Fatal("expected enabled by default")
+		t.Fatal("expected enabled after opt-in")
 	}
 	c.Send("command", map[string]any{"command": "plan", "nodes": Bucket(7), "name": "SECRET", "account_id": "123456789012"})
 	c.Flush()
@@ -59,8 +66,10 @@ func TestDisableSwitches(t *testing.T) {
 		t.Setenv("IAGRAM_TELEMETRY", "")
 		t.Setenv("DO_NOT_TRACK", "")
 		t.Setenv("CI", "")
+		home := t.TempDir()
+		_ = Load(home, "test").Set(true) // opted in...
 		t.Setenv(tc.k, tc.v)
-		if c := Load(t.TempDir(), "test"); c.Enabled() {
+		if c := Load(home, "test"); c.Enabled() { // ...but the environment wins
 			t.Errorf("%s=%s should disable", tc.k, tc.v)
 		}
 	}
@@ -80,16 +89,24 @@ func TestDisableSwitches(t *testing.T) {
 	}
 }
 
-func TestNoticeShownOnce(t *testing.T) {
+func TestOptInPersistsAndCanBeRevoked(t *testing.T) {
 	t.Setenv("IAGRAM_TELEMETRY", "")
 	t.Setenv("DO_NOT_TRACK", "")
 	t.Setenv("CI", "")
 	home := t.TempDir()
-	c := Load(home, "test")
-	if c.Notice() == "" {
-		t.Error("first notice empty")
+	if err := Load(home, "test").Set(true); err != nil {
+		t.Fatal(err)
 	}
-	if c.Notice() != "" || Load(home, "test").Notice() != "" {
-		t.Error("notice shown twice")
+	if c := Load(home, "test"); !c.Enabled() || c.Setting() != "on" {
+		t.Error("opt-in not persisted")
+	}
+	if err := Load(home, "test").Set(false); err != nil {
+		t.Fatal(err)
+	}
+	if c := Load(home, "test"); c.Enabled() || c.Setting() != "off" {
+		t.Error("opt-out not persisted")
+	}
+	if Load(home, "test").Notice() != "" {
+		t.Error("no first-run notice for an opt-in feature")
 	}
 }

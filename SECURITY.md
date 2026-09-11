@@ -17,9 +17,9 @@ code that launches tofu is [`internal/tofu/run.go`](internal/tofu/run.go).
 |---|---|---|
 | Download OpenTofu once, pinned version, SHA256 verified | `github.com/opentofu/opentofu/releases` | `internal/tofu/install.go` |
 | Provider plugins and cloud API calls made by tofu itself | Terraform registry, your cloud's APIs | (tofu) |
-| Anonymous usage events, [documented here](docs/telemetry.md), off with `IAGRAM_TELEMETRY=0` | `telemetry.iagram.dev` | `internal/telemetry/telemetry.go` |
+| Anonymous usage events, **only after `iagram telemetry on`** (off by default), [documented here](docs/telemetry.md) | `telemetry.iagram.dev` | `internal/telemetry/telemetry.go` |
 
-Nothing else. Set `IAGRAM_TOFU_PATH` to skip the download and use your own binary.
+Nothing else. With the default settings the binary itself contacts only GitHub (once, for OpenTofu) and whatever tofu contacts on your behalf. Set `IAGRAM_TOFU_PATH` to skip the download and use your own binary.
 
 **Local server.** `iagram up` listens on `127.0.0.1` only, on a port you choose,
 and rejects requests carrying a non-localhost `Origin` header. It exposes the

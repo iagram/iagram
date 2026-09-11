@@ -31,7 +31,7 @@ func runTelemetry(args []string, stdout io.Writer, tel *telemetry.Client) error 
 		if state == "on" && !tel.Enabled() {
 			state = "on (disabled by environment: IAGRAM_TELEMETRY, DO_NOT_TRACK or CI)"
 		}
-		fmt.Fprintf(stdout, "telemetry: %s\nwhat is sent: https://github.com/iagram/iagram/blob/main/docs/telemetry.md\n", state)
+		fmt.Fprintf(stdout, "telemetry: %s (opt-in; default off)\nwhat is sent when on: https://github.com/iagram/iagram/blob/main/docs/telemetry.md\n", state)
 	default:
 		return fmt.Errorf("usage: iagram telemetry on|off|status")
 	}

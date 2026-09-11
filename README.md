@@ -78,7 +78,7 @@ All diagram commands accept `-f FILE` and repeatable `--catalog DIR`. `IAGRAM_TO
 
 ## Telemetry
 
-iagram sends a few anonymous usage events (command name, version, OS, bucketed counts). Never names, properties, ids, account ids, paths or errors. The exact payload is in [docs/telemetry.md](docs/telemetry.md); the code is one file with tests that assert the whitelist. Off with `iagram telemetry off`, `IAGRAM_TELEMETRY=0`, `DO_NOT_TRACK=1`, or automatically in CI.
+Off by default. iagram sends nothing unless you run `iagram telemetry on`; if you do, it sends a few anonymous usage events (command name, version, OS, bucketed counts), never names, properties, ids, account ids, paths or errors. The exact payload is in [docs/telemetry.md](docs/telemetry.md); the code is one file with tests that assert the default and the whitelist.
 
 ## Build from source
 

@@ -1,25 +1,29 @@
 # Telemetry
 
-iagram sends a few anonymous usage events so the project can tell whether it is
-being used at all. This page is the complete description; the implementation is
-one file, [`internal/telemetry/telemetry.go`](../internal/telemetry/telemetry.go),
-and its tests assert that nothing outside the list below can be sent.
+**Telemetry is off by default.** iagram sends nothing unless you run
+`iagram telemetry on`. If you do, it sends a few anonymous usage events so the
+project can tell how it is used. This page is the complete description; the
+implementation is one file, [`internal/telemetry/telemetry.go`](../internal/telemetry/telemetry.go),
+and its tests assert that it is off by default and that nothing outside the
+list below can be sent.
 
-## Turning it off
-
-Any one of these disables it:
+## Turning it on and off
 
 ```
-iagram telemetry off          # persisted in ~/.iagram/config.json
+iagram telemetry on           # opt in (persisted in ~/.iagram/config.json)
+iagram telemetry off          # opt out again
+iagram telemetry status
+```
+
+Even when opted in, any of these switches it off for that run:
+
+```
 IAGRAM_TELEMETRY=0            # environment
 DO_NOT_TRACK=1                # https://consoledonottrack.com
 CI=true                       # never in CI
 ```
 
-`iagram telemetry status` shows the current state. The first time `iagram up`
-runs it prints a notice pointing here.
-
-## What is sent
+## What is sent (only when opted in)
 
 One JSON object per event to `https://telemetry.iagram.dev/v1/events`:
 

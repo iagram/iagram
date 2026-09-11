@@ -39,9 +39,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "init":
 		err = runInit(args[1:], stdout)
 	case "up":
-		if n := tel.Notice(); n != "" {
-			fmt.Fprint(stderr, n+"\n")
-		}
 		err = runUp(args[1:], stdout, tel)
 	case "validate":
 		doc, err = runValidate(args[1:], stdout)

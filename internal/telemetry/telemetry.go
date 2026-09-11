@@ -1,8 +1,8 @@
 // Package telemetry sends a few anonymous usage events so the project can
 // tell whether anyone uses it. Everything about it is deliberately boring:
 //
-//   - It is ON by default, disclosed on first run, and off with any of
-//     `iagram telemetry off`, IAGRAM_TELEMETRY=0, DO_NOT_TRACK=1, or CI=true.
+//   - It is OFF by default (opt-in). `iagram telemetry on` enables it; even
+//     then IAGRAM_TELEMETRY=0, DO_NOT_TRACK=1 or CI=true switch it off again.
 //   - The payload is the fixed set of fields in Event and nothing else. Keys in
 //     Props are whitelisted; values are numbers, booleans or short enums.
 //     Names, properties, ids, account ids, paths, IPs and error text are
@@ -34,7 +34,7 @@ var Endpoint = "https://telemetry.iagram.dev/v1/events"
 // Config is ~/.iagram/config.json.
 type Config struct {
 	InstallID   string `json:"install_id"`
-	Telemetry   string `json:"telemetry,omitempty"` // "on" | "off" | "" (default on)
+	Telemetry   string `json:"telemetry,omitempty"` // "on" | "off" | "" (default off)
 	NoticeShown bool   `json:"telemetry_notice_shown,omitempty"`
 }
 
@@ -78,7 +78,7 @@ func Load(home, version string) *Client {
 		c.cfg.InstallID = newID()
 		_ = c.save()
 	}
-	c.enabled = c.cfg.Telemetry != "off" && !envDisabled()
+	c.enabled = c.cfg.Telemetry == "on" && !envDisabled()
 	return c
 }
 
@@ -87,10 +87,10 @@ func (c *Client) Enabled() bool { return c.enabled }
 
 // Setting returns "on" or "off" as configured (ignoring env overrides).
 func (c *Client) Setting() string {
-	if c.cfg.Telemetry == "off" {
-		return "off"
+	if c.cfg.Telemetry == "on" {
+		return "on"
 	}
-	return "on"
+	return "off"
 }
 
 // Set persists on/off.
@@ -104,20 +104,9 @@ func (c *Client) Set(on bool) error {
 	return c.save()
 }
 
-// Notice returns the first-run disclosure once, and records that it was shown.
-func (c *Client) Notice() string {
-	if c.cfg.NoticeShown {
-		return ""
-	}
-	c.cfg.NoticeShown = true
-	_ = c.save()
-	if !c.enabled {
-		return ""
-	}
-	return "iagram sends anonymous usage events (command name, version, OS, counts; never names,\n" +
-		"properties, account ids or paths). Details: https://github.com/iagram/iagram/blob/main/docs/telemetry.md\n" +
-		"Turn off with: iagram telemetry off   (or IAGRAM_TELEMETRY=0)\n"
-}
+// Notice is kept for compatibility; telemetry is opt-in, so there is nothing
+// to disclose on first run.
+func (c *Client) Notice() string { return "" }
 
 // Send queues an event. Unknown prop keys are dropped, not sent.
 func (c *Client) Send(event string, props map[string]any) {
