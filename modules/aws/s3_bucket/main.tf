@@ -51,3 +51,5 @@ resource "aws_s3_bucket_public_access_block" "this" {
 
 output "bucket_name" { value = aws_s3_bucket.this.bucket }
 output "bucket_arn" { value = aws_s3_bucket.this.arn }
+# "<name>|<regional domain>|<arn>" consumed by CloudFront origins.
+output "cdn_origin" { value = "${aws_s3_bucket.this.bucket}|${aws_s3_bucket.this.bucket_regional_domain_name}|${aws_s3_bucket.this.arn}" }

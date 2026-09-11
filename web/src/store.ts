@@ -11,6 +11,8 @@ import {
 import { api } from './api'
 import { Rules } from './rules'
 import { fromDocument, makeEdge, makeNode, newId, toDocument, type RFEdge, type RFNode } from './convert'
+import type { Document } from './types'
+import { rfStore } from './rf'
 import type { ApplyResult, Catalog, DriftResult, Job, PlanResult, Problem } from './types'
 import { ROOT } from './types'
 
@@ -39,6 +41,10 @@ interface State {
   lastApply: ApplyResult | null
   theme: 'light' | 'dark'
   showLabels: boolean
+  showMinimap: boolean
+  snapToGrid: boolean
+  version: string
+  modal: 'shortcuts' | 'about' | null
   selectedEdgeId: string | null
   hoveredEdgeId: string | null
   /** A node id the canvas should select through React Flow (deep links). */
@@ -78,6 +84,16 @@ interface State {
   selectedIds: () => string[]
   setTheme: (t: 'light' | 'dark') => void
   setShowLabels: (v: boolean) => void
+  setShowMinimap: (v: boolean) => void
+  setSnapToGrid: (v: boolean) => void
+  setModal: (m: 'shortcuts' | 'about' | null) => void
+  /** Replace the canvas with a document (opened file, import); unsaved until Save. */
+  loadDocument: (doc: Document) => void
+  newDiagram: () => void
+  selectAll: () => void
+  deselectAll: () => void
+  deleteSelection: () => void
+  currentDocument: () => Document
   selectEdge: (id: string | null) => void
   hoverEdge: (id: string | null) => void
   removeEdge: (id: string) => void
@@ -143,6 +159,10 @@ export const useStore = create<State>((set, get) => ({
   lastApply: null,
   theme: stored<'light' | 'dark'>('iagram.theme', systemDark ? 'dark' : 'light'),
   showLabels: stored('iagram.labels', true),
+  showMinimap: stored('iagram.minimap', false),
+  snapToGrid: stored('iagram.snap', true),
+  version: '',
+  modal: null,
   selectedEdgeId: null,
   hoveredEdgeId: null,
   pendingSelect: null,
@@ -154,6 +174,7 @@ export const useStore = create<State>((set, get) => ({
       const { nodes, edges } = fromDocument(rules, res.document)
       set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [] })
       api.latestPlan().then((r) => set({ ...(r.plan ? { plan: r.plan, planStale: false } : {}), drift: r.drift })).catch(() => undefined)
+      api.health().then((h) => set({ version: h.version })).catch(() => undefined)
     } catch (e) {
       set({ error: (e as Error).message })
     }
@@ -410,6 +431,60 @@ export const useStore = create<State>((set, get) => ({
   setShowLabels(v) {
     persist('iagram.labels', v)
     set({ showLabels: v })
+  },
+
+  setShowMinimap(v) {
+    persist('iagram.minimap', v)
+    set({ showMinimap: v })
+  },
+
+  setSnapToGrid(v) {
+    persist('iagram.snap', v)
+    set({ snapToGrid: v })
+  },
+
+  setModal(m) {
+    set({ modal: m })
+  },
+
+  loadDocument(doc) {
+    const { rules } = get()
+    if (!rules) return
+    get().commit()
+    const { nodes, edges } = fromDocument(rules, doc)
+    set({ nodes, edges, docName: doc.name ?? get().docName, dirty: true, selectedId: null, selectedEdgeId: null, plan: null, planStale: false })
+    get().validateSoon()
+    get().showToast(`Loaded ${nodes.length} elements; Save to write iagram.json`)
+  },
+
+  newDiagram() {
+    get().commit()
+    set({ nodes: [], edges: [], dirty: true, selectedId: null, selectedEdgeId: null, plan: null, planStale: false, problems: [] })
+  },
+
+  selectAll() {
+    rfStore()?.getState().addSelectedNodes(get().nodes.map((n) => n.id))
+  },
+
+  deselectAll() {
+    rfStore()?.getState().resetSelectedElements()
+    set({ selectedId: null, selectedEdgeId: null })
+  },
+
+  deleteSelection() {
+    const nodeIds = get().selectedIds()
+    const edgeIds = get().edges.filter((e) => e.selected).map((e) => e.id)
+    if (nodeIds.length) get().removeNodes(nodeIds)
+    else if (edgeIds.length) {
+      get().commit()
+      set({ edges: get().edges.filter((e) => !edgeIds.includes(e.id)), dirty: true, selectedEdgeId: null })
+      get().validateSoon()
+    } else if (get().selectedEdgeId) get().removeEdge(get().selectedEdgeId!)
+  },
+
+  currentDocument() {
+    const { docName, nodes, edges } = get()
+    return toDocument(docName, nodes, edges)
   },
 
   selectEdge(id) {

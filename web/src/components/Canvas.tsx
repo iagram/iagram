@@ -14,6 +14,7 @@ import { ResourceNode } from '../nodes/ResourceNode'
 import { DND_TYPE } from './Palette'
 import { LEAF_H, LEAF_W, type RFEdge, type RFNode } from '../convert'
 import { ROOT } from '../types'
+import { setRfStore } from '../rf'
 
 const nodeTypes = { container: ContainerNode, resource: ResourceNode }
 
@@ -42,6 +43,12 @@ export function Canvas() {
   const { screenToFlowPosition, getInternalNode } = useReactFlow<RFNode, RFEdge>()
   const rfStore = useStoreApi<RFNode, RFEdge>()
   const pendingSelect = useStore((s) => s.pendingSelect)
+  const showMinimap = useStore((s) => s.showMinimap)
+  const snapToGrid = useStore((s) => s.snapToGrid)
+  useEffect(() => {
+    setRfStore(rfStore as unknown as Parameters<typeof setRfStore>[0])
+    return () => setRfStore(null)
+  }, [rfStore])
 
   // Programmatic selection goes through React Flow so its selection state and
   // ours never fight (see store.select).
@@ -241,13 +248,13 @@ export function Canvas() {
         colorMode={theme}
         deleteKeyCode={['Backspace', 'Delete']}
         fitView
-        snapToGrid
+        snapToGrid={snapToGrid}
         snapGrid={[10, 10]}
         minZoom={0.1}
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} />
-        <MiniMap pannable zoomable nodeStrokeWidth={2} />
+        {showMinimap && <MiniMap pannable zoomable nodeStrokeWidth={2} position="bottom-left" />}
       </ReactFlow>
     </div>
   )

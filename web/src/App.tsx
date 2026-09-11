@@ -8,6 +8,7 @@ import { Toolbar } from './components/Toolbar'
 import { ProblemsBar } from './components/ProblemsBar'
 import { LogDrawer } from './components/LogDrawer'
 import { ConfirmApply } from './components/ConfirmApply'
+import { InfoModals } from './components/InfoModals'
 
 export function App() {
   const load = useStore((s) => s.load)
@@ -25,6 +26,9 @@ export function App() {
   const copySelection = useStore((s) => s.copySelection)
   const paste = useStore((s) => s.paste)
   const duplicateSelection = useStore((s) => s.duplicateSelection)
+  const selectAll = useStore((s) => s.selectAll)
+  const deselectAll = useStore((s) => s.deselectAll)
+  const setModal = useStore((s) => s.setModal)
 
   useEffect(() => {
     // Deep links: #select=<node id> focuses an element, ?theme=dark|light forces a theme.
@@ -40,9 +44,20 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
-      if (!mod) return
       const k = e.key.toLowerCase()
       const inField = (e.target as HTMLElement)?.closest('input, select, textarea')
+      if (!mod) {
+        if (e.key === 'Escape') {
+          deselectAll()
+          setModal(null)
+        } else if (e.key === '?' && !inField) setModal('shortcuts')
+        return
+      }
+      if (k === 'a' && !inField) {
+        e.preventDefault()
+        selectAll()
+        return
+      }
       if (k === 's') {
         e.preventDefault()
         void save()
@@ -72,7 +87,7 @@ export function App() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('beforeunload', onUnload)
     }
-  }, [save, dirty, undo, redo, copySelection, paste, duplicateSelection])
+  }, [save, dirty, undo, redo, copySelection, paste, duplicateSelection, selectAll, deselectAll, setModal])
 
   if (error && !catalog) {
     return (
@@ -95,6 +110,7 @@ export function App() {
         </div>
         <LogDrawer />
         <ConfirmApply />
+        <InfoModals />
         <ProblemsBar />
         {toast && <div className="toast">{toast}</div>}
         {error && <div className="toast error">{error}</div>}

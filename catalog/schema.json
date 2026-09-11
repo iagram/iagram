@@ -33,7 +33,7 @@
         "module": {"type": "string", "description": "Module path under modules/, e.g. aws/ec2_instance. Required for role module."},
         "import": {"type": "object", "additionalProperties": false, "properties": {"resource": {"type": "string"}, "props": {"type": "object", "additionalProperties": {"type": "string"}}, "parent": {"type": "string"}, "id": {"type": "string"}, "name": {"type": "string"}, "from": {"type": "string"}, "prop": {"type": "string"}}, "description": "How to recognise this element in an existing Terraform state (iagram import)."},
         "provider_args": {"type": "object", "description": "Roles account/region: template for the provider block; \"${prop}\" strings are replaced by node properties, empty ones dropped."},
-        "inputs_from_parent": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^parent(\\.parent)*\\.[a-z0-9_]+$"}, "description": "input -> ancestor output reference, e.g. parent.vpc_id"},
+        "inputs_from_parent": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^\\[?parent(\\.parent)*\\.[a-z0-9_]+\\]?$"}, "description": "input -> ancestor output reference, e.g. parent.vpc_id; wrap in [] to pass a one-element list (empty when the ancestor is not a module) so modules can branch on length()"},
         "collect": {"type": "object", "additionalProperties": {"type": "object", "required": ["type", "under", "output"], "additionalProperties": false, "properties": {"type": {"type": "string"}, "under": {"type": "string", "pattern": "^parent(\\.parent)*$"}, "output": {"type": "string"}, "min": {"type": "integer", "minimum": 0, "description": "Minimum number of gathered nodes for the element to be valid."}, "distinct": {"type": "string", "description": "Property that must differ across at least min gathered nodes."}}}}
       }
     },
@@ -42,7 +42,7 @@
   },
   "$defs": {
     "rule_tf":  {"type": "object", "required": ["set", "input", "value"], "additionalProperties": false, "properties": {"set": {"type": "string", "enum": ["from", "to"]}, "input": {"type": "string"}, "value": {"type": "string", "pattern": "^(from|to)\\.[a-z0-9_]+$"}}},
-    "rule_in":  {"type": "object", "required": ["from", "kind"], "additionalProperties": false, "properties": {"from": {"type": "string"}, "kind": {"type": "string"}, "label": {"type": "string"}, "terraform": {"$ref": "#/$defs/rule_tf"}}},
-    "rule_out": {"type": "object", "required": ["to", "kind"],   "additionalProperties": false, "properties": {"to": {"type": "string"},   "kind": {"type": "string"}, "label": {"type": "string"}, "terraform": {"$ref": "#/$defs/rule_tf"}}}
+    "rule_in":  {"type": "object", "required": ["from", "kind"], "additionalProperties": false, "properties": {"from": {"type": "string"}, "kind": {"type": "string"}, "label": {"type": "string"}, "terraform": {"$ref": "#/$defs/rule_tf"}, "requires_from": {"type": "object"}, "requires_to": {"type": "object"}}},
+    "rule_out": {"type": "object", "required": ["to", "kind"],   "additionalProperties": false, "properties": {"to": {"type": "string"},   "kind": {"type": "string"}, "label": {"type": "string"}, "terraform": {"$ref": "#/$defs/rule_tf"}, "requires_from": {"type": "object"}, "requires_to": {"type": "object"}}}
   }
 }

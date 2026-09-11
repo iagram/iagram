@@ -15,22 +15,22 @@ variable "enabled" {
   type    = bool
   default = true
 }
-variable "origin_bucket_names" {
-  type    = list(string)
-  default = []
+variable "origin_buckets" {
+  type        = list(string)
+  description = "\"<name>|<regional domain>|<arn>\" entries from serves_from arrows."
+  default     = []
 }
 variable "origin_alb_dns_names" {
   type    = list(string)
   default = []
 }
 
-data "aws_s3_bucket" "origin" {
-  count  = length(var.origin_bucket_names)
-  bucket = var.origin_bucket_names[count.index]
+locals {
+  buckets = [for b in var.origin_buckets : { name = split("|", b)[0], domain = split("|", b)[1], arn = split("|", b)[2] }]
 }
 
 resource "aws_cloudfront_origin_access_control" "s3" {
-  count                             = length(var.origin_bucket_names) > 0 ? 1 : 0
+  count                             = length(var.origin_buckets) > 0 ? 1 : 0
   name                              = "${var.name}-oac"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
@@ -38,7 +38,7 @@ resource "aws_cloudfront_origin_access_control" "s3" {
 }
 
 locals {
-  default_origin = length(var.origin_bucket_names) > 0 ? "s3-0" : length(var.origin_alb_dns_names) > 0 ? "alb-0" : "none"
+  default_origin = length(var.origin_buckets) > 0 ? "s3-0" : length(var.origin_alb_dns_names) > 0 ? "alb-0" : "none"
 }
 
 resource "aws_cloudfront_distribution" "this" {
@@ -49,10 +49,10 @@ resource "aws_cloudfront_distribution" "this" {
   tags                = merge(var.tags, { Name = var.name })
 
   dynamic "origin" {
-    for_each = { for i, b in var.origin_bucket_names : "s3-${i}" => i }
+    for_each = { for i, b in local.buckets : "s3-${i}" => i }
     content {
       origin_id                = origin.key
-      domain_name              = data.aws_s3_bucket.origin[origin.value].bucket_regional_domain_name
+      domain_name              = local.buckets[origin.value].domain
       origin_access_control_id = aws_cloudfront_origin_access_control.s3[0].id
     }
   }
@@ -106,10 +106,10 @@ resource "aws_cloudfront_distribution" "this" {
 }
 
 data "aws_iam_policy_document" "bucket" {
-  count = length(var.origin_bucket_names)
+  count = length(var.origin_buckets)
   statement {
     actions   = ["s3:GetObject"]
-    resources = ["${data.aws_s3_bucket.origin[count.index].arn}/*"]
+    resources = ["${local.buckets[count.index].arn}/*"]
     principals {
       type        = "Service"
       identifiers = ["cloudfront.amazonaws.com"]
@@ -123,8 +123,8 @@ data "aws_iam_policy_document" "bucket" {
 }
 
 resource "aws_s3_bucket_policy" "origin" {
-  count  = length(var.origin_bucket_names)
-  bucket = var.origin_bucket_names[count.index]
+  count  = length(var.origin_buckets)
+  bucket = local.buckets[count.index].name
   policy = data.aws_iam_policy_document.bucket[count.index].json
 }
 

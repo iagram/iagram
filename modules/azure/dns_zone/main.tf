@@ -7,12 +7,12 @@ variable "resource_group_name" { type = string }
 variable "domain" { type = string }
 variable "a_records" {
   type        = list(string)
-  description = "\"<name>|<ip>\" entries from resolves_to arrows; empty ips are skipped."
+  description = "\"<name>|<ip>\" entries from resolves_to arrows (the VM must have a public IP)."
   default     = []
 }
 
 locals {
-  records = [for r in var.a_records : { name = split("|", r)[0], ip = split("|", r)[1] } if split("|", r)[1] != ""]
+  records = [for r in var.a_records : { name = split("|", r)[0], ip = split("|", r)[1] }]
 }
 
 resource "azurerm_dns_zone" "this" {

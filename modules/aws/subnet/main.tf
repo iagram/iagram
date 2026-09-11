@@ -38,7 +38,7 @@ resource "aws_route_table" "this" {
 }
 
 resource "aws_route" "internet" {
-  count                  = var.public && var.internet_gateway_id != "" ? 1 : 0
+  count                  = var.public ? 1 : 0
   route_table_id         = aws_route_table.this.id
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = var.internet_gateway_id

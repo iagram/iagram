@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,5 +127,31 @@ func TestApplyRequiresAPlan(t *testing.T) {
 	_ = json.NewDecoder(res.Body).Decode(&out)
 	if out["plan"] != nil || out["drift"] != nil {
 		t.Errorf("latest = %v", out)
+	}
+}
+
+func TestImportEndpointBuildsADocumentWithoutSaving(t *testing.T) {
+	ts, docPath := newTestServer(t)
+	state := `{"version":4,"resources":[{"mode":"managed","type":"aws_vpc","name":"v","instances":[{"attributes":{"id":"vpc-1","arn":"arn:aws:ec2:eu-west-1:123456789012:vpc/vpc-1","cidr_block":"10.0.0.0/16","tags":{"Name":"core"}}}]}]}`
+	res, err := http.Post(ts.URL+"/api/import?name=x", "application/json", strings.NewReader(state))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out struct {
+		Document struct {
+			Name  string                  `json:"name"`
+			Nodes []struct{ Type string } `json:"nodes"`
+		} `json:"document"`
+		Report struct{ Imported int } `json:"report"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 || out.Report.Imported != 1 || len(out.Document.Nodes) != 3 || out.Document.Name != "x" { // vpc + synthesized account + region
+		t.Errorf("status=%d out=%+v", res.StatusCode, out)
+	}
+	if _, err := os.Stat(docPath); err == nil {
+		t.Error("import must not write the document")
 	}
 }

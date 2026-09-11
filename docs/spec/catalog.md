@@ -93,7 +93,10 @@ would shadow meta-arguments or the inputs the generator sets.
 - **Arrows are flow.** A connection is allowed only if a rule exists for the
   pair `(from type, to type)`. Exactly one rule per ordered pair. `kind` names
   what the arrow means; `label` is what the canvas shows. Never encode the same
-  fact as both containment and an arrow.
+  fact as both containment and an arrow. `requires_from` / `requires_to` list
+  property values one end must have for the arrow to work (a DNS record needs
+  the VM to have `public_ip: true`); the validator reports violations on the
+  arrow.
 - **Properties** support JSON Schema types `string` (`enum`, `pattern`,
   `format: cidr`), `integer`/`number` (`minimum`, `maximum`) and `boolean`.
   `default` values are applied when a node is created. `required` is enforced.
@@ -121,7 +124,10 @@ would shadow meta-arguments or the inputs the generator sets.
 - `inputs_from_parent`: `parent`, `parent.parent`, ... followed by an output
   name. If that ancestor is not a module node (an account or region), the input
   is omitted, so one entry can accept several parent types (a Lambda in a
-  region or in a subnet).
+  region or in a subnet). Wrap the reference in brackets (`"[parent.subnet_id]"`)
+  to pass a one-element list instead (empty when unresolved): modules must
+  branch on `length()` of such lists, which OpenTofu knows at plan time, never
+  on whether a referenced value is empty, which it does not.
 - `collect`: gathers `${module.X.<output>}` for every node of `type` placed
   anywhere under the named ancestor, as a list. `min` makes the validator
   require that many gathered nodes; `distinct` names a property that must

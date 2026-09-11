@@ -1,6 +1,6 @@
-import { useState } from 'react'
 import { useReactFlow, useViewport } from '@xyflow/react'
 import { useStore } from '../store'
+import { MenuBar } from './MenuBar'
 
 export function Toolbar() {
   const dirty = useStore((s) => s.dirty)
@@ -29,8 +29,7 @@ export function Toolbar() {
   const setTheme = useStore((s) => s.setTheme)
   const showLabels = useStore((s) => s.showLabels)
   const setShowLabels = useStore((s) => s.setShowLabels)
-  const runDestroyPlan = useStore((s) => s.runDestroyPlan)
-  const [menu, setMenu] = useState(false)
+
   const { zoomIn, zoomOut, fitView, zoomTo } = useReactFlow()
   const { zoom } = useViewport()
   const errors = problems.filter((p) => p.level === 'error').length
@@ -39,6 +38,7 @@ export function Toolbar() {
   return (
     <header className="toolbar">
       <span className="brand">iagram</span>
+      <MenuBar />
       <span className="doc">
         {docName || 'iagram.json'}
         {dirty && <i title="unsaved changes"> ●</i>}
@@ -106,27 +106,6 @@ export function Toolbar() {
       <button className="primary" onClick={() => void runPlan()} disabled={running || errors > 0} title={errors ? 'Fix validation errors first' : 'Save, generate Terraform and run tofu plan'}>
         {running && job?.kind === 'plan' ? 'Planning…' : 'Plan'}
       </button>
-      <span className="menu-wrap">
-        <button onClick={() => setMenu((m) => !m)} title="More" aria-haspopup="menu" aria-expanded={menu}>
-          ⋯
-        </button>
-        {menu && (
-          <div className="menu" role="menu" onMouseLeave={() => setMenu(false)}>
-            <button
-              role="menuitem"
-              className="danger-item"
-              disabled={running || !hasDeployed}
-              onClick={() => {
-                setMenu(false)
-                void runDestroyPlan()
-              }}
-              title={hasDeployed ? 'Plan the teardown of everything this diagram manages' : 'Nothing deployed'}
-            >
-              Destroy infrastructure…
-            </button>
-          </div>
-        )}
-      </span>
       <button className={`apply ${canApply ? 'ready' : ''} ${plan?.destroy ? 'destroy' : ''}`} onClick={() => setConfirmApply(true)} disabled={!canApply} title={!plan ? 'Plan first' : planStale || dirty ? 'Diagram changed; plan again' : !plan.changes ? 'Nothing to apply' : 'Apply this plan'}>
         {running && job?.kind === 'apply' ? (plan?.destroy ? 'Destroying…' : 'Applying…') : plan?.destroy ? 'Destroy' : 'Apply'}
       </button>

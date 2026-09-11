@@ -175,6 +175,17 @@ func (g *gen) moduleBlocks() error {
 			block[k] = v
 		}
 		for input, ref := range e.Terraform.InputsFromParent {
+			// "[parent.x]" yields a one-element list (or [] when unresolved) so a
+			// module can branch on length(), which is known at plan time, rather
+			// than on the value, which is not.
+			if list := strings.HasPrefix(ref, "[") && strings.HasSuffix(ref, "]"); list {
+				if expr, ok := g.resolveAncestorRef(n, ref[1:len(ref)-1]); ok {
+					block[input] = []any{expr}
+				} else {
+					block[input] = []any{}
+				}
+				continue
+			}
 			if expr, ok := g.resolveAncestorRef(n, ref); ok {
 				block[input] = expr
 			}

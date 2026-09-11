@@ -6,12 +6,12 @@ variable "tags" {
 variable "domain" { type = string }
 variable "a_records" {
   type        = list(string)
-  description = "\"<name>|<ip>\" entries from resolves_to arrows; empty ips are skipped."
+  description = "\"<name>|<ip>\" entries from resolves_to arrows (the instance must have an external IP)."
   default     = []
 }
 
 locals {
-  records = [for r in var.a_records : { name = split("|", r)[0], ip = split("|", r)[1] } if split("|", r)[1] != ""]
+  records = [for r in var.a_records : { name = split("|", r)[0], ip = split("|", r)[1] }]
 }
 
 resource "google_dns_managed_zone" "this" {

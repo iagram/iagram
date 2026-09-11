@@ -57,6 +57,11 @@ type ConnRule struct {
 	Kind      string         `yaml:"kind"`
 	Label     string         `yaml:"label,omitempty"`
 	Terraform *ConnTerraform `yaml:"terraform,omitempty"`
+	// RequiresFrom / RequiresTo are property values the source / target must
+	// have for the connection to work (a VM needs a public IP before a DNS
+	// record can point at it). Checked by the validator.
+	RequiresFrom map[string]any `yaml:"requires_from,omitempty"`
+	RequiresTo   map[string]any `yaml:"requires_to,omitempty"`
 }
 
 // ConnTerraform says what an edge means in Terraform: append Value (an output
@@ -70,11 +75,13 @@ type ConnTerraform struct {
 
 // Rule is a compiled, directional connection rule.
 type Rule struct {
-	From      string         `json:"from"`
-	To        string         `json:"to"`
-	Kind      string         `json:"kind"`
-	Label     string         `json:"label,omitempty"`
-	Terraform *ConnTerraform `json:"terraform,omitempty"`
+	From         string         `json:"from"`
+	To           string         `json:"to"`
+	Kind         string         `json:"kind"`
+	Label        string         `json:"label,omitempty"`
+	Terraform    *ConnTerraform `json:"terraform,omitempty"`
+	RequiresFrom map[string]any `json:"requires_from,omitempty"`
+	RequiresTo   map[string]any `json:"requires_to,omitempty"`
 }
 
 // Terraform describes how an entry renders.
@@ -298,12 +305,12 @@ func (c *Catalog) compile() error {
 			}
 		}
 		for _, r := range e.Connections.Out {
-			if err := c.addRule(seen, Rule{From: e.ID, To: r.To, Kind: r.Kind, Label: r.Label, Terraform: r.Terraform}); err != nil {
+			if err := c.addRule(seen, Rule{From: e.ID, To: r.To, Kind: r.Kind, Label: r.Label, Terraform: r.Terraform, RequiresFrom: r.RequiresFrom, RequiresTo: r.RequiresTo}); err != nil {
 				return fmt.Errorf("%s: %w", e.ID, err)
 			}
 		}
 		for _, r := range e.Connections.In {
-			if err := c.addRule(seen, Rule{From: r.From, To: e.ID, Kind: r.Kind, Label: r.Label, Terraform: r.Terraform}); err != nil {
+			if err := c.addRule(seen, Rule{From: r.From, To: e.ID, Kind: r.Kind, Label: r.Label, Terraform: r.Terraform, RequiresFrom: r.RequiresFrom, RequiresTo: r.RequiresTo}); err != nil {
 				return fmt.Errorf("%s: %w", e.ID, err)
 			}
 		}

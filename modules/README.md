@@ -14,3 +14,10 @@ Conventions every module follows (the generator relies on them):
   are variables; list inputs default to `[]` so an unconnected node still plans.
 - Every `outputs:` entry in the catalog is an `output`.
 - Modules do not configure providers; the root passes one explicitly.
+
+Plan-time rule: `count` and `for_each` may only depend on values known before
+apply. Booleans and numbers from properties are known; outputs of other modules
+are not. To branch on the presence of a parent, take it as a one-element list
+(`"[parent.x]"` in the catalog) and test `length()`. Never filter lists of
+references (`if x != ""`) and count the result; require the condition through
+the connection rule's `requires_from` / `requires_to` instead.

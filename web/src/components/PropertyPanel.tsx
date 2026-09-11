@@ -29,7 +29,12 @@ export function PropertyPanel() {
     const src = allNodes.find((n) => n.id === edge.source)
     const dst = allNodes.find((n) => n.id === edge.target)
     const rule = src && dst ? rules.connection(src.data.type, dst.data.type) : undefined
-    const tf = catalog?.connections.find((r) => r.from === src?.data.type && r.to === dst?.data.type)?.terraform
+    const fullRule = catalog?.connections.find((r) => r.from === src?.data.type && r.to === dst?.data.type)
+    const tf = fullRule?.terraform
+    const reqs = [
+      ...Object.entries(fullRule?.requires_from ?? {}).map(([k, v]) => `${src?.data.name}.${k} = ${String(v)}`),
+      ...Object.entries(fullRule?.requires_to ?? {}).map(([k, v]) => `${dst?.data.name}.${k} = ${String(v)}`),
+    ]
     return (
       <aside className="panel">
         <h2>Connection</h2>
@@ -49,6 +54,11 @@ export function PropertyPanel() {
           </details>
         ) : (
           <p className="muted">This arrow is documentation only; it does not change the generated Terraform.</p>
+        )}
+        {reqs.length > 0 && (
+          <p className="muted">
+            Requires: <span className="mono">{reqs.join(', ')}</span>
+          </p>
         )}
         <button className="danger" onClick={() => removeEdge(edge.id)}>
           Delete connection

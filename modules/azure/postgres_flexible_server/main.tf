@@ -27,9 +27,6 @@ variable "allowed_ip_addresses" {
   default     = []
 }
 
-locals {
-  allowed = [for ip in var.allowed_ip_addresses : ip if ip != ""]
-}
 
 resource "random_password" "admin" {
   length  = 24
@@ -52,11 +49,11 @@ resource "azurerm_postgresql_flexible_server" "this" {
 }
 
 resource "azurerm_postgresql_flexible_server_firewall_rule" "clients" {
-  count            = length(local.allowed)
+  count            = length(var.allowed_ip_addresses)
   name             = "client-${count.index}"
   server_id        = azurerm_postgresql_flexible_server.this.id
-  start_ip_address = local.allowed[count.index]
-  end_ip_address   = local.allowed[count.index]
+  start_ip_address = var.allowed_ip_addresses[count.index]
+  end_ip_address   = var.allowed_ip_addresses[count.index]
 }
 
 output "fqdn" { value = azurerm_postgresql_flexible_server.this.fqdn }

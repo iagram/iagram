@@ -41,6 +41,8 @@ export interface Rule {
   kind: string
   label?: string
   terraform?: { set: 'from' | 'to'; input: string; value: string }
+  requires_from?: Record<string, unknown>
+  requires_to?: Record<string, unknown>
 }
 
 export interface Catalog {
@@ -147,4 +149,11 @@ export interface Job {
   status: 'running' | 'succeeded' | 'failed' | 'cancelled'
   error?: string
   result?: PlanResult | ApplyResult | DriftResult
+}
+
+export interface ImportReport {
+  imported: number
+  skipped?: string[]
+  unplaced?: string[]
+  providers?: string[]
 }

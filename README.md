@@ -105,10 +105,10 @@ iagram.json ──validate──▶ generate ──▶ .iagram/tf/main.tf.json +
 | **Palette** (left) | Provider tabs; elements grouped by category; items that fit the selected container are highlighted, the rest dimmed. Drag onto the canvas. |
 | **Canvas** | Nested containers (account → region → VPC → subnet), typed arrows with labels, plan and drift overlays, minimap. Shift-drag to select several, ⌘-click to add. Drag an element into another container to move it there (refused with a message if the catalog forbids it). |
 | **Settings panel** (right) | Name, properties in sections (`Compute`, `Networking`, `Advanced`…), validation messages, planned resource changes, drift details, live outputs after apply (click to copy), delete. Click an arrow for the connection inspector. |
-| **Toolbar** | Undo/redo, zoom, label toggle, dark/light theme, validation status, Save, Check drift, Plan, Apply, ⋯ menu (Destroy). |
+| **Menubar and toolbar** | File (new, open, import from Terraform state, save, download, export Terraform / PNG / SVG), Edit (undo, redo, clipboard, select all), View (zoom, labels, minimap, snap, theme), Infrastructure (plan, apply, drift, destroy, log), Help (shortcuts, docs, about); quick buttons for undo/redo, zoom, labels, theme, Save, Check drift, Plan, Apply. |
 | **Log drawer** | Streams `tofu` output for plan/apply/drift; lists orphaned state that a plan would destroy. |
 
-Shortcuts: ⌘S save · ⌘Z / ⌘⇧Z undo, redo · ⌘C / ⌘V / ⌘D copy, paste, duplicate · ⌫ delete · double-click an element to focus its settings. Deep links: `?theme=dark`, `#select=<node id>`.
+Shortcuts: ⌘S save · ⌘Z / ⌘⇧Z undo, redo · ⌘C / ⌘V / ⌘D copy, paste, duplicate · ⌘A select all · Esc deselect · ⌫ delete · `?` shortcut list · double-click an element to focus its settings. Deep links: `?theme=dark`, `#select=<node id>`.
 
 ## Commands
 

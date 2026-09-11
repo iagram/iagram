@@ -222,6 +222,25 @@ func (v *validator) edges() {
 		if e.Kind != rule.Kind {
 			v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("connection %s -> %s must be of kind %q", src.Name, dst.Name, rule.Kind)})
 		}
+		v.requires(e, src, rule.RequiresFrom, src, dst)
+		v.requires(e, dst, rule.RequiresTo, src, dst)
+	}
+}
+
+// requires checks the property values a connection rule demands on one end.
+func (v *validator) requires(e document.Edge, on *document.Node, want map[string]any, src, dst *document.Node) {
+	for prop, expected := range want {
+		got, ok := on.Props[prop]
+		if !ok {
+			if entry, ok := v.c.Get(on.Type); ok {
+				if schema, ok := entry.Property(prop); ok {
+					got = schema["default"]
+				}
+			}
+		}
+		if fmt.Sprint(got) != fmt.Sprint(expected) {
+			v.add(Problem{Level: Error, Edge: e.ID, Node: on.ID, Field: prop, Message: fmt.Sprintf("%s -> %s needs %s.%s = %v", src.Name, dst.Name, on.Name, prop, expected)})
+		}
 	}
 }
 

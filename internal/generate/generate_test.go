@@ -87,9 +87,12 @@ func TestGenerate(t *testing.T) {
 	if subs, _ := mods["db"]["subnet_ids"].([]any); len(subs) != 2 {
 		t.Errorf("db subnet_ids = %v", mods["db"]["subnet_ids"])
 	}
-	// lambda in a region: no subnet/vpc inputs
-	if _, has := mods["fn"]["subnet_id"]; has {
-		t.Error("lambda in region should not get subnet_id")
+	// lambda in a region: empty subnet list, no vpc
+	if l, _ := mods["fn"]["subnet_ids"].([]any); len(l) != 0 {
+		t.Errorf("lambda in region should get subnet_ids = [], got %v", mods["fn"]["subnet_ids"])
+	}
+	if _, has := mods["fn"]["vpc_id"]; has {
+		t.Error("lambda in region should not get vpc_id")
 	}
 	// tags carry the node id so plans map back
 	if mods["bkt"]["tags"].(map[string]any)["iagram_node"] != "bkt" {
@@ -146,5 +149,21 @@ func TestProviderArgsKeepLiteralEmptyBlocks(t *testing.T) {
 	}
 	if _, ok := prov["gone"]; ok {
 		t.Error("block with only unresolved placeholders kept")
+	}
+}
+
+func TestBracketedParentRefYieldsOneElementList(t *testing.T) {
+	c, d := fixture(t)
+	d.Nodes = append(d.Nodes, document.Node{ID: "fn2", Type: "aws.lambda_function", Name: "fn2", Parent: "sub-a", Props: map[string]any{"runtime": "python3.12", "handler": "app.handler"}})
+	res, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn2 := res.Config["module"].(map[string]map[string]any)["fn2"]
+	if l, _ := fn2["subnet_ids"].([]any); len(l) != 1 || l[0] != "${module.sub_a.subnet_id}" {
+		t.Errorf("subnet_ids = %v", fn2["subnet_ids"])
+	}
+	if fn2["vpc_id"] != "${module.vpc.vpc_id}" {
+		t.Errorf("vpc_id = %v", fn2["vpc_id"])
 	}
 }

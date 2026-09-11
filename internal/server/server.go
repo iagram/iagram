@@ -50,6 +50,7 @@ func New(c *catalog.Catalog, docPath string, webFS, iconsFS fs.FS, version strin
 	m.HandleFunc("PUT /api/document", s.putDocument)
 	m.HandleFunc("POST /api/validate", s.validateDocument)
 	m.HandleFunc("GET /api/generate", s.generate)
+	m.HandleFunc("POST /api/import", s.importState)
 	m.HandleFunc("POST /api/plan", s.startPlan)
 	m.HandleFunc("POST /api/plan/destroy", s.startDestroyPlan)
 	m.HandleFunc("GET /api/plan/latest", s.latestPlan)

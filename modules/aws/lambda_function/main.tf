@@ -40,10 +40,10 @@ variable "security_group_ids" {
   type    = list(string)
   default = []
 }
-variable "subnet_id" {
-  type        = string
-  description = "Set when the function is placed in a subnet; empty means no VPC attachment."
-  default     = ""
+variable "subnet_ids" {
+  type        = list(string)
+  description = "The enclosing subnet as a one-element list; empty means no VPC attachment. A list so length() is known at plan time."
+  default     = []
 }
 variable "vpc_id" {
   type    = string
@@ -51,7 +51,7 @@ variable "vpc_id" {
 }
 
 locals {
-  in_vpc        = var.subnet_id != ""
+  in_vpc        = length(var.subnet_ids) > 0
   function_name = replace(var.name, "/[^A-Za-z0-9-_]/", "-")
 }
 
@@ -159,7 +159,7 @@ resource "aws_lambda_function" "this" {
   dynamic "vpc_config" {
     for_each = local.in_vpc ? [1] : []
     content {
-      subnet_ids         = [var.subnet_id]
+      subnet_ids         = var.subnet_ids
       security_group_ids = concat([aws_security_group.fn[0].id], var.security_group_ids)
     }
   }

@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/iagram/iagram/internal/document"
+	"github.com/iagram/iagram/internal/importer"
 	"github.com/iagram/iagram/internal/jobs"
+	"github.com/iagram/iagram/internal/layout"
+	"github.com/iagram/iagram/internal/validate"
 	"github.com/iagram/iagram/internal/workspace"
 )
 
@@ -284,4 +287,26 @@ func (s *Server) event(name string, props map[string]any, d *document.Document) 
 		return
 	}
 	s.OnEvent(name, props, d)
+}
+
+// importState turns a posted terraform.tfstate / `tofu show -json` body into a
+// document (not saved: the UI shows it and the user decides to save).
+func (s *Server) importState(w http.ResponseWriter, r *http.Request) {
+	raw, err := readAll(r, 64<<20)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	res, err := importer.ParseState(raw)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		name = "imported"
+	}
+	d, rep := importer.Build(s.Catalog, name, res)
+	layout.Auto(s.Catalog, d)
+	writeJSON(w, http.StatusOK, map[string]any{"document": d, "report": rep, "validation": validate.Run(s.Catalog, d)})
 }

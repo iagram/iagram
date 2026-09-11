@@ -128,3 +128,26 @@ func TestCollectMinimums(t *testing.T) {
 	r = validate.Run(c, d)
 	expectProblem(t, r, "Application Load Balancer needs at least 2 Subnets in its VPC (found 1)")
 }
+
+func TestConnectionRequirements(t *testing.T) {
+	c, err := catalog.Load(iagram.CatalogFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := document.New("t")
+	d.Nodes = []document.Node{
+		{ID: "sub", Type: "azure.subscription", Name: "s", Props: map[string]any{"subscription_id": "00000000-0000-0000-0000-000000000000"}},
+		{ID: "rg", Type: "azure.resource_group", Name: "rg", Parent: "sub", Props: map[string]any{"location": "westeurope"}},
+		{ID: "vnet", Type: "azure.vnet", Name: "v", Parent: "rg", Props: map[string]any{"cidr": "10.0.0.0/16"}},
+		{ID: "snet", Type: "azure.subnet", Name: "n", Parent: "vnet", Props: map[string]any{"cidr": "10.0.1.0/24"}},
+		{ID: "vm", Type: "azure.virtual_machine", Name: "vm", Parent: "snet", Props: map[string]any{"size": "Standard_B1s", "public_ip": false}},
+		{ID: "dns", Type: "azure.dns_zone", Name: "dns", Parent: "rg", Props: map[string]any{"domain": "example.com"}},
+	}
+	d.Edges = []document.Edge{{ID: "e1", Kind: "resolves_to", Source: "dns", Target: "vm"}}
+	r := validate.Run(c, d)
+	expectProblem(t, r, "dns -> vm needs vm.public_ip = true")
+	d.Nodes[4].Props["public_ip"] = true
+	if r := validate.Run(c, d); !r.OK() {
+		t.Errorf("expected clean after enabling public ip: %s", messages(r))
+	}
+}
