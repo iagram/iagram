@@ -275,6 +275,7 @@ func (b *builder) run(resources []Resource) {
 	}
 	sort.Strings(b.report.Providers)
 	b.report.Imported = len(pend) + len(raw)
+	attachToParents(b.c, b.doc)
 	// Containers created after their children must still sort deterministically.
 	sort.Slice(b.doc.Nodes, func(i, j int) bool { return b.doc.Nodes[i].ID < b.doc.Nodes[j].ID })
 }
@@ -549,4 +550,31 @@ func nodeID(e *catalog.Entry, seed string) string {
 	}
 	h := sha1.Sum([]byte(seed))
 	return short + "-" + hex.EncodeToString(h[:])[:6]
+}
+
+// attachToParents moves attachment elements (not drawn on their own) under
+// the element their binding attribute references, so they show up in that
+// element's settings rather than floating in a region.
+func attachToParents(c *catalog.Catalog, d *document.Document) {
+	byID := d.Index()
+	for i := range d.Nodes {
+		n := &d.Nodes[i]
+		e, ok := c.Get(n.Type)
+		if !ok || !e.Attachment {
+			continue
+		}
+		for _, edge := range d.Edges {
+			if edge.Source != n.ID || edge.Kind != catalog.ReferencesKind {
+				continue
+			}
+			target, ok := byID[edge.Target]
+			if !ok || target.ID == n.ID {
+				continue
+			}
+			if te, ok := c.Get(target.Type); ok && !te.Attachment && te.Provider == e.Provider {
+				n.Parent = target.ID
+				break
+			}
+		}
+	}
 }

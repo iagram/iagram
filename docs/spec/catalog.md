@@ -209,6 +209,22 @@ attributes to `${<target address>.<output>}` (lists append). Curated elements
 never reference generated ones automatically; their inputs are fixed by their
 rules.
 
+### Graphical elements and attachments
+
+A generated element is *graphical* when its resource type maps to an official
+provider icon in `catalog/icons/<provider>/services.yaml` (longest type-prefix
+match) and its name does not mark it as configuration of another resource
+(`_policy`, `_attachment`, `_association`, `_rule`, `_subscription`,
+`_versioning`, `_permission`, `_member`, `_binding`, …). Only graphical
+elements appear in the palette. Every other type is an *attachment*: it may be
+placed inside any element of its provider (container or not), is not drawn,
+and is configured from its parent's settings panel. `iagram` derives which
+attachments apply to a parent from the schemas: the attachment's type extends
+the parent's (`aws_s3_bucket_versioning` for `aws_s3_bucket`) or it has an
+attribute named after the parent (`bucket`, `role`, `topic_arn`, `subnet_id`);
+that attribute is bound to the parent through a `references` edge, so it
+renders as `${<parent address>.<id|arn|name>}`.
+
 ## Equivalences (`catalog/equivalences.yaml`)
 
 `iagram convert --to <provider>` uses this table: `elements` rows list the

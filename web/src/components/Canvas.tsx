@@ -50,7 +50,13 @@ export function Canvas() {
   const ensureEntry = useStore((s) => s.ensureEntry)
   const { fitView } = useReactFlow()
   // One canvas per provider: only that provider's nodes (and their edges) are shown.
-  const visibleNodes = useMemo(() => nodes.filter((n) => n.data.type.split('.')[0] === activeProvider), [nodes, activeProvider])
+  const catalogVersion = useStore((s) => s.catalogVersion)
+  // Attachments are configured inside their parent's panel, never drawn.
+  const visibleNodes = useMemo(
+    () => nodes.filter((n) => n.data.type.split('.')[0] === activeProvider && !rules?.entry(n.data.type)?.attachment),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nodes, activeProvider, rules, catalogVersion],
+  )
   const visibleIds = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes])
   useEffect(() => {
     const t = setTimeout(() => void fitView({ padding: 0.1, duration: 200 }), 30)

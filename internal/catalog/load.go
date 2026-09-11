@@ -29,6 +29,7 @@ func Load(fsys fs.FS) (*Catalog, error) {
 	sort.Strings(files)
 
 	c := &Catalog{Providers: map[string]Provider{}}
+	c.loadServiceIcons(fsys)
 	for _, f := range files {
 		raw, err := fs.ReadFile(fsys, f)
 		if err != nil {
@@ -77,7 +78,7 @@ func LoadLayered(builtin fs.FS, extra ...fs.FS) (*Catalog, error) {
 	if len(extra) == 0 {
 		return base, nil
 	}
-	merged := &Catalog{Providers: base.Providers}
+	merged := &Catalog{Providers: base.Providers, serviceIcons: base.serviceIcons}
 	byID := map[string]int{}
 	for _, e := range base.Entries {
 		byID[e.ID] = len(merged.Entries)
@@ -149,4 +150,28 @@ func loadRaw(fsys fs.FS) (*Catalog, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// loadServiceIcons reads catalog/icons/<provider>/services.yaml files.
+func (c *Catalog) loadServiceIcons(fsys fs.FS) {
+	c.serviceIcons = map[string]map[string]string{}
+	dirs, err := fs.ReadDir(fsys, "catalog/icons")
+	if err != nil {
+		return
+	}
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		raw, err := fs.ReadFile(fsys, "catalog/icons/"+d.Name()+"/services.yaml")
+		if err != nil {
+			continue
+		}
+		var doc struct {
+			Prefixes map[string]string `yaml:"prefixes"`
+		}
+		if yaml.Unmarshal(raw, &doc) == nil {
+			c.serviceIcons[d.Name()] = doc.Prefixes
+		}
+	}
 }

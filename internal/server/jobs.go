@@ -419,3 +419,17 @@ func (s *Server) convertDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"document": out, "report": rep, "validation": validate.Run(s.Catalog, out)})
 }
+
+// attachmentsFor lists attachment types applicable to a parent element type.
+func (s *Server) attachmentsFor(w http.ResponseWriter, r *http.Request) {
+	t := r.URL.Query().Get("type")
+	if t == "" {
+		writeError(w, http.StatusBadRequest, errors.New("type is required"))
+		return
+	}
+	list := s.Catalog.AttachmentsFor(t)
+	if list == nil {
+		list = []catalog.AttachmentOption{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"type": t, "attachments": list})
+}

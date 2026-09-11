@@ -24,6 +24,7 @@ export interface JSONSchema {
 
 export interface Entry {
   terraform?: { role?: string; resource?: string; module?: string }
+  attachment?: boolean
   id: string
   label: string
   description?: string
@@ -87,6 +88,16 @@ export interface GeneratedSummary {
   service: string
   category: string
   icon?: string
+  graphical: boolean
+  attachment: boolean
+}
+
+export interface AttachmentOption {
+  id: string
+  label: string
+  resource: string
+  attr: string
+  output: string
 }
 
 export interface ConvertReport {

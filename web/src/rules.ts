@@ -19,7 +19,13 @@ export class Rules {
 
   canContain(parentType: string, childType: string): boolean {
     const child = this.byId[childType]
-    if (!child || !child.allowed_parents.includes(parentType)) return false
+    if (!child) return false
+    // Attachments live inside the element they configure, container or not.
+    if (child.attachment && parentType !== ROOT) {
+      const parent = this.byId[parentType]
+      return !!parent && parent.provider === child.provider
+    }
+    if (!child.allowed_parents.includes(parentType)) return false
     if (parentType === ROOT) return true
     const parent = this.byId[parentType]
     if (!parent || parent.kind !== 'container') return false

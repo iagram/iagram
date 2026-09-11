@@ -36,6 +36,9 @@ type Entry struct {
 	Terraform       *Terraform        `yaml:"terraform,omitempty" json:"terraform,omitempty"`
 	Outputs         []string          `yaml:"outputs,omitempty" json:"outputs,omitempty"`
 	Size            *Size             `yaml:"size,omitempty" json:"size,omitempty"`
+	// Attachment marks a generated element with no graphical counterpart: it is
+	// not drawn on the canvas but configured inside the element it references.
+	Attachment bool `yaml:"-" json:"attachment,omitempty"`
 }
 
 // Size is the default canvas size of a node.
@@ -190,6 +193,9 @@ type Catalog struct {
 	registry  ResourceRegistry
 	genMu     sync.Mutex
 	generated map[string]*Entry
+	// serviceIcons: provider -> tf type prefix (without provider prefix) -> icon path.
+	serviceIcons map[string]map[string]string
+	attachCache  map[string][]AttachmentOption
 }
 
 // Role values for Terraform.Role.
@@ -219,6 +225,11 @@ func (c *Catalog) CanContain(parentType, childType string) bool {
 	child, ok := c.Get(childType)
 	if !ok {
 		return false
+	}
+	// Attachments live inside the element they configure, container or not.
+	if child.Attachment && parentType != Root {
+		parent, ok := c.Get(parentType)
+		return ok && parent.Provider == child.Provider
 	}
 	if !contains(child.AllowedParents, parentType) {
 		return false

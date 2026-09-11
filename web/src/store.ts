@@ -13,7 +13,7 @@ import { Rules } from './rules'
 import { fromDocument, makeEdge, makeNode, newId, toDocument, type RFEdge, type RFNode } from './convert'
 import type { Document } from './types'
 import { rfStore } from './rf'
-import type { ApplyResult, Catalog, DriftResult, Entry, GeneratedSummary, Job, PlanResult, Problem } from './types'
+import type { ApplyResult, AttachmentOption, Catalog, DriftResult, Entry, GeneratedSummary, Job, PlanResult, Problem } from './types'
 import { ROOT } from './types'
 
 interface State {
@@ -50,6 +50,7 @@ interface State {
   catalogVersion: number
   generatedByProvider: Record<string, GeneratedSummary[]>
   connectingFrom: string | null
+  attachmentsByType: Record<string, AttachmentOption[]>
   selectedEdgeId: string | null
   hoveredEdgeId: string | null
   /** A node id the canvas should select through React Flow (deep links). */
@@ -106,6 +107,10 @@ interface State {
   setEdgeBinding: (edgeId: string, attr: string, output: string) => void
   /** Create a references edge from a node's attribute to a target node (from the settings panel). */
   linkAttribute: (sourceId: string, attr: string, targetId: string, output: string) => void
+  loadAttachments: (type: string) => Promise<void>
+  /** Add an attachment element inside parentId, bound to it through attr/output. */
+  addAttachment: (parentId: string, opt: AttachmentOption) => Promise<void>
+  isAttachment: (type: string) => boolean
   selectEdge: (id: string | null) => void
   hoverEdge: (id: string | null) => void
   removeEdge: (id: string) => void
@@ -179,6 +184,7 @@ export const useStore = create<State>((set, get) => ({
   catalogVersion: 0,
   generatedByProvider: {},
   connectingFrom: null,
+  attachmentsByType: {},
   selectedEdgeId: null,
   hoveredEdgeId: null,
   pendingSelect: null,
@@ -555,6 +561,42 @@ export const useStore = create<State>((set, get) => ({
 
   setConnectingFrom(id) {
     set({ connectingFrom: id })
+  },
+
+  isAttachment(type) {
+    return !!get().rules?.entry(type)?.attachment
+  },
+
+  async loadAttachments(type) {
+    if (get().attachmentsByType[type]) return
+    try {
+      const r = await api.attachments(type)
+      set({ attachmentsByType: { ...get().attachmentsByType, [type]: r.attachments } })
+    } catch {
+      set({ attachmentsByType: { ...get().attachmentsByType, [type]: [] } })
+    }
+  },
+
+  async addAttachment(parentId, opt) {
+    const entry = await get().ensureEntry(opt.id)
+    const { rules, nodes } = get()
+    if (!entry || !rules) return
+    const parent = nodes.find((n) => n.id === parentId)
+    if (!parent) return
+    get().commit()
+    const count = nodes.filter((n) => n.data.type === opt.id && n.parentId === parentId).length + 1
+    const id = newId(entry)
+    const node = makeNode(rules, {
+      id,
+      type: opt.id,
+      name: `${parent.data.name}-${opt.resource.split('_').slice(-1)[0]}${count > 1 ? `-${count}` : ''}`,
+      parent: parentId,
+      props: rules.defaults(opt.id),
+      layout: { x: 0, y: 0 },
+    })
+    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: 'references', source: id, target: parentId, attr: opt.attr, output: opt.output }, opt.attr)
+    set({ nodes: [...get().nodes, node], edges: [...get().edges, edge], dirty: true })
+    get().validateSoon()
   },
 
   setEdgeBinding(edgeId, attr, output) {

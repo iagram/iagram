@@ -26,10 +26,11 @@ export function Palette() {
   }, [provider, loadGenerated])
   const q = query.trim().toLowerCase()
   const generatedMatches = useMemo(() => {
-    const list = generated ?? []
+    const list = (generated ?? []).filter((g) => g.graphical)
     if (!q) return list
     return list.filter((g) => g.label.toLowerCase().includes(q) || g.resource.includes(q) || g.service.includes(q))
   }, [generated, q])
+  const attachmentCount = useMemo(() => (generated ?? []).filter((g) => !g.graphical).length, [generated])
 
   if (!catalog || !rules) return <aside className="palette" />
 
@@ -86,7 +87,10 @@ export function Palette() {
         <h3>
           All resources <span className="muted">({generated ? generatedMatches.length : '…'})</span>
         </h3>
-        <p className="hint">Every {PROVIDER_LABEL[provider] ?? provider} Terraform resource type, with settings generated from the provider schema.</p>
+        <p className="hint">
+          Every {PROVIDER_LABEL[provider] ?? provider} Terraform resource with an official icon, settings generated from the provider schema.
+          {attachmentCount > 0 && ` ${attachmentCount} more (policies, rules, associations…) attach from an element's settings.`}
+        </p>
         {generatedMatches.slice(0, 60).map((g) => {
           const fits = rules.canContain(contextType, g.id) || !rules.entry(g.id)
           return (

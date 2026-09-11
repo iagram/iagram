@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store'
 import type { JSONSchema, Problem } from '../types'
 
@@ -26,6 +26,14 @@ export function PropertyPanel() {
   const setEdgeBinding = useStore((s) => s.setEdgeBinding)
   const linkAttribute = useStore((s) => s.linkAttribute)
   useStore((s) => s.catalogVersion)
+  const loadAttachments = useStore((s) => s.loadAttachments)
+  const addAttachment = useStore((s) => s.addAttachment)
+  const attachmentOptions = useStore((s) => (s.selectedId ? s.attachmentsByType[s.nodes.find((n) => n.id === s.selectedId)?.data.type ?? ''] : undefined))
+  const attachedNodes = useMemo(() => (selectedId ? allNodes.filter((n) => n.parentId === selectedId && !!rules?.entry(n.data.type)?.attachment) : []), [allNodes, selectedId, rules])
+  useEffect(() => {
+    if (node && !rules?.entry(node.data.type)?.attachment) void loadAttachments(node.data.type)
+  }, [node, rules, loadAttachments])
+  const [pickAttachment, setPickAttachment] = useState('')
   const selIds = useMemo(() => allNodes.filter((n) => n.selected).map((n) => n.id), [allNodes])
   const selectedCount = selIds.length
   if (selectedEdgeId && edge && rules) {
@@ -170,6 +178,44 @@ export function PropertyPanel() {
             </li>
           ))}
         </ul>
+      )}
+
+      {!rules.entry(node.data.type)?.attachment && (
+        <details open className="section attachments">
+          <summary>
+            Attachments <span className="muted">({attachedNodes.length})</span>
+          </summary>
+          <p className="muted">Resources that configure this element (policies, rules, subscriptions…). They are generated with it, not drawn.</p>
+          {attachedNodes.map((a) => (
+            <AttachmentRow key={a.id} id={a.id} />
+          ))}
+          {attachmentOptions && attachmentOptions.length > 0 ? (
+            <div className="add-attachment">
+              <select value={pickAttachment} onChange={(e) => setPickAttachment(e.target.value)}>
+                <option value="">Add attachment…</option>
+                {attachmentOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label} ({o.attr})
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="primary"
+                disabled={!pickAttachment}
+                onClick={() => {
+                  const opt = attachmentOptions.find((o) => o.id === pickAttachment)
+                  if (opt) void addAttachment(node.id, opt)
+                  setPickAttachment('')
+                }}
+              >
+                Add
+              </button>
+            </div>
+          ) : attachmentOptions ? (
+            <p className="muted">No attachable resource types for this element.</p>
+          ) : null}
+        </details>
       )}
 
       {nodePlan && (
@@ -374,6 +420,76 @@ function Field({
       {jsonError && <small className="err">Invalid JSON: {jsonError}</small>}
       <FieldProblems problems={problems} />
     </label>
+  )
+}
+
+/** One attachment of the selected element: name, its fields, delete. */
+function AttachmentRow({ id }: { id: string }) {
+  const node = useStore((s) => s.nodes.find((n) => n.id === id))
+  const rules = useStore((s) => s.rules)
+  const updateNode = useStore((s) => s.updateNode)
+  const removeNodes = useStore((s) => s.removeNodes)
+  const linkAttribute = useStore((s) => s.linkAttribute)
+  const problems = useStore((s) => s.problems)
+  const binding = useStore((s) => s.edges.find((e) => e.source === id && e.data?.kind === 'references' && e.target === node?.parentId)?.data)
+  const [open, setOpen] = useState(false)
+  if (!node || !rules) return null
+  const entry = rules.entry(node.data.type)
+  const schema: JSONSchema = entry?.props ?? {}
+  const required = new Set(schema.required ?? [])
+  const mine = problems.filter((p) => p.node === id)
+  const byField: Record<string, Problem[]> = {}
+  for (const p of mine) if (p.field) (byField[p.field] ??= []).push(p)
+  const setProp = (k: string, v: unknown) => {
+    const props = { ...node.data.props }
+    if (v === '' || v === undefined) delete props[k]
+    else props[k] = v
+    updateNode(node.id, { props })
+  }
+  return (
+    <div className={`attachment ${open ? 'open' : ''}`}>
+      <div className="head" onClick={() => setOpen((v) => !v)}>
+        <span className="chev">{open ? '▾' : '▸'}</span>
+        <b>{entry?.label ?? node.data.type}</b>
+        <span className="muted mono">{node.data.name}</span>
+        {mine.some((p) => p.level === 'error') && <span className="badge error">!</span>}
+      </div>
+      {open && (
+        <div className="body">
+          <p className="muted mono">
+            {entry?.terraform?.resource} · {binding?.attr} = {'${parent.'}{binding?.output ?? 'id'}{'}'}
+          </p>
+          <label className="field">
+            <span>Name</span>
+            <input value={node.data.name} onChange={(e) => updateNode(node.id, { name: e.target.value })} />
+          </label>
+          {groupFields(schema).map(({ title, fields, advanced }) => (
+            <details key={title} open={!advanced} className="section">
+              <summary>{title}</summary>
+              {fields
+                .filter(([k]) => k !== binding?.attr)
+                .map(([k, s]) => (
+                  <Field
+                    key={k}
+                    name={k}
+                    schema={s}
+                    required={required.has(k)}
+                    value={node.data.props[k]}
+                    onChange={(v) => setProp(k, v)}
+                    problems={byField[k]}
+                    linkable={(s.type === 'string' || s.type === 'array') && !s['x-json']}
+                    onLink={(targetId, output) => linkAttribute(node.id, k, targetId, output)}
+                    nodeId={node.id}
+                  />
+                ))}
+            </details>
+          ))}
+          <button className="danger" onClick={() => removeNodes([node.id])}>
+            Remove attachment
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 

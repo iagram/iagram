@@ -153,3 +153,55 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestGraphicalVersusAttachment(t *testing.T) {
+	c := load(t)
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	list := c.Generated("aws")
+	byRes := map[string]catalog.GeneratedSummary{}
+	for _, g := range list {
+		byRes[g.Resource] = g
+	}
+	if g := byRes["aws_sns_topic"]; !g.Graphical || g.Icon == "aws/generic.svg" {
+		t.Errorf("sns topic should be graphical with an official icon: %+v", g)
+	}
+	if g := byRes["aws_sns_topic_subscription"]; g.Graphical || !g.Attachment {
+		t.Errorf("subscription should be an attachment: %+v", g)
+	}
+	if g := byRes["aws_s3_bucket_versioning"]; g.Graphical {
+		t.Errorf("bucket versioning should be an attachment: %+v", g)
+	}
+	if g := byRes["aws_iam_role_policy_attachment"]; g.Graphical {
+		t.Errorf("policy attachment should be an attachment: %+v", g)
+	}
+	graphical := 0
+	for _, g := range list {
+		if g.Graphical {
+			graphical++
+		}
+	}
+	if graphical < 300 || graphical > 900 {
+		t.Errorf("aws graphical count = %d (palette should be a few hundred, not 1700)", graphical)
+	}
+	// attachments for the curated bucket and for a generated topic
+	opts := c.AttachmentsFor("aws.s3_bucket")
+	found := map[string]catalog.AttachmentOption{}
+	for _, o := range opts {
+		found[o.Resource] = o
+	}
+	if v, ok := found["aws_s3_bucket_versioning"]; !ok || v.Attr != "bucket" || v.Output != "bucket_name" {
+		t.Errorf("bucket versioning binding = %+v (all: %d)", v, len(opts))
+	}
+	opts = c.AttachmentsFor("aws.res.aws_sns_topic")
+	found = map[string]catalog.AttachmentOption{}
+	for _, o := range opts {
+		found[o.Resource] = o
+	}
+	if v, ok := found["aws_sns_topic_subscription"]; !ok || v.Attr != "topic_arn" || v.Output != "arn" {
+		t.Errorf("subscription binding = %+v", v)
+	}
+	e, _ := c.Get("aws.res.aws_sns_topic_subscription")
+	if !e.Attachment || !c.CanContain("aws.res.aws_sns_topic", e.ID) {
+		t.Error("attachment must be placeable inside its (leaf) parent")
+	}
+}

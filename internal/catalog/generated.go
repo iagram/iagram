@@ -42,12 +42,41 @@ func IsGeneratedID(id string) bool { return strings.Contains(id, ".res.") }
 
 // GeneratedSummary is the light listing served to the palette.
 type GeneratedSummary struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Resource string `json:"resource"`
-	Service  string `json:"service"`
-	Category string `json:"category"`
-	Icon     string `json:"icon,omitempty"`
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	Resource   string `json:"resource"`
+	Service    string `json:"service"`
+	Category   string `json:"category"`
+	Icon       string `json:"icon,omitempty"`
+	Graphical  bool   `json:"graphical"`  // has an official icon and is a thing of its own
+	Attachment bool   `json:"attachment"` // configured inside another element
+}
+
+// attachmentWords mark resource types that configure another resource rather
+// than standing on their own, even when their service has an icon.
+var attachmentWords = []string{
+	"_association", "_attachment", "_permission", "_subscription", "_rule", "_versioning", "_configuration", "_acl", "_policy", "_notification",
+	"_lifecycle", "_logging", "_cors", "_encryption", "_public_access_block", "_ownership_controls", "_website", "_object", "_member", "_binding",
+	"_assignment", "_registration", "_mapping", "_target", "_record", "_entry", "_option", "_parameter", "_setting", "_tag", "_alias", "_grant",
+	"_access_point", "_access_key", "_login_profile", "_ssh_key", "_signing_certificate", "_service_specific_credential", "_replication",
+	"_inventory", "_metric", "_intelligent_tiering", "_request_payment", "_analytics", "_accelerate", "_provisioned_concurrency", "_event_source",
+	"_function_url", "_layer_version", "_code_signing", "_invocation", "_domain_identity", "_receipt", "_identity_notification", "_route",
+	"_listener", "_certificate_validation", "_default_", "_peering", "_endpoint_service", "_network_interface_attachment", "_volume_attachment",
+	"_iam_", "_secret_version", "_key_version", "_integration", "_response", "_deployment", "_stage", "_authorizer", "_model", "_usage_plan",
+	"_api_key", "_domain_name", "_base_path", "_vpc_link", "_resource", "_method", "_gateway_response", "_documentation", "_request_validator",
+}
+
+// IsAttachmentType reports whether a Terraform resource type configures
+// another resource rather than being drawn on its own.
+func IsAttachmentType(tfType string) bool {
+	_, rest, _ := strings.Cut(tfType, "_")
+	rest = "_" + rest
+	for _, w := range attachmentWords {
+		if strings.Contains(rest, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // Generated lists the generated elements of a catalog provider (aws, gcp, azure).
@@ -59,9 +88,11 @@ func (c *Catalog) Generated(provider string) []GeneratedSummary {
 	types := c.registry.Types(pc.LocalName())
 	out := make([]GeneratedSummary, 0, len(types))
 	for _, t := range types {
+		icon, official := c.serviceIcon(provider, t)
+		attachment := !official || IsAttachmentType(t)
 		out = append(out, GeneratedSummary{
 			ID: provider + ".res." + t, Label: humanize(t), Resource: t, Service: service(t),
-			Category: categoryOf(t), Icon: c.iconFor(provider, t),
+			Category: categoryOf(t), Icon: icon, Graphical: !attachment, Attachment: attachment,
 		})
 	}
 	return out
@@ -105,12 +136,18 @@ func (c *Catalog) generatedEntry(id string) (*Entry, bool) {
 		}
 		schema["required"] = req
 	}
+	icon, official := c.serviceIcon(provider, tfType)
+	attachment := !official || IsAttachmentType(tfType)
+	desc := fmt.Sprintf("Terraform resource %s, rendered as a plain resource block. Every attribute of the provider schema is available; reference other elements with arrows.", tfType)
+	if attachment {
+		desc = fmt.Sprintf("Terraform resource %s. Configured inside the element it applies to; not drawn on its own.", tfType)
+	}
 	e := &Entry{
 		ID: id, Label: humanize(tfType), Provider: provider, Category: categoryOf(tfType),
-		Description: fmt.Sprintf("Terraform resource %s, rendered as a plain resource block. Every attribute of the provider schema is available; reference other elements with arrows.", tfType),
-		Icon:        c.iconFor(provider, tfType), Kind: KindLeaf, AllowedParents: parents,
+		Description: desc, Icon: icon, Kind: KindLeaf, AllowedParents: parents,
 		Props: schema, Outputs: outputs, Size: &Size{W: 120, H: 90},
-		Terraform: &Terraform{Role: RoleResource, Resource: tfType},
+		Terraform:  &Terraform{Role: RoleResource, Resource: tfType},
+		Attachment: attachment,
 	}
 	c.generated[id] = e
 	return e, true
@@ -174,26 +211,193 @@ func containsAny(s string, subs ...string) bool {
 	return false
 }
 
-// iconFor reuses a curated icon whose service matches, else the provider's
-// generic tile.
-func (c *Catalog) iconFor(provider, tfType string) string {
-	svc := service(tfType)
-	rest := strings.TrimPrefix(tfType, strings.SplitN(tfType, "_", 2)[0]+"_")
+// serviceIcon returns the official icon for a resource type (longest matching
+// prefix in catalog/icons/<provider>/services.yaml, or the curated element
+// importing exactly that type) and whether one exists. Without one the
+// element is not graphical.
+func (c *Catalog) serviceIcon(provider, tfType string) (string, bool) {
 	for _, e := range c.Entries {
-		if e.Provider != provider || e.Icon == "" || e.Terraform == nil || e.Terraform.Import == nil {
-			continue
+		if e.Provider == provider && e.Terraform != nil && e.Terraform.Import != nil && e.Terraform.Import.Resource == tfType && e.Icon != "" {
+			return e.Icon, true
 		}
-		res := e.Terraform.Import.Resource
-		if res == "" {
-			continue
-		}
-		if res == tfType {
-			return e.Icon
-		}
-		if s2 := service(res); s2 == svc && svc != "" {
-			return e.Icon
-		}
-		_ = rest
 	}
-	return provider + "/generic.svg"
+	_, rest, _ := strings.Cut(tfType, "_")
+	best, bestLen := "", 0
+	for prefix, icon := range c.serviceIcons[provider] {
+		if (rest == strings.TrimSuffix(prefix, "_") || strings.HasPrefix(rest, prefix) || strings.HasPrefix(rest, prefix+"_")) && len(prefix) > bestLen {
+			best, bestLen = icon, len(prefix)
+		}
+	}
+	if best != "" {
+		return best, true
+	}
+	return provider + "/generic.svg", false
+}
+
+// AttachmentOption is an attachment type that can be added to a parent, with
+// the attribute/output binding that ties it to the parent.
+type AttachmentOption struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Resource string `json:"resource"`
+	Attr     string `json:"attr"`   // attachment attribute that references the parent
+	Output   string `json:"output"` // parent attribute/output referenced
+}
+
+// AttachmentsFor lists the attachment types applicable to a parent element,
+// derived from the schemas: the type name extends the parent's type, or an
+// attribute is named after the parent (bucket, role, topic_arn, subnet_id...).
+func (c *Catalog) AttachmentsFor(parentID string) []AttachmentOption {
+	pe, ok := c.Get(parentID)
+	if !ok || c.registry == nil {
+		return nil
+	}
+	c.genMu.Lock()
+	if c.attachCache == nil {
+		c.attachCache = map[string][]AttachmentOption{}
+	}
+	if cached, ok := c.attachCache[parentID]; ok {
+		c.genMu.Unlock()
+		return cached
+	}
+	c.genMu.Unlock()
+
+	parentTF := ""
+	if pe.Terraform != nil {
+		if pe.Terraform.Role == RoleResource {
+			parentTF = pe.Terraform.Resource
+		} else if pe.Terraform.Import != nil {
+			parentTF = pe.Terraform.Import.Resource
+		}
+	}
+	pc, ok := c.Providers[pe.Provider]
+	if !ok {
+		return nil
+	}
+	local := pc.LocalName()
+	var out []AttachmentOption
+	if parentTF != "" {
+		tokens := parentTokens(parentTF)
+		for _, t := range c.registry.Types(local) {
+			if t == parentTF {
+				continue
+			}
+			icon, official := c.serviceIcon(pe.Provider, t)
+			_ = icon
+			if official && !IsAttachmentType(t) {
+				continue // graphical: it is drawn, not attached
+			}
+			props, _, _, ok := c.registry.Resource(t)
+			if !ok {
+				continue
+			}
+			if attr, output := bindingFor(t, parentTF, tokens, props, pe); attr != "" {
+				out = append(out, AttachmentOption{ID: pe.Provider + ".res." + t, Label: humanize(t), Resource: t, Attr: attr, Output: output})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
+	c.genMu.Lock()
+	c.attachCache[parentID] = out
+	c.genMu.Unlock()
+	return out
+}
+
+// parentTokens returns the name tokens an attachment attribute may use for a
+// parent type: aws_s3_bucket -> ["s3_bucket", "bucket"], aws_iam_role -> ["iam_role", "role"].
+func parentTokens(parentTF string) []string {
+	_, rest, _ := strings.Cut(parentTF, "_")
+	parts := strings.Split(rest, "_")
+	var toks []string
+	for i := 0; i < len(parts); i++ {
+		toks = append(toks, strings.Join(parts[i:], "_"))
+	}
+	return toks
+}
+
+// bindingFor decides whether attachment type t attaches to the parent and
+// through which attribute; the referenced output is chosen to match.
+func bindingFor(t, parentTF string, tokens []string, props map[string]any, parent *Entry) (attr, output string) {
+	byPrefix := strings.HasPrefix(t, parentTF+"_")
+	candidates := []string{}
+	for _, tok := range tokens {
+		candidates = append(candidates, tok, tok+"_id", tok+"_arn", tok+"_name", tok+"_url", tok+"_key_id")
+	}
+	best := ""
+	for _, cand := range candidates {
+		if _, ok := props[cand]; ok {
+			best = cand
+			break
+		}
+	}
+	if best == "" && byPrefix {
+		// Same family but no obvious attribute: attach on the first *_id/_arn/_name string attr.
+		names := make([]string, 0, len(props))
+		for n := range props {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			if strings.HasSuffix(n, "_id") || strings.HasSuffix(n, "_arn") || strings.HasSuffix(n, "_name") {
+				best = n
+				break
+			}
+		}
+	}
+	if best == "" {
+		return "", ""
+	}
+	return best, outputFor(best, parent)
+}
+
+// outputFor picks the parent output an attachment attribute should reference.
+func outputFor(attr string, parent *Entry) string {
+	outs := parent.Outputs
+	has := func(n string) bool {
+		for _, o := range outs {
+			if o == n {
+				return true
+			}
+		}
+		if props, ok := parent.Props["properties"].(map[string]any); ok {
+			if _, ok := props[n]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	pick := func(suffixes ...string) string {
+		for _, sfx := range suffixes {
+			for _, o := range outs {
+				if o == sfx || strings.HasSuffix(o, "_"+sfx) {
+					return o
+				}
+			}
+		}
+		return ""
+	}
+	switch {
+	case strings.HasSuffix(attr, "_arn"):
+		if o := pick("arn"); o != "" {
+			return o
+		}
+	case strings.HasSuffix(attr, "_url"):
+		if o := pick("url"); o != "" {
+			return o
+		}
+	case strings.HasSuffix(attr, "_name") || !strings.Contains(attr, "_id"):
+		// bare tokens (bucket, role, function_name, topic) usually take the name
+		for _, n := range []string{attr, "name", "bucket"} {
+			if has(n) {
+				return n
+			}
+		}
+		if o := pick("name"); o != "" {
+			return o
+		}
+	}
+	if o := pick("id"); o != "" {
+		return o
+	}
+	return "id"
 }
