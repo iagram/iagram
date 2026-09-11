@@ -1,0 +1,26 @@
+id: aws.security_group
+label: Security Group
+description: Stateful firewall. Connect it to the resources it protects; rules are derived from the traffic arrows pointing at those resources.
+category: security
+icon: aws/security_group.svg
+kind: leaf
+allowed_parents: [aws.vpc]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: aws.ec2_instance,  kind: protects, label: protects}
+    - {to: aws.rds_instance,  kind: protects, label: protects}
+    - {to: aws.alb,           kind: protects, label: protects}
+    - {to: aws.lambda_function, kind: protects, label: protects}
+props:
+  type: object
+  properties:
+    description:
+      type: string
+      title: Description
+      default: managed by iagram
+terraform:
+  module: registry/aws/security_group
+  inputs_from_parent:
+    vpc_id: parent.id
+outputs: [security_group_id]

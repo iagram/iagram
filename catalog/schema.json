@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iagram.dev/schemas/catalog-entry.json",
+  "title": "iagram catalog entry",
+  "description": "One drawable element. Path must be catalog/<provider>/<name>.yaml and id must be <provider>.<name>.",
+  "type": "object",
+  "required": ["id", "label", "category", "kind", "allowed_parents"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9]+\\.[a-z0-9_]+$"},
+    "label": {"type": "string"},
+    "description": {"type": "string"},
+    "category": {"type": "string", "enum": ["account", "network", "compute", "database", "storage", "security", "serverless", "integration"]},
+    "icon": {"type": "string", "description": "Path under catalog/icons/, e.g. aws/ec2.svg"},
+    "kind": {"type": "string", "enum": ["leaf", "container"]},
+    "allowed_parents": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "Catalog ids this element may be dropped into; 'root' means directly on the canvas."},
+    "allowed_children": {"type": "array", "items": {"type": "string"}, "description": "Optional whitelist for containers; when omitted, children are governed by their own allowed_parents."},
+    "connections": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "in": {"type": "array", "items": {"$ref": "#/$defs/rule_in"}},
+        "out": {"type": "array", "items": {"$ref": "#/$defs/rule_out"}}
+      }
+    },
+    "props": {"type": "object", "description": "JSON Schema (object) for the element's properties; drives the property panel and validation."},
+    "terraform": {
+      "type": "object",
+      "required": ["module"],
+      "properties": {
+        "module": {"type": "string"},
+        "inputs_from_parent": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "outputs": {"type": "array", "items": {"type": "string"}},
+    "size": {"type": "object", "required": ["w", "h"], "properties": {"w": {"type": "number"}, "h": {"type": "number"}}}
+  },
+  "$defs": {
+    "rule_in":  {"type": "object", "required": ["from", "kind"], "properties": {"from": {"type": "string"}, "kind": {"type": "string"}, "label": {"type": "string"}}},
+    "rule_out": {"type": "object", "required": ["to", "kind"],   "properties": {"to": {"type": "string"},   "kind": {"type": "string"}, "label": {"type": "string"}}}
+  }
+}

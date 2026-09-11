@@ -1,0 +1,33 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: frontend
+        run: cd web && npm ci && npm run build
+      - name: go
+        run: |
+          go vet ./...
+          go test ./...
+          go build -o iagram ./cmd/iagram
+      - name: smoke
+        run: |
+          d=$(mktemp -d) && cd "$d"
+          "$GITHUB_WORKSPACE/iagram" init smoke
+          "$GITHUB_WORKSPACE/iagram" validate

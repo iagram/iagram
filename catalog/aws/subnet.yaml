@@ -1,0 +1,31 @@
+id: aws.subnet
+label: Subnet
+category: network
+icon: aws/subnet.svg
+kind: container
+allowed_parents: [aws.vpc]
+size: {w: 360, h: 260}
+props:
+  type: object
+  required: [cidr, az]
+  properties:
+    cidr:
+      type: string
+      title: CIDR block
+      format: cidr
+      default: 10.0.1.0/24
+    az:
+      type: string
+      title: Availability zone suffix
+      description: a, b, c… appended to the region.
+      default: a
+      enum: [a, b, c, d, e, f]
+    public:
+      type: boolean
+      title: Public (route to internet gateway)
+      default: false
+terraform:
+  module: registry/aws/subnet
+  inputs_from_parent:
+    vpc_id: parent.id
+outputs: [subnet_id]

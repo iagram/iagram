@@ -1,0 +1,31 @@
+id: aws.alb
+label: Application Load Balancer
+category: network
+icon: aws/alb.svg
+kind: leaf
+allowed_parents: [aws.vpc]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: aws.ec2_instance,    kind: routes_to, label: routes to}
+    - {to: aws.lambda_function, kind: routes_to, label: routes to}
+props:
+  type: object
+  required: [scheme]
+  properties:
+    scheme:
+      type: string
+      title: Scheme
+      default: internet-facing
+      enum: [internet-facing, internal]
+    listener_port:
+      type: integer
+      title: Listener port
+      default: 80
+      minimum: 1
+      maximum: 65535
+terraform:
+  module: registry/aws/alb
+  inputs_from_parent:
+    vpc_id: parent.id
+outputs: [dns_name]

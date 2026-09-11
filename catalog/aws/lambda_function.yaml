@@ -1,0 +1,39 @@
+id: aws.lambda_function
+label: Lambda Function
+category: serverless
+icon: aws/lambda.svg
+kind: leaf
+allowed_parents: [aws.region, aws.subnet]
+size: {w: 120, h: 90}
+connections:
+  out:
+    - {to: aws.s3_bucket,    kind: reads_writes, label: reads/writes}
+    - {to: aws.rds_instance, kind: connects_to,  label: connects to}
+props:
+  type: object
+  required: [runtime, handler]
+  properties:
+    runtime:
+      type: string
+      title: Runtime
+      default: python3.12
+      enum: [python3.12, python3.13, nodejs20.x, nodejs22.x, go1.x, java21, provided.al2023]
+    handler:
+      type: string
+      title: Handler
+      default: app.handler
+    memory_mb:
+      type: integer
+      title: Memory (MB)
+      default: 256
+      minimum: 128
+      maximum: 10240
+    timeout_s:
+      type: integer
+      title: Timeout (s)
+      default: 30
+      minimum: 1
+      maximum: 900
+terraform:
+  module: registry/aws/lambda_function
+outputs: [function_arn]
