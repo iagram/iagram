@@ -5,8 +5,11 @@ import (
 
 	"github.com/iagram/iagram"
 	"github.com/iagram/iagram/internal/catalog"
+	"github.com/iagram/iagram/internal/document"
+	"github.com/iagram/iagram/internal/generate"
 	"github.com/iagram/iagram/internal/importer"
 	"github.com/iagram/iagram/internal/layout"
+	"github.com/iagram/iagram/internal/tfschema"
 	"github.com/iagram/iagram/internal/validate"
 )
 
@@ -107,5 +110,59 @@ func TestParseShowJSON(t *testing.T) {
 	}
 	if len(res) != 2 || res[1].Module != "module.m" || res[1].Attrs["vpc_id"] != "vpc-9" {
 		t.Errorf("res = %+v", res)
+	}
+}
+
+func TestStateImportFallsBackToGeneratedElementsAndRecoversReferences(t *testing.T) {
+	c, err := catalog.Load(iagram.CatalogFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	state := `{"version":4,"resources":[
+	 {"mode":"managed","type":"aws_kms_key","name":"data","instances":[{"attributes":{"id":"key-1","arn":"arn:aws:kms:eu-west-1:123456789012:key/key-1","description":"data at rest","enable_key_rotation":true,"key_id":"key-1"}}]},
+	 {"mode":"managed","type":"aws_sns_topic","name":"alerts","instances":[{"attributes":{"id":"arn:aws:sns:eu-west-1:123456789012:alerts","arn":"arn:aws:sns:eu-west-1:123456789012:alerts","name":"alerts","kms_master_key_id":"key-1"}}]}
+	]}`
+	res, err := importer.ParseState([]byte(state))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, rep := importer.Build(c, "s", res)
+	if rep.Imported != 2 || len(rep.Skipped) != 0 {
+		t.Fatalf("report = %+v", rep)
+	}
+	byID := d.Index()
+	var topic, key *document.Node
+	for i := range d.Nodes {
+		switch d.Nodes[i].Type {
+		case "aws.res.aws_sns_topic":
+			topic = &d.Nodes[i]
+		case "aws.res.aws_kms_key":
+			key = &d.Nodes[i]
+		}
+	}
+	if topic == nil || key == nil {
+		t.Fatalf("generated nodes missing: %+v", d.Nodes)
+	}
+	if byID[topic.Parent].Type != "aws.region" || key.Props["enable_key_rotation"] != true {
+		t.Errorf("topic parent=%v key props=%v", byID[topic.Parent], key.Props)
+	}
+	if _, still := topic.Props["kms_master_key_id"]; still {
+		t.Error("reference value should have moved into an edge")
+	}
+	if len(d.Edges) != 1 || d.Edges[0].Attr != "kms_master_key_id" || d.Edges[0].Target != key.ID {
+		t.Errorf("edges = %+v", d.Edges)
+	}
+	if v := validate.Run(c, d); !v.OK() {
+		t.Errorf("invalid: %+v", v.Problems)
+	}
+	// And it renders: the reference comes back as an expression.
+	out, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := out.Config["resource"].(map[string]map[string]map[string]any)
+	if r["aws_sns_topic"]["alerts"]["kms_master_key_id"] != "${aws_kms_key.data.id}" {
+		t.Errorf("rendered = %v", r["aws_sns_topic"]["alerts"])
 	}
 }

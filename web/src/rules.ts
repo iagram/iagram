@@ -30,7 +30,22 @@ export class Rules {
   }
 
   connection(fromType: string, toType: string): Rule | undefined {
-    return this.conn.get(`${fromType}->${toType}`)
+    const r = this.conn.get(`${fromType}->${toType}`)
+    if (r) return r
+    // A generated element (<provider>.res.<type>) may reference anything of its provider.
+    if (fromType.includes('.res.') && fromType.split('.')[0] === toType.split('.')[0]) {
+      return { from: fromType, to: toType, kind: 'references', label: 'references' }
+    }
+    return undefined
+  }
+
+  /** Register a generated element fetched from the server. */
+  register(e: Entry) {
+    this.byId[e.id] = e
+  }
+
+  isGenerated(type: string): boolean {
+    return type.includes('.res.')
   }
 
   /** Types that are allowed somewhere inside the given container type. */

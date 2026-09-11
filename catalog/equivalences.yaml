@@ -1,0 +1,65 @@
+# Cross-provider equivalences used by `iagram convert --to <provider>`.
+# Each row lists the counterpart element per provider; `props` maps property
+# names when they differ (source name -> target name); `classes` maps size
+# classes so an instance keeps roughly the same size after conversion.
+regions:
+  - {aws: us-east-1,      gcp: us-east1,          azure: eastus}
+  - {aws: us-east-2,      gcp: us-east4,          azure: eastus2}
+  - {aws: us-west-1,      gcp: us-west1,          azure: westus}
+  - {aws: us-west-2,      gcp: us-west1,          azure: westus2}
+  - {aws: ca-central-1,   gcp: northamerica-northeast1, azure: canadacentral}
+  - {aws: eu-west-1,      gcp: europe-west1,      azure: westeurope}
+  - {aws: eu-west-2,      gcp: europe-west2,      azure: uksouth}
+  - {aws: eu-west-3,      gcp: europe-west9,      azure: francecentral}
+  - {aws: eu-central-1,   gcp: europe-west3,      azure: germanywestcentral}
+  - {aws: eu-north-1,     gcp: europe-north1,     azure: swedencentral}
+  - {aws: ap-southeast-1, gcp: asia-southeast1,   azure: southeastasia}
+  - {aws: ap-southeast-2, gcp: australia-southeast1, azure: australiaeast}
+  - {aws: ap-northeast-1, gcp: asia-northeast1,   azure: japaneast}
+  - {aws: sa-east-1,      gcp: southamerica-east1, azure: brazilsouth}
+
+classes:
+  compute:   # aws.ec2_instance.instance_type / gcp.compute_instance.machine_type / azure.virtual_machine.size
+    - {aws: t3.micro,   gcp: e2-micro,       azure: Standard_B1s}
+    - {aws: t3.small,   gcp: e2-small,       azure: Standard_B2s}
+    - {aws: t3.medium,  gcp: e2-medium,      azure: Standard_B2ms}
+    - {aws: t3.large,   gcp: e2-standard-2,  azure: Standard_D2s_v5}
+    - {aws: m6i.large,  gcp: n2-standard-2,  azure: Standard_D2s_v5}
+    - {aws: m6i.xlarge, gcp: n2-standard-4,  azure: Standard_D4s_v5}
+    - {aws: c6i.large,  gcp: c3-standard-4,  azure: Standard_D2s_v5}
+    - {aws: r6i.large,  gcp: n2-standard-2,  azure: Standard_E2s_v5}
+  database:  # aws.rds_instance.instance_class / gcp.cloud_sql_instance.tier / azure.postgres_flexible_server.sku_name
+    - {aws: db.t3.micro,  gcp: db-f1-micro,        azure: B_Standard_B1ms}
+    - {aws: db.t3.small,  gcp: db-g1-small,        azure: B_Standard_B2s}
+    - {aws: db.t3.medium, gcp: db-custom-1-3840,   azure: GP_Standard_D2s_v3}
+    - {aws: db.m6g.large, gcp: db-custom-2-7680,   azure: GP_Standard_D2s_v3}
+    - {aws: db.r6g.large, gcp: db-custom-4-15360,  azure: MO_Standard_E2s_v3}
+  kubernetes_nodes:
+    - {aws: t3.medium, gcp: e2-standard-2, azure: Standard_D2s_v5}
+    - {aws: m6i.large, gcp: n2-standard-2, azure: Standard_D2s_v5}
+    - {aws: m6i.xlarge, gcp: n2-standard-4, azure: Standard_D4s_v5}
+
+# Root containers per provider, outermost first. Converting drops the source
+# chain and creates the target chain; `region_prop` says which property of
+# which target element receives the (translated) region.
+roots:
+  aws:   {chain: [aws.account, aws.region],              region_prop: aws.region.region}
+  gcp:   {chain: [gcp.project],                          region_prop: gcp.project.region}
+  azure: {chain: [azure.subscription, azure.resource_group], region_prop: azure.resource_group.location}
+
+elements:
+  - {aws: aws.vpc,               gcp: gcp.vpc,                azure: azure.vnet,                     props: {cidr: cidr}}
+  - {aws: aws.subnet,            gcp: gcp.subnetwork,         azure: azure.subnet,                   props: {cidr: cidr}, region_prop: {gcp: region}}
+  - {aws: aws.security_group,    gcp: gcp.firewall_rule,      azure: azure.network_security_group,   props: {ingress_ports: ports, ingress_cidr: source_ranges}, props_azure: {ingress_ports: inbound_ports, ingress_cidr: source_cidr}}
+  - {aws: aws.ec2_instance,      gcp: gcp.compute_instance,   azure: azure.virtual_machine,          class: {compute: {aws: instance_type, gcp: machine_type, azure: size}}, props: {public_ip: public_ip}}
+  - {aws: aws.rds_instance,      gcp: gcp.cloud_sql_instance, azure: azure.postgres_flexible_server, class: {database: {aws: instance_class, gcp: tier, azure: sku_name}}, region_prop: {gcp: region}}
+  - {aws: aws.s3_bucket,         gcp: gcp.storage_bucket,     azure: azure.storage_account,          props: {versioning: versioning}}
+  - {aws: aws.lambda_function,   gcp: gcp.cloud_run_service,  azure: ~}
+  - {aws: aws.eks_cluster,       gcp: gcp.gke_cluster,        azure: azure.aks_cluster,              class: {kubernetes_nodes: {aws: node_instance_type, gcp: machine_type, azure: node_size}}, props: {desired_nodes: node_count}}
+  - {aws: aws.sqs_queue,         gcp: gcp.pubsub_topic,       azure: ~}
+  - {aws: aws.dynamodb_table,    gcp: gcp.bigquery_dataset,   azure: ~}
+  - {aws: aws.route53_zone,      gcp: gcp.cloud_dns_zone,     azure: azure.dns_zone,                 props: {domain: domain}}
+  - {aws: ~,                     gcp: ~,                      azure: azure.key_vault}
+  - {aws: ~,                     gcp: ~,                      azure: azure.container_registry}
+  - {aws: aws.alb,               gcp: ~,                      azure: ~}
+  - {aws: aws.cloudfront_distribution, gcp: ~,                azure: ~}

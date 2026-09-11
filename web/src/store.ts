@@ -13,7 +13,7 @@ import { Rules } from './rules'
 import { fromDocument, makeEdge, makeNode, newId, toDocument, type RFEdge, type RFNode } from './convert'
 import type { Document } from './types'
 import { rfStore } from './rf'
-import type { ApplyResult, Catalog, DriftResult, Job, PlanResult, Problem } from './types'
+import type { ApplyResult, Catalog, DriftResult, Entry, GeneratedSummary, Job, PlanResult, Problem } from './types'
 import { ROOT } from './types'
 
 interface State {
@@ -45,6 +45,11 @@ interface State {
   snapToGrid: boolean
   version: string
   modal: 'shortcuts' | 'about' | null
+  /** Which provider's canvas is shown; nodes of other providers are hidden. */
+  activeProvider: string
+  catalogVersion: number
+  generatedByProvider: Record<string, GeneratedSummary[]>
+  connectingFrom: string | null
   selectedEdgeId: string | null
   hoveredEdgeId: string | null
   /** A node id the canvas should select through React Flow (deep links). */
@@ -94,6 +99,13 @@ interface State {
   deselectAll: () => void
   deleteSelection: () => void
   currentDocument: () => Document
+  setActiveProvider: (p: string) => void
+  ensureEntry: (type: string) => Promise<Entry | undefined>
+  loadGenerated: (provider: string) => Promise<void>
+  setConnectingFrom: (id: string | null) => void
+  setEdgeBinding: (edgeId: string, attr: string, output: string) => void
+  /** Create a references edge from a node's attribute to a target node (from the settings panel). */
+  linkAttribute: (sourceId: string, attr: string, targetId: string, output: string) => void
   selectEdge: (id: string | null) => void
   hoverEdge: (id: string | null) => void
   removeEdge: (id: string) => void
@@ -163,6 +175,10 @@ export const useStore = create<State>((set, get) => ({
   snapToGrid: stored('iagram.snap', true),
   version: '',
   modal: null,
+  activeProvider: stored('iagram.provider', ''),
+  catalogVersion: 0,
+  generatedByProvider: {},
+  connectingFrom: null,
   selectedEdgeId: null,
   hoveredEdgeId: null,
   pendingSelect: null,
@@ -171,8 +187,17 @@ export const useStore = create<State>((set, get) => ({
     try {
       const [catalog, res] = await Promise.all([api.catalog(), api.document()])
       const rules = new Rules(catalog)
+      const missing = [...new Set(res.document.nodes.map((n) => n.type).filter((t) => !rules.entry(t)))]
+      if (missing.length) {
+        const r = await api.resolve(missing).catch(() => ({ entries: {} }))
+        for (const e of Object.values(r.entries)) rules.register(e)
+      }
       const { nodes, edges } = fromDocument(rules, res.document)
-      set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [] })
+      const providers = [...new Set(catalog.entries.map((e) => e.provider))].sort()
+      const used = [...new Set(res.document.nodes.map((n) => n.type.split('.')[0]))]
+      const current = get().activeProvider
+      const activeProvider = providers.includes(current) ? current : used.find((p) => providers.includes(p)) ?? providers[0] ?? ''
+      set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider })
       api.latestPlan().then((r) => set({ ...(r.plan ? { plan: r.plan, planStale: false } : {}), drift: r.drift })).catch(() => undefined)
       api.health().then((h) => set({ version: h.version })).catch(() => undefined)
     } catch (e) {
@@ -270,6 +295,9 @@ export const useStore = create<State>((set, get) => ({
     const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: c.source, target: c.target }, rule.label ?? rule.kind)
     set({ edges: addEdge(edge, edges), dirty: true })
     get().validateSoon()
+    // The attachment's configuration opens right away (attribute picker for references).
+    rfStore()?.getState().resetSelectedElements()
+    set({ selectedId: null, selectedEdgeId: edge.id })
   },
 
   updateNode(id, patch) {
@@ -450,6 +478,13 @@ export const useStore = create<State>((set, get) => ({
   loadDocument(doc) {
     const { rules } = get()
     if (!rules) return
+    const missing = [...new Set(doc.nodes.map((n) => n.type).filter((t) => !rules.entry(t)))]
+    if (missing.length) {
+      void api.resolve(missing).then((r) => {
+        for (const e of Object.values(r.entries)) rules.register(e)
+        set({ catalogVersion: get().catalogVersion + 1 })
+      })
+    }
     get().commit()
     const { nodes, edges } = fromDocument(rules, doc)
     set({ nodes, edges, docName: doc.name ?? get().docName, dirty: true, selectedId: null, selectedEdgeId: null, plan: null, planStale: false })
@@ -485,6 +520,67 @@ export const useStore = create<State>((set, get) => ({
   currentDocument() {
     const { docName, nodes, edges } = get()
     return toDocument(docName, nodes, edges)
+  },
+
+  setActiveProvider(p) {
+    persist('iagram.provider', p)
+    rfStore()?.getState().resetSelectedElements()
+    set({ activeProvider: p, selectedId: null, selectedEdgeId: null })
+  },
+
+  async ensureEntry(type) {
+    const { rules } = get()
+    if (!rules) return undefined
+    const have = rules.entry(type)
+    if (have) return have
+    try {
+      const e = await api.entry(type)
+      rules.register(e)
+      set({ catalogVersion: get().catalogVersion + 1 })
+      return e
+    } catch {
+      return undefined
+    }
+  },
+
+  async loadGenerated(provider) {
+    if (get().generatedByProvider[provider]) return
+    try {
+      const r = await api.generated(provider)
+      set({ generatedByProvider: { ...get().generatedByProvider, [provider]: r.elements } })
+    } catch {
+      set({ generatedByProvider: { ...get().generatedByProvider, [provider]: [] } })
+    }
+  },
+
+  setConnectingFrom(id) {
+    set({ connectingFrom: id })
+  },
+
+  setEdgeBinding(edgeId, attr, output) {
+    get().commit(`edge:${edgeId}`)
+    set({
+      edges: get().edges.map((e) => (e.id === edgeId ? { ...e, label: attr || e.data?.label, data: { ...(e.data ?? { kind: 'references', label: 'references' }), attr, output } } : e)),
+      dirty: true,
+    })
+    get().validateSoon()
+  },
+
+  linkAttribute(sourceId, attr, targetId, output) {
+    const { rules, nodes, edges } = get()
+    const src = nodes.find((n) => n.id === sourceId)
+    const dst = nodes.find((n) => n.id === targetId)
+    if (!rules || !src || !dst) return
+    const rule = rules.connection(src.data.type, dst.data.type)
+    if (!rule) {
+      get().showToast('These elements cannot be linked')
+      return
+    }
+    get().commit()
+    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: sourceId, target: targetId, attr, output }, attr)
+    set({ edges: [...edges, edge], dirty: true, selectedEdgeId: edge.id, selectedId: null })
+    rfStore()?.getState().resetSelectedElements()
+    get().validateSoon()
   },
 
   selectEdge(id) {

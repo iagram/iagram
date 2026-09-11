@@ -17,9 +17,13 @@ export interface JSONSchema {
   /** iagram annotations: panel section and collapsed-by-default flag */
   group?: string
   advanced?: boolean
+  /** value edited as raw JSON (complex Terraform types, nested blocks) */
+  'x-json'?: boolean
+  items?: JSONSchema
 }
 
 export interface Entry {
+  terraform?: { role?: string; resource?: string; module?: string }
   id: string
   label: string
   description?: string
@@ -72,6 +76,24 @@ export interface DocEdge {
   kind: string
   source: string
   target: string
+  attr?: string
+  output?: string
+}
+
+export interface GeneratedSummary {
+  id: string
+  label: string
+  resource: string
+  service: string
+  category: string
+  icon?: string
+}
+
+export interface ConvertReport {
+  converted: number
+  dropped?: string[]
+  edges?: string[]
+  notes?: string[]
 }
 
 export interface Document {

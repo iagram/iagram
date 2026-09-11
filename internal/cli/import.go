@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/iagram/iagram/internal/document"
 	"github.com/iagram/iagram/internal/importer"
 	"github.com/iagram/iagram/internal/layout"
 )
@@ -19,14 +20,15 @@ func runImport(args []string, stdout io.Writer) error {
 	var c common
 	c.bind(fs_)
 	state := fs_.String("state", "", "terraform.tfstate or `tofu show -json` output ('-' for stdin)")
+	hclDir := fs_.String("hcl", "", "directory of Terraform configuration (.tf / .tf.json) to import")
 	out := fs_.String("o", defaultFile, "output diagram file")
 	name := fs_.String("name", "imported", "diagram name")
 	force := fs_.Bool("force", false, "overwrite the output file if it exists")
 	if err := fs_.Parse(args); err != nil {
 		return err
 	}
-	if *state == "" {
-		return fmt.Errorf("usage: iagram import --state FILE [-o iagram.json]")
+	if *state == "" && *hclDir == "" {
+		return fmt.Errorf("usage: iagram import (--state FILE | --hcl DIR) [-o iagram.iad]")
 	}
 	if exists(*out) && !*force {
 		return fmt.Errorf("%s already exists (use --force to overwrite)", *out)
@@ -35,20 +37,30 @@ func runImport(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	var raw []byte
-	if *state == "-" {
-		raw, err = io.ReadAll(os.Stdin)
+	var doc *document.Document
+	var rep importer.Report
+	if *hclDir != "" {
+		parsed, err := importer.ParseHCL(*hclDir)
+		if err != nil {
+			return err
+		}
+		doc, rep = importer.BuildHCL(cat, *name, parsed)
 	} else {
-		raw, err = os.ReadFile(*state)
+		var raw []byte
+		if *state == "-" {
+			raw, err = io.ReadAll(os.Stdin)
+		} else {
+			raw, err = os.ReadFile(*state)
+		}
+		if err != nil {
+			return err
+		}
+		res, err := importer.ParseState(raw)
+		if err != nil {
+			return err
+		}
+		doc, rep = importer.Build(cat, *name, res)
 	}
-	if err != nil {
-		return err
-	}
-	res, err := importer.ParseState(raw)
-	if err != nil {
-		return err
-	}
-	doc, rep := importer.Build(cat, *name, res)
 	layout.Auto(cat, doc)
 	if err := doc.Save(*out); err != nil {
 		return err
@@ -60,6 +72,8 @@ func runImport(args []string, stdout io.Writer) error {
 	for _, u := range rep.Unplaced {
 		fmt.Fprintln(stdout, "note:", u)
 	}
-	fmt.Fprintln(stdout, "\nConnections are not recovered from state: draw them, then run `iagram plan` to see what differs.")
+	if *hclDir == "" {
+		fmt.Fprintln(stdout, "\nArrows between curated elements are not recovered from state; references between generated elements are. Run `iagram plan` to see what differs.")
+	}
 	return nil
 }

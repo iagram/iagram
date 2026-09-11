@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useStore } from '../store'
 import type { Entry } from '../types'
 import { ROOT } from '../types'
@@ -16,12 +16,20 @@ export function Palette() {
   const nodes = useStore((s) => s.nodes)
   const setDragging = useStore((s) => s.setDragging)
 
-  const providers = useMemo(() => [...new Set((catalog?.entries ?? []).map((e) => e.provider))].sort(), [catalog])
-  const inUse = useMemo(() => [...new Set(nodes.map((n) => n.data.type.split('.')[0]))], [nodes])
-  // The tab the user picked; until then, derive it (no effect, no setState loop).
-  const [chosen, setChosen] = useState<string | null>(null)
-  const provider = chosen && providers.includes(chosen) ? chosen : inUse.find((p) => providers.includes(p)) ?? providers[0] ?? ''
-  const setProvider = setChosen
+  const provider = useStore((s) => s.activeProvider)
+  const generated = useStore((s) => s.generatedByProvider[s.activeProvider])
+  const loadGenerated = useStore((s) => s.loadGenerated)
+  const ensureEntry = useStore((s) => s.ensureEntry)
+  const [query, setQuery] = useState('')
+  useEffect(() => {
+    if (provider) void loadGenerated(provider)
+  }, [provider, loadGenerated])
+  const q = query.trim().toLowerCase()
+  const generatedMatches = useMemo(() => {
+    const list = generated ?? []
+    if (!q) return list
+    return list.filter((g) => g.label.toLowerCase().includes(q) || g.resource.includes(q) || g.service.includes(q))
+  }, [generated, q])
 
   if (!catalog || !rules) return <aside className="palette" />
 
@@ -33,6 +41,7 @@ export function Palette() {
   const groups = new Map<string, Entry[]>()
   for (const e of catalog.entries) {
     if (e.provider !== provider) continue
+    if (q && !e.label.toLowerCase().includes(q) && !e.id.includes(q)) continue
     ;(groups.get(e.category) ?? groups.set(e.category, []).get(e.category)!).push(e)
   }
 
@@ -45,16 +54,7 @@ export function Palette() {
   return (
     <aside className="palette">
       <h2>Elements</h2>
-      {providers.length > 1 && (
-        <div className="providers" role="tablist">
-          {providers.map((p) => (
-            <button key={p} role="tab" aria-selected={p === provider} className={p === provider ? 'active' : ''} onClick={() => setProvider(p)}>
-              {PROVIDER_LABEL[p] ?? p}
-              {inUse.includes(p) && <i title="used in this diagram" />}
-            </button>
-          ))}
-        </div>
-      )}
+      <input className="search" type="search" placeholder={`Search ${PROVIDER_LABEL[provider] ?? provider} elements…`} value={query} onChange={(e) => setQuery(e.target.value)} />
       <p className="hint">
         Drag onto the canvas. Highlighted items fit inside <b>{contextLabel}</b>.
       </p>
@@ -82,6 +82,38 @@ export function Palette() {
             })}
           </section>
         ))}
+      <section className="generated">
+        <h3>
+          All resources <span className="muted">({generated ? generatedMatches.length : '…'})</span>
+        </h3>
+        <p className="hint">Every {PROVIDER_LABEL[provider] ?? provider} Terraform resource type, with settings generated from the provider schema.</p>
+        {generatedMatches.slice(0, 60).map((g) => {
+          const fits = rules.canContain(contextType, g.id) || !rules.entry(g.id)
+          return (
+            <div
+              key={g.id}
+              className={`item ${fits ? 'fits' : 'dim'}`}
+              draggable
+              onMouseEnter={() => void ensureEntry(g.id)}
+              onDragStart={(ev) => {
+                void ensureEntry(g.id)
+                ev.dataTransfer.setData(DND_TYPE, g.id)
+                ev.dataTransfer.effectAllowed = 'move'
+                setDragging(g.id)
+              }}
+              onDragEnd={() => setDragging(null)}
+              title={g.resource}
+            >
+              {g.icon && <img src={`/icons/${g.icon}`} alt="" draggable={false} />}
+              <span>
+                {g.label}
+                <small className="mono">{g.resource}</small>
+              </span>
+            </div>
+          )
+        })}
+        {generatedMatches.length > 60 && <p className="hint">{generatedMatches.length - 60} more; refine the search.</p>}
+      </section>
     </aside>
   )
 }

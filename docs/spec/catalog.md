@@ -193,3 +193,27 @@ built-in ones are simply the layers iagram ships with.
 This is spec version 1. Additive changes (new optional fields) do not bump the
 version. Removing or changing the meaning of a field bumps it, and iagram keeps
 loading the previous version for at least two minor releases.
+
+## Generated elements
+
+Every resource type of a provider is available as a generated element with id
+`<provider>.res.<terraform type>`, synthesised from the provider schema
+snapshot (`schemas/<local name>.json.gz`, produced by `iagram schemas update`
+from `tofu providers schema -json`). Its settings are the configurable
+attributes of the schema (required/optional; computed-only attributes are
+outputs); complex types and nested blocks are edited as JSON. It renders as a
+plain `resource "<type>" "<node name>"` block bound to the region's provider
+alias. It may be placed in any container of its provider and may reference any
+element of its provider with a `references` arrow that sets one of its
+attributes to `${<target address>.<output>}` (lists append). Curated elements
+never reference generated ones automatically; their inputs are fixed by their
+rules.
+
+## Equivalences (`catalog/equivalences.yaml`)
+
+`iagram convert --to <provider>` uses this table: `elements` rows list the
+counterpart id per provider with property renames (`props`, `props_azure`)
+and size classes (`class` → `classes`), `regions` maps region names, and
+`roots` gives each provider's container chain and which property receives the
+region. Elements, connections and properties without a counterpart are
+reported and dropped.

@@ -14,6 +14,8 @@ export interface NodeData extends Record<string, unknown> {
 export interface EdgeData extends Record<string, unknown> {
   kind: string
   label: string
+  attr?: string
+  output?: string
 }
 
 export type RFNode = Node<NodeData, 'container' | 'resource'>
@@ -49,7 +51,7 @@ export function makeEdge(e: DocEdge, label: string): RFEdge {
     labelBgPadding: [6, 3],
     labelBgBorderRadius: 8,
     labelShowBg: true,
-    data: { kind: e.kind, label },
+    data: { kind: e.kind, label, attr: e.attr, output: e.output },
     markerEnd: { type: MarkerType.ArrowClosed },
   }
 }
@@ -76,7 +78,8 @@ export function fromDocument(rules: Rules, doc: Document): { nodes: RFNode[]; ed
   const types = new Map(doc.nodes.map((n) => [n.id, n.type]))
   const edges = doc.edges.map((e) => {
     const rule = rules.connection(types.get(e.source) ?? '', types.get(e.target) ?? '')
-    return makeEdge(e, rule?.label ?? e.kind)
+    const label = e.kind === 'references' && e.attr ? e.attr : rule?.label ?? e.kind
+    return makeEdge(e, label)
   })
   return { nodes, edges }
 }
@@ -104,7 +107,7 @@ export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[]): Docu
         },
       }
     }),
-    edges: edges.map((e) => ({ id: e.id, kind: e.data?.kind ?? '', source: e.source, target: e.target })),
+    edges: edges.map((e) => ({ id: e.id, kind: e.data?.kind ?? '', source: e.source, target: e.target, ...(e.data?.attr ? { attr: e.data.attr } : {}), ...(e.data?.output ? { output: e.data.output } : {}) })),
   }
 }
 

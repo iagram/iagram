@@ -40,7 +40,7 @@ export function Toolbar() {
       <span className="brand">iagram</span>
       <MenuBar />
       <span className="doc">
-        {docName || 'iagram.json'}
+        {docName || 'iagram.iad'}
         {dirty && <i title="unsaved changes"> ●</i>}
       </span>
 

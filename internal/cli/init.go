@@ -16,8 +16,8 @@ func runInit(args []string, stdout io.Writer) error {
 	} else if wd, err := os.Getwd(); err == nil {
 		name = filepath.Base(wd)
 	}
-	if exists(defaultFile) {
-		return fmt.Errorf("%s already exists", defaultFile)
+	if exists(defaultFile) || exists(legacyFile) {
+		return fmt.Errorf("a diagram already exists here (%s or %s)", defaultFile, legacyFile)
 	}
 	if err := document.New(name).Save(defaultFile); err != nil {
 		return err

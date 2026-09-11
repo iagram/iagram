@@ -17,7 +17,7 @@
 $ iagram init
 $ iagram up            # opens http://localhost:7777
    draw → Plan → review the colours → Apply
-$ git add iagram.json  # the diagram is a file; commit it like code
+$ git add iagram.iad   # the diagram is a file (.iad = infrastructure as diagram); commit it like code
 ```
 
 ## Contents
@@ -46,7 +46,8 @@ Infrastructure diagrams and infrastructure code drift apart the day after they a
 - **Placement is containment, arrows are meaning.** A node inside a subnet inside a VPC gets `subnet_id` and `vpc_id`. An arrow from a load balancer to an instance registers the target; from a workload to a bucket grants an IAM policy; from a security group to a database attaches it. The connection inspector shows exactly what each arrow does in Terraform.
 - **The plan is painted on the diagram.** Green create, amber update, red destroy, per element, with the resource list in the panel. Apply runs the exact plan you reviewed and writes outputs (IPs, endpoints, ARNs) back onto the nodes. Drift checks paint what changed outside iagram.
 - **Local, boring, auditable.** One binary. Credentials come from the same local chain the cloud CLIs use and never pass through iagram. Every outbound call the binary makes is listed in [SECURITY.md](SECURITY.md). Telemetry is off unless you turn it on.
-- **Cloud-agnostic core.** No code in iagram names a cloud. AWS, Google Cloud and Azure ship as catalog directories plus Terraform modules; a fourth is a directory of YAML and modules.
+- **Every Terraform resource, both ways.** Besides the curated elements, iagram derives an element for **every resource type of the AWS, Google and Azure providers** (3,958 today) from the providers' own schemas, with a settings panel generated from the schema and a plain `resource` block as output. References between them are arrows or attributes, kept as Terraform expressions. `iagram import --hcl` turns existing `.tf` into a diagram and `generate` turns it back: import → generate → import is a fixed point.
+- **Cloud-agnostic core.** No code in iagram names a cloud. AWS, Google Cloud and Azure ship as catalog directories plus Terraform modules; a fourth is a directory of YAML and modules. `iagram convert --to gcp` rewrites a diagram for another provider from an equivalence table.
 
 ## Install
 
@@ -71,9 +72,9 @@ iagram up                  # opens the canvas
 
 In the canvas:
 
-1. Pick a provider tab (AWS, Azure, Google Cloud) and drag an **Account** (or Project / Subscription) onto the canvas, then a **Region**, a **VPC**, **Subnets**, and the resources inside them. Containers turn green or red while you drag to show where a drop is allowed.
+1. Pick a provider canvas (AWS, Azure, Google Cloud: one canvas per provider over the same file) and drag an **Account** (or Project / Subscription) onto the canvas, then a **Region**, a **VPC**, **Subnets**, and the resources inside them. Containers turn green or red while you drag to show where a drop is allowed.
 2. Click an element to configure it in the panel on the right: typed fields, dropdowns, required markers, inline validation, grouped into sections.
-3. Connect elements by dragging from the right handle of one to the left handle of another. Only meaningful connections snap. Click an arrow to see what it does.
+3. Connect elements by dragging from the right handle of one to the left handle of another: valid targets light up green, forbidden ones show a ✕. The connection's configuration opens as soon as it attaches. You can also attach by reference from the settings panel (🔗 on an attribute).
 4. **Plan**. iagram saves, generates Terraform under `.iagram/tf/`, runs `tofu init` and `tofu plan`, streams the log, and colours the nodes.
 5. **Apply**. Confirm the summary (destroys are called out in red). Outputs appear on the nodes when it finishes.
 6. Later: **Check drift** to see what changed outside iagram; edit the diagram and Plan again to reconcile; **⋯ → Destroy infrastructure…** to tear everything down (asks you to type the diagram name).
@@ -93,16 +94,18 @@ iagram.json ──validate──▶ generate ──▶ .iagram/tf/main.tf.json +
                                                                                      └─ apply ──▶ outputs ──▶ nodes[].outputs
 ```
 
-- **`iagram.json`** is the diagram: nodes (type, name, parent, properties, layout), edges (kind, source, target). Deterministic JSON, readable diffs, versioned with a migration path. Spec: [docs/spec/document.md](docs/spec/document.md).
+- **`iagram.iad`** is the diagram (JSON inside): nodes (type, name, parent, properties, layout), edges (kind, source, target, and for references the attribute/output). Deterministic, readable diffs, versioned with a migration path. Legacy `iagram.json` still loads. Spec: [docs/spec/document.md](docs/spec/document.md).
 - **The catalog** (`catalog/<provider>/*.yaml`) is the single source of truth: one YAML file per element drives the palette entry, the drop rules, the connection rules, the settings panel, validation, the Terraform module call and the import mapping. Spec: [docs/spec/catalog.md](docs/spec/catalog.md), enforced by [`catalog/schema.json`](catalog/schema.json).
-- **Generation** emits one `module` block per node (named after the node id, `source = ./modules/<provider>/<type>`), provider blocks from account/region nodes (aliased per region, so one diagram can span regions and clouds), inputs wired from the containment chain and the arrows, and root outputs per node. Modules are embedded in the binary and materialised next to the config, so `.iagram/tf/` is plain Terraform you can inspect or eject to at any time.
+- **Two tiers of elements.** *Curated* elements (39) are opinionated modules with semantic arrows (`routes_to`, `protects`, …). *Generated* elements exist for every other resource type: the palette's "All resources" section, searchable, each with settings derived from `tofu providers schema -json` (shipped compressed in the binary, refresh with `iagram schemas update`). A generated element renders as a plain `resource` block named after the element, so imported configurations regenerate with the same addresses; its arrows are `references` that set an attribute to `${type.name.attr}`.
+- **Generation** emits one `module` block per curated node and one `resource` block per generated node (named after the node id, `source = ./modules/<provider>/<type>`), provider blocks from account/region nodes (aliased per region, so one diagram can span regions and clouds), inputs wired from the containment chain and the arrows, and root outputs per node. Modules are embedded in the binary and materialised next to the config, so `.iagram/tf/` is plain Terraform you can inspect or eject to at any time.
 - **Execution** is OpenTofu, run as a subprocess that inherits your shell environment. Plan and apply stream over a local job API; the plan JSON is mapped back to nodes by module name. State is local under `.iagram/tf/` by default, like a fresh Terraform project (configure a remote backend there if you want one).
 
 ## The editor
 
 | Area | What it does |
 |---|---|
-| **Palette** (left) | Provider tabs; elements grouped by category; items that fit the selected container are highlighted, the rest dimmed. Drag onto the canvas. |
+| **Canvas tabs** | One canvas per provider over the same `.iad`; counts per provider. Plan/Apply cover the whole file. |
+| **Palette** (left) | Search; curated elements grouped by category; **All resources**: every provider resource type. Items that fit the selected container are highlighted, the rest dimmed. Drag onto the canvas. |
 | **Canvas** | Nested containers (account → region → VPC → subnet), typed arrows with labels, plan and drift overlays, minimap. Shift-drag to select several, ⌘-click to add. Drag an element into another container to move it there (refused with a message if the catalog forbids it). |
 | **Settings panel** (right) | Name, properties in sections (`Compute`, `Networking`, `Advanced`…), validation messages, planned resource changes, drift details, live outputs after apply (click to copy), delete. Click an arrow for the connection inspector. |
 | **Menubar and toolbar** | File (new, open, import from Terraform state, save, download, export Terraform / PNG / SVG), Edit (undo, redo, clipboard, select all), View (zoom, labels, minimap, snap, theme), Infrastructure (plan, apply, drift, destroy, log), Help (shortcuts, docs, about); quick buttons for undo/redo, zoom, labels, theme, Save, Check drift, Plan, Apply. |
@@ -145,11 +148,16 @@ Modules default to the secure option: encrypted storage, IMDSv2, private databas
 ## Bringing existing infrastructure
 
 ```
-iagram import --state terraform.tfstate -o iagram.json      # or: tofu show -json | iagram import --state - -o iagram.json
+iagram import --hcl ./infra -o iagram.iad          # from Terraform configuration
+iagram import --state terraform.tfstate -o iagram.iad   # from state (or: tofu show -json | iagram import --state -)
 iagram up
 ```
 
-Import rebuilds nodes and containment from any Terraform state (format 4, or `show -json` output) using the catalog's import mappings, synthesises account/region containers from ARNs, project attributes or ARM ids, and lays everything out in a grid. Arrows are not recovered: draw them, then `plan` shows the gap. The report lists resource types with no mapping and elements placed by fallback. Example: `examples/import/`.
+From **configuration**, every `resource` block becomes a generated element with its literal attributes; references (`aws_vpc.main.id`) become arrows, other expressions (`var.x`, functions) are kept verbatim, provider blocks become account/region containers, and `variable`/`module`/`data` blocks are reported as skipped. `iagram generate` then produces an equivalent configuration, and importing that again yields the same diagram.
+
+From **state**, curated mappings recover nodes and containment; every other resource type falls back to its generated element with the configurable attributes from state, and attribute values that equal another resource's id become reference arrows. Example: `examples/import/`.
+
+Convert a diagram between providers with `iagram convert --to azure` (or File → Convert diagram to…): elements, size classes and regions map through [`catalog/equivalences.yaml`](catalog/equivalences.yaml); whatever has no counterpart is listed.
 
 ## Running in Docker
 
@@ -194,7 +202,10 @@ internal/layout        grid auto-layout for imports
 internal/jobs          one-at-a-time background jobs with streaming logs
 internal/server        local HTTP API + embedded UI
 internal/telemetry     opt-in usage events (whitelisted)
-catalog/               the specification of what can be drawn (YAML + icons)
+catalog/               the specification of what can be drawn (YAML + icons + equivalences)
+schemas/               compact provider schema snapshots (every resource type)
+internal/tfschema      provider schema extraction and registry
+internal/convert       cross-provider conversion
 modules/               Terraform modules embedded in the binary
 web/                   React + React Flow editor (built into internal/web/dist)
 examples/              diagrams validated in CI against real providers
@@ -227,7 +238,8 @@ Releases: tag `vX.Y.Z` and push; GoReleaser builds binaries, checksums, GHCR ima
 | 5 | Drag re-parenting, multi-select, clipboard; GoReleaser, Homebrew, install script; Kubernetes, messaging and data elements | done |
 | 6 | Dark theme, connection inspector, `iagram destroy`, DNS/CDN elements, grouped settings | done |
 | 7 | Docker Compose, pip launcher, comprehensive docs | done |
-| next | Visual identity; first real plan/apply validation per cloud; more elements | |
+| 8 | `.iad` files, generated elements for every provider resource type, HCL import and lossless round trip, per-provider canvases, connection UX, cross-provider convert, menubar | done |
+| next | Visual identity; validation on real GCP/Azure accounts | |
 
 Early software: the shipped catalogs are validated against the real providers, but the first production apply should be reviewed plan by plan, as with any Terraform.
 

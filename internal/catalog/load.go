@@ -17,7 +17,7 @@ func Load(fsys fs.FS) (*Catalog, error) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(p, ".yaml") || strings.HasPrefix(p, "catalog/icons/") {
+		if d.IsDir() || !strings.HasSuffix(p, ".yaml") || strings.HasPrefix(p, "catalog/icons/") || path.Dir(p) == "catalog" {
 			return nil
 		}
 		files = append(files, p)

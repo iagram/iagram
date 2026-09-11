@@ -5,6 +5,7 @@ import (
 
 	"github.com/iagram/iagram"
 	"github.com/iagram/iagram/internal/catalog"
+	"github.com/iagram/iagram/internal/tfschema"
 )
 
 func load(t *testing.T) *catalog.Catalog {
@@ -108,4 +109,47 @@ func TestReservedPropertyNamesRejected(t *testing.T) {
 			t.Errorf("%s: module %s missing", e.ID, e.Terraform.Module)
 		}
 	}
+}
+
+func TestGeneratedElementsFromRegistry(t *testing.T) {
+	c := load(t)
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	id, ok := c.GeneratedID("google_pubsub_subscription")
+	if !ok || id != "gcp.res.google_pubsub_subscription" {
+		t.Fatalf("id = %q", id)
+	}
+	e, ok := c.Get(id)
+	if !ok || e.Kind != catalog.KindLeaf || e.Terraform.Role != catalog.RoleResource || e.Terraform.Resource != "google_pubsub_subscription" {
+		t.Fatalf("entry = %+v", e)
+	}
+	if e.Label != "Pubsub Subscription" || e.Provider != "gcp" {
+		t.Errorf("label=%q provider=%q", e.Label, e.Provider)
+	}
+	if !contains(e.AllowedParents, "gcp.project") || !contains(e.AllowedParents, "gcp.vpc") {
+		t.Errorf("parents = %v", e.AllowedParents)
+	}
+	if _, ok := c.Connection(id, "gcp.pubsub_topic"); !ok {
+		t.Error("generated -> curated same-provider reference should be allowed")
+	}
+	if _, ok := c.Connection(id, "aws.s3_bucket"); ok {
+		t.Error("cross-provider reference must be refused")
+	}
+	if _, ok := c.Connection("gcp.pubsub_topic", id); ok {
+		t.Error("curated -> generated has no rule")
+	}
+	if n := len(c.Generated("aws")); n < 1500 {
+		t.Errorf("aws generated = %d", n)
+	}
+	if _, ok := c.Get("aws.res.aws_not_a_thing"); ok {
+		t.Error("unknown type must not synthesise")
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

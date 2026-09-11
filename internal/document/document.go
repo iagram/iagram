@@ -44,12 +44,16 @@ type Layout struct {
 	H float64 `json:"h,omitempty"`
 }
 
-// Edge is a typed relationship between two nodes.
+// Edge is a typed relationship between two nodes. For "references" edges from
+// a generated element, Attr names the source attribute that receives the
+// reference and Output the target attribute/output referenced (default id).
 type Edge struct {
 	ID     string `json:"id"`
 	Kind   string `json:"kind"`
 	Source string `json:"source"`
 	Target string `json:"target"`
+	Attr   string `json:"attr,omitempty"`
+	Output string `json:"output,omitempty"`
 }
 
 // New returns an empty document.

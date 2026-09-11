@@ -23,6 +23,9 @@ export function MenuBar() {
   const { zoomIn, zoomOut, fitView, zoomTo, getNodes } = useReactFlow()
   const fileInput = useRef<HTMLInputElement>(null)
   const stateInput = useRef<HTMLInputElement>(null)
+  const hclInput = useRef<HTMLInputElement>(null)
+  const providers = [...new Set((s.catalog?.entries ?? []).map((e) => e.provider))].sort()
+  const PROVIDER_LABEL: Record<string, string> = { aws: 'AWS', gcp: 'Google Cloud', azure: 'Azure' }
 
   useEffect(() => {
     if (!open) return
@@ -104,14 +107,44 @@ export function MenuBar() {
     })
   }
 
+  const importHCL = (f: File) => {
+    f.text().then(async (txt) => {
+      try {
+        const r = await api.importHCL(txt, f.name.replace(/\.(tf|json)$/, ''), f.name.endsWith('.json') ? 'json' : 'hcl')
+        s.loadDocument(r.document)
+        s.showToast(`${r.report.imported} resource(s) imported from Terraform${r.report.skipped?.length ? `; skipped: ${r.report.skipped.join(', ')}` : ''}`)
+      } catch (e) {
+        s.showToast(`Import failed: ${(e as Error).message}`)
+      }
+    })
+  }
+  const convertTo = async (to: string) => {
+    if (s.dirty) await s.save()
+    try {
+      const r = await api.convert(to)
+      s.loadDocument(r.document)
+      s.setActiveProvider(to)
+      const parts = [`${r.report.converted} element(s) converted to ${PROVIDER_LABEL[to] ?? to}`]
+      if (r.report.dropped?.length) parts.push(`${r.report.dropped.length} dropped`)
+      if (r.report.edges?.length) parts.push(`${r.report.edges.length} connection(s) dropped`)
+      s.showToast(parts.join(', ') + '. Review, then Save.')
+      if (r.report.dropped?.length || r.report.notes?.length) console.info('convert report', r.report)
+    } catch (e) {
+      s.showToast(`Convert failed: ${(e as Error).message}`)
+    }
+  }
+
   const menus: Record<string, Item[]> = {
     File: [
       { label: 'New diagram', onClick: () => (s.nodes.length === 0 || confirm('Clear the canvas? The file is not touched until you save.')) && s.newDiagram() },
-      { label: 'Open iagram.json…', onClick: () => fileInput.current?.click() },
+      { label: 'Open .iad file…', onClick: () => fileInput.current?.click() },
+      { label: 'Import from Terraform configuration (.tf)…', onClick: () => hclInput.current?.click() },
       { label: 'Import from Terraform state…', onClick: () => stateInput.current?.click() },
       { sep: true },
+      ...providers.filter((p) => p !== s.activeProvider).map((p) => ({ label: `Convert diagram to ${PROVIDER_LABEL[p] ?? p}…`, onClick: () => void convertTo(p), disabled: s.nodes.length === 0 })),
+      { sep: true },
       { label: 'Save', shortcut: '⌘S', onClick: () => void s.save(), disabled: !s.dirty || s.saving },
-      { label: 'Download iagram.json', onClick: () => download(`${s.docName || 'iagram'}.json`, JSON.stringify(s.currentDocument(), null, 2) + '\n') },
+      { label: 'Download .iad', onClick: () => download(`${s.docName || 'iagram'}.iad`, JSON.stringify(s.currentDocument(), null, 2) + '\n') },
       { sep: true },
       {
         label: 'Export Terraform (main.tf.json)',
@@ -206,7 +239,8 @@ export function MenuBar() {
           )}
         </span>
       ))}
-      <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(e) => e.target.files?.[0] && (openFile(e.target.files[0]), (e.target.value = ''))} />
+      <input ref={hclInput} type="file" accept=".tf,.json" hidden onChange={(e) => e.target.files?.[0] && (importHCL(e.target.files[0]), (e.target.value = ''))} />
+      <input ref={fileInput} type="file" accept=".iad,.json,application/json" hidden onChange={(e) => e.target.files?.[0] && (openFile(e.target.files[0]), (e.target.value = ''))} />
       <input ref={stateInput} type="file" accept=".tfstate,.json,application/json" hidden onChange={(e) => e.target.files?.[0] && (importState(e.target.files[0]), (e.target.value = ''))} />
     </div>
   )

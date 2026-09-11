@@ -33,6 +33,7 @@ func runUp(args []string, stdout io.Writer, tel *telemetry.Client) error {
 	if err := fs_.Parse(args); err != nil {
 		return err
 	}
+	c.resolveFile()
 	if !exists(c.file) {
 		return fmt.Errorf("%s not found; run `iagram init` first", c.file)
 	}

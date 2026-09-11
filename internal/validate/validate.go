@@ -132,6 +132,16 @@ func (v *validator) hasCycle(n *document.Node) bool {
 }
 
 func (v *validator) props() {
+	// Attributes bound through a references edge count as set.
+	bound := map[string]map[string]bool{}
+	for _, e := range v.d.Edges {
+		if e.Kind == catalog.ReferencesKind && e.Attr != "" {
+			if bound[e.Source] == nil {
+				bound[e.Source] = map[string]bool{}
+			}
+			bound[e.Source][e.Attr] = true
+		}
+	}
 	for i := range v.d.Nodes {
 		n := &v.d.Nodes[i]
 		e, ok := v.c.Get(n.Type)
@@ -139,6 +149,9 @@ func (v *validator) props() {
 			continue
 		}
 		for _, req := range e.Required() {
+			if bound[n.ID][req] {
+				continue
+			}
 			if val, ok := n.Props[req]; !ok || val == "" || val == nil {
 				v.add(Problem{Level: Error, Node: n.ID, Field: req, Message: fmt.Sprintf("%s is required", req)})
 			}
@@ -218,6 +231,15 @@ func (v *validator) edges() {
 		if !ok {
 			v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("%s cannot connect to %s", src.Name, dst.Name)})
 			continue
+		}
+		if rule.Kind == catalog.ReferencesKind {
+			if e.Attr == "" {
+				v.add(Problem{Level: Warning, Edge: e.ID, Message: fmt.Sprintf("%s -> %s: choose which attribute of %s receives the reference", src.Name, dst.Name, src.Name)})
+			} else if se, ok := v.c.Get(src.Type); ok {
+				if _, has := se.Property(e.Attr); !has {
+					v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("%s has no attribute %q", src.Name, e.Attr)})
+				}
+			}
 		}
 		if e.Kind != rule.Kind {
 			v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("connection %s -> %s must be of kind %q", src.Name, dst.Name, rule.Kind)})

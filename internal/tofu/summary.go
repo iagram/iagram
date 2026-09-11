@@ -79,6 +79,10 @@ func Summarize(p *tfjson.Plan, moduleToNode map[string]string) Summary {
 			mod, _, _ := strings.Cut(rest, ".")
 			mod, _, _ = strings.Cut(mod, "[")
 			node = moduleToNode[mod]
+		} else {
+			// Generated elements are root resources: "<type>.<name>[index]".
+			addr, _, _ := strings.Cut(rc.Address, "[")
+			node = moduleToNode[addr]
 		}
 		if node == "" {
 			if change.Action != ActionNoop {

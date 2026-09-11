@@ -39,9 +39,26 @@ type gen struct {
 	nodes map[string]*document.Node
 	res   *Result
 
-	modules   map[string]map[string]any // module name -> block
+	modules   map[string]map[string]any            // module name -> block
+	resources map[string]map[string]map[string]any // tf type -> name -> block
 	providers map[string][]map[string]any
 	aliases   map[string]string // node id (region/account) -> alias
+}
+
+// Address returns the Terraform address prefix of a node: module.<name> for
+// curated elements, <type>.<name> for generated ones.
+func (g *gen) address(n *document.Node) (string, bool) {
+	e, ok := g.c.Get(n.Type)
+	if !ok || e.Terraform == nil {
+		return "", false
+	}
+	switch e.Terraform.Role {
+	case catalog.RoleModule:
+		return "module." + sanitize(n.ID), true
+	case catalog.RoleResource:
+		return e.Terraform.Resource + "." + sanitize(n.Name), true
+	}
+	return "", false
 }
 
 // Run generates Terraform for d.
@@ -50,6 +67,7 @@ func Run(c *catalog.Catalog, d *document.Document) (*Result, error) {
 		c: c, d: d, nodes: d.Index(),
 		res:       &Result{ModuleToNode: map[string]string{}},
 		modules:   map[string]map[string]any{},
+		resources: map[string]map[string]map[string]any{},
 		providers: map[string][]map[string]any{},
 		aliases:   map[string]string{},
 	}
@@ -59,7 +77,11 @@ func Run(c *catalog.Catalog, d *document.Document) (*Result, error) {
 	if err := g.moduleBlocks(); err != nil {
 		return nil, err
 	}
+	if err := g.resourceBlocks(); err != nil {
+		return nil, err
+	}
 	g.edgeWiring()
+	g.referenceWiring()
 	g.assemble()
 	return g.res, nil
 }
@@ -71,12 +93,12 @@ func (g *gen) providerBlocks() error {
 	for i := range g.d.Nodes {
 		n := &g.d.Nodes[i]
 		e, ok := g.c.Get(n.Type)
-		if !ok || e.Terraform == nil || e.Terraform.Role != "region" {
+		if !ok || e.Terraform == nil || e.Terraform.Role != catalog.RoleRegion {
 			continue
 		}
 		args := map[string]any{}
 		for _, anc := range g.ancestors(n) {
-			if ae, ok := g.c.Get(anc.Type); ok && ae.Terraform != nil && ae.Terraform.Role == "account" {
+			if ae, ok := g.c.Get(anc.Type); ok && ae.Terraform != nil && ae.Terraform.Role == catalog.RoleAccount {
 				merge(args, render(ae.Terraform.ProviderArgs, anc.Props))
 			}
 		}
@@ -92,7 +114,7 @@ func (g *gen) providerBlocks() error {
 	for i := range g.d.Nodes {
 		n := &g.d.Nodes[i]
 		e, ok := g.c.Get(n.Type)
-		if !ok || e.Terraform == nil || e.Terraform.Role != "account" {
+		if !ok || e.Terraform == nil || e.Terraform.Role != catalog.RoleAccount {
 			continue
 		}
 		if g.hasRegionChild(n) {
@@ -128,7 +150,7 @@ func (g *gen) hasRegionChild(acct *document.Node) bool {
 		if n.Parent != acct.ID {
 			continue
 		}
-		if e, ok := g.c.Get(n.Type); ok && e.Terraform != nil && e.Terraform.Role == "region" {
+		if e, ok := g.c.Get(n.Type); ok && e.Terraform != nil && e.Terraform.Role == catalog.RoleRegion {
 			return true
 		}
 	}
@@ -146,7 +168,7 @@ func (g *gen) moduleBlocks() error {
 			g.res.Warnings = append(g.res.Warnings, fmt.Sprintf("%s (%s) has no terraform mapping; skipped", n.Name, e.Label))
 			continue
 		}
-		if e.Terraform.Role != "module" {
+		if e.Terraform.Role != catalog.RoleModule {
 			continue
 		}
 		name := sanitize(n.ID)
@@ -211,6 +233,89 @@ func (g *gen) moduleBlocks() error {
 	return nil
 }
 
+// resourceBlocks emits one plain resource block per generated element, with
+// every property as an attribute. The Terraform resource name is the node
+// name, so an imported configuration regenerates with the same addresses.
+func (g *gen) resourceBlocks() error {
+	for i := range g.d.Nodes {
+		n := &g.d.Nodes[i]
+		e, ok := g.c.Get(n.Type)
+		if !ok || e.Terraform == nil || e.Terraform.Role != catalog.RoleResource {
+			continue
+		}
+		tfType := e.Terraform.Resource
+		name := sanitize(n.Name)
+		if g.resources[tfType] == nil {
+			g.resources[tfType] = map[string]map[string]any{}
+		}
+		if _, dup := g.resources[tfType][name]; dup {
+			return fmt.Errorf("two %s resources named %q", tfType, n.Name)
+		}
+		block := map[string]any{}
+		for k, v := range n.Props {
+			if v == nil || v == "" {
+				continue
+			}
+			block[k] = v
+		}
+		if alias := g.providerAlias(n, e.Provider); alias != "" {
+			local := g.localName(e.Provider)
+			block["provider"] = local + "." + alias
+		}
+		// Tag the resource for plan mapping when the schema has tags and none were set.
+		if props, _ := e.Props["properties"].(map[string]any); props != nil {
+			if _, hasTags := props["tags"]; hasTags {
+				if _, set := block["tags"]; !set {
+					block["tags"] = map[string]any{"iagram_node": n.ID, "iagram_diagram": g.d.Name, "managed_by": "iagram"}
+				}
+			}
+		}
+		g.resources[tfType][name] = block
+		g.res.ModuleToNode[tfType+"."+name] = n.ID
+	}
+	return nil
+}
+
+// referenceWiring resolves "references" edges: the source attribute gets
+// "${<target address>.<output>}" (appended when the attribute is a list).
+func (g *gen) referenceWiring() {
+	for _, ed := range g.d.Edges {
+		if ed.Kind != catalog.ReferencesKind || ed.Attr == "" {
+			continue
+		}
+		src, sok := g.nodes[ed.Source]
+		dst, dok := g.nodes[ed.Target]
+		if !sok || !dok {
+			continue
+		}
+		se, ok := g.c.Get(src.Type)
+		if !ok || se.Terraform == nil || se.Terraform.Role != catalog.RoleResource {
+			continue
+		}
+		addr, ok := g.address(dst)
+		if !ok {
+			continue
+		}
+		out := ed.Output
+		if out == "" {
+			out = "id"
+		}
+		ref := "${" + addr + "." + out + "}"
+		block := g.resources[se.Terraform.Resource][sanitize(src.Name)]
+		if block == nil {
+			continue
+		}
+		schema, _ := se.Property(ed.Attr)
+		if schema != nil && schema["type"] == "array" {
+			list, _ := block[ed.Attr].([]any)
+			list = append(list, ref)
+			block[ed.Attr] = list
+		} else {
+			block[ed.Attr] = ref
+		}
+	}
+}
+
 // edgeWiring appends "${module.X.output}" to the list input named by the
 // rule, on whichever side the rule says.
 func (g *gen) edgeWiring() {
@@ -271,6 +376,17 @@ func (g *gen) assemble() {
 	for name, id := range g.res.ModuleToNode {
 		n := g.nodes[id]
 		e, _ := g.c.Get(n.Type)
+		if e.Terraform.Role == catalog.RoleResource {
+			// Generated elements: id (and arn when present) are enough to write back.
+			vals := map[string]any{"id": fmt.Sprintf("${%s.id}", name)}
+			for _, o := range e.Outputs {
+				if o == "arn" {
+					vals["arn"] = fmt.Sprintf("${%s.arn}", name)
+				}
+			}
+			outputs[sanitize(name)] = map[string]any{"value": vals, "sensitive": true}
+			continue
+		}
 		if len(e.Outputs) == 0 {
 			continue
 		}
@@ -287,6 +403,9 @@ func (g *gen) assemble() {
 	}
 	if len(g.modules) > 0 {
 		cfg["module"] = g.modules
+	}
+	if len(g.resources) > 0 {
+		cfg["resource"] = g.resources
 	}
 	if len(outputs) > 0 {
 		cfg["output"] = outputs
@@ -310,7 +429,7 @@ func (g *gen) providerAlias(n *document.Node, provider string) string {
 		if !ok || e.Provider != provider || e.Terraform == nil {
 			continue
 		}
-		if e.Terraform.Role == "region" || e.Terraform.Role == "account" {
+		if e.Terraform.Role == catalog.RoleRegion || e.Terraform.Role == catalog.RoleAccount {
 			if a, ok := g.aliases[anc.ID]; ok {
 				return a
 			}
@@ -359,7 +478,7 @@ func (g *gen) resolveAncestorRef(n *document.Node, ref string) (string, bool) {
 		return "", false
 	}
 	e, ok := g.c.Get(anc.Type)
-	if !ok || e.Terraform == nil || e.Terraform.Role != "module" {
+	if !ok || e.Terraform == nil || e.Terraform.Role != catalog.RoleModule {
 		return "", false
 	}
 	return fmt.Sprintf("${module.%s.%s}", sanitize(anc.ID), output), true

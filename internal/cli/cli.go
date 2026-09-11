@@ -15,6 +15,7 @@ import (
 	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
 	"github.com/iagram/iagram/internal/telemetry"
+	"github.com/iagram/iagram/internal/tfschema"
 	"github.com/iagram/iagram/internal/tofu"
 )
 
@@ -54,8 +55,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		doc, err = runDestroy(args[1:], stdout)
 	case "import":
 		err = runImport(args[1:], stdout)
+	case "convert":
+		err = runConvert(args[1:], stdout)
 	case "catalog":
 		err = runCatalog(args[1:], stdout)
+	case "schemas":
+		err = runSchemas(args[1:], stdout)
 	case "telemetry":
 		err = runTelemetry(args[1:], stdout, tel)
 	case "version", "-v", "--version":
@@ -124,7 +129,7 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `iagram: infrastructure as diagram.
 
 Usage:
-  iagram init [name]           create iagram.json in the current directory
+  iagram init [name]           create iagram.iad in the current directory
   iagram up [flags]            open the canvas at http://localhost:7777
   iagram validate [flags]      check iagram.json against the catalog
   iagram generate [flags]      write Terraform to .iagram/tf/main.tf.json
@@ -133,12 +138,15 @@ Usage:
   iagram drift [flags]         refresh-only plan: report infrastructure that no longer matches state
   iagram destroy [--yes]       tear down everything the diagram manages (asks for the diagram name)
   iagram import --state FILE   build a diagram from an existing Terraform state
+  iagram import --hcl DIR      build a diagram from Terraform configuration (.tf / .tf.json)
+  iagram convert --to PROVIDER rewrite the diagram for another cloud (aws, gcp, azure)
+  iagram schemas [update]      show or refresh the embedded provider schema snapshots
   iagram catalog check DIR     validate an external catalog directory
   iagram telemetry on|off|status
   iagram version
 
 Flags for up/validate/generate/plan/apply:
-  -f, --file FILE      diagram file (default "iagram.json")
+  -f, --file FILE      diagram file (default "iagram.iad"; legacy iagram.json is found automatically)
       --catalog DIR    layer an extra catalog directory (repeatable)
   -p, --port PORT      listen port for up (default 7777)
       --host ADDR      listen address for up (default 127.0.0.1; 0.0.0.0 inside Docker)
@@ -149,7 +157,11 @@ shell's credential chain exactly as terraform does. See SECURITY.md.
 `)
 }
 
-const defaultFile = "iagram.json"
+// DefaultFile is the diagram file name. ".iad" = infrastructure as diagram;
+// the content is JSON. Legacy "iagram.json" is still found when present.
+const defaultFile = "iagram.iad"
+
+const legacyFile = "iagram.json"
 
 // common flags shared by the diagram commands.
 type common struct {
@@ -176,10 +188,20 @@ func (c *common) loadCatalog() (*catalog.Catalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load catalog: %w", err)
 	}
+	home, _ := tofu.Home()
+	cat.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, filepath.Join(home, "schemas"))})
 	return cat, nil
 }
 
+// resolveFile falls back to the legacy iagram.json when the default .iad is absent.
+func (c *common) resolveFile() {
+	if c.file == defaultFile && !exists(defaultFile) && exists(legacyFile) {
+		c.file = legacyFile
+	}
+}
+
 func (c *common) loadDocument() (*document.Document, error) {
+	c.resolveFile()
 	if !exists(c.file) {
 		return nil, fmt.Errorf("%s not found; run `iagram init` first", c.file)
 	}

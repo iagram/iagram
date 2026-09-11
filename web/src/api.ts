@@ -1,5 +1,5 @@
 import type { Catalog, Document, DriftResult, Job, PlanResult, Validation } from './types'
-import type { ImportReport } from './types'
+import type { ConvertReport, Entry, GeneratedSummary, ImportReport } from './types'
 
 // Browser fetch failures surface as an opaque TypeError; say what it means here.
 const rawFetch = globalThis.fetch.bind(globalThis)
@@ -50,4 +50,13 @@ export const api = {
       json<{ document: Document; report: ImportReport; validation: Validation }>(r),
     ),
   health: () => fetch('/api/health').then((r) => json<{ ok: boolean; version: string; document: string }>(r)),
+  generated: (provider: string) => fetch(`/api/resources?provider=${encodeURIComponent(provider)}`).then((r) => json<{ elements: GeneratedSummary[] }>(r)),
+  entry: (id: string) => fetch(`/api/resources/${encodeURIComponent(id)}`).then((r) => json<Entry>(r)),
+  resolve: (ids: string[]) =>
+    fetch('/api/resources/resolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) }).then((r) => json<{ entries: Record<string, Entry> }>(r)),
+  importHCL: (raw: string, name: string, format: 'hcl' | 'json') =>
+    fetch(`/api/import/hcl?name=${encodeURIComponent(name)}&format=${format}`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: raw }).then((r) =>
+      json<{ document: Document; report: ImportReport; validation: Validation }>(r),
+    ),
+  convert: (to: string) => fetch(`/api/convert?to=${encodeURIComponent(to)}`, { method: 'POST' }).then((r) => json<{ document: Document; report: ConvertReport }>(r)),
 }

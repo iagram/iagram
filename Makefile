@@ -24,7 +24,7 @@ test:
 lint:
 	gofmt -l . | tee /dev/stderr | test -z "$$(cat)"
 
-## dev: run the API on :7777 and Vite with HMR on :5173 (needs an iagram.json in cwd)
+## dev: run the API on :7777 and Vite with HMR on :5173 (needs an iagram.iad in cwd)
 dev:
 	go run ./cmd/iagram up --no-open & \
 	cd web && npm run dev

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useStore } from '../store'
 import type { JSONSchema, Problem } from '../types'
 
@@ -23,6 +23,9 @@ export function PropertyPanel() {
   const edge = useStore((s) => s.edges.find((e) => e.id === s.selectedEdgeId))
   const removeEdge = useStore((s) => s.removeEdge)
   const catalog = useStore((s) => s.catalog)
+  const setEdgeBinding = useStore((s) => s.setEdgeBinding)
+  const linkAttribute = useStore((s) => s.linkAttribute)
+  useStore((s) => s.catalogVersion)
   const selIds = useMemo(() => allNodes.filter((n) => n.selected).map((n) => n.id), [allNodes])
   const selectedCount = selIds.length
   if (selectedEdgeId && edge && rules) {
@@ -45,16 +48,25 @@ export function PropertyPanel() {
           {rules.entry(src?.data.type ?? '')?.label} <i>{rule?.label ?? edge.data?.kind}</i> {rules.entry(dst?.data.type ?? '')?.label}
         </p>
         <p className="muted mono">kind: {edge.data?.kind}</p>
-        {tf ? (
+        {edge.data?.kind === 'references' && src && dst && (
+          <ReferenceBinding
+            sourceType={src.data.type}
+            targetType={dst.data.type}
+            attr={edge.data.attr ?? ''}
+            output={edge.data.output ?? 'id'}
+            onChange={(attr, output) => setEdgeBinding(edge.id, attr, output)}
+          />
+        )}
+        {edge.data?.kind !== 'references' && tf ? (
           <details open>
             <summary>What this arrow does in Terraform</summary>
             <p className="muted">
               Adds <span className="mono">{tf.value}</span> to the <span className="mono">{tf.input}</span> input of the {tf.set === 'from' ? 'source' : 'target'} module.
             </p>
           </details>
-        ) : (
+        ) : edge.data?.kind !== 'references' ? (
           <p className="muted">This arrow is documentation only; it does not change the generated Terraform.</p>
-        )}
+        ) : null}
         {reqs.length > 0 && (
           <p className="muted">
             Requires: <span className="mono">{reqs.join(', ')}</span>
@@ -122,6 +134,11 @@ export function PropertyPanel() {
         <FieldProblems problems={byField.name} />
       </label>
 
+      {rules.isGenerated(node.data.type) && (
+        <p className="muted">
+          Generated from the provider schema for <span className="mono">{entry?.terraform?.resource}</span>. Use 🔗 on an attribute to reference another element, or draw an arrow.
+        </p>
+      )}
       {groupFields(schema).map(({ title, fields, advanced }) => (
         <details key={title} open={!advanced} className="section">
           <summary>
@@ -129,7 +146,18 @@ export function PropertyPanel() {
             {fields.some(([k]) => byField[k]?.some((p) => p.level === 'error')) && <span className="badge error">!</span>}
           </summary>
           {fields.map(([k, s]) => (
-            <Field key={k} name={k} schema={s} required={required.has(k)} value={node.data.props[k]} onChange={(v) => setProp(k, v)} problems={byField[k]} />
+            <Field
+              key={k}
+              name={k}
+              schema={s}
+              required={required.has(k)}
+              value={node.data.props[k]}
+              onChange={(v) => setProp(k, v)}
+              problems={byField[k]}
+              linkable={rules.isGenerated(node.data.type) && (s.type === 'string' || s.type === 'array') && !s['x-json']}
+              onLink={(targetId, output) => linkAttribute(node.id, k, targetId, output)}
+              nodeId={node.id}
+            />
           ))}
         </details>
       ))}
@@ -228,11 +256,73 @@ function groupFields(schema: JSONSchema): { title: string; fields: [string, JSON
   return out
 }
 
-function Field({ name, schema, required, value, onChange, problems }: { name: string; schema: JSONSchema; required: boolean; value: unknown; onChange: (v: unknown) => void; problems?: Problem[] }) {
+function Field({
+  name,
+  schema,
+  required,
+  value,
+  onChange,
+  problems,
+  linkable,
+  onLink,
+  nodeId,
+}: {
+  name: string
+  schema: JSONSchema
+  required: boolean
+  value: unknown
+  onChange: (v: unknown) => void
+  problems?: Problem[]
+  linkable?: boolean
+  onLink?: (targetId: string, output: string) => void
+  nodeId?: string
+}) {
   const title = schema.title ?? name
+  const [linking, setLinking] = useState(false)
+  const [jsonText, setJsonText] = useState<string | null>(null)
+  const [jsonError, setJsonError] = useState<string | null>(null)
   let control: JSX.Element
-  if (schema.type === 'boolean') {
+  if (schema['x-json']) {
+    const shown = jsonText ?? (value === undefined ? '' : JSON.stringify(value, null, 2))
+    control = (
+      <textarea
+        className="mono"
+        rows={Math.min(12, Math.max(3, shown.split('\n').length))}
+        value={shown}
+        placeholder={schema.type === 'array' ? '[ { … } ]' : '{ … }'}
+        onChange={(e) => setJsonText(e.target.value)}
+        onBlur={() => {
+          if (jsonText === null) return
+          if (jsonText.trim() === '') {
+            onChange(undefined)
+          } else {
+            try {
+              onChange(JSON.parse(jsonText))
+              setJsonError(null)
+            } catch (err) {
+              setJsonError((err as Error).message)
+              return
+            }
+          }
+          setJsonText(null)
+        }}
+      />
+    )
+  } else if (schema.type === 'boolean') {
     control = <input type="checkbox" checked={Boolean(value ?? schema.default ?? false)} onChange={(e) => onChange(e.target.checked)} />
+  } else if (schema.type === 'array') {
+    const list = Array.isArray(value) ? (value as unknown[]).map(String) : []
+    control = (
+      <textarea
+        rows={Math.min(6, Math.max(2, list.length + 1))}
+        value={list.join('\n')}
+        placeholder="one value per line"
+        onChange={(e) => {
+          const items = e.target.value.split('\n').map((x) => x.trim()).filter(Boolean)
+          onChange(items.length ? (schema.items?.type === 'number' ? items.map(Number) : items) : undefined)
+        }}
+      />
+    )
   } else if (schema.enum) {
     control = (
       <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)}>
@@ -263,11 +353,119 @@ function Field({ name, schema, required, value, onChange, problems }: { name: st
     <label className={`field ${schema.type === 'boolean' ? 'inline' : ''}`}>
       <span>
         {title} {required && <em>*</em>}
+        {linkable && (
+          <button type="button" className="link-btn" title="Reference another element with this attribute" onClick={(e) => (e.preventDefault(), setLinking((v) => !v))}>
+            🔗
+          </button>
+        )}
       </span>
       {control}
+      {linking && nodeId && onLink && (
+        <LinkPicker
+          sourceId={nodeId}
+          onPick={(targetId, output) => {
+            setLinking(false)
+            onLink(targetId, output)
+          }}
+          onCancel={() => setLinking(false)}
+        />
+      )}
       {schema.description && <small>{schema.description}</small>}
+      {jsonError && <small className="err">Invalid JSON: {jsonError}</small>}
       <FieldProblems problems={problems} />
     </label>
+  )
+}
+
+/** Attribute/output picker for a references edge. */
+function ReferenceBinding({ sourceType, targetType, attr, output, onChange }: { sourceType: string; targetType: string; attr: string; output: string; onChange: (attr: string, output: string) => void }) {
+  const rules = useStore((s) => s.rules)
+  const src = rules?.entry(sourceType)
+  const dst = rules?.entry(targetType)
+  const attrs = Object.entries(src?.props?.properties ?? {})
+    .filter(([, s]) => (s.type === 'string' || s.type === 'array') && !s['x-json'])
+    .map(([k]) => k)
+    .sort((a, b) => score(b) - score(a) || a.localeCompare(b))
+  const outputs = ['id', ...(dst?.outputs ?? []).filter((o) => o !== 'id')]
+  return (
+    <div className="binding">
+      <label className="field">
+        <span>Attribute of the source that receives the reference</span>
+        <select value={attr} onChange={(e) => onChange(e.target.value, output)}>
+          <option value="">Choose…</option>
+          {attrs.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span>Attribute of the target being referenced</span>
+        <select value={output} onChange={(e) => onChange(attr, e.target.value)}>
+          {outputs.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      </label>
+      {attr && (
+        <p className="muted mono">
+          {attr} = {'${'}
+          {dst?.terraform?.resource ? `${dst.terraform.resource}.<name>` : 'module.<id>'}.{output}
+          {'}'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function score(a: string): number {
+  if (/_ids?$/.test(a)) return 3
+  if (/_arns?$/.test(a) || /_names?$/.test(a)) return 2
+  if (/(vpc|subnet|network|group|role|key|bucket|topic|queue|zone)/.test(a)) return 1
+  return 0
+}
+
+/** Target chooser for linking from the settings panel. */
+function LinkPicker({ sourceId, onPick, onCancel }: { sourceId: string; onPick: (targetId: string, output: string) => void; onCancel: () => void }) {
+  const nodes = useStore((s) => s.nodes)
+  const rules = useStore((s) => s.rules)
+  const src = nodes.find((n) => n.id === sourceId)
+  const [target, setTarget] = useState('')
+  const candidates = nodes.filter((n) => n.id !== sourceId && rules && src && rules.connection(src.data.type, n.data.type))
+  const dst = nodes.find((n) => n.id === target)
+  const outputs = ['id', ...((dst && rules?.entry(dst.data.type)?.outputs) ?? []).filter((o) => o !== 'id')]
+  const [output, setOutput] = useState('id')
+  return (
+    <div className="binding">
+      <select value={target} onChange={(e) => setTarget(e.target.value)}>
+        <option value="">Link to element…</option>
+        {candidates.map((n) => (
+          <option key={n.id} value={n.id}>
+            {n.data.name} ({rules?.entry(n.data.type)?.label ?? n.data.type})
+          </option>
+        ))}
+      </select>
+      {target && (
+        <select value={output} onChange={(e) => setOutput(e.target.value)}>
+          {outputs.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      )}
+      <div className="actions">
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="primary" disabled={!target} onClick={() => onPick(target, output)}>
+          Link
+        </button>
+      </div>
+    </div>
   )
 }
 

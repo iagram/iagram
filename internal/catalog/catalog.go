@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Root is the pseudo parent type for nodes placed directly on the canvas.
@@ -99,6 +100,8 @@ type Rule struct {
 type Terraform struct {
 	Role   string `yaml:"role,omitempty" json:"role,omitempty"`
 	Module string `yaml:"module,omitempty" json:"module,omitempty"`
+	// Resource is the Terraform resource type of a generated element (role resource).
+	Resource string `yaml:"resource,omitempty" json:"resource,omitempty"`
 	// ProviderArgs (roles account/region) is a template for the provider
 	// block: any string "${prop}" is replaced by the node's property value;
 	// keys (or list items) whose property is empty are dropped.
@@ -181,18 +184,39 @@ type Catalog struct {
 	Providers map[string]Provider `json:"providers"`
 
 	byID map[string]*Entry
+
+	// Generated elements: one per Terraform resource type known to the
+	// registry, synthesised on first use and cached. See generated.go.
+	registry  ResourceRegistry
+	genMu     sync.Mutex
+	generated map[string]*Entry
 }
 
-// Get returns the entry with the given id.
+// Role values for Terraform.Role.
+const (
+	RoleModule   = "module"
+	RoleAccount  = "account"
+	RoleRegion   = "region"
+	RoleResource = "resource" // a generated element: one plain resource block
+)
+
+// ReferencesKind is the connection kind between a generated element and
+// anything it references through an attribute.
+const ReferencesKind = "references"
+
+// Get returns the entry with the given id, synthesising generated elements
+// ("<provider>.res.<tf_type>") from the resource registry on demand.
 func (c *Catalog) Get(id string) (*Entry, bool) {
-	e, ok := c.byID[id]
-	return e, ok
+	if e, ok := c.byID[id]; ok {
+		return e, true
+	}
+	return c.generatedEntry(id)
 }
 
 // CanContain reports whether a node of childType may be placed inside a node
 // of parentType (Root for the canvas itself).
 func (c *Catalog) CanContain(parentType, childType string) bool {
-	child, ok := c.byID[childType]
+	child, ok := c.Get(childType)
 	if !ok {
 		return false
 	}
@@ -202,7 +226,7 @@ func (c *Catalog) CanContain(parentType, childType string) bool {
 	if parentType == Root {
 		return true
 	}
-	parent, ok := c.byID[parentType]
+	parent, ok := c.Get(parentType)
 	if !ok || parent.Kind != KindContainer {
 		return false
 	}
@@ -212,11 +236,17 @@ func (c *Catalog) CanContain(parentType, childType string) bool {
 	return true
 }
 
-// Connection returns the rule allowing an edge from fromType to toType.
+// Connection returns the rule allowing an edge from fromType to toType. A
+// generated element may reference any element of the same provider.
 func (c *Catalog) Connection(fromType, toType string) (Rule, bool) {
 	for _, r := range c.Rules {
 		if r.From == fromType && r.To == toType {
 			return r, true
+		}
+	}
+	if from, ok := c.Get(fromType); ok && from.Terraform != nil && from.Terraform.Role == RoleResource {
+		if to, ok := c.Get(toType); ok && to.Provider == from.Provider {
+			return Rule{From: fromType, To: toType, Kind: ReferencesKind, Label: "references"}, true
 		}
 	}
 	return Rule{}, false
@@ -295,7 +325,7 @@ func (c *Catalog) compile() error {
 			if e.Terraform.Role == "" {
 				e.Terraform.Role = "module"
 			}
-			if e.Terraform.Role == "module" && e.Terraform.Module == "" {
+			if e.Terraform.Role == RoleModule && e.Terraform.Module == "" {
 				return fmt.Errorf("%s: terraform.module is required for role module", e.ID)
 			}
 			for input, col := range e.Terraform.Collect {

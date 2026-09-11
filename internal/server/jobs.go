@@ -11,6 +11,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/iagram/iagram"
+	"github.com/iagram/iagram/internal/catalog"
+	"github.com/iagram/iagram/internal/convert"
 	"github.com/iagram/iagram/internal/document"
 	"github.com/iagram/iagram/internal/importer"
 	"github.com/iagram/iagram/internal/jobs"
@@ -309,4 +312,110 @@ func (s *Server) importState(w http.ResponseWriter, r *http.Request) {
 	d, rep := importer.Build(s.Catalog, name, res)
 	layout.Auto(s.Catalog, d)
 	writeJSON(w, http.StatusOK, map[string]any{"document": d, "report": rep, "validation": validate.Run(s.Catalog, d)})
+}
+
+// generatedList serves the light listing of generated elements for a provider.
+func (s *Server) generatedList(w http.ResponseWriter, r *http.Request) {
+	prov := r.URL.Query().Get("provider")
+	if prov == "" {
+		writeError(w, http.StatusBadRequest, errors.New("provider is required"))
+		return
+	}
+	list := s.Catalog.Generated(prov)
+	if list == nil {
+		list = []catalog.GeneratedSummary{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"provider": prov, "elements": list})
+}
+
+// generatedEntry serves the full entry (settings schema included) of one element.
+func (s *Server) generatedEntry(w http.ResponseWriter, r *http.Request) {
+	e, ok := s.Catalog.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, e)
+}
+
+// resolveEntries returns full entries for a list of ids (used after loading a
+// document that contains generated elements).
+func (s *Server) resolveEntries(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	raw, err := readAll(r, 1<<20)
+	if err != nil || json.Unmarshal(raw, &req) != nil {
+		writeError(w, http.StatusBadRequest, errors.New("expected {\"ids\": [...]}"))
+		return
+	}
+	out := map[string]*catalog.Entry{}
+	for _, id := range req.IDs {
+		if e, ok := s.Catalog.Get(id); ok {
+			out[id] = e
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": out})
+}
+
+// importHCL turns posted HCL (a single .tf body) into a document of generated elements.
+func (s *Server) importHCL(w http.ResponseWriter, r *http.Request) {
+	raw, err := readAll(r, 16<<20)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	dir, err := os.MkdirTemp("", "iagram-hcl-*")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	name := "main.tf"
+	if r.URL.Query().Get("format") == "json" {
+		name = "main.tf.json"
+	}
+	if err := os.WriteFile(dir+"/"+name, raw, 0o644); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	parsed, err := importer.ParseHCL(dir)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	docName := r.URL.Query().Get("name")
+	if docName == "" {
+		docName = "imported"
+	}
+	d, rep := importer.BuildHCL(s.Catalog, docName, parsed)
+	layout.Auto(s.Catalog, d)
+	writeJSON(w, http.StatusOK, map[string]any{"document": d, "report": rep, "validation": validate.Run(s.Catalog, d)})
+}
+
+// convertDoc rewrites the saved diagram for another provider (not saved).
+func (s *Server) convertDoc(w http.ResponseWriter, r *http.Request) {
+	to := r.URL.Query().Get("to")
+	if to == "" {
+		writeError(w, http.StatusBadRequest, errors.New("to is required"))
+		return
+	}
+	s.mu.Lock()
+	d, err := document.Load(s.DocPath)
+	s.mu.Unlock()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	tbl, err := convert.Load(iagram.CatalogFS)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	out, rep, err := convert.Run(s.Catalog, tbl, d, to)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"document": out, "report": rep, "validation": validate.Run(s.Catalog, out)})
 }

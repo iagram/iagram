@@ -45,6 +45,17 @@ export function Canvas() {
   const pendingSelect = useStore((s) => s.pendingSelect)
   const showMinimap = useStore((s) => s.showMinimap)
   const snapToGrid = useStore((s) => s.snapToGrid)
+  const activeProvider = useStore((s) => s.activeProvider)
+  const setConnectingFrom = useStore((s) => s.setConnectingFrom)
+  const ensureEntry = useStore((s) => s.ensureEntry)
+  const { fitView } = useReactFlow()
+  // One canvas per provider: only that provider's nodes (and their edges) are shown.
+  const visibleNodes = useMemo(() => nodes.filter((n) => n.data.type.split('.')[0] === activeProvider), [nodes, activeProvider])
+  const visibleIds = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes])
+  useEffect(() => {
+    const t = setTimeout(() => void fitView({ padding: 0.1, duration: 200 }), 30)
+    return () => clearTimeout(t)
+  }, [activeProvider, fitView])
   useEffect(() => {
     setRfStore(rfStore as unknown as Parameters<typeof setRfStore>[0])
     return () => setRfStore(null)
@@ -120,8 +131,23 @@ export function Canvas() {
       setDragging(null)
       const type = ev.dataTransfer.getData(DND_TYPE)
       if (!type || !rules) return
-      const entry = rules.entry(type)
-      if (!entry) return
+      let entry = rules.entry(type)
+      if (!entry) {
+        // Generated element: fetch its schema first, then drop.
+        const point0 = screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
+        void ensureEntry(type).then((e) => {
+          if (!e) return
+          const parent = containerAt(point0)
+          const size = { w: LEAF_W, h: LEAF_H }
+          let pos = { x: point0.x - size.w / 2, y: point0.y - size.h / 2 }
+          if (parent) {
+            const r = absRect(parent.id)!
+            pos = { x: Math.max(8, pos.x - r.x), y: Math.max(36, pos.y - r.y) }
+          }
+          addNode(type, parent?.id ?? null, pos)
+        })
+        return
+      }
       const point = screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
       const parent = containerAt(point)
       const size = entry.kind === 'container' ? entry.size ?? { w: 400, h: 300 } : { w: LEAF_W, h: LEAF_H }
@@ -133,7 +159,7 @@ export function Canvas() {
       }
       addNode(type, parent?.id ?? null, pos)
     },
-    [rules, screenToFlowPosition, containerAt, absRect, addNode, setDragging],
+    [rules, screenToFlowPosition, containerAt, absRect, addNode, setDragging, ensureEntry],
   )
 
   /** The node and everything inside it. */
@@ -208,22 +234,24 @@ export function Canvas() {
   // Labels are shown for all edges when enabled, otherwise only on hover/selection.
   const styledEdges = useMemo(
     () =>
-      edges.map((e) => {
+      edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target)).map((e) => {
         const visible = showLabels || e.id === hoveredEdgeId || e.id === selectedEdgeId
         return { ...e, label: visible ? e.data?.label : undefined, className: badEdges.has(e.id) ? 'edge-error' : undefined }
       }),
-    [edges, badEdges, showLabels, hoveredEdgeId, selectedEdgeId],
+    [edges, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds],
   )
 
   return (
     <div className="canvas" onDrop={onDrop} onDragOver={onDragOver}>
       <ReactFlow<RFNode, RFEdge>
-        nodes={nodes}
+        nodes={visibleNodes}
         edges={styledEdges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={connect}
+        onConnectStart={(_, p) => setConnectingFrom(p.nodeId ?? null)}
+        onConnectEnd={() => setConnectingFrom(null)}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         selectionOnDrag

@@ -194,9 +194,23 @@ type pending struct {
 func (b *builder) run(resources []Resource) {
 	// Pass 1: create nodes for mapped resources, index their primary ids.
 	var pend []pending
+	var raw []pending // generated elements, wired by reference recovery below
 	for _, r := range resources {
 		e, ok := b.byResource[r.Type]
 		if !ok {
+			// No curated mapping: use the generated element for the type when the
+			// provider schema knows it, so any resource round-trips.
+			if gid, ok := b.c.GeneratedID(r.Type); ok {
+				if ge, ok := b.c.Get(gid); ok {
+					n := b.rawNode(ge, r)
+					b.doc.Nodes = append(b.doc.Nodes, n)
+					raw = append(raw, pending{res: r, e: ge, idx: len(b.doc.Nodes) - 1})
+					if id, ok := lookup(r.Attrs, "id"); ok && fmt.Sprint(id) != "" {
+						b.byPrimaryID[fmt.Sprint(id)] = n.ID
+					}
+					continue
+				}
+			}
 			if !b.skipped[r.Type] {
 				b.skipped[r.Type] = true
 				b.report.Skipped = append(b.report.Skipped, r.Type)
@@ -245,13 +259,97 @@ func (b *builder) run(resources []Resource) {
 		}
 		b.doc.Nodes[p.idx].Parent = parent
 	}
+	// Generated elements: parent from the account/region grouping; attribute
+	// values equal to another node's primary id become reference edges.
+	for _, p := range raw {
+		seenProv[p.e.Provider] = true
+		parent := b.groupParent(p)
+		if parent == "" {
+			parent = b.fallbackParent(p.e)
+		}
+		b.doc.Nodes[p.idx].Parent = parent
+		b.recoverReferences(p.idx)
+	}
 	for prov := range seenProv {
 		b.report.Providers = append(b.report.Providers, prov)
 	}
 	sort.Strings(b.report.Providers)
-	b.report.Imported = len(pend)
+	b.report.Imported = len(pend) + len(raw)
 	// Containers created after their children must still sort deterministically.
 	sort.Slice(b.doc.Nodes, func(i, j int) bool { return b.doc.Nodes[i].ID < b.doc.Nodes[j].ID })
+}
+
+// rawNode builds a generated-element node from a state resource: every
+// configurable attribute (per the provider schema) that has a value.
+func (b *builder) rawNode(e *catalog.Entry, r Resource) document.Node {
+	n := document.Node{ID: nodeID(e, r.Address), Type: e.ID, Name: r.Name, Props: map[string]any{}}
+	if r.Module != "" && (r.Name == "this" || r.Name == "main" || r.Name == "default") {
+		segs := strings.Split(r.Module, ".")
+		n.Name = segs[len(segs)-1]
+	}
+	props, _ := e.Props["properties"].(map[string]any)
+	for attr := range props {
+		v, ok := r.Attrs[attr]
+		if !ok || v == nil {
+			continue
+		}
+		switch t := v.(type) {
+		case string:
+			if t == "" {
+				continue
+			}
+		case []any:
+			if len(t) == 0 {
+				continue
+			}
+		case map[string]any:
+			if len(t) == 0 {
+				continue
+			}
+		}
+		n.Props[attr] = v
+	}
+	return n
+}
+
+// recoverReferences turns attribute values that equal another node's primary
+// id into references edges, so containment and wiring survive a round trip.
+func (b *builder) recoverReferences(idx int) {
+	n := &b.doc.Nodes[idx]
+	names := make([]string, 0, len(n.Props))
+	for k := range n.Props {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, attr := range names {
+		switch v := n.Props[attr].(type) {
+		case string:
+			if target, ok := b.byPrimaryID[v]; ok && target != n.ID {
+				b.doc.Edges = append(b.doc.Edges, document.Edge{ID: edgeID(n.ID, attr, target), Kind: catalog.ReferencesKind, Source: n.ID, Target: target, Attr: attr, Output: "id"})
+				delete(n.Props, attr) // the edge carries it; the generator writes the reference back
+			}
+		case []any:
+			var keep []any
+			for _, item := range v {
+				s, _ := item.(string)
+				if target, ok := b.byPrimaryID[s]; ok && s != "" && target != n.ID {
+					b.doc.Edges = append(b.doc.Edges, document.Edge{ID: edgeID(n.ID, attr, target), Kind: catalog.ReferencesKind, Source: n.ID, Target: target, Attr: attr, Output: "id"})
+					continue
+				}
+				keep = append(keep, item)
+			}
+			if len(keep) == 0 {
+				delete(n.Props, attr)
+			} else {
+				n.Props[attr] = keep
+			}
+		}
+	}
+}
+
+func edgeID(src, attr, dst string) string {
+	h := sha1.Sum([]byte(src + "|" + attr + "|" + dst))
+	return "e-" + hex.EncodeToString(h[:])[:8]
 }
 
 // groupParent resolves the account/region containers for a resource whose
