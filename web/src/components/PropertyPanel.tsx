@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useStore } from '../store'
 import type { JSONSchema, Problem } from '../types'
 
@@ -15,15 +16,17 @@ export function PropertyPanel() {
   const planStale = useStore((s) => s.planStale)
   const nodeDrift = useStore((s) => (s.selectedId ? s.drift?.summary.nodes[s.selectedId] : undefined))
 
-  const selectedCount = useStore((s) => s.nodes.filter((n) => n.selected).length)
-  const removeNodes2 = useStore((s) => s.removeNodes)
-  const selIds = useStore((s) => s.nodes.filter((n) => n.selected).map((n) => n.id))
+  // Derive from the stable nodes array: a selector returning a new array each
+  // render would re-render forever.
+  const allNodes = useStore((s) => s.nodes)
+  const selIds = useMemo(() => allNodes.filter((n) => n.selected).map((n) => n.id), [allNodes])
+  const selectedCount = selIds.length
   if (selectedCount > 1 && rules) {
     return (
       <aside className="panel">
         <h2>{selectedCount} elements selected</h2>
         <p className="muted">⌘C copy · ⌘V paste · ⌘D duplicate · ⌫ delete. Drag to move them together; drop into another container to re-parent.</p>
-        <button className="danger" onClick={() => removeNodes2(selIds)}>
+        <button className="danger" onClick={() => removeNodes(selIds)}>
           Delete {selectedCount} elements
         </button>
       </aside>
