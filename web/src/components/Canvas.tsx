@@ -16,6 +16,7 @@ import { LEAF_H, LEAF_W, type RFEdge, type RFNode } from '../convert'
 import { ROOT } from '../types'
 import { setRfStore } from '../rf'
 import { CanvasControls } from './CanvasControls'
+import { ProjectionBanner } from './ProjectionBanner'
 
 const nodeTypes = { container: ContainerNode, resource: ResourceNode }
 
@@ -52,11 +53,16 @@ export function Canvas() {
   const { fitView } = useReactFlow()
   // One canvas per provider: only that provider's nodes (and their edges) are shown.
   const catalogVersion = useStore((s) => s.catalogVersion)
-  // Attachments are configured inside their parent's panel, never drawn.
+  const projection = useStore((s) => s.projection)
+  const projected = !!projection && projection.provider === activeProvider
+  // Mirrored tabs show the live equivalence of the source tab; attachments
+  // are configured inside their parent's panel, never drawn.
+  const sourceNodes = projected ? projection.nodes : nodes
+  const sourceEdges = projected ? projection.edges : edges
   const visibleNodes = useMemo(
-    () => nodes.filter((n) => n.data.type.split('.')[0] === activeProvider && !rules?.entry(n.data.type)?.attachment),
+    () => sourceNodes.filter((n) => n.data.type.split('.')[0] === activeProvider && !rules?.entry(n.data.type)?.attachment),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nodes, activeProvider, rules, catalogVersion],
+    [sourceNodes, activeProvider, rules, catalogVersion],
   )
   const visibleIds = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes])
   useEffect(() => {
@@ -241,11 +247,11 @@ export function Canvas() {
   // Labels are shown for all edges when enabled, otherwise only on hover/selection.
   const styledEdges = useMemo(
     () =>
-      edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target)).map((e) => {
+      sourceEdges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target)).map((e) => {
         const visible = showLabels || e.id === hoveredEdgeId || e.id === selectedEdgeId
         return { ...e, label: visible ? e.data?.label : undefined, className: badEdges.has(e.id) ? 'edge-error' : undefined }
       }),
-    [edges, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds],
+    [sourceEdges, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds],
   )
 
   return (
@@ -292,6 +298,7 @@ export function Canvas() {
         {showMinimap && <MiniMap pannable zoomable nodeStrokeWidth={2} position="bottom-left" />}
       </ReactFlow>
       <CanvasControls />
+      {projected && <ProjectionBanner />}
     </div>
   )
 }

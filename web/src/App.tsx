@@ -37,6 +37,8 @@ export function App() {
       const params = new URLSearchParams(location.search)
       const t = params.get('theme')
       if (t === 'dark' || t === 'light') useStore.getState().setTheme(t)
+      const prov = params.get('provider')
+      if (prov) useStore.getState().setActiveProvider(prov)
       const m = /select=([^&]+)/.exec(location.hash)
       if (m) useStore.getState().requestSelect(decodeURIComponent(m[1]))
     })

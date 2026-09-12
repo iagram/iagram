@@ -404,9 +404,17 @@ func (s *Server) convertDoc(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("to is required"))
 		return
 	}
-	s.mu.Lock()
-	d, err := document.Load(s.DocPath)
-	s.mu.Unlock()
+	var d *document.Document
+	var err error
+	if r.ContentLength != 0 {
+		// Convert the document posted by the UI (possibly unsaved), so
+		// projected tabs follow the canvas live.
+		d, err = decodeDoc(r)
+	} else {
+		s.mu.Lock()
+		d, err = document.Load(s.DocPath)
+		s.mu.Unlock()
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

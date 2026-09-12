@@ -59,5 +59,8 @@ export const api = {
     fetch(`/api/import/hcl?name=${encodeURIComponent(name)}&format=${format}`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: raw }).then((r) =>
       json<{ document: Document; report: ImportReport; validation: Validation }>(r),
     ),
-  convert: (to: string) => fetch(`/api/convert?to=${encodeURIComponent(to)}`, { method: 'POST' }).then((r) => json<{ document: Document; report: ConvertReport }>(r)),
+  convert: (to: string, doc?: Document) =>
+    fetch(`/api/convert?to=${encodeURIComponent(to)}`, { method: 'POST', ...(doc ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc) } : {}) }).then((r) =>
+      json<{ document: Document; report: ConvertReport }>(r),
+    ),
 }

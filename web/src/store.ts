@@ -13,7 +13,7 @@ import { Rules } from './rules'
 import { fromDocument, makeEdge, makeNode, newId, toDocument, type RFEdge, type RFNode } from './convert'
 import type { Document } from './types'
 import { rfStore } from './rf'
-import type { ApplyResult, AttachmentOption, Catalog, DriftResult, Entry, Family, GeneratedSummary, Job, PlanResult, Problem } from './types'
+import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, Entry, Family, GeneratedSummary, Job, PlanResult, Problem } from './types'
 import { ROOT } from './types'
 
 interface State {
@@ -50,6 +50,10 @@ interface State {
   catalogVersion: number
   generatedByProvider: Record<string, GeneratedSummary[]>
   familiesByProvider: Record<string, Family[]>
+  /** Mirror mode: other providers' tabs show a live equivalence of the source tab. */
+  mirror: boolean
+  projection: { provider: string; nodes: RFNode[]; edges: RFEdge[]; report: ConvertReport } | null
+  projecting: boolean
   connectingFrom: string | null
   attachmentsByType: Record<string, AttachmentOption[]>
   selectedEdgeId: string | null
@@ -114,6 +118,14 @@ interface State {
   isAttachment: (type: string) => boolean
   /** Switch a generated element to a sibling resource type of its family (properties reset to defaults). */
   changeNodeType: (id: string, type: string) => Promise<void>
+  /** Provider of the real nodes (the source tab); '' when empty. */
+  primaryProvider: () => string
+  setMirror: (v: boolean) => void
+  refreshProjection: () => Promise<void>
+  /** Make the projected tab the source: its converted nodes become the document. */
+  materialize: () => void
+  /** True when the active tab is a projection (not the source). */
+  isProjected: () => boolean
   selectEdge: (id: string | null) => void
   hoverEdge: (id: string | null) => void
   removeEdge: (id: string) => void
@@ -135,6 +147,7 @@ function persist(key: string, v: unknown) {
   }
 }
 const systemDark = typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
+const PROVIDER_NAME: Record<string, string> = { aws: 'AWS', gcp: 'Google Cloud', azure: 'Azure' }
 
 interface Clipboard {
   nodes: RFNode[]
@@ -187,6 +200,9 @@ export const useStore = create<State>((set, get) => ({
   catalogVersion: 0,
   generatedByProvider: {},
   familiesByProvider: {},
+  mirror: stored('iagram.mirror', true),
+  projection: null,
+  projecting: false,
   connectingFrom: null,
   attachmentsByType: {},
   selectedEdgeId: null,
@@ -207,7 +223,8 @@ export const useStore = create<State>((set, get) => ({
       const used = [...new Set(res.document.nodes.map((n) => n.type.split('.')[0]))]
       const current = get().activeProvider
       const activeProvider = providers.includes(current) ? current : used.find((p) => providers.includes(p)) ?? providers[0] ?? ''
-      set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider })
+      set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
+      void get().refreshProjection()
       api.latestPlan().then((r) => set({ ...(r.plan ? { plan: r.plan, planStale: false } : {}), drift: r.drift })).catch(() => undefined)
       api.health().then((h) => set({ version: h.version })).catch(() => undefined)
     } catch (e) {
@@ -241,6 +258,10 @@ export const useStore = create<State>((set, get) => ({
   },
 
   onNodesChange(changes) {
+    if (get().isProjected() && changes.some((c) => c.type !== 'select' && c.type !== 'dimensions')) {
+      // Editing a mirrored tab makes it the source first.
+      get().materialize()
+    }
     // Position/dimension churn is not "dirty" until the drag ends; selection never is.
     // Only user actions dirty the document: a finished drag, a resize that set
     // attributes, add/replace. Initial measurement and selection never do.
@@ -259,6 +280,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   onEdgesChange(changes) {
+    if (get().isProjected() && changes.some((c) => c.type !== 'select')) get().materialize()
     const structural = changes.some((c) => c.type !== 'select')
     if (changes.some((c) => c.type === 'remove')) get().commit()
     set({ edges: applyEdgeChanges(changes, get().edges), ...(structural ? { dirty: true } : {}) })
@@ -266,6 +288,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   addNode(type, parentId, position) {
+    if (get().isProjected()) get().materialize()
     const { rules, nodes } = get()
     if (!rules) return null
     const entry = rules.entry(type)
@@ -293,6 +316,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   connect(c) {
+    if (get().isProjected()) get().materialize()
     const { rules, nodes, edges } = get()
     if (!rules || !c.source || !c.target) return
     const src = nodes.find((n) => n.id === c.source)
@@ -311,6 +335,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   updateNode(id, patch) {
+    if (get().isProjected()) get().materialize()
     // typing in one field coalesces into a single undo step
     get().commit(`update:${id}:${patch.name !== undefined ? 'name' : Object.keys(patch.props ?? {}).join(',')}`)
     set({
@@ -323,6 +348,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   removeNodes(ids) {
+    if (get().isProjected()) get().materialize()
     get().commit()
     const { nodes, edges, selectedId } = get()
     const doomed = new Set(ids)
@@ -535,7 +561,64 @@ export const useStore = create<State>((set, get) => ({
   setActiveProvider(p) {
     persist('iagram.provider', p)
     rfStore()?.getState().resetSelectedElements()
-    set({ activeProvider: p, selectedId: null, selectedEdgeId: null })
+    set({ activeProvider: p, selectedId: null, selectedEdgeId: null, projection: null })
+    void get().refreshProjection()
+  },
+
+  primaryProvider() {
+    const counts: Record<string, number> = {}
+    for (const n of get().nodes) {
+      const p = n.data.type.split('.')[0]
+      counts[p] = (counts[p] ?? 0) + 1
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
+  },
+
+  isProjected() {
+    const { mirror, activeProvider, nodes } = get()
+    if (!mirror || nodes.length === 0) return false
+    const primary = get().primaryProvider()
+    // A file that already mixes providers is edited as independent canvases.
+    const providers = new Set(nodes.map((n) => n.data.type.split('.')[0]))
+    if (providers.size > 1) return false
+    return activeProvider !== primary
+  },
+
+  setMirror(v) {
+    persist('iagram.mirror', v)
+    set({ mirror: v, projection: null })
+    void get().refreshProjection()
+  },
+
+  async refreshProjection() {
+    const { rules, activeProvider } = get()
+    if (!rules || !get().isProjected()) {
+      set({ projection: null })
+      return
+    }
+    set({ projecting: true })
+    try {
+      const r = await api.convert(activeProvider, get().currentDocument())
+      if (get().activeProvider !== activeProvider) return
+      const missing = [...new Set(r.document.nodes.map((n) => n.type).filter((t) => !rules.entry(t)))]
+      if (missing.length) {
+        const res = await api.resolve(missing).catch(() => ({ entries: {} }))
+        for (const e of Object.values(res.entries)) rules.register(e)
+      }
+      const { nodes, edges } = fromDocument(rules, r.document)
+      set({ projection: { provider: activeProvider, nodes, edges, report: r.report }, projecting: false })
+    } catch (e) {
+      set({ projecting: false, error: (e as Error).message })
+    }
+  },
+
+  materialize() {
+    const { projection, activeProvider } = get()
+    if (!projection || projection.provider !== activeProvider) return
+    get().commit()
+    set({ nodes: projection.nodes, edges: projection.edges, projection: null, dirty: true, plan: null, planStale: false })
+    get().showToast(`${PROVIDER_NAME[activeProvider] ?? activeProvider} is now the source; other tabs mirror it`)
+    get().validateSoon()
   },
 
   async ensureEntry(type) {

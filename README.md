@@ -72,7 +72,7 @@ iagram up                  # opens the canvas
 
 In the canvas:
 
-1. Pick a provider canvas (AWS, Azure, Google Cloud: one canvas per provider over the same file) and drag an **Account** (or Project / Subscription) onto the canvas, then a **Region**, a **VPC**, **Subnets**, and the resources inside them. Containers turn green or red while you drag to show where a drop is allowed.
+1. Pick a provider tab (AWS, Azure, Google Cloud; the other tabs will mirror what you draw) and drag an **Account** (or Project / Subscription) onto the canvas, then a **Region**, a **VPC**, **Subnets**, and the resources inside them. Containers turn green or red while you drag to show where a drop is allowed.
 2. Click an element to configure it in the panel on the right: typed fields, dropdowns, required markers, inline validation, grouped into sections.
 3. Connect elements by dragging from the right handle of one to the left handle of another: valid targets light up green, forbidden ones show a ✕. The connection's configuration opens as soon as it attaches. You can also attach by reference from the settings panel (🔗 on an attribute).
 4. **Plan**. iagram saves, generates Terraform under `.iagram/tf/`, runs `tofu init` and `tofu plan`, streams the log, and colours the nodes.
@@ -105,7 +105,7 @@ iagram.json ──validate──▶ generate ──▶ .iagram/tf/main.tf.json +
 
 | Area | What it does |
 |---|---|
-| **Canvas tabs** | One canvas per provider over the same `.iad`; counts per provider. Plan/Apply cover the whole file. |
+| **Canvas tabs** | One tab per provider. In **mirror** mode (default) the tab you draw on is the source and the other tabs show its live equivalent through the equivalence table, dropped elements listed in a banner; editing a mirrored tab makes that provider the source. Turn mirroring off for independent canvases in one file. Plan/Apply run the source. |
 | **Palette** (left) | Search; curated elements grouped by category; **More services**: one tile per official icon (its resource type is picked in the settings). Searching also lists individual matching resource types. Items that fit the selected container are highlighted, the rest dimmed. Drag onto the canvas. |
 | **Canvas** | Nested containers (account → region → VPC → subnet), typed arrows with labels, plan and drift overlays, minimap. Shift-drag to select several, ⌘-click to add. Drag an element into another container to move it there (refused with a message if the catalog forbids it). |
 | **Settings panel** (right) | Name, properties in sections (`Compute`, `Networking`, `Advanced`…), **Attachments** (add and configure the non-graphical resources that apply to this element), validation messages, planned resource changes, drift details, live outputs after apply (click to copy), delete. Click an arrow for the connection inspector. |
