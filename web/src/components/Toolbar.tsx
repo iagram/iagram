@@ -1,4 +1,3 @@
-import { useReactFlow, useViewport } from '@xyflow/react'
 import { useStore } from '../store'
 import { MenuBar } from './MenuBar'
 
@@ -8,10 +7,6 @@ export function Toolbar() {
   const save = useStore((s) => s.save)
   const docName = useStore((s) => s.docName)
   const problems = useStore((s) => s.problems)
-  const canUndo = useStore((s) => s.past.length > 0)
-  const canRedo = useStore((s) => s.future.length > 0)
-  const undo = useStore((s) => s.undo)
-  const redo = useStore((s) => s.redo)
   const plan = useStore((s) => s.plan)
   const planStale = useStore((s) => s.planStale)
   const job = useStore((s) => s.job)
@@ -25,13 +20,7 @@ export function Toolbar() {
   const hasDeployed = useStore((s) => s.nodes.some((n) => n.data.outputs && Object.keys(n.data.outputs).length > 0))
   const running = job?.status === 'running'
   const canApply = !!plan && !planStale && plan.changes && !running && !dirty
-  const theme = useStore((s) => s.theme)
-  const setTheme = useStore((s) => s.setTheme)
-  const showLabels = useStore((s) => s.showLabels)
-  const setShowLabels = useStore((s) => s.setShowLabels)
 
-  const { zoomIn, zoomOut, fitView, zoomTo } = useReactFlow()
-  const { zoom } = useViewport()
   const errors = problems.filter((p) => p.level === 'error').length
   const warnings = problems.length - errors
 
@@ -42,39 +31,6 @@ export function Toolbar() {
       <span className="doc">
         {docName || 'iagram.iad'}
         {dirty && <i title="unsaved changes"> ●</i>}
-      </span>
-
-      <span className="group">
-        <button onClick={undo} disabled={!canUndo} title="Undo (⌘Z)">
-          ↶
-        </button>
-        <button onClick={redo} disabled={!canRedo} title="Redo (⌘⇧Z)">
-          ↷
-        </button>
-      </span>
-
-      <span className="group">
-        <button onClick={() => zoomOut()} title="Zoom out (⌘-)">
-          −
-        </button>
-        <button className="zoom" onClick={() => zoomTo(1)} title="Reset to 100%">
-          {Math.round(zoom * 100)}%
-        </button>
-        <button onClick={() => zoomIn()} title="Zoom in (⌘+)">
-          +
-        </button>
-        <button onClick={() => fitView({ padding: 0.1 })} title="Fit diagram (⌘0)">
-          ⛶
-        </button>
-      </span>
-
-      <span className="group">
-        <button className={showLabels ? 'on' : ''} onClick={() => setShowLabels(!showLabels)} title={showLabels ? 'Hide connection labels (shown on hover)' : 'Show connection labels'}>
-          Aa
-        </button>
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? 'Light theme' : 'Dark theme'}>
-          {theme === 'dark' ? '☀' : '☾'}
-        </button>
       </span>
 
       <span className="spacer" />

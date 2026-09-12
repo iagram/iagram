@@ -15,6 +15,7 @@ import { DND_TYPE } from './Palette'
 import { LEAF_H, LEAF_W, type RFEdge, type RFNode } from '../convert'
 import { ROOT } from '../types'
 import { setRfStore } from '../rf'
+import { CanvasControls } from './CanvasControls'
 
 const nodeTypes = { container: ContainerNode, resource: ResourceNode }
 
@@ -290,6 +291,7 @@ export function Canvas() {
         <Background gap={20} />
         {showMinimap && <MiniMap pannable zoomable nodeStrokeWidth={2} position="bottom-left" />}
       </ReactFlow>
+      <CanvasControls />
     </div>
   )
 }
