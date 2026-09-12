@@ -27,6 +27,8 @@ export function App() {
   const copySelection = useStore((s) => s.copySelection)
   const paste = useStore((s) => s.paste)
   const duplicateSelection = useStore((s) => s.duplicateSelection)
+  const cutSelection = useStore((s) => s.cutSelection)
+  const reorder = useStore((s) => s.reorder)
   const selectAll = useStore((s) => s.selectAll)
   const deselectAll = useStore((s) => s.deselectAll)
   const setModal = useStore((s) => s.setModal)
@@ -79,6 +81,15 @@ export function App() {
       } else if (k === 'd' && !inField) {
         e.preventDefault()
         duplicateSelection()
+      } else if (k === 'x' && !inField) {
+        e.preventDefault()
+        cutSelection()
+      } else if (e.key === ']' && !inField) {
+        e.preventDefault()
+        reorder(e.shiftKey ? 'front' : 'forward')
+      } else if (e.key === '[' && !inField) {
+        e.preventDefault()
+        reorder(e.shiftKey ? 'back' : 'backward')
       }
     }
     const onUnload = (e: BeforeUnloadEvent) => {
@@ -90,7 +101,7 @@ export function App() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('beforeunload', onUnload)
     }
-  }, [save, dirty, undo, redo, copySelection, paste, duplicateSelection, selectAll, deselectAll, setModal])
+  }, [save, dirty, undo, redo, copySelection, paste, duplicateSelection, cutSelection, reorder, selectAll, deselectAll, setModal])
 
   if (error && !catalog) {
     return (

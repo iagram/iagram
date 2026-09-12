@@ -3,7 +3,9 @@ import { useStore } from '../store'
 const SHORTCUTS: [string, string][] = [
   ['⌘S', 'Save'],
   ['⌘Z / ⌘⇧Z', 'Undo / redo'],
-  ['⌘C / ⌘V / ⌘D', 'Copy / paste / duplicate selection'],
+  ['⌘X / ⌘C / ⌘V / ⌘D', 'Cut / copy / paste / duplicate selection'],
+  ['⌘] / ⌘[ (+⇧)', 'Bring forward / send backward (to front / to back)'],
+  ['Right-click', 'Context menu on elements, connections and the canvas'],
   ['⌫', 'Delete selection'],
   ['⌘A / Esc', 'Select all / deselect'],
   ['Shift + drag', 'Box-select'],

@@ -61,6 +61,7 @@ export interface Layout {
   y: number
   w?: number
   h?: number
+  z?: number
 }
 
 export interface DocNode {

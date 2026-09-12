@@ -17,6 +17,8 @@ import { ROOT } from '../types'
 import { setRfStore } from '../rf'
 import { CanvasControls } from './CanvasControls'
 import { ProjectionBanner } from './ProjectionBanner'
+import { ContextMenu } from './ContextMenu'
+import type React from 'react'
 
 const nodeTypes = { container: ContainerNode, resource: ResourceNode }
 
@@ -50,6 +52,17 @@ export function Canvas() {
   const activeProvider = useStore((s) => s.activeProvider)
   const setConnectingFrom = useStore((s) => s.setConnectingFrom)
   const ensureEntry = useStore((s) => s.ensureEntry)
+  const setContextMenu = useStore((s) => s.setContextMenu)
+  const openMenu = useCallback(
+    (ev: React.MouseEvent, target: 'node' | 'edge' | 'pane', id?: string) => {
+      ev.preventDefault()
+      const host = (ev.currentTarget as HTMLElement).closest('.canvas') as HTMLElement | null
+      const rect = host?.getBoundingClientRect()
+      const flow = screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
+      setContextMenu({ x: ev.clientX - (rect?.left ?? 0), y: ev.clientY - (rect?.top ?? 0), flow, target, id })
+    },
+    [screenToFlowPosition, setContextMenu],
+  )
   const { fitView } = useReactFlow()
   // One canvas per provider: only that provider's nodes (and their edges) are shown.
   const catalogVersion = useStore((s) => s.catalogVersion)
@@ -289,7 +302,19 @@ export function Canvas() {
         onPaneClick={() => {
           select(null)
           selectEdge(null)
+          setContextMenu(null)
         }}
+        onNodeContextMenu={(ev, n) => {
+          if (!n.selected) rfStore.getState().addSelectedNodes([n.id])
+          openMenu(ev, 'node', n.id)
+        }}
+        onSelectionContextMenu={(ev) => openMenu(ev, 'node')}
+        onEdgeContextMenu={(ev, e) => {
+          selectEdge(e.id)
+          openMenu(ev, 'edge', e.id)
+        }}
+        onPaneContextMenu={(ev) => openMenu(ev as React.MouseEvent, 'pane')}
+        onMoveStart={() => setContextMenu(null)}
         colorMode={theme}
         deleteKeyCode={['Backspace', 'Delete']}
         fitView
@@ -302,6 +327,7 @@ export function Canvas() {
         {showMinimap && <MiniMap pannable zoomable nodeStrokeWidth={2} position="bottom-left" />}
       </ReactFlow>
       <CanvasControls />
+      <ContextMenu />
       {projected && <ProjectionBanner />}
     </div>
   )

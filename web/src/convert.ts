@@ -9,6 +9,12 @@ export interface NodeData extends Record<string, unknown> {
   name: string
   props: Record<string, unknown>
   outputs?: Record<string, unknown>
+  z?: number
+}
+
+/** Containers sit under leaves; within each tier, z orders siblings. */
+export function zIndexFor(container: boolean, z: number | undefined): number {
+  return (container ? 0 : 1000) + (z ?? 0)
 }
 
 export interface EdgeData extends Record<string, unknown> {
@@ -33,11 +39,10 @@ export function makeNode(rules: Rules, n: DocNode): RFNode {
     id: n.id,
     type: container ? 'container' : 'resource',
     position: { x: n.layout.x, y: n.layout.y },
-    data: { type: n.type, name: n.name, props: n.props ?? {}, outputs: n.outputs },
+    data: { type: n.type, name: n.name, props: n.props ?? {}, outputs: n.outputs, z: n.layout.z },
     parentId: n.parent || undefined,
     style: { width: w, height: h },
-    // containers sit under their children in z-order
-    zIndex: container ? 0 : 1,
+    zIndex: zIndexFor(container, n.layout.z),
   }
 }
 
@@ -104,6 +109,7 @@ export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[]): Docu
           y: round(n.position.y),
           ...(container && w ? { w: round(w) } : {}),
           ...(container && h ? { h: round(h) } : {}),
+          ...(n.data.z ? { z: n.data.z } : {}),
         },
       }
     }),

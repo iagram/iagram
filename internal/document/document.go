@@ -42,6 +42,8 @@ type Layout struct {
 	Y float64 `json:"y"`
 	W float64 `json:"w,omitempty"`
 	H float64 `json:"h,omitempty"`
+	// Z orders siblings front to back (higher is in front); 0 when unset.
+	Z int `json:"z,omitempty"`
 }
 
 // Edge is a typed relationship between two nodes. For "references" edges from

@@ -10,7 +10,7 @@ import {
 } from '@xyflow/react'
 import { api } from './api'
 import { Rules } from './rules'
-import { fromDocument, makeEdge, makeNode, newId, toDocument, type RFEdge, type RFNode } from './convert'
+import { fromDocument, makeEdge, makeNode, newId, toDocument, zIndexFor, type RFEdge, type RFNode } from './convert'
 import type { Document } from './types'
 import { rfStore } from './rf'
 import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, Entry, Family, GeneratedSummary, Job, PlanResult, Problem } from './types'
@@ -56,6 +56,7 @@ interface State {
   projecting: boolean
   connectingFrom: string | null
   attachmentsByType: Record<string, AttachmentOption[]>
+  contextMenu: { x: number; y: number; flow: XYPosition; target: 'node' | 'edge' | 'pane'; id?: string } | null
   selectedEdgeId: string | null
   hoveredEdgeId: string | null
   /** A node id the canvas should select through React Flow (deep links). */
@@ -90,8 +91,13 @@ interface State {
   /** Move a node (and its subtree) under a new parent at a position relative to it. */
   reparent: (id: string, parentId: string | null, position: XYPosition) => void
   copySelection: () => void
-  paste: () => void
+  cutSelection: () => void
+  paste: (at?: XYPosition) => void
   duplicateSelection: () => void
+  /** Reorder the selection among its siblings: front, back, or one step. */
+  reorder: (how: 'front' | 'back' | 'forward' | 'backward') => void
+  setContextMenu: (m: State['contextMenu']) => void
+  hasClipboard: () => boolean
   selectedIds: () => string[]
   setTheme: (t: 'light' | 'dark') => void
   setShowLabels: (v: boolean) => void
@@ -205,6 +211,7 @@ export const useStore = create<State>((set, get) => ({
   projecting: false,
   connectingFrom: null,
   attachmentsByType: {},
+  contextMenu: null,
   selectedEdgeId: null,
   hoveredEdgeId: null,
   pendingSelect: null,
@@ -778,11 +785,16 @@ export const useStore = create<State>((set, get) => ({
     get().showToast(`Copied ${clipboard.nodes.length} element${clipboard.nodes.length === 1 ? '' : 's'}`)
   },
 
-  paste() {
+  paste(at) {
     const { rules } = get()
     if (!clipboard || !rules) return
     pasteCount++
     const offset = 40 * pasteCount
+    // Paste at a point: shift the copied top-level nodes so their bounding box starts there.
+    const tops = clipboard.nodes.filter((n) => !n.parentId || !clipboard!.nodes.some((m) => m.id === n.parentId))
+    const minX = Math.min(...tops.map((n) => n.position.x))
+    const minY = Math.min(...tops.map((n) => n.position.y))
+    const shift = at ? { x: at.x - minX, y: at.y - minY } : { x: offset, y: offset }
     const idMap = new Map<string, string>()
     for (const n of clipboard.nodes) idMap.set(n.id, newId(rules.entry(n.data.type)!))
     const existingNames = new Set(get().nodes.map((n) => n.data.name))
@@ -799,7 +811,7 @@ export const useStore = create<State>((set, get) => ({
         ...n,
         id: idMap.get(n.id)!,
         parentId: parentInside ? idMap.get(n.parentId!) : n.parentId,
-        position: parentInside ? n.position : { x: n.position.x + offset, y: n.position.y + offset },
+        position: parentInside ? n.position : { x: n.position.x + shift.x, y: n.position.y + shift.y },
         selected: true,
         data: { ...n.data, name, props: { ...n.data.props } },
       }
@@ -812,6 +824,51 @@ export const useStore = create<State>((set, get) => ({
   duplicateSelection() {
     get().copySelection()
     if (clipboard) get().paste()
+  },
+
+  cutSelection() {
+    const ids = get().selectedIds()
+    if (ids.length === 0) return
+    get().copySelection()
+    get().removeNodes(ids)
+    get().showToast(`Cut ${ids.length} element${ids.length === 1 ? '' : 's'}`)
+  },
+
+  hasClipboard() {
+    return !!clipboard
+  },
+
+  reorder(how) {
+    const ids = new Set(get().selectedIds())
+    if (ids.size === 0) return
+    get().commit()
+    const nodes = get().nodes
+    const zOf = (n: RFNode) => n.data.z ?? 0
+    const next = nodes.map((n) => {
+      if (!ids.has(n.id)) return n
+      const siblings = nodes.filter((m) => m.parentId === n.parentId && m.type === n.type && m.id !== n.id)
+      let z = zOf(n)
+      switch (how) {
+        case 'front':
+          z = Math.max(0, ...siblings.map(zOf)) + 1
+          break
+        case 'back':
+          z = Math.min(0, ...siblings.map(zOf)) - 1
+          break
+        case 'forward':
+          z = zOf(n) + 1
+          break
+        case 'backward':
+          z = zOf(n) - 1
+          break
+      }
+      return { ...n, data: { ...n.data, z }, zIndex: zIndexFor(n.type === 'container', z) }
+    })
+    set({ nodes: next, dirty: true })
+  },
+
+  setContextMenu(m) {
+    set({ contextMenu: m })
   },
 
   setLogOpen(open) {
