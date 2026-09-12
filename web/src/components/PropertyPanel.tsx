@@ -27,6 +27,12 @@ export function PropertyPanel() {
   const linkAttribute = useStore((s) => s.linkAttribute)
   useStore((s) => s.catalogVersion)
   const loadAttachments = useStore((s) => s.loadAttachments)
+  const changeNodeType = useStore((s) => s.changeNodeType)
+  const family = useStore((s) => {
+    const n = s.nodes.find((x) => x.id === s.selectedId)
+    if (!n) return undefined
+    return (s.familiesByProvider[n.data.type.split('.')[0]] ?? []).find((f) => f.types.includes(n.data.type))
+  })
   const addAttachment = useStore((s) => s.addAttachment)
   const attachmentOptions = useStore((s) => (s.selectedId ? s.attachmentsByType[s.nodes.find((n) => n.id === s.selectedId)?.data.type ?? ''] : undefined))
   const attachedNodes = useMemo(() => (selectedId ? allNodes.filter((n) => n.parentId === selectedId && !!rules?.entry(n.data.type)?.attachment) : []), [allNodes, selectedId, rules])
@@ -142,6 +148,19 @@ export function PropertyPanel() {
         <FieldProblems problems={byField.name} />
       </label>
 
+      {rules.isGenerated(node.data.type) && family && family.types.length > 1 && (
+        <label className="field">
+          <span>Resource type</span>
+          <select value={node.data.type} onChange={(e) => void changeNodeType(node.id, e.target.value)}>
+            {family.types.map((t) => (
+              <option key={t} value={t}>
+                {t.split('.res.')[1]}
+              </option>
+            ))}
+          </select>
+          <small>{family.label}: the icon covers these Terraform resource types. Changing the type resets the settings.</small>
+        </label>
+      )}
       {rules.isGenerated(node.data.type) && (
         <p className="muted">
           Generated from the provider schema for <span className="mono">{entry?.terraform?.resource}</span>. Use 🔗 on an attribute to reference another element, or draw an arrow.

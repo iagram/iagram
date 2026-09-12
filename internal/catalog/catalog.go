@@ -194,9 +194,10 @@ type Catalog struct {
 	genMu     sync.Mutex
 	generated map[string]*Entry
 	// serviceIcons: provider -> tf type prefix (without provider prefix) -> icon path.
-	serviceIcons map[string]map[string]string
-	attachCache  map[string][]AttachmentOption
-	attachKinds  map[string]map[string]bool // provider -> tf type -> is attachment
+	serviceIcons    map[string]map[string]string
+	serviceDefaults map[string]map[string]string // provider -> prefix -> default tf type of the family
+	attachCache     map[string][]AttachmentOption
+	attachKinds     map[string]map[string]bool // provider -> tf type -> is attachment
 }
 
 // Role values for Terraform.Role.

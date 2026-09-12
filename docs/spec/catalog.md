@@ -209,6 +209,16 @@ attributes to `${<target address>.<output>}` (lists append). Curated elements
 never reference generated ones automatically; their inputs are fixed by their
 rules.
 
+### Palette families
+
+The palette lists one entry per official icon of a provider. Where a curated
+element uses that icon, the curated element is the entry; otherwise a
+*family* tile is shown whose drop creates the family's default resource type
+(`defaults:` in `services.yaml`, else the type most other types bind to). The
+family's other first-level types are offered as the element's **Resource
+type** in the settings panel. Searching the palette also surfaces individual
+first-level types.
+
 ### First-level elements and attachments
 
 A generated element is *first-level* (drawn, in the palette) when its

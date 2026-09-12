@@ -13,7 +13,7 @@ import { Rules } from './rules'
 import { fromDocument, makeEdge, makeNode, newId, toDocument, type RFEdge, type RFNode } from './convert'
 import type { Document } from './types'
 import { rfStore } from './rf'
-import type { ApplyResult, AttachmentOption, Catalog, DriftResult, Entry, GeneratedSummary, Job, PlanResult, Problem } from './types'
+import type { ApplyResult, AttachmentOption, Catalog, DriftResult, Entry, Family, GeneratedSummary, Job, PlanResult, Problem } from './types'
 import { ROOT } from './types'
 
 interface State {
@@ -49,6 +49,7 @@ interface State {
   activeProvider: string
   catalogVersion: number
   generatedByProvider: Record<string, GeneratedSummary[]>
+  familiesByProvider: Record<string, Family[]>
   connectingFrom: string | null
   attachmentsByType: Record<string, AttachmentOption[]>
   selectedEdgeId: string | null
@@ -111,6 +112,8 @@ interface State {
   /** Add an attachment element inside parentId, bound to it through attr/output. */
   addAttachment: (parentId: string, opt: AttachmentOption) => Promise<void>
   isAttachment: (type: string) => boolean
+  /** Switch a generated element to a sibling resource type of its family (properties reset to defaults). */
+  changeNodeType: (id: string, type: string) => Promise<void>
   selectEdge: (id: string | null) => void
   hoverEdge: (id: string | null) => void
   removeEdge: (id: string) => void
@@ -183,6 +186,7 @@ export const useStore = create<State>((set, get) => ({
   activeProvider: stored('iagram.provider', ''),
   catalogVersion: 0,
   generatedByProvider: {},
+  familiesByProvider: {},
   connectingFrom: null,
   attachmentsByType: {},
   selectedEdgeId: null,
@@ -553,9 +557,9 @@ export const useStore = create<State>((set, get) => ({
     if (get().generatedByProvider[provider]) return
     try {
       const r = await api.generated(provider)
-      set({ generatedByProvider: { ...get().generatedByProvider, [provider]: r.elements } })
+      set({ generatedByProvider: { ...get().generatedByProvider, [provider]: r.elements }, familiesByProvider: { ...get().familiesByProvider, [provider]: r.families } })
     } catch {
-      set({ generatedByProvider: { ...get().generatedByProvider, [provider]: [] } })
+      set({ generatedByProvider: { ...get().generatedByProvider, [provider]: [] }, familiesByProvider: { ...get().familiesByProvider, [provider]: [] } })
     }
   },
 
@@ -565,6 +569,25 @@ export const useStore = create<State>((set, get) => ({
 
   isAttachment(type) {
     return !!get().rules?.entry(type)?.attachment
+  },
+
+  async changeNodeType(id, type) {
+    const entry = await get().ensureEntry(type)
+    const { rules, nodes } = get()
+    if (!entry || !rules) return
+    const node = nodes.find((n) => n.id === id)
+    if (!node || node.data.type === type) return
+    get().commit()
+    // Attachments and references bound to the old type no longer apply.
+    const attached = nodes.filter((n) => n.parentId === id && !!rules.entry(n.data.type)?.attachment).map((n) => n.id)
+    const drop = new Set([id, ...attached])
+    set({
+      nodes: nodes.filter((n) => !attached.includes(n.id)).map((n) => (n.id === id ? { ...n, data: { ...n.data, type, props: rules.defaults(type), outputs: undefined } } : n)),
+      edges: get().edges.filter((e) => !(drop.has(e.source) || attached.includes(e.target))),
+      dirty: true,
+      catalogVersion: get().catalogVersion + 1,
+    })
+    get().validateSoon()
   },
 
   async loadAttachments(type) {

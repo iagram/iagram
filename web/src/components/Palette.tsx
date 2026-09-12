@@ -18,6 +18,7 @@ export function Palette() {
 
   const provider = useStore((s) => s.activeProvider)
   const generated = useStore((s) => s.generatedByProvider[s.activeProvider])
+  const families = useStore((s) => s.familiesByProvider[s.activeProvider])
   const loadGenerated = useStore((s) => s.loadGenerated)
   const ensureEntry = useStore((s) => s.ensureEntry)
   const [query, setQuery] = useState('')
@@ -31,6 +32,13 @@ export function Palette() {
     return list.filter((g) => g.label.toLowerCase().includes(q) || g.resource.includes(q) || g.service.includes(q))
   }, [generated, q])
   const attachmentCount = useMemo(() => (generated ?? []).filter((g) => !g.graphical).length, [generated])
+  // Palette entries: one per official icon not already covered by a curated element.
+  const familyTiles = useMemo(() => (families ?? []).filter((f) => !f.curated && (!q || f.label.toLowerCase().includes(q) || f.types.some((t) => t.includes(q)))), [families, q])
+  const grouped = useMemo(() => {
+    const m = new Map<string, typeof familyTiles>()
+    for (const f of familyTiles) (m.get(f.category) ?? m.set(f.category, []).get(f.category)!).push(f)
+    return [...m.entries()].sort(([a], [b]) => ORDER.indexOf(a) - ORDER.indexOf(b))
+  }, [familyTiles])
 
   if (!catalog || !rules) return <aside className="palette" />
 
@@ -85,38 +93,69 @@ export function Palette() {
         ))}
       <section className="generated">
         <h3>
-          All resources <span className="muted">({generated ? generatedMatches.length : '…'})</span>
+          More services <span className="muted">({families ? familyTiles.length : '…'})</span>
         </h3>
         <p className="hint">
-          Every {PROVIDER_LABEL[provider] ?? provider} Terraform resource with an official icon, settings generated from the provider schema.
-          {attachmentCount > 0 && ` ${attachmentCount} more (policies, rules, associations…) attach from an element's settings.`}
+          One element per official icon. Its resource type is chosen in the settings; sub-resources (
+          {attachmentCount}) attach from there.
         </p>
-        {generatedMatches.slice(0, 60).map((g) => {
-          const fits = rules.canContain(contextType, g.id) || !rules.entry(g.id)
-          return (
-            <div
-              key={g.id}
-              className={`item ${fits ? 'fits' : 'dim'}`}
-              draggable
-              onMouseEnter={() => void ensureEntry(g.id)}
-              onDragStart={(ev) => {
-                void ensureEntry(g.id)
-                ev.dataTransfer.setData(DND_TYPE, g.id)
-                ev.dataTransfer.effectAllowed = 'move'
-                setDragging(g.id)
-              }}
-              onDragEnd={() => setDragging(null)}
-              title={g.resource}
-            >
-              {g.icon && <img src={`/icons/${g.icon}`} alt="" draggable={false} />}
-              <span>
-                {g.label}
-                <small className="mono">{g.resource}</small>
-              </span>
-            </div>
-          )
-        })}
-        {generatedMatches.length > 60 && <p className="hint">{generatedMatches.length - 60} more; refine the search.</p>}
+        {grouped.map(([cat, fams]) => (
+          <div key={cat}>
+            <h4>{cat}</h4>
+            {fams.map((f) => {
+              const fits = rules.canContain(contextType, f.default) || !rules.entry(f.default)
+              return (
+                <div
+                  key={f.key}
+                  className={`item ${fits ? 'fits' : 'dim'}`}
+                  draggable
+                  onMouseEnter={() => void ensureEntry(f.default)}
+                  onDragStart={(ev) => {
+                    void ensureEntry(f.default)
+                    ev.dataTransfer.setData(DND_TYPE, f.default)
+                    ev.dataTransfer.effectAllowed = 'move'
+                    setDragging(f.default)
+                  }}
+                  onDragEnd={() => setDragging(null)}
+                  title={`${f.types.length} resource type${f.types.length === 1 ? '' : 's'}: ${f.types.map((t) => t.split('.res.')[1]).join(', ')}`}
+                >
+                  <img src={`/icons/${f.icon}`} alt="" draggable={false} />
+                  <span>
+                    {f.label}
+                    {f.types.length > 1 && <small className="mono">{f.types.length} types</small>}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        ))}
+        {q && generatedMatches.length > 0 && (
+          <div>
+            <h4>Matching resource types</h4>
+            {generatedMatches.slice(0, 30).map((g) => (
+              <div
+                key={g.id}
+                className="item fits"
+                draggable
+                onMouseEnter={() => void ensureEntry(g.id)}
+                onDragStart={(ev) => {
+                  void ensureEntry(g.id)
+                  ev.dataTransfer.setData(DND_TYPE, g.id)
+                  ev.dataTransfer.effectAllowed = 'move'
+                  setDragging(g.id)
+                }}
+                onDragEnd={() => setDragging(null)}
+                title={g.resource}
+              >
+                {g.icon && <img src={`/icons/${g.icon}`} alt="" draggable={false} />}
+                <span>
+                  {g.label}
+                  <small className="mono">{g.resource}</small>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </aside>
   )

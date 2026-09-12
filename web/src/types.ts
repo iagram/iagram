@@ -92,6 +92,16 @@ export interface GeneratedSummary {
   attachment: boolean
 }
 
+export interface Family {
+  key: string
+  label: string
+  icon: string
+  category: string
+  types: string[]
+  default: string
+  curated?: string
+}
+
 export interface AttachmentOption {
   id: string
   label: string

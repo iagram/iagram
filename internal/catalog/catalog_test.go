@@ -1,6 +1,7 @@
 package catalog_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/iagram/iagram"
@@ -248,5 +249,41 @@ func TestGraphicalVersusAttachment(t *testing.T) {
 	e, _ := c.Get("aws.res.aws_sns_topic_subscription")
 	if !e.Attachment || !c.CanContain("aws.res.aws_sns_topic", e.ID) {
 		t.Error("attachment must be placeable inside its (leaf) parent")
+	}
+}
+
+func TestFamiliesOnePerIcon(t *testing.T) {
+	c := load(t)
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	fams := c.Families("aws")
+	if len(fams) < 100 || len(fams) > 200 {
+		t.Errorf("aws families = %d (one per icon expected)", len(fams))
+	}
+	seen := map[string]bool{}
+	var lambda, iam *catalog.Family
+	for i := range fams {
+		f := &fams[i]
+		if seen[f.Icon] {
+			t.Errorf("icon %s listed twice", f.Icon)
+		}
+		seen[f.Icon] = true
+		if len(f.Types) == 0 || f.Default != f.Types[0] {
+			t.Errorf("family %s malformed: %+v", f.Label, f)
+		}
+		switch {
+		case strings.HasSuffix(f.Icon, "/lambda.svg") || strings.HasSuffix(f.Icon, "aws_lambda.svg"):
+			lambda = f
+		case strings.HasSuffix(f.Icon, "aws_identity_and_access_management.svg"):
+			iam = f
+		}
+	}
+	if lambda == nil || lambda.Default != "aws.res.aws_lambda_function" {
+		t.Errorf("lambda family = %+v", lambda)
+	}
+	if iam == nil || iam.Default != "aws.res.aws_iam_role" || len(iam.Types) < 4 {
+		t.Errorf("iam family = %+v", iam)
+	}
+	if lambda != nil && lambda.Curated != "aws.lambda_function" {
+		t.Errorf("lambda family should point at the curated element: %+v", lambda)
 	}
 }

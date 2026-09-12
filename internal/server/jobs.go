@@ -325,7 +325,11 @@ func (s *Server) generatedList(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []catalog.GeneratedSummary{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"provider": prov, "elements": list})
+	fams := s.Catalog.Families(prov)
+	if fams == nil {
+		fams = []catalog.Family{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"provider": prov, "elements": list, "families": fams})
 }
 
 // generatedEntry serves the full entry (settings schema included) of one element.
