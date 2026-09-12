@@ -174,14 +174,46 @@ func TestGraphicalVersusAttachment(t *testing.T) {
 	if g := byRes["aws_iam_role_policy_attachment"]; g.Graphical {
 		t.Errorf("policy attachment should be an attachment: %+v", g)
 	}
-	for _, res := range []string{"aws_iam_role", "aws_route53_zone", "aws_lb_target_group", "aws_api_gateway_rest_api", "aws_lambda_function", "aws_ecs_cluster"} {
+	// First-level: own icon, no owner of the same kind. Placement references (vpc, subnet) do not count.
+	for _, res := range []string{"aws_iam_role", "aws_iam_policy", "aws_route53_zone", "aws_lb", "aws_api_gateway_rest_api", "aws_lambda_function", "aws_ecs_cluster", "aws_ecs_task_definition", "aws_nat_gateway", "aws_vpc_endpoint", "aws_instance", "aws_cloudwatch_log_group", "aws_kms_key", "aws_ecr_repository", "aws_rds_cluster"} {
 		if g := byRes[res]; !g.Graphical {
-			t.Errorf("%s should be graphical: %+v", res, g)
+			t.Errorf("%s should be first-level: %+v", res, g)
 		}
 	}
-	for _, res := range []string{"aws_route", "aws_security_group_rule", "aws_lambda_permission", "aws_cloudwatch_event_target", "aws_api_gateway_method", "aws_lb_listener"} {
+	// Attachments: configuration of another resource, or owned by one sharing the icon.
+	for _, res := range []string{"aws_route", "aws_security_group_rule", "aws_lambda_permission", "aws_lambda_alias", "aws_cloudwatch_event_target", "aws_api_gateway_method", "aws_lb_listener", "aws_lb_target_group", "aws_ecs_service", "aws_eks_node_group", "aws_rds_cluster_instance", "aws_cloudwatch_log_stream", "aws_kms_alias", "aws_ecr_repository_policy", "aws_glue_catalog_table"} {
 		if g := byRes[res]; g.Graphical {
 			t.Errorf("%s should be an attachment: %+v", res, g)
+		}
+	}
+	gcpList := c.Generated("gcp")
+	gcpBy := map[string]catalog.GeneratedSummary{}
+	for _, g := range gcpList {
+		gcpBy[g.Resource] = g
+	}
+	for _, res := range []string{"google_sql_database", "google_sql_user", "google_pubsub_subscription", "google_container_node_pool", "google_bigquery_table"} {
+		if g := gcpBy[res]; g.Graphical {
+			t.Errorf("%s should be an attachment: %+v", res, g)
+		}
+	}
+	for _, res := range []string{"google_compute_instance", "google_sql_database_instance", "google_cloud_run_v2_service", "google_storage_bucket", "google_pubsub_topic"} {
+		if g := gcpBy[res]; !g.Graphical {
+			t.Errorf("%s should be first-level: %+v", res, g)
+		}
+	}
+	azList := c.Generated("azure")
+	azBy := map[string]catalog.GeneratedSummary{}
+	for _, g := range azList {
+		azBy[g.Resource] = g
+	}
+	for _, res := range []string{"azurerm_storage_container", "azurerm_storage_blob", "azurerm_kubernetes_cluster_node_pool", "azurerm_role_assignment"} {
+		if g := azBy[res]; g.Graphical {
+			t.Errorf("%s should be an attachment: %+v", res, g)
+		}
+	}
+	for _, res := range []string{"azurerm_linux_virtual_machine", "azurerm_linux_web_app", "azurerm_storage_account", "azurerm_kubernetes_cluster", "azurerm_mssql_server"} {
+		if g := azBy[res]; !g.Graphical {
+			t.Errorf("%s should be first-level: %+v", res, g)
 		}
 	}
 	if attr, out, ok := c.AttachmentBinding("aws.res.aws_sns_topic_subscription", "aws.res.aws_sns_topic"); !ok || attr != "topic_arn" || out != "arn" {
@@ -193,7 +225,7 @@ func TestGraphicalVersusAttachment(t *testing.T) {
 			graphical++
 		}
 	}
-	if graphical < 300 || graphical > 1300 {
+	if graphical < 200 || graphical > 1000 {
 		t.Errorf("aws graphical count = %d (palette should be a few hundred, not 1700)", graphical)
 	}
 	// attachments for the curated bucket and for a generated topic

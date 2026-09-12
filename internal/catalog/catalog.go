@@ -196,6 +196,7 @@ type Catalog struct {
 	// serviceIcons: provider -> tf type prefix (without provider prefix) -> icon path.
 	serviceIcons map[string]map[string]string
 	attachCache  map[string][]AttachmentOption
+	attachKinds  map[string]map[string]bool // provider -> tf type -> is attachment
 }
 
 // Role values for Terraform.Role.

@@ -52,37 +52,13 @@ type GeneratedSummary struct {
 	Attachment bool   `json:"attachment"` // configured inside another element
 }
 
-// attachmentSuffixes mark resource types that configure another resource
-// rather than standing on their own, even when their service has an icon.
-// Matched as whole trailing words of the type name (aws_s3_bucket_versioning,
-// google_project_iam_member, azurerm_role_assignment).
-var attachmentSuffixes = []string{
-	"association", "attachment", "permission", "subscription", "rule", "versioning", "configuration", "acl", "policy", "notification",
-	"lifecycle", "logging", "cors", "encryption", "public_access_block", "ownership_controls", "website", "object", "member", "binding",
-	"assignment", "registration", "mapping", "target", "record", "record_set", "entry", "option", "parameter", "setting", "tag", "alias", "grant",
-	"access_point", "access_key", "login_profile", "ssh_key", "signing_certificate", "service_specific_credential", "replication",
-	"inventory", "metric", "analytics", "provisioned_concurrency_config", "event_source_mapping", "function_url", "layer_version",
-	"code_signing_config", "invocation", "domain_identity", "certificate_validation", "peering", "peering_connection", "endpoint_service",
-	"volume_attachment", "network_interface_attachment", "secret_version", "key_version", "integration", "response", "deployment", "stage",
-	"authorizer", "usage_plan", "usage_plan_key", "api_key", "domain_name", "base_path_mapping", "vpc_link", "resource", "method",
-	"gateway_response", "documentation_part", "documentation_version", "request_validator", "route", "listener", "listener_rule",
-	"target_group_attachment", "group_membership", "user_group_membership", "role_policy", "group_policy", "user_policy", "policy_attachment",
-	"membership", "label", "annotation", "condition", "exclusion", "sink", "metric_filter", "dashboard", "widget", "hook", "trigger",
-}
-
-// IsAttachmentType reports whether a Terraform resource type configures
-// another resource rather than being drawn on its own.
+// IsAttachmentType reports whether a Terraform resource type's name alone
+// marks it as configuration: the provider "default" resources
+// (aws_default_vpc, aws_default_security_group) adopt existing objects and
+// are never drawn. Everything else is decided by classify.
 func IsAttachmentType(tfType string) bool {
 	_, rest, _ := strings.Cut(tfType, "_")
-	if strings.Contains("_"+rest+"_", "_default_") {
-		return true
-	}
-	for _, sfx := range attachmentSuffixes {
-		if rest == sfx || strings.HasSuffix(rest, "_"+sfx) {
-			return true
-		}
-	}
-	return false
+	return strings.HasPrefix(rest, "default_")
 }
 
 // AttachmentBinding returns the attribute/output through which an attachment
@@ -104,12 +80,19 @@ func (c *Catalog) AttachmentBinding(childID, parentID string) (attr, output stri
 	if parentTF == "" {
 		return "", "", false
 	}
-	props, _, _, rok := c.registry.Resource(child.Terraform.Resource)
+	props, required, _, rok := c.registry.Resource(child.Terraform.Resource)
 	if !rok {
 		return "", "", false
 	}
-	attr, output = bindingFor(child.Terraform.Resource, parentTF, parentTokens(parentTF), props, parent)
-	return attr, output, attr != ""
+	related := c.iconKey(child.Provider, child.Terraform.Resource) == c.iconKey(child.Provider, parentTF)
+	attr = bindsTo(child.Terraform.Resource, parentTF, props, required, related)
+	if attr == "" && strings.HasPrefix(child.Terraform.Resource, parentTF+"_") {
+		attr = firstRefAttr(props)
+	}
+	if attr == "" {
+		return "", "", false
+	}
+	return attr, outputFor(attr, parent), true
 }
 
 // Generated lists the generated elements of a catalog provider (aws, gcp, azure).
@@ -121,8 +104,8 @@ func (c *Catalog) Generated(provider string) []GeneratedSummary {
 	types := c.registry.Types(pc.LocalName())
 	out := make([]GeneratedSummary, 0, len(types))
 	for _, t := range types {
-		icon, official := c.serviceIcon(provider, t)
-		attachment := !official || IsAttachmentType(t)
+		icon, _ := c.serviceIcon(provider, t)
+		attachment := c.isAttachment(provider, t)
 		out = append(out, GeneratedSummary{
 			ID: provider + ".res." + t, Label: humanize(t), Resource: t, Service: service(t),
 			Category: categoryOf(t), Icon: icon, Graphical: !attachment, Attachment: attachment,
@@ -144,10 +127,11 @@ func (c *Catalog) generatedEntry(id string) (*Entry, bool) {
 		return nil, false
 	}
 	c.genMu.Lock()
-	defer c.genMu.Unlock()
 	if e, ok := c.generated[id]; ok {
+		c.genMu.Unlock()
 		return e, true
 	}
+	c.genMu.Unlock() // isAttachment below takes the lock itself
 	props, required, outputs, ok := c.registry.Resource(tfType)
 	if !ok || !strings.HasPrefix(tfType, pc.LocalName()+"_") {
 		return nil, false
@@ -169,8 +153,8 @@ func (c *Catalog) generatedEntry(id string) (*Entry, bool) {
 		}
 		schema["required"] = req
 	}
-	icon, official := c.serviceIcon(provider, tfType)
-	attachment := !official || IsAttachmentType(tfType)
+	icon, _ := c.serviceIcon(provider, tfType)
+	attachment := c.isAttachment(provider, tfType)
 	desc := fmt.Sprintf("Terraform resource %s, rendered as a plain resource block. Every attribute of the provider schema is available; reference other elements with arrows.", tfType)
 	if attachment {
 		desc = fmt.Sprintf("Terraform resource %s. Configured inside the element it applies to; not drawn on its own.", tfType)
@@ -182,7 +166,9 @@ func (c *Catalog) generatedEntry(id string) (*Entry, bool) {
 		Terraform:  &Terraform{Role: RoleResource, Resource: tfType},
 		Attachment: attachment,
 	}
+	c.genMu.Lock()
 	c.generated[id] = e
+	c.genMu.Unlock()
 	return e, true
 }
 
@@ -267,6 +253,23 @@ func (c *Catalog) serviceIcon(provider, tfType string) (string, bool) {
 	return provider + "/generic.svg", false
 }
 
+// iconKey identifies the icon family of a resource type: the services.yaml
+// prefix it matches (independent of whether a curated element overrides the
+// icon path), or the type itself when nothing matches.
+func (c *Catalog) iconKey(provider, tfType string) string {
+	_, rest, _ := strings.Cut(tfType, "_")
+	best, bestLen := "", 0
+	for prefix := range c.serviceIcons[provider] {
+		if (rest == strings.TrimSuffix(prefix, "_") || strings.HasPrefix(rest, prefix) || strings.HasPrefix(rest, prefix+"_")) && len(prefix) > bestLen {
+			best, bestLen = prefix, len(prefix)
+		}
+	}
+	if best == "" {
+		return tfType
+	}
+	return c.serviceIcons[provider][best] // the icon file: two prefixes may share one icon
+}
+
 // AttachmentOption is an attachment type that can be added to a parent, with
 // the attribute/output binding that ties it to the parent.
 type AttachmentOption struct {
@@ -310,22 +313,25 @@ func (c *Catalog) AttachmentsFor(parentID string) []AttachmentOption {
 	local := pc.LocalName()
 	var out []AttachmentOption
 	if parentTF != "" {
-		tokens := parentTokens(parentTF)
 		for _, t := range c.registry.Types(local) {
-			if t == parentTF {
+			// Only first-level types are drawn; only same-service types attach
+			// (an Amazon Connect instance_id is not an EC2 attachment).
+			if t == parentTF || !c.isAttachment(pe.Provider, t) || service(t) != service(parentTF) {
 				continue
 			}
-			icon, official := c.serviceIcon(pe.Provider, t)
-			_ = icon
-			if official && !IsAttachmentType(t) {
-				continue // graphical: it is drawn, not attached
-			}
-			props, _, _, ok := c.registry.Resource(t)
+			props, required, _, ok := c.registry.Resource(t)
 			if !ok {
 				continue
 			}
-			if attr, output := bindingFor(t, parentTF, tokens, props, pe); attr != "" {
-				out = append(out, AttachmentOption{ID: pe.Provider + ".res." + t, Label: humanize(t), Resource: t, Attr: attr, Output: output})
+			related := c.iconKey(pe.Provider, t) == c.iconKey(pe.Provider, parentTF)
+			attr := bindsTo(t, parentTF, props, required, related)
+			if attr == "" && strings.HasPrefix(t, parentTF+"_") {
+				// Name extension without an obvious attribute: offer it anyway,
+				// bound through the first reference-looking attribute.
+				attr = firstRefAttr(props)
+			}
+			if attr != "" {
+				out = append(out, AttachmentOption{ID: pe.Provider + ".res." + t, Label: humanize(t), Resource: t, Attr: attr, Output: outputFor(attr, pe)})
 			}
 		}
 	}
@@ -336,51 +342,23 @@ func (c *Catalog) AttachmentsFor(parentID string) []AttachmentOption {
 	return out
 }
 
-// parentTokens returns the name tokens an attachment attribute may use for a
-// parent type: aws_s3_bucket -> ["s3_bucket", "bucket"], aws_iam_role -> ["iam_role", "role"].
-func parentTokens(parentTF string) []string {
-	_, rest, _ := strings.Cut(parentTF, "_")
-	parts := strings.Split(rest, "_")
-	var toks []string
-	for i := 0; i < len(parts); i++ {
-		toks = append(toks, strings.Join(parts[i:], "_"))
+// firstRefAttr returns the first non-container attribute that looks like a
+// reference (*_id, *_arn, *_name), or "".
+func firstRefAttr(props map[string]any) string {
+	names := make([]string, 0, len(props))
+	for n := range props {
+		names = append(names, n)
 	}
-	return toks
-}
-
-// bindingFor decides whether attachment type t attaches to the parent and
-// through which attribute; the referenced output is chosen to match.
-func bindingFor(t, parentTF string, tokens []string, props map[string]any, parent *Entry) (attr, output string) {
-	byPrefix := strings.HasPrefix(t, parentTF+"_")
-	candidates := []string{}
-	for _, tok := range tokens {
-		candidates = append(candidates, tok, tok+"_id", tok+"_arn", tok+"_name", tok+"_url", tok+"_key_id")
-	}
-	best := ""
-	for _, cand := range candidates {
-		if _, ok := props[cand]; ok {
-			best = cand
-			break
+	sort.Strings(names)
+	for _, n := range names {
+		if containerAttrs[n] {
+			continue
+		}
+		if strings.HasSuffix(n, "_id") || strings.HasSuffix(n, "_arn") || strings.HasSuffix(n, "_name") {
+			return n
 		}
 	}
-	if best == "" && byPrefix {
-		// Same family but no obvious attribute: attach on the first *_id/_arn/_name string attr.
-		names := make([]string, 0, len(props))
-		for n := range props {
-			names = append(names, n)
-		}
-		sort.Strings(names)
-		for _, n := range names {
-			if strings.HasSuffix(n, "_id") || strings.HasSuffix(n, "_arn") || strings.HasSuffix(n, "_name") {
-				best = n
-				break
-			}
-		}
-	}
-	if best == "" {
-		return "", ""
-	}
-	return best, outputFor(best, parent)
+	return ""
 }
 
 // outputFor picks the parent output an attachment attribute should reference.

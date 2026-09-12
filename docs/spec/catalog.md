@@ -209,21 +209,32 @@ attributes to `${<target address>.<output>}` (lists append). Curated elements
 never reference generated ones automatically; their inputs are fixed by their
 rules.
 
-### Graphical elements and attachments
+### First-level elements and attachments
 
-A generated element is *graphical* when its resource type maps to an official
-provider icon in `catalog/icons/<provider>/services.yaml` (longest type-prefix
-match) and its name does not mark it as configuration of another resource
-(`_policy`, `_attachment`, `_association`, `_rule`, `_subscription`,
-`_versioning`, `_permission`, `_member`, `_binding`, …). Only graphical
-elements appear in the palette. Every other type is an *attachment*: it may be
-placed inside any element of its provider (container or not), is not drawn,
-and is configured from its parent's settings panel. `iagram` derives which
-attachments apply to a parent from the schemas: the attachment's type extends
-the parent's (`aws_s3_bucket_versioning` for `aws_s3_bucket`) or it has an
-attribute named after the parent (`bucket`, `role`, `topic_arn`, `subnet_id`);
-that attribute is bound to the parent through a `references` edge, so it
-renders as `${<parent address>.<id|arn|name>}`.
+A generated element is *first-level* (drawn, in the palette) when its
+resource type maps to an official provider icon in
+`catalog/icons/<provider>/services.yaml` (longest type-prefix match) and no
+other type owns it. Ownership is derived from the provider schemas:
+
+- **name extension**: `aws_s3_bucket_versioning` extends `aws_s3_bucket`,
+  `google_project_iam_member` extends `google_project`, unless the shorter
+  type is the one referencing the longer (`google_sql_database` references
+  `google_sql_database_instance`, so the instance is first-level) or the
+  shorter type is a container (`aws_vpc_endpoint` lives in a VPC);
+- **binding attribute**, within the same service: an attribute named after
+  the owner's full type name (`storage_account_name`), or, within the same
+  icon family, after its last word(s) either bare (`cluster`, `instance`,
+  `topic`) or with a required `_id`/`_arn`/`_name` suffix (`function_name`,
+  `target_key_id`). Container attributes (`vpc_id`, `subnet_id`,
+  `resource_group_name`, `project`, `network`…) and generic words (`policy`,
+  `name`, `key`, `role`…) never count; nested blocks never count.
+
+Every other type is an *attachment*: it may be placed inside any element of
+its provider (container or not), is not drawn, and is configured from its
+parent's settings panel, bound to the parent through a `references` edge on
+its binding attribute (`${<parent address>.<id|arn|name>}`). The `default_*`
+adoption resources are attachments as well. Cross-service references between
+first-level elements are arrows.
 
 ## Equivalences (`catalog/equivalences.yaml`)
 
