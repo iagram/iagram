@@ -199,6 +199,38 @@ export function PropertyPanel() {
         </ul>
       )}
 
+      {!rules.entry(node.data.type)?.attachment && (attachmentOptions?.some((o) => o.component) || allNodes.some((n) => n.parentId === node.id && !!rules.entry(n.data.type)?.component)) && (
+        <details open className="section components">
+          <summary>
+            Components <span className="muted">({allNodes.filter((n) => n.parentId === node.id && !!rules.entry(n.data.type)?.component).length})</span>
+          </summary>
+          <p className="muted">Members deployed inside this box (node groups, services, instances). They are drawn inside it; click one to configure it.</p>
+          <div className="add-attachment">
+            <select value={pickAttachment} onChange={(e) => setPickAttachment(e.target.value)}>
+              <option value="">Add component…</option>
+              {(attachmentOptions ?? [])
+                .filter((o) => o.component)
+                .map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+            </select>
+            <button
+              type="button"
+              className="primary"
+              disabled={!pickAttachment}
+              onClick={() => {
+                const opt = attachmentOptions?.find((o) => o.id === pickAttachment)
+                if (opt) void addAttachment(node.id, opt)
+                setPickAttachment('')
+              }}
+            >
+              Add
+            </button>
+          </div>
+        </details>
+      )}
       {!rules.entry(node.data.type)?.attachment && (
         <details open className="section attachments">
           <summary>
@@ -208,15 +240,17 @@ export function PropertyPanel() {
           {attachedNodes.map((a) => (
             <AttachmentRow key={a.id} id={a.id} />
           ))}
-          {attachmentOptions && attachmentOptions.length > 0 ? (
+          {attachmentOptions && attachmentOptions.some((o) => !o.component) ? (
             <div className="add-attachment">
               <select value={pickAttachment} onChange={(e) => setPickAttachment(e.target.value)}>
                 <option value="">Add attachment…</option>
-                {attachmentOptions.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label} ({o.attr})
-                  </option>
-                ))}
+                {attachmentOptions
+                  .filter((o) => !o.component)
+                  .map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label} ({o.attr})
+                    </option>
+                  ))}
               </select>
               <button
                 type="button"

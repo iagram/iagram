@@ -155,16 +155,31 @@ func (c *Catalog) generatedEntry(id string) (*Entry, bool) {
 	}
 	icon, _ := c.serviceIcon(provider, tfType)
 	attachment := c.isAttachment(provider, tfType)
+	kind := KindLeaf
+	size := &Size{W: 120, H: 90}
+	component := false
 	desc := fmt.Sprintf("Terraform resource %s, rendered as a plain resource block. Every attribute of the provider schema is available; reference other elements with arrows.", tfType)
 	if attachment {
-		desc = fmt.Sprintf("Terraform resource %s. Configured inside the element it applies to; not drawn on its own.", tfType)
+		if owner := c.componentOwner(provider, tfType); owner != "" {
+			// A member of a cluster: drawn inside the cluster box.
+			attachment, component = false, true
+			parents = c.ownerElementIDs(provider, owner)
+			desc = fmt.Sprintf("Terraform resource %s. A member of its cluster, drawn inside the cluster box.", tfType)
+		} else {
+			desc = fmt.Sprintf("Terraform resource %s. Configured inside the element it applies to; not drawn on its own.", tfType)
+		}
+	} else if c.isBoxType(provider, tfType) {
+		// Clusters with members are boxes: node groups, services, instances sit inside.
+		kind = KindContainer
+		size = &Size{W: 380, H: 240}
+		desc += " Drawn as a box: its members (node groups, services, instances) are added from its settings and drawn inside."
 	}
 	e := &Entry{
 		ID: id, Label: humanize(tfType), Provider: provider, Category: categoryOf(tfType),
-		Description: desc, Icon: icon, Kind: KindLeaf, AllowedParents: parents,
-		Props: schema, Outputs: outputs, Size: &Size{W: 120, H: 90},
+		Description: desc, Icon: icon, Kind: kind, AllowedParents: parents,
+		Props: schema, Outputs: outputs, Size: size,
 		Terraform:  &Terraform{Role: RoleResource, Resource: tfType},
-		Attachment: attachment,
+		Attachment: attachment, Component: component,
 	}
 	c.genMu.Lock()
 	c.generated[id] = e
@@ -270,14 +285,29 @@ func (c *Catalog) iconKey(provider, tfType string) string {
 	return c.serviceIcons[provider][best] // the icon file: two prefixes may share one icon
 }
 
+// ownerElementIDs lists the element ids a component may live in: the
+// generated element of the owner type plus any curated element importing it.
+func (c *Catalog) ownerElementIDs(provider, ownerTF string) []string {
+	ids := []string{provider + ".res." + ownerTF}
+	for _, e := range c.Entries {
+		if e.Provider == provider && e.Terraform != nil && e.Terraform.Import != nil && e.Terraform.Import.Resource == ownerTF {
+			ids = append(ids, e.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // AttachmentOption is an attachment type that can be added to a parent, with
-// the attribute/output binding that ties it to the parent.
+// the attribute/output binding that ties it to the parent. Component says the
+// element is drawn inside the parent rather than configured invisibly.
 type AttachmentOption struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Resource string `json:"resource"`
-	Attr     string `json:"attr"`   // attachment attribute that references the parent
-	Output   string `json:"output"` // parent attribute/output referenced
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Resource  string `json:"resource"`
+	Attr      string `json:"attr"`   // attachment attribute that references the parent
+	Output    string `json:"output"` // parent attribute/output referenced
+	Component bool   `json:"component,omitempty"`
 }
 
 // AttachmentsFor lists the attachment types applicable to a parent element,
@@ -331,7 +361,7 @@ func (c *Catalog) AttachmentsFor(parentID string) []AttachmentOption {
 				attr = firstRefAttr(props)
 			}
 			if attr != "" {
-				out = append(out, AttachmentOption{ID: pe.Provider + ".res." + t, Label: humanize(t), Resource: t, Attr: attr, Output: outputFor(attr, pe)})
+				out = append(out, AttachmentOption{ID: pe.Provider + ".res." + t, Label: humanize(t), Resource: t, Attr: attr, Output: outputFor(attr, pe), Component: c.componentOwner(pe.Provider, t) != ""})
 			}
 		}
 	}

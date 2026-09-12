@@ -153,11 +153,16 @@ func bindsTo(t, ownerTF string, props map[string]any, required []string, related
 	tokens := []token{{rest, false}}
 	if related {
 		words := strings.Split(rest, "_")
-		if last := words[len(words)-1]; last != rest {
+		_, tRest, _ := strings.Cut(t, "_")
+		tWords := strings.Split(tRest, "_")
+		own := tWords[len(tWords)-1] // aws_msk_cluster.cluster_name names itself, not another cluster
+		if last := words[len(words)-1]; last != rest && last != own {
 			tokens = append(tokens, token{last, true})
 		}
 		if len(words) > 2 {
-			tokens = append(tokens, token{strings.Join(words[1:], "_"), true})
+			if sub := strings.Join(words[1:], "_"); sub != tRest && !strings.HasSuffix(tRest, "_"+sub) {
+				tokens = append(tokens, token{sub, true})
+			}
 		}
 	}
 	names := make([]string, 0, len(props))
@@ -174,6 +179,9 @@ func bindsTo(t, ownerTF string, props map[string]any, required []string, related
 				continue // nested blocks named after another type are not references
 			}
 			if n == tok.name {
+				if configLike(ownerTF) {
+					continue // a bare "security_configuration"/"task_definition" is a reference, not ownership
+				}
 				return n // bare reference: cluster, instance, topic, bucket
 			}
 			suffixed := n == tok.name+"_id" || n == tok.name+"_arn" || n == tok.name+"_name" || n == tok.name+"_url" || n == tok.name+"_identifier" ||
@@ -184,4 +192,66 @@ func bindsTo(t, ownerTF string, props map[string]any, required []string, related
 		}
 	}
 	return ""
+}
+
+// componentWords are the trailing words of owned types that represent
+// members running inside a cluster-like owner rather than its configuration.
+var componentWords = map[string]bool{"node_group": true, "node_pool": true, "service": true, "instance": true, "replica": true, "broker": true, "worker": true, "node": true, "pool": true, "task_set": true, "instance_group": true, "instance_fleet": true}
+
+// IsClusterType reports whether a first-level type is a cluster-like box that
+// holds members: its name ends with _cluster (EKS, ECS, MSK, Aurora, GKE,
+// AKS, Redshift, ElastiCache...).
+func IsClusterType(tfType string) bool {
+	return strings.HasSuffix(tfType, "_cluster") || strings.HasSuffix(tfType, "_replication_group")
+}
+
+// componentOwner returns the cluster-like owner when tfType is a member
+// component of it, else "".
+func (c *Catalog) componentOwner(provider, tfType string) string {
+	if !c.isAttachment(provider, tfType) {
+		return ""
+	}
+	owner := c.ownerOf(provider, tfType)
+	if owner == "" || !IsClusterType(owner) {
+		return ""
+	}
+	_, rest, _ := strings.Cut(tfType, "_")
+	words := strings.Split(rest, "_")
+	for i := range words {
+		if componentWords[strings.Join(words[i:], "_")] {
+			return owner
+		}
+	}
+	return ""
+}
+
+// configLike types describe settings rather than hold members; they never own
+// other resources (an EMR cluster references its security configuration, it
+// does not belong to it).
+func configLike(tfType string) bool {
+	for _, sfx := range []string{"_configuration", "_config", "_setting", "_settings", "_template", "_definition", "_option_group", "_parameter_group", "_profile", "_schedule"} {
+		if strings.HasSuffix(tfType, sfx) {
+			return true
+		}
+	}
+	return false
+}
+
+// isBoxType reports whether a first-level type is drawn as a box: it is a
+// cluster-like owner with at least one member component (EKS with node
+// groups, ECS with services, Aurora with cluster instances). Multi-zone
+// elements without members (an MSK cluster, a load balancer) stay nodes.
+func (c *Catalog) isBoxType(provider, tfType string) bool {
+	if !IsClusterType(tfType) || c.isAttachment(provider, tfType) {
+		return false
+	}
+	pc := c.Providers[provider]
+	for _, t := range c.registry.Types(pc.LocalName()) {
+		if strings.HasPrefix(t, tfType+"_") || service(t) == service(tfType) {
+			if c.componentOwner(provider, t) == tfType {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -287,3 +287,57 @@ func TestFamiliesOnePerIcon(t *testing.T) {
 		t.Errorf("lambda family should point at the curated element: %+v", lambda)
 	}
 }
+
+func TestClustersAreBoxesWithComponents(t *testing.T) {
+	c := load(t)
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	for _, id := range []string{"aws.eks_cluster", "gcp.gke_cluster", "azure.aks_cluster", "aws.res.aws_ecs_cluster", "aws.res.aws_rds_cluster", "aws.res.aws_emr_cluster", "gcp.res.google_container_cluster", "azure.res.azurerm_kubernetes_cluster"} {
+		e, ok := c.Get(id)
+		if !ok || e.Kind != catalog.KindContainer {
+			t.Errorf("%s should be a container box: %+v", id, e)
+		}
+	}
+	// Multi-zone elements without member resources stay single nodes.
+	for _, id := range []string{"aws.res.aws_msk_cluster", "aws.res.aws_redshift_cluster", "aws.res.aws_elasticache_replication_group", "aws.alb"} {
+		e, ok := c.Get(id)
+		if !ok || e.Kind != catalog.KindLeaf || e.Attachment {
+			t.Errorf("%s should be a first-level node: kind=%s attachment=%v", id, e.Kind, e.Attachment)
+		}
+	}
+	for tf, owners := range map[string][]string{
+		"aws_eks_node_group":                   {"aws.eks_cluster", "aws.res.aws_eks_cluster"},
+		"aws_ecs_service":                      {"aws.res.aws_ecs_cluster"},
+		"aws_rds_cluster_instance":             {"aws.res.aws_rds_cluster"},
+		"google_container_node_pool":           {"gcp.gke_cluster", "gcp.res.google_container_cluster"},
+		"azurerm_kubernetes_cluster_node_pool": {"azure.aks_cluster", "azure.res.azurerm_kubernetes_cluster"},
+	} {
+		id, _ := c.GeneratedID(tf)
+		e, ok := c.Get(id)
+		if !ok || !e.Component || e.Attachment {
+			t.Errorf("%s should be a component: %+v", tf, e)
+			continue
+		}
+		for _, o := range owners {
+			if !c.CanContain(o, id) {
+				t.Errorf("%s should be placeable in %s (allowed: %v)", tf, o, e.AllowedParents)
+			}
+		}
+		if c.CanContain("aws.region", id) || c.CanContain("gcp.project", id) {
+			t.Errorf("%s must not be placeable outside its cluster", tf)
+		}
+	}
+	// pure configuration stays an invisible attachment
+	if e, _ := c.Get("aws.res.aws_iam_role_policy_attachment"); !e.Attachment || e.Component {
+		t.Errorf("policy attachment misclassified: %+v", e)
+	}
+	opts := c.AttachmentsFor("aws.res.aws_ecs_cluster")
+	found := false
+	for _, o := range opts {
+		if o.Resource == "aws_ecs_service" && o.Component {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ecs service should be offered as a component of the cluster: %+v", opts)
+	}
+}

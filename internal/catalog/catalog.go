@@ -39,6 +39,9 @@ type Entry struct {
 	// Attachment marks a generated element with no graphical counterpart: it is
 	// not drawn on the canvas but configured inside the element it references.
 	Attachment bool `yaml:"-" json:"attachment,omitempty"`
+	// Component marks an owned element that is nevertheless drawn, inside its
+	// owner's box (node groups in a cluster, services in an ECS cluster).
+	Component bool `yaml:"-" json:"component,omitempty"`
 }
 
 // Size is the default canvas size of a node.
@@ -232,6 +235,10 @@ func (c *Catalog) CanContain(parentType, childType string) bool {
 	if child.Attachment && parentType != Root {
 		parent, ok := c.Get(parentType)
 		return ok && parent.Provider == child.Provider
+	}
+	// Components live only inside their owner (curated or generated).
+	if child.Component {
+		return contains(child.AllowedParents, parentType)
 	}
 	if !contains(child.AllowedParents, parentType) {
 		return false

@@ -25,6 +25,7 @@ export interface JSONSchema {
 export interface Entry {
   terraform?: { role?: string; resource?: string; module?: string }
   attachment?: boolean
+  component?: boolean
   id: string
   label: string
   description?: string
@@ -108,6 +109,7 @@ export interface AttachmentOption {
   resource: string
   attr: string
   output: string
+  component?: boolean
 }
 
 export interface ConvertReport {

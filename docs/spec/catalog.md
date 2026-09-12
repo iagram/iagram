@@ -239,7 +239,13 @@ other type owns it. Ownership is derived from the provider schemas:
   `resource_group_name`, `project`, `network`…) and generic words (`policy`,
   `name`, `key`, `role`…) never count; nested blocks never count.
 
-Every other type is an *attachment*: it may be placed inside any element of
+Owned types split in two. *Components* are members deployed inside a
+cluster-like owner (types ending in `_cluster` / `_replication_group` whose
+owned types end in `node_group`, `node_pool`, `service`, `instance`,
+`instance_group`, `broker`, `worker`, `pool`…): the owner becomes a
+container box and the component is drawn inside it, placeable only there,
+bound to it through its binding attribute. Every other owned type is an
+*attachment*: it may be placed inside any element of
 its provider (container or not), is not drawn, and is configured from its
 parent's settings panel, bound to the parent through a `references` edge on
 its binding attribute (`${<parent address>.<id|arn|name>}`). The `default_*`

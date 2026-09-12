@@ -247,11 +247,15 @@ export function Canvas() {
   // Labels are shown for all edges when enabled, otherwise only on hover/selection.
   const styledEdges = useMemo(
     () =>
-      sourceEdges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target)).map((e) => {
+      sourceEdges
+        .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
+        // A component's binding to its own box is containment, not an arrow.
+        .filter((e) => !(e.data?.kind === 'references' && sourceNodes.find((n) => n.id === e.source)?.parentId === e.target))
+        .map((e) => {
         const visible = showLabels || e.id === hoveredEdgeId || e.id === selectedEdgeId
         return { ...e, label: visible ? e.data?.label : undefined, className: badEdges.has(e.id) ? 'edge-error' : undefined }
       }),
-    [sourceEdges, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds],
+    [sourceEdges, sourceNodes, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds],
   )
 
   return (

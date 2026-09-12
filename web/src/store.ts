@@ -692,13 +692,15 @@ export const useStore = create<State>((set, get) => ({
     get().commit()
     const count = nodes.filter((n) => n.data.type === opt.id && n.parentId === parentId).length + 1
     const id = newId(entry)
+    // Components are drawn inside the parent box: tile them left to right.
+    const siblings = nodes.filter((n) => n.parentId === parentId && !!rules.entry(n.data.type)?.component).length
     const node = makeNode(rules, {
       id,
       type: opt.id,
       name: `${parent.data.name}-${opt.resource.split('_').slice(-1)[0]}${count > 1 ? `-${count}` : ''}`,
       parent: parentId,
       props: rules.defaults(opt.id),
-      layout: { x: 0, y: 0 },
+      layout: entry.component ? { x: 20 + (siblings % 3) * 140, y: 50 + Math.floor(siblings / 3) * 110 } : { x: 0, y: 0 },
     })
     const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: 'references', source: id, target: parentId, attr: opt.attr, output: opt.output }, opt.attr)
     set({ nodes: [...get().nodes, node], edges: [...get().edges, edge], dirty: true })

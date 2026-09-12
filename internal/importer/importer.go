@@ -561,7 +561,7 @@ func attachToParents(c *catalog.Catalog, d *document.Document) {
 	for i := range d.Nodes {
 		n := &d.Nodes[i]
 		e, ok := c.Get(n.Type)
-		if !ok || !e.Attachment {
+		if !ok || (!e.Attachment && !e.Component) {
 			continue
 		}
 		fallback := ""
