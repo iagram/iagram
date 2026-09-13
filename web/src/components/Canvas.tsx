@@ -18,6 +18,8 @@ import { setRfStore } from '../rf'
 import { CanvasControls } from './CanvasControls'
 import { ProjectionBanner } from './ProjectionBanner'
 import { ContextMenu } from './ContextMenu'
+import { Legend } from './Legend'
+import { edgeTypes } from '../edges/IagramEdge'
 import type React from 'react'
 
 const nodeTypes = { container: ContainerNode, resource: ResourceNode }
@@ -267,7 +269,7 @@ export function Canvas() {
         .filter((e) => !(e.data?.kind === 'references' && sourceNodes.find((n) => n.id === e.source)?.parentId === e.target))
         .map((e) => {
         const visible = showLabels || e.id === hoveredEdgeId || e.id === selectedEdgeId
-        return { ...e, label: visible ? e.data?.label : undefined, className: badEdges.has(e.id) ? 'edge-error' : undefined }
+        return { ...e, data: e.data ? { ...e.data, showLabel: visible } : e.data, className: badEdges.has(e.id) ? 'edge-error' : undefined }
       }),
     [sourceEdges, sourceNodes, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds],
   )
@@ -278,6 +280,7 @@ export function Canvas() {
         nodes={visibleNodes}
         edges={styledEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={connect}
@@ -329,6 +332,7 @@ export function Canvas() {
       </ReactFlow>
       <CanvasControls />
       <ContextMenu />
+      <Legend />
       {projected && <ProjectionBanner />}
     </div>
   )

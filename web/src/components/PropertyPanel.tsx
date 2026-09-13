@@ -24,6 +24,11 @@ export function PropertyPanel() {
   const removeEdge = useStore((s) => s.removeEdge)
   const catalog = useStore((s) => s.catalog)
   const setEdgeBinding = useStore((s) => s.setEdgeBinding)
+  const updateEdge = useStore((s) => s.updateEdge)
+  const steps = useStore((s) => s.steps)
+  const setSteps = useStore((s) => s.setSteps)
+  const showLegend = useStore((s) => s.showLegend)
+  const setShowLegend = useStore((s) => s.setShowLegend)
   const linkAttribute = useStore((s) => s.linkAttribute)
   useStore((s) => s.catalogVersion)
   const loadAttachments = useStore((s) => s.loadAttachments)
@@ -86,6 +91,41 @@ export function PropertyPanel() {
             Requires: <span className="mono">{reqs.join(', ')}</span>
           </p>
         )}
+        <details open className="section">
+          <summary>Annotation</summary>
+          <label className="field">
+            <span>Label</span>
+            <input value={edge.data?.userLabel ?? ''} placeholder={edge.data?.ruleLabel || 'shown on the arrow'} onChange={(e) => updateEdge(edge.id, { label: e.target.value })} />
+          </label>
+          <label className="field">
+            <span>Step</span>
+            <input value={edge.data?.step ?? ''} placeholder="1, 2, 9a…" onChange={(e) => updateEdge(edge.id, { step: e.target.value })} />
+          </label>
+          <label className="field">
+            <span>Direction</span>
+            <select value={edge.data?.style?.direction ?? edge.data?.ruleStyle?.direction ?? 'one'} onChange={(e) => updateEdge(edge.id, { style: { direction: e.target.value as 'one' | 'both' | 'none' } })}>
+              <option value="one">one way →</option>
+              <option value="both">both ways ↔</option>
+              <option value="none">plain line (association)</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Line</span>
+            <select value={edge.data?.style?.dash ?? edge.data?.ruleStyle?.dash ?? 'solid'} onChange={(e) => updateEdge(edge.id, { style: { dash: e.target.value as 'solid' | 'dashed' | 'dotted' } })}>
+              <option value="solid">solid</option>
+              <option value="dashed">dashed</option>
+              <option value="dotted">dotted</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Colour</span>
+            <input value={edge.data?.style?.color ?? ''} placeholder="CSS colour, e.g. #8C4FFF" onChange={(e) => updateEdge(edge.id, { style: { color: e.target.value } })} />
+          </label>
+          <label className="field check">
+            <input type="checkbox" checked={!!edge.data?.style?.inactive} onChange={(e) => updateEdge(edge.id, { style: { inactive: e.target.checked } })} />
+            <span>Inactive (standby path, greyed out)</span>
+          </label>
+        </details>
         <button className="danger" onClick={() => removeEdge(edge.id)}>
           Delete connection
         </button>
@@ -112,6 +152,26 @@ export function PropertyPanel() {
         </p>
         <p className="muted">Select an element to edit its properties. Drag from the palette to add one; connect elements by dragging from the right handle to the left handle of another.</p>
         <p className="muted">Shift+drag selects several; ⌘-click adds to the selection. Drag an element into another container to move it there.</p>
+        <details open className="section">
+          <summary>Walkthrough steps</summary>
+          <p className="muted">Give elements and arrows a step number in their Annotation section; describe each number here. Shown in the legend.</p>
+          <div className="steps-editor">
+            {steps.map((st, i) => (
+              <div className="row" key={i}>
+                <input className="n" value={st.n} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, n: e.target.value } : x)))} />
+                <textarea rows={2} value={st.text} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} />
+                <button className="icon" title="Remove step" onClick={() => setSteps(steps.filter((_, j) => j !== i))}>
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button onClick={() => setSteps([...steps, { n: String(steps.length + 1), text: '' }])}>Add step</button>
+          </div>
+        </details>
+        <label className="field check">
+          <input type="checkbox" checked={showLegend} onChange={(e) => setShowLegend(e.target.checked)} />
+          <span>Show legend on the canvas</span>
+        </label>
       </aside>
     )
   }
@@ -147,6 +207,17 @@ export function PropertyPanel() {
         <input value={node.data.name} onChange={(e) => updateNode(node.id, { name: e.target.value })} />
         <FieldProblems problems={byField.name} />
       </label>
+      <details className="section">
+        <summary>Annotation</summary>
+        <label className="field">
+          <span>Caption</span>
+          <input value={node.data.caption ?? ''} placeholder={entry?.caption_prop ? `defaults to ${entry.caption_prop}` : 'second line under the name'} onChange={(e) => updateNode(node.id, { caption: e.target.value })} />
+        </label>
+        <label className="field">
+          <span>Step</span>
+          <input value={node.data.step ?? ''} placeholder="1, 2, 9a…" onChange={(e) => updateNode(node.id, { step: e.target.value })} />
+        </label>
+      </details>
 
       {rules.isGenerated(node.data.type) && family && family.types.length > 1 && (
         <label className="field">

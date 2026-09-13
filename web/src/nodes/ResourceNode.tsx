@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { COMMON } from '../types'
 import { useStore } from '../store'
-import type { RFNode } from '../convert'
+import { captionOf, type RFNode } from '../convert'
 import { NodeBadge, usePlanClass } from './NodeBadge'
 import { useTargetState } from './useTargetState'
 
@@ -19,6 +19,7 @@ function ResourceNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
       <div className={`node note ${selected ? 'selected' : ''}`} data-type={data.type} data-provider={provider}>
         <NodeResizer isVisible={selected} minWidth={120} minHeight={60} lineClassName="resizer-line" handleClassName="resizer-handle" />
         <Handle type="target" position={Position.Left} />
+        {data.step && <span className="step-badge">{data.step}</span>}
         <div className="text">{text || <span className="muted">{data.name}</span>}</div>
         <Handle type="source" position={Position.Right} />
       </div>
@@ -29,6 +30,7 @@ function ResourceNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
     return (
       <div className={`node resource actor ${targetState} ${selected ? 'selected' : ''}`} data-type={data.type} data-provider={provider}>
         <Handle type="target" position={Position.Left} />
+        {data.step && <span className="step-badge">{data.step}</span>}
         {icon && <img src={`/icons/${icon}`} alt="" draggable={false} />}
         <div className="name" title={data.name}>
           {data.name}
@@ -38,14 +40,16 @@ function ResourceNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
       </div>
     )
   }
+  const caption = captionOf(entry, data)
   return (
     <div className={`node resource ${planClass} ${targetState} ${selected ? 'selected' : ''}`} data-type={data.type} data-provider={provider}>
       <Handle type="target" position={Position.Left} />
+      {data.step && <span className="step-badge">{data.step}</span>}
       {icon && <img src={`/icons/${icon}`} alt="" draggable={false} />}
       <div className="name" title={data.name}>
         {data.name}
       </div>
-      <div className="label">{entry?.label ?? data.type}</div>
+      <div className="label">{caption ? <i>{caption}</i> : entry?.label ?? data.type}</div>
       <NodeBadge id={id} />
       <Handle type="source" position={Position.Right} />
     </div>

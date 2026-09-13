@@ -33,8 +33,13 @@ indent, trailing newline) so that diffs and code review work. Commit it.
 | `nodes[].parent` | Id of the containing node; absent for top-level nodes. |
 | `nodes[].props` | Properties per the catalog `props` schema. Always present (`{}` when empty). |
 | `nodes[].outputs` | Optional. Written by `iagram apply` from the module outputs the catalog declares (endpoint, ids, IPs). Informational: never read by the generator, never validated. |
+| `nodes[].caption` | Optional free second line under the name ("primary Region", "vehicle lookup"). When absent the canvas shows the catalog's `caption_prop` value (CIDR, region, instance type). Informational. |
+| `nodes[].step` | Optional callout number of the walkthrough (`"1"`, `"9a"`). Informational. |
 | `nodes[].layout` | `x`,`y` relative to the parent; `w`,`h` for containers only; optional `z` stacking order among siblings. Layout never affects the generated infrastructure. |
 | `edges[]` | Typed connections; `kind` must match the catalog rule for the pair of node types. For `references` edges from generated elements, `attr` is the source attribute receiving the reference and `output` the referenced target attribute (default `id`). |
+| `edges[].label`, `edges[].step` | Optional label overriding the kind's default ("mTLS", "Private VIF") and callout number. Informational. |
+| `edges[].style` | Optional drawing: `direction` `one` (default) / `both` / `none` (plain association line), `dash` `solid` / `dashed` / `dotted`, `color` (CSS), `inactive` (greyed standby path). The catalog rule of the kind provides defaults. Informational. |
+| `steps[]` | Optional walkthrough text: `{n, text}` per callout number, shown in the legend. Informational. |
 | `nodes[].type` for generated elements | `<provider>.res.<terraform type>`, e.g. `aws.res.aws_kms_key`; properties are the resource's attributes as in Terraform, nested blocks as arrays/objects. |
 
 A machine-readable schema is in [`document.schema.json`](document.schema.json).

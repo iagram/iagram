@@ -447,7 +447,9 @@ func (g *gen) providerAlias(n *document.Node, provider string) string {
 	return ""
 }
 
-// ancestors returns parent, grandparent, ... (nearest first).
+// ancestors returns parent, grandparent, ... (nearest first), skipping
+// transparent containers (groups): "parent.vpc_id" of a subnet drawn inside a
+// group inside a VPC is the VPC.
 func (g *gen) ancestors(n *document.Node) []*document.Node {
 	var out []*document.Node
 	seen := map[string]bool{n.ID: true}
@@ -457,7 +459,9 @@ func (g *gen) ancestors(n *document.Node) []*document.Node {
 		if !ok {
 			break
 		}
-		out = append(out, p)
+		if !g.transparent(p.Type) {
+			out = append(out, p)
+		}
 		cur = p
 	}
 	return out

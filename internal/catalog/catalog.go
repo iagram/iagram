@@ -36,6 +36,9 @@ type Entry struct {
 	Terraform       *Terraform        `yaml:"terraform,omitempty" json:"terraform,omitempty"`
 	Outputs         []string          `yaml:"outputs,omitempty" json:"outputs,omitempty"`
 	Size            *Size             `yaml:"size,omitempty" json:"size,omitempty"`
+	// CaptionProp names the property shown as the element's second line when
+	// the node has no caption of its own (cidr, region, instance_type).
+	CaptionProp string `yaml:"caption_prop,omitempty" json:"caption_prop,omitempty"`
 	// Style is the drawing convention of a container (border colour, dash,
 	// label position), following the provider's official diagram grammar.
 	Style *Style `yaml:"style,omitempty" json:"style,omitempty"`
@@ -72,6 +75,7 @@ type ConnRule struct {
 	To        string         `yaml:"to,omitempty"`
 	Kind      string         `yaml:"kind"`
 	Label     string         `yaml:"label,omitempty"`
+	Style     *ConnStyle     `yaml:"style,omitempty"`
 	Terraform *ConnTerraform `yaml:"terraform,omitempty"`
 	// RequiresFrom / RequiresTo are property values the source / target must
 	// have for the connection to work (a VM needs a public IP before a DNS
@@ -90,11 +94,20 @@ type ConnTerraform struct {
 }
 
 // Rule is a compiled, directional connection rule.
+// ConnStyle is the default drawing of a connection kind: Direction one|both|
+// none, Dash solid|dashed|dotted, Color a CSS colour.
+type ConnStyle struct {
+	Direction string `yaml:"direction,omitempty" json:"direction,omitempty"`
+	Dash      string `yaml:"dash,omitempty" json:"dash,omitempty"`
+	Color     string `yaml:"color,omitempty" json:"color,omitempty"`
+}
+
 type Rule struct {
 	From         string         `json:"from"`
 	To           string         `json:"to"`
 	Kind         string         `json:"kind"`
 	Label        string         `json:"label,omitempty"`
+	Style        *ConnStyle     `json:"style,omitempty"`
 	Terraform    *ConnTerraform `json:"terraform,omitempty"`
 	RequiresFrom map[string]any `json:"requires_from,omitempty"`
 	RequiresTo   map[string]any `json:"requires_to,omitempty"`
@@ -312,7 +325,7 @@ func (c *Catalog) Connection(fromType, toType string) (Rule, bool) {
 	}
 	if from, ok := c.Get(fromType); ok && from.Terraform != nil && from.Terraform.Role == RoleResource {
 		if to, ok := c.Get(toType); ok && to.Provider == from.Provider {
-			return Rule{From: fromType, To: toType, Kind: ReferencesKind, Label: "references"}, true
+			return Rule{From: fromType, To: toType, Kind: ReferencesKind, Label: "references", Style: &ConnStyle{Dash: "dotted"}}, true
 		}
 	}
 	return Rule{}, false
@@ -401,12 +414,12 @@ func (c *Catalog) compile() error {
 			}
 		}
 		for _, r := range e.Connections.Out {
-			if err := c.addRule(seen, Rule{From: e.ID, To: r.To, Kind: r.Kind, Label: r.Label, Terraform: r.Terraform, RequiresFrom: r.RequiresFrom, RequiresTo: r.RequiresTo}); err != nil {
+			if err := c.addRule(seen, Rule{From: e.ID, To: r.To, Kind: r.Kind, Label: r.Label, Style: r.Style, Terraform: r.Terraform, RequiresFrom: r.RequiresFrom, RequiresTo: r.RequiresTo}); err != nil {
 				return fmt.Errorf("%s: %w", e.ID, err)
 			}
 		}
 		for _, r := range e.Connections.In {
-			if err := c.addRule(seen, Rule{From: r.From, To: e.ID, Kind: r.Kind, Label: r.Label, Terraform: r.Terraform, RequiresFrom: r.RequiresFrom, RequiresTo: r.RequiresTo}); err != nil {
+			if err := c.addRule(seen, Rule{From: r.From, To: e.ID, Kind: r.Kind, Label: r.Label, Style: r.Style, Terraform: r.Terraform, RequiresFrom: r.RequiresFrom, RequiresTo: r.RequiresTo}); err != nil {
 				return fmt.Errorf("%s: %w", e.ID, err)
 			}
 		}

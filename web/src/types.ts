@@ -32,6 +32,7 @@ export interface BoxStyle {
 export interface Entry {
   style?: BoxStyle
   style_variants?: Record<string, BoxStyle>
+  caption_prop?: string
   terraform?: { role?: string; resource?: string; module?: string }
   attachment?: boolean
   component?: boolean
@@ -56,6 +57,7 @@ export interface Rule {
   to: string
   kind: string
   label?: string
+  style?: Omit<EdgeStyle, 'inactive'>
   terraform?: { set: 'from' | 'to'; input: string; value: string }
   requires_from?: Record<string, unknown>
   requires_to?: Record<string, unknown>
@@ -82,6 +84,17 @@ export interface DocNode {
   props: Record<string, unknown>
   layout: Layout
   outputs?: Record<string, unknown>
+  /** free second line under the name; informational */
+  caption?: string
+  /** callout number of the walkthrough ("1", "9a"); informational */
+  step?: string
+}
+
+export interface EdgeStyle {
+  direction?: 'one' | 'both' | 'none'
+  dash?: 'solid' | 'dashed' | 'dotted'
+  color?: string
+  inactive?: boolean
 }
 
 export interface DocEdge {
@@ -91,6 +104,15 @@ export interface DocEdge {
   target: string
   attr?: string
   output?: string
+  /** overrides the kind's label; informational */
+  label?: string
+  step?: string
+  style?: EdgeStyle
+}
+
+export interface Step {
+  n: string
+  text: string
 }
 
 export interface GeneratedSummary {
@@ -135,6 +157,7 @@ export interface Document {
   name?: string
   nodes: DocNode[]
   edges: DocEdge[]
+  steps?: Step[]
 }
 
 export interface Problem {

@@ -20,6 +20,25 @@ type Document struct {
 	Name    string `json:"name,omitempty"`
 	Nodes   []Node `json:"nodes"`
 	Edges   []Edge `json:"edges"`
+	// Steps is the numbered walkthrough of the diagram: nodes and edges carry
+	// a Step number, this list holds the text for each number. Informational.
+	Steps []Step `json:"steps,omitempty"`
+}
+
+// Step is one entry of the numbered walkthrough ("1", "2", "9a").
+type Step struct {
+	N    string `json:"n"`
+	Text string `json:"text"`
+}
+
+// EdgeStyle is how an arrow is drawn. Direction is one|both|none (none draws
+// a plain association line), Dash is solid|dashed|dotted, Color a CSS colour,
+// Inactive greys the arrow out (standby capacity, disabled path).
+type EdgeStyle struct {
+	Direction string `json:"direction,omitempty"`
+	Dash      string `json:"dash,omitempty"`
+	Color     string `json:"color,omitempty"`
+	Inactive  bool   `json:"inactive,omitempty"`
 }
 
 // Node is a placed catalog element.
@@ -34,6 +53,10 @@ type Node struct {
 	// catalog declares (endpoints, ids, IPs). They are informational: the
 	// generator never reads them and they never affect validation.
 	Outputs map[string]any `json:"outputs,omitempty"`
+	// Caption is a free second line under the name ("primary Region",
+	// "vehicle lookup"); Step a callout number. Both informational.
+	Caption string `json:"caption,omitempty"`
+	Step    string `json:"step,omitempty"`
 }
 
 // Layout is position (relative to the parent) and, for containers, size.
@@ -56,6 +79,11 @@ type Edge struct {
 	Target string `json:"target"`
 	Attr   string `json:"attr,omitempty"`
 	Output string `json:"output,omitempty"`
+	// Label overrides the connection kind's label ("mTLS", "Private VIF");
+	// Step is a callout number; Style the drawing. All informational.
+	Label string     `json:"label,omitempty"`
+	Step  string     `json:"step,omitempty"`
+	Style *EdgeStyle `json:"style,omitempty"`
 }
 
 // New returns an empty document.

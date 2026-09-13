@@ -179,6 +179,7 @@ export function MenuBar() {
       { label: 'Fit diagram', shortcut: '⇧1', onClick: () => void fitView({ padding: 0.1 }) },
       { sep: true },
       { label: 'Connection labels', checked: s.showLabels, onClick: () => s.setShowLabels(!s.showLabels) },
+      { label: 'Legend', checked: s.showLegend, onClick: () => s.setShowLegend(!s.showLegend) },
       { label: 'Minimap', checked: s.showMinimap, onClick: () => s.setShowMinimap(!s.showMinimap) },
       { label: 'Snap to grid', checked: s.snapToGrid, onClick: () => s.setSnapToGrid(!s.snapToGrid) },
       { sep: true },

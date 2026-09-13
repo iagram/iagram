@@ -10,16 +10,19 @@ import {
 } from '@xyflow/react'
 import { api } from './api'
 import { Rules } from './rules'
-import { fromDocument, makeEdge, makeNode, newId, toDocument, zIndexFor, type RFEdge, type RFNode } from './convert'
+import { fromDocument, makeEdge, withMarkers, makeNode, newId, toDocument, zIndexFor, type RFEdge, type RFNode } from './convert'
 import type { Document } from './types'
 import { rfStore } from './rf'
-import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, Entry, Family, GeneratedSummary, Job, PlanResult, Problem } from './types'
+import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, EdgeStyle, Entry, Family, GeneratedSummary, Job, PlanResult, Problem, Step } from './types'
 import { COMMON, ROOT } from './types'
 
 interface State {
   catalog: Catalog | null
   rules: Rules | null
   docName: string
+  /** numbered walkthrough text, keyed by step number */
+  steps: Step[]
+  showLegend: boolean
   nodes: RFNode[]
   edges: RFEdge[]
   selectedId: string | null
@@ -69,7 +72,11 @@ interface State {
   onEdgesChange: (changes: EdgeChange<RFEdge>[]) => void
   addNode: (type: string, parentId: string | null, position: XYPosition) => string | null
   connect: (c: Connection) => void
-  updateNode: (id: string, patch: { name?: string; props?: Record<string, unknown> }) => void
+  updateNode: (id: string, patch: { name?: string; props?: Record<string, unknown>; caption?: string; step?: string }) => void
+  /** Edit an edge's label, step or style (informational fields). */
+  updateEdge: (id: string, patch: { label?: string; step?: string; style?: EdgeStyle }) => void
+  setSteps: (steps: Step[]) => void
+  setShowLegend: (v: boolean) => void
   removeNodes: (ids: string[]) => void
   select: (id: string | null) => void
   requestSelect: (id: string | null) => void
@@ -179,6 +186,8 @@ export const useStore = create<State>((set, get) => ({
   catalog: null,
   rules: null,
   docName: '',
+  steps: [],
+  showLegend: stored('iagram.legend', false),
   nodes: [],
   edges: [],
   selectedId: null,
@@ -232,7 +241,7 @@ export const useStore = create<State>((set, get) => ({
       const used = [...new Set(res.document.nodes.map((n) => n.type.split('.')[0]))].filter((p) => p !== COMMON)
       const current = get().activeProvider
       const activeProvider = providers.includes(current) ? current : used.find((p) => providers.includes(p)) ?? providers[0] ?? ''
-      set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
+      set({ catalog, rules, nodes, edges, steps: res.document.steps ?? [], docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
       void get().refreshProjection()
       api.latestPlan().then((r) => set({ ...(r.plan ? { plan: r.plan, planStale: false } : {}), drift: r.drift })).catch(() => undefined)
       api.health().then((h) => set({ version: h.version })).catch(() => undefined)
@@ -242,10 +251,10 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async save() {
-    const { docName, nodes, edges } = get()
+    const { docName, nodes, edges, steps } = get()
     set({ saving: true })
     try {
-      const res = await api.save(toDocument(docName, nodes, edges))
+      const res = await api.save(toDocument(docName, nodes, edges, steps))
       set({ problems: res.validation.problems, dirty: false, saving: false, error: null })
       get().showToast('Saved iagram.json')
     } catch (e) {
@@ -256,9 +265,9 @@ export const useStore = create<State>((set, get) => ({
   validateSoon() {
     clearTimeout(validateTimer)
     validateTimer = setTimeout(async () => {
-      const { docName, nodes, edges } = get()
+      const { docName, nodes, edges, steps } = get()
       try {
-        const v = await api.validate(toDocument(docName, nodes, edges))
+        const v = await api.validate(toDocument(docName, nodes, edges, steps))
         set({ problems: v.problems })
       } catch (e) {
         set({ error: (e as Error).message })
@@ -335,7 +344,7 @@ export const useStore = create<State>((set, get) => ({
     if (!rule) return
     if (edges.some((e) => e.source === c.source && e.target === c.target)) return
     get().commit()
-    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: c.source, target: c.target }, rule.label ?? rule.kind)
+    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: c.source, target: c.target }, rule.label ?? (rule.kind === 'flow' ? '' : rule.kind), rule.style)
     set({ edges: addEdge(edge, edges), dirty: true })
     get().validateSoon()
     // The attachment's configuration opens right away (attribute picker for references).
@@ -346,10 +355,21 @@ export const useStore = create<State>((set, get) => ({
   updateNode(id, patch) {
     if (get().isProjected()) get().materialize()
     // typing in one field coalesces into a single undo step
-    get().commit(`update:${id}:${patch.name !== undefined ? 'name' : Object.keys(patch.props ?? {}).join(',')}`)
+    get().commit(`update:${id}:${patch.name !== undefined ? 'name' : patch.caption !== undefined ? 'caption' : patch.step !== undefined ? 'step' : Object.keys(patch.props ?? {}).join(',')}`)
     set({
       nodes: get().nodes.map((n) =>
-        n.id === id ? { ...n, data: { ...n.data, ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.props ? { props: patch.props } : {}) } } : n,
+        n.id === id
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                ...(patch.name !== undefined ? { name: patch.name } : {}),
+                ...(patch.props ? { props: patch.props } : {}),
+                ...(patch.caption !== undefined ? { caption: patch.caption || undefined } : {}),
+                ...(patch.step !== undefined ? { step: patch.step || undefined } : {}),
+              },
+            }
+          : n,
       ),
       dirty: true,
     })
@@ -532,7 +552,7 @@ export const useStore = create<State>((set, get) => ({
     }
     get().commit()
     const { nodes, edges } = fromDocument(rules, doc)
-    set({ nodes, edges, docName: doc.name ?? get().docName, dirty: true, selectedId: null, selectedEdgeId: null, plan: null, planStale: false })
+    set({ nodes, edges, steps: doc.steps ?? [], docName: doc.name ?? get().docName, dirty: true, selectedId: null, selectedEdgeId: null, plan: null, planStale: false })
     get().validateSoon()
     get().showToast(`Loaded ${nodes.length} elements; Save to write iagram.json`)
   },
@@ -563,8 +583,8 @@ export const useStore = create<State>((set, get) => ({
   },
 
   currentDocument() {
-    const { docName, nodes, edges } = get()
-    return toDocument(docName, nodes, edges)
+    const { docName, nodes, edges, steps } = get()
+    return toDocument(docName, nodes, edges, steps)
   },
 
   setActiveProvider(p) {
@@ -731,10 +751,36 @@ export const useStore = create<State>((set, get) => ({
   setEdgeBinding(edgeId, attr, output) {
     get().commit(`edge:${edgeId}`)
     set({
-      edges: get().edges.map((e) => (e.id === edgeId ? { ...e, label: attr || e.data?.label, data: { ...(e.data ?? { kind: 'references', label: 'references' }), attr, output } } : e)),
+      edges: get().edges.map((e) => (e.id === edgeId ? { ...e, data: { ...(e.data ?? { kind: 'references', label: 'references', ruleLabel: 'references' }), attr, output, ruleLabel: attr || 'references', label: e.data?.userLabel || attr || 'references' } } : e)),
       dirty: true,
     })
     get().validateSoon()
+  },
+
+  updateEdge(id, patch) {
+    if (get().isProjected()) get().materialize()
+    get().commit(`edge:${id}:${Object.keys(patch).join(',')}`)
+    set({
+      edges: get().edges.map((e) => {
+        if (e.id !== id || !e.data) return e
+        const style = patch.style !== undefined ? Object.fromEntries(Object.entries({ ...(e.data.style ?? {}), ...patch.style }).filter(([, v]) => v !== undefined && v !== '' && v !== false)) : e.data.style
+        const userLabel = patch.label !== undefined ? patch.label || undefined : e.data.userLabel
+        const data = { ...e.data, userLabel, label: userLabel || e.data.ruleLabel, ...(patch.step !== undefined ? { step: patch.step || undefined } : {}), style }
+        return withMarkers({ ...e, data })
+      }),
+      dirty: true,
+    })
+  },
+
+  setSteps(steps) {
+    if (get().isProjected()) get().materialize()
+    get().commit('steps')
+    set({ steps, dirty: true })
+  },
+
+  setShowLegend(v) {
+    persist('iagram.legend', v)
+    set({ showLegend: v })
   },
 
   linkAttribute(sourceId, attr, targetId, output) {
@@ -748,7 +794,7 @@ export const useStore = create<State>((set, get) => ({
       return
     }
     get().commit()
-    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: sourceId, target: targetId, attr, output }, attr)
+    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: sourceId, target: targetId, attr, output }, attr, rule.style)
     set({ edges: [...edges, edge], dirty: true, selectedEdgeId: edge.id, selectedId: null })
     rfStore()?.getState().resetSelectedElements()
     get().validateSoon()

@@ -1,7 +1,7 @@
 // iagram.json <-> React Flow nodes/edges.
 import type { Edge, Node } from '@xyflow/react'
 import { MarkerType } from '@xyflow/react'
-import type { DocEdge, DocNode, Document, Entry } from './types'
+import type { DocEdge, DocNode, Document, EdgeStyle, Entry, Step } from './types'
 import type { Rules } from './rules'
 
 export interface NodeData extends Record<string, unknown> {
@@ -10,6 +10,17 @@ export interface NodeData extends Record<string, unknown> {
   props: Record<string, unknown>
   outputs?: Record<string, unknown>
   z?: number
+  caption?: string
+  step?: string
+}
+
+/** Second line of a node: its own caption, else the catalog's caption_prop value. */
+export function captionOf(entry: Entry | undefined, data: NodeData): string {
+  if (data.caption) return data.caption
+  const prop = entry?.caption_prop
+  if (!prop) return ''
+  const v = data.props[prop]
+  return v === undefined || v === null || v === '' ? '' : String(v)
 }
 
 /** Containers sit under leaves; within each tier, z orders siblings. */
@@ -19,9 +30,25 @@ export function zIndexFor(container: boolean, z: number | undefined): number {
 
 export interface EdgeData extends Record<string, unknown> {
   kind: string
+  /** label shown on the canvas: the user's label, else the connection kind's */
   label: string
+  /** the user's own label, persisted */
+  userLabel?: string
+  /** the kind's default label, from the catalog rule */
+  ruleLabel: string
+  step?: string
+  style?: EdgeStyle
+  /** the kind's default style, from the catalog rule */
+  ruleStyle?: EdgeStyle
+  /** set by the canvas: false hides the label (labels-off mode, not hovered) */
+  showLabel?: boolean
   attr?: string
   output?: string
+}
+
+/** Effective style: the edge's own over the kind's default. */
+export function effectiveStyle(d: EdgeData | undefined): EdgeStyle {
+  return { ...(d?.ruleStyle ?? {}), ...(d?.style ?? {}) }
 }
 
 export type RFNode = Node<NodeData, 'container' | 'resource'>
@@ -39,26 +66,24 @@ export function makeNode(rules: Rules, n: DocNode): RFNode {
     id: n.id,
     type: container ? 'container' : 'resource',
     position: { x: n.layout.x, y: n.layout.y },
-    data: { type: n.type, name: n.name, props: n.props ?? {}, outputs: n.outputs, z: n.layout.z },
+    data: { type: n.type, name: n.name, props: n.props ?? {}, outputs: n.outputs, z: n.layout.z, caption: n.caption, step: n.step },
     parentId: n.parent || undefined,
     style: { width: w, height: h },
     zIndex: zIndexFor(container, n.layout.z),
   }
 }
 
-export function makeEdge(e: DocEdge, label: string): RFEdge {
-  return {
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    type: 'smoothstep',
-    label,
-    labelBgPadding: [6, 3],
-    labelBgBorderRadius: 8,
-    labelShowBg: true,
-    data: { kind: e.kind, label, attr: e.attr, output: e.output },
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }
+export function makeEdge(e: DocEdge, ruleLabel: string, ruleStyle?: EdgeStyle): RFEdge {
+  const data: EdgeData = { kind: e.kind, label: e.label || ruleLabel, userLabel: e.label, ruleLabel, step: e.step, style: e.style, ruleStyle, attr: e.attr, output: e.output }
+  return withMarkers({ id: e.id, source: e.source, target: e.target, type: 'iagram', data })
+}
+
+/** Arrow heads follow the effective direction (one, both, none) and colour. */
+export function withMarkers(edge: RFEdge): RFEdge {
+  const st = effectiveStyle(edge.data)
+  const marker = { type: MarkerType.ArrowClosed, ...(st.color ? { color: st.color } : {}) }
+  const direction = st.direction ?? 'one'
+  return { ...edge, markerEnd: direction === 'none' ? undefined : marker, markerStart: direction === 'both' ? marker : undefined }
 }
 
 /** Parents must precede children for React Flow sub-flows. */
@@ -83,16 +108,17 @@ export function fromDocument(rules: Rules, doc: Document): { nodes: RFNode[]; ed
   const types = new Map(doc.nodes.map((n) => [n.id, n.type]))
   const edges = doc.edges.map((e) => {
     const rule = rules.connection(types.get(e.source) ?? '', types.get(e.target) ?? '')
-    const label = e.kind === 'references' && e.attr ? e.attr : rule?.label ?? e.kind
-    return makeEdge(e, label)
+    const label = e.kind === 'references' && e.attr ? e.attr : rule?.label ?? (e.kind === 'flow' ? '' : e.kind)
+    return makeEdge(e, label, rule?.style)
   })
   return { nodes, edges }
 }
 
-export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[]): Document {
+export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[], steps: Step[] = []): Document {
   return {
     version: 1,
     name: name || undefined,
+    ...(steps.length ? { steps } : {}),
     nodes: nodes.map((n) => {
       const w = num(n.style?.width) ?? n.measured?.width
       const h = num(n.style?.height) ?? n.measured?.height
@@ -104,6 +130,8 @@ export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[]): Docu
         parent: n.parentId || undefined,
         props: n.data.props,
         ...(n.data.outputs && Object.keys(n.data.outputs).length ? { outputs: n.data.outputs } : {}),
+        ...(n.data.caption ? { caption: n.data.caption } : {}),
+        ...(n.data.step ? { step: n.data.step } : {}),
         layout: {
           x: round(n.position.x),
           y: round(n.position.y),
@@ -113,7 +141,17 @@ export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[]): Docu
         },
       }
     }),
-    edges: edges.map((e) => ({ id: e.id, kind: e.data?.kind ?? '', source: e.source, target: e.target, ...(e.data?.attr ? { attr: e.data.attr } : {}), ...(e.data?.output ? { output: e.data.output } : {}) })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      kind: e.data?.kind ?? '',
+      source: e.source,
+      target: e.target,
+      ...(e.data?.attr ? { attr: e.data.attr } : {}),
+      ...(e.data?.output ? { output: e.data.output } : {}),
+      ...(e.data?.userLabel ? { label: e.data.userLabel } : {}),
+      ...(e.data?.step ? { step: e.data.step } : {}),
+      ...(e.data?.style && Object.keys(e.data.style).length ? { style: e.data.style } : {}),
+    })),
   }
 }
 

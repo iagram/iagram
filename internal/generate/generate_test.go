@@ -191,3 +191,22 @@ func TestCommonNodesAreIgnoredSilently(t *testing.T) {
 		}
 	}
 }
+
+func TestGroupsAreTransparentForParentInputs(t *testing.T) {
+	c, d := fixture(t)
+	d.Nodes = append(d.Nodes,
+		document.Node{ID: "tier", Type: "common.group", Name: "app tier", Parent: "vpc", Props: map[string]any{}},
+		document.Node{ID: "sub_g", Type: "aws.subnet", Name: "grouped", Parent: "tier", Props: map[string]any{"cidr": "10.0.9.0/24", "az": "c"}},
+	)
+	res, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mods := res.Config["module"].(map[string]map[string]any)
+	if got := mods["sub_g"]["vpc_id"]; got != "${module.vpc.vpc_id}" {
+		t.Errorf("subnet inside a group inside the VPC: vpc_id = %v", got)
+	}
+	if p, _ := mods["sub_g"]["providers"].(map[string]any); p["aws"] != "aws.reg" {
+		t.Errorf("provider alias should come through the group: %v", mods["sub_g"]["providers"])
+	}
+}

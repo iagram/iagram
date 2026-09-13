@@ -76,6 +76,7 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 		return nil, Report{}, fmt.Errorf("no root chain for provider %q", target)
 	}
 	out := document.New(d.Name)
+	out.Steps = d.Steps
 	rep := Report{}
 	byID := d.Index()
 
@@ -175,7 +176,7 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 			rep.Dropped = append(rep.Dropped, fmt.Sprintf("%s: target %s missing from catalog", n.Name, targetType))
 			continue
 		}
-		tn := document.Node{ID: n.ID, Type: targetType, Name: n.Name, Props: map[string]any{}, Layout: n.Layout}
+		tn := document.Node{ID: n.ID, Type: targetType, Name: n.Name, Props: map[string]any{}, Layout: n.Layout, Caption: n.Caption, Step: n.Step}
 		// defaults first, then mapped properties
 		if props, ok := te.Props["properties"].(map[string]any); ok {
 			for k, v := range props {
@@ -252,7 +253,7 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 			bottom := chainBottomFor(topRoot(&n, byID))
 			if bn := find(bottom); bn != nil && !c.CanContain(bn.Type, tn.Type) {
 				for i := range out.Nodes {
-					if c.CanContain(out.Nodes[i].Type, tn.Type) {
+					if oe, _ := c.Get(out.Nodes[i].Type); !oe.Transparent && c.CanContain(out.Nodes[i].Type, tn.Type) {
 						bottom = out.Nodes[i].ID
 						break
 					}
@@ -280,7 +281,7 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 			rep.Edges = append(rep.Edges, fmt.Sprintf("%s -> %s (%s): no equivalent connection in %s", byID[e.Source].Name, byID[e.Target].Name, e.Kind, target))
 			continue
 		}
-		out.Edges = append(out.Edges, document.Edge{ID: e.ID, Kind: rule.Kind, Source: s, Target: t2})
+		out.Edges = append(out.Edges, document.Edge{ID: e.ID, Kind: rule.Kind, Source: s, Target: t2, Label: e.Label, Step: e.Step, Style: e.Style})
 	}
 	// Root containers usually need an identifier only the user knows.
 	for _, elemID := range root.Chain {
