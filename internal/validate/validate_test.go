@@ -151,3 +151,34 @@ func TestConnectionRequirements(t *testing.T) {
 		t.Errorf("expected clean after enabling public ip: %s", messages(r))
 	}
 }
+
+func TestTransparentGroupsUseLogicalParent(t *testing.T) {
+	c, d := fixture(t)
+	// A group inside the VPC: a subnet inside the group is fine (VPC is the
+	// logical parent); an EC2 instance directly in a group on the canvas is not.
+	vpc := ""
+	for _, n := range d.Nodes {
+		if n.Type == "aws.vpc" {
+			vpc = n.ID
+		}
+	}
+	d.Nodes = append(d.Nodes,
+		document.Node{ID: "g1", Type: "common.group", Name: "tier", Parent: vpc, Props: map[string]any{}},
+		document.Node{ID: "s9", Type: "aws.subnet", Name: "grouped", Parent: "g1", Props: map[string]any{"cidr": "10.0.9.0/24", "az": "c"}},
+		document.Node{ID: "g2", Type: "common.group", Name: "loose", Props: map[string]any{}},
+		document.Node{ID: "i9", Type: "aws.ec2_instance", Name: "orphan", Parent: "g2", Props: map[string]any{}},
+		document.Node{ID: "u1", Type: "common.users", Name: "customers", Props: map[string]any{}},
+	)
+	d.Edges = append(d.Edges, document.Edge{ID: "f1", Kind: "flow", Source: "u1", Target: vpc})
+	r := validate.Run(c, d)
+	msgs := messages(r)
+	if strings.Contains(msgs, "s9") {
+		t.Errorf("subnet inside a group inside the VPC should be valid: %s", msgs)
+	}
+	if !strings.Contains(msgs, "i9 EC2 Instance cannot be placed") {
+		t.Errorf("instance inside a group on the canvas should be rejected: %s", msgs)
+	}
+	if strings.Contains(msgs, "u1") || strings.Contains(msgs, "f1") {
+		t.Errorf("actors and flow edges are always valid: %s", msgs)
+	}
+}

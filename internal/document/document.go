@@ -148,3 +148,22 @@ func (d *Document) normalize() {
 	sort.Slice(d.Nodes, func(i, j int) bool { return d.Nodes[i].ID < d.Nodes[j].ID })
 	sort.Slice(d.Edges, func(i, j int) bool { return d.Edges[i].ID < d.Edges[j].ID })
 }
+
+// LogicalParent returns the nearest ancestor of n that is not transparent
+// (as judged by the callback on the ancestor's type), or nil for the canvas.
+// Transparent containers are drawing groups with no Terraform meaning.
+func (d *Document) LogicalParent(byID map[string]*Node, n *Node, transparent func(typ string) bool) *Node {
+	seen := map[string]bool{n.ID: true}
+	for cur := n; cur.Parent != "" && !seen[cur.Parent]; {
+		seen[cur.Parent] = true
+		p, ok := byID[cur.Parent]
+		if !ok {
+			return nil
+		}
+		if !transparent(p.Type) {
+			return p
+		}
+		cur = p
+	}
+	return nil
+}

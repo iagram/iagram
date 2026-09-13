@@ -2,7 +2,7 @@
 // drops and connections before they exist. The Go validator remains the
 // authority; this only decides what the UI lets you do.
 import type { Catalog, Entry, Rule } from './types'
-import { ROOT } from './types'
+import { ANY_PARENT, COMMON, FLOW_KIND, ROOT } from './types'
 
 export class Rules {
   readonly byId: Record<string, Entry>
@@ -25,10 +25,13 @@ export class Rules {
       const parent = this.byId[parentType]
       return !!parent && parent.provider === child.provider
     }
-    if (!child.allowed_parents.includes(parentType)) return false
-    if (parentType === ROOT) return true
+    if (parentType === ROOT) return child.allowed_parents.includes(ROOT) || child.allowed_parents.includes(ANY_PARENT)
     const parent = this.byId[parentType]
     if (!parent || parent.kind !== 'container') return false
+    // Transparent containers (groups) accept anything; the real check is
+    // against the group's own parent (see logicalParentType in the store).
+    if (parent.transparent) return true
+    if (!child.allowed_parents.includes(parentType) && !child.allowed_parents.includes(ANY_PARENT)) return false
     if (parent.allowed_children && parent.allowed_children.length > 0) {
       return parent.allowed_children.includes(childType)
     }
@@ -38,6 +41,10 @@ export class Rules {
   connection(fromType: string, toType: string): Rule | undefined {
     const r = this.conn.get(`${fromType}->${toType}`)
     if (r) return r
+    // Actors and notes connect to anything with an informational arrow.
+    if (fromType.split('.')[0] === COMMON || toType.split('.')[0] === COMMON) {
+      return { from: fromType, to: toType, kind: FLOW_KIND, label: '' }
+    }
     // A generated element (<provider>.res.<type>) may reference anything of its provider.
     if (fromType.includes('.res.') && fromType.split('.')[0] === toType.split('.')[0]) {
       return { from: fromType, to: toType, kind: 'references', label: 'references' }
@@ -48,6 +55,10 @@ export class Rules {
   /** Register a generated element fetched from the server. */
   register(e: Entry) {
     this.byId[e.id] = e
+  }
+
+  isTransparent(type: string): boolean {
+    return !!this.byId[type]?.transparent
   }
 
   isGenerated(type: string): boolean {

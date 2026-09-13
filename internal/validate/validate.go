@@ -93,12 +93,15 @@ func (v *validator) structure() {
 
 		parentType := catalog.Root
 		if n.Parent != "" {
-			p, ok := v.nodes[n.Parent]
-			if !ok {
+			if _, ok := v.nodes[n.Parent]; !ok {
 				v.add(Problem{Level: Error, Node: n.ID, Message: fmt.Sprintf("parent %q does not exist", n.Parent)})
 				continue
 			}
-			parentType = p.Type
+			// Groups and other transparent containers do not count: the
+			// element must fit where the group itself sits.
+			if lp := v.logicalParent(n); lp != nil {
+				parentType = lp.Type
+			}
 		}
 		if !v.c.CanContain(parentType, n.Type) {
 			where := "on the canvas"
@@ -113,6 +116,14 @@ func (v *validator) structure() {
 			v.add(Problem{Level: Error, Node: n.ID, Message: "containment cycle"})
 		}
 	}
+}
+
+// logicalParent skips transparent containers (groups) on the way up.
+func (v *validator) logicalParent(n *document.Node) *document.Node {
+	return v.d.LogicalParent(v.nodes, n, func(typ string) bool {
+		e, ok := v.c.Get(typ)
+		return ok && e.Transparent
+	})
 }
 
 func (v *validator) hasCycle(n *document.Node) bool {
@@ -285,7 +296,11 @@ func (v *validator) cidrs() {
 		if err != nil {
 			continue // reported by props()
 		}
-		byParent[n.Parent] = append(byParent[n.Parent], ranged{n, ipn})
+		group := ""
+		if lp := v.logicalParent(n); lp != nil {
+			group = lp.ID
+		}
+		byParent[group] = append(byParent[group], ranged{n, ipn})
 
 		if anc := v.nearestCIDRAncestor(n); anc != nil {
 			if !anc.Contains(ipn.IP) || !anc.Contains(lastIP(ipn)) {

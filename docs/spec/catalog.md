@@ -260,3 +260,63 @@ and size classes (`class` → `classes`), `regions` maps region names, and
 `roots` gives each provider's container chain and which property receives the
 region. Elements, connections and properties without a counterpart are
 reported and dropped.
+
+## Drawing style (`style`, `style_variants`)
+
+Containers may declare how they are drawn, following the provider's official
+diagram grammar (for AWS: the group conventions of the Architecture Icons
+deck):
+
+```yaml
+style: {border: "#8C4FFF", fill: "rgba(140,79,255,.04)", dash: solid, label: left}
+style_variants:
+  public: {border: "#7AA116"}   # applied when props.public is true
+```
+
+`border` and `fill` are CSS colours (`fill` defaults to a 5 % tint of the
+border), `dash` is `solid | dashed | dotted`, `label` is `left | center`.
+Variants are merged over `style` in declaration order for every boolean
+property that is true.
+
+## Icon sets (`catalog/icons/<provider>/services.yaml`)
+
+```yaml
+prefixes:   # Terraform type prefix (after the provider prefix) -> service icon
+  s3: aws/services/amazon_simple_storage_service.svg
+resources:  # prefix -> resource (line-art) icon; drawing only
+  nat_gateway: aws/resources/amazon_vpc_nat_gateway.svg
+defaults:   # prefix -> Terraform type created when the family tile is dropped
+  s3: aws_s3_bucket
+labels:     # icon file -> palette label, when the file name reads badly
+  aws/services/amazon_simple_storage_service.svg: S3
+```
+
+The longest matching prefix wins. `prefixes` decide which types form one
+*service* (used to classify attachments and components); `resources` only
+change the icon that is drawn, and every distinct drawn icon becomes its own
+palette tile.
+
+## Provider-neutral vocabulary (`catalog/common`)
+
+The `common` provider declares `no_terraform: true` and needs no `source`.
+Its elements are the diagram vocabulary of the official reference
+architectures that has no Terraform counterpart:
+
+| Element | Kind | Purpose |
+|---|---|---|
+| `common.group` | container, `transparent` | labelled box: tier, stage, tenant, cell |
+| `common.datacenter` | container, `transparent` | corporate data center, branch, partner network |
+| `common.note` | leaf | free text (`text`, multiline) |
+| `common.user`, `users`, `client`, `mobile`, `internet`, `saas`, `device`, `server`, `database`, `idp`, `documents`, `email` | leaf | actors drawn as bare icons with an optional `caption` |
+
+Rules that make them cloud-neutral:
+
+- `allowed_parents: ["*"]` means any container or the canvas.
+- A **transparent** container has no Terraform meaning. Elements placed
+  inside it are validated, wired (`inputs_from_parent`) and generated as if
+  they were placed in the container's own parent: a subnet in a group in a
+  VPC is a subnet of that VPC.
+- An edge with an actor or note at either end is a `flow` edge: drawn as an
+  arrow, sets no Terraform input, always valid.
+- The generator ignores `common.*` nodes silently; `iagram convert` and the
+  mirror tabs copy them unchanged.

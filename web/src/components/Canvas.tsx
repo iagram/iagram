@@ -13,7 +13,7 @@ import { ContainerNode } from '../nodes/ContainerNode'
 import { ResourceNode } from '../nodes/ResourceNode'
 import { DND_TYPE } from './Palette'
 import { LEAF_H, LEAF_W, type RFEdge, type RFNode } from '../convert'
-import { ROOT } from '../types'
+import { COMMON, ROOT } from '../types'
 import { setRfStore } from '../rf'
 import { CanvasControls } from './CanvasControls'
 import { ProjectionBanner } from './ProjectionBanner'
@@ -26,6 +26,7 @@ export function Canvas() {
   const nodes = useStore((s) => s.nodes)
   const edges = useStore((s) => s.edges)
   const rules = useStore((s) => s.rules)
+  const logicalParentType = useStore((s) => s.logicalParentType)
   const onNodesChange = useStore((s) => s.onNodesChange)
   const onEdgesChange = useStore((s) => s.onEdgesChange)
   const connect = useStore((s) => s.connect)
@@ -73,7 +74,7 @@ export function Canvas() {
   const sourceNodes = projected ? projection.nodes : nodes
   const sourceEdges = projected ? projection.edges : edges
   const visibleNodes = useMemo(
-    () => sourceNodes.filter((n) => n.data.type.split('.')[0] === activeProvider && !rules?.entry(n.data.type)?.attachment),
+    () => sourceNodes.filter((n) => [activeProvider, COMMON].includes(n.data.type.split('.')[0]) && !rules?.entry(n.data.type)?.attachment),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sourceNodes, activeProvider, rules, catalogVersion],
   )
@@ -225,7 +226,7 @@ export function Canvas() {
         const target = containerAt(centre, subtree(n.id))
         const targetId = target?.id ?? null
         if (targetId === (n.parentId ?? null)) continue // same parent: a plain move
-        const targetType = target ? target.data.type : ROOT
+        const targetType = target ? logicalParentType(target.id) : ROOT
         if (!rules.canContain(targetType, n.data.type)) {
           const start = starts.get(n.id)
           if (start) reparent(n.id, n.parentId ?? null, start)
@@ -241,7 +242,7 @@ export function Canvas() {
         reparent(n.id, targetId, pos)
       }
     },
-    [rules, absRect, containerAt, subtree, reparent, setDragging, showToast],
+    [rules, absRect, containerAt, subtree, reparent, setDragging, showToast, logicalParentType],
   )
 
   const isValidConnection: IsValidConnection<RFEdge> = useCallback(

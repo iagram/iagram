@@ -407,6 +407,9 @@ function Field({
         }}
       />
     )
+  } else if (schema.type === 'string' && schema.format === 'multiline') {
+    const text = typeof value === 'string' ? value : ''
+    control = <textarea rows={Math.min(10, Math.max(3, text.split('\n').length + 1))} value={text} onChange={(e) => onChange(e.target.value)} />
   } else if (schema.type === 'boolean') {
     control = <input type="checkbox" checked={Boolean(value ?? schema.default ?? false)} onChange={(e) => onChange(e.target.checked)} />
   } else if (schema.type === 'array') {

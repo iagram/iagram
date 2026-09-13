@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useStore } from '../store'
+import { COMMON } from '../types'
 
 const LABEL: Record<string, string> = { aws: 'AWS', gcp: 'Google Cloud', azure: 'Azure' }
 
@@ -9,7 +10,7 @@ export function CanvasTabs() {
   const nodes = useStore((s) => s.nodes)
   const active = useStore((s) => s.activeProvider)
   const setActive = useStore((s) => s.setActiveProvider)
-  const providers = useMemo(() => [...new Set((catalog?.entries ?? []).map((e) => e.provider))].sort(), [catalog])
+  const providers = useMemo(() => [...new Set((catalog?.entries ?? []).map((e) => e.provider))].filter((p) => p !== COMMON).sort(), [catalog])
   const mirror = useStore((s) => s.mirror)
   const setMirror = useStore((s) => s.setMirror)
   const primary = useStore((s) => s.primaryProvider())
@@ -19,6 +20,7 @@ export function CanvasTabs() {
     const c: Record<string, number> = {}
     for (const n of nodes) {
       const p = n.data.type.split('.')[0]
+      if (p === COMMON) continue
       c[p] = (c[p] ?? 0) + 1
     }
     return c

@@ -147,7 +147,8 @@ func (g *gen) providerBlocks() error {
 func (g *gen) hasRegionChild(acct *document.Node) bool {
 	for i := range g.d.Nodes {
 		n := &g.d.Nodes[i]
-		if n.Parent != acct.ID {
+		lp := g.d.LogicalParent(g.nodes, n, g.transparent)
+		if lp == nil || lp.ID != acct.ID {
 			continue
 		}
 		if e, ok := g.c.Get(n.Type); ok && e.Terraform != nil && e.Terraform.Role == catalog.RoleRegion {
@@ -165,7 +166,9 @@ func (g *gen) moduleBlocks() error {
 			return fmt.Errorf("node %s: unknown type %s", n.ID, n.Type)
 		}
 		if e.Terraform == nil {
-			g.res.Warnings = append(g.res.Warnings, fmt.Sprintf("%s (%s) has no terraform mapping; skipped", n.Name, e.Label))
+			if g.c.HasTerraform(e.Provider) {
+				g.res.Warnings = append(g.res.Warnings, fmt.Sprintf("%s (%s) has no terraform mapping; skipped", n.Name, e.Label))
+			}
 			continue
 		}
 		if e.Terraform.Role != catalog.RoleModule {
@@ -411,6 +414,12 @@ func (g *gen) assemble() {
 		cfg["output"] = outputs
 	}
 	g.res.Config = cfg
+}
+
+// transparent reports whether a node type is a drawing-only container.
+func (g *gen) transparent(typ string) bool {
+	e, ok := g.c.Get(typ)
+	return ok && e.Transparent
 }
 
 // localName maps a catalog provider (gcp) to its Terraform name (google).

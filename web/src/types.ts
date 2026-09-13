@@ -35,6 +35,7 @@ export interface Entry {
   terraform?: { role?: string; resource?: string; module?: string }
   attachment?: boolean
   component?: boolean
+  transparent?: boolean
   id: string
   label: string
   description?: string
@@ -149,6 +150,11 @@ export interface Validation {
 }
 
 export const ROOT = 'root'
+/** Provider of the cloud-neutral vocabulary (groups, actors, notes). */
+export const COMMON = 'common'
+export const ANY_PARENT = '*'
+/** Informational edge to or from an actor or note. */
+export const FLOW_KIND = 'flow'
 
 export type PlanAction = 'no-op' | 'read' | 'create' | 'update' | 'replace' | 'delete'
 

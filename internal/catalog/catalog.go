@@ -42,6 +42,9 @@ type Entry struct {
 	// StyleVariants override Style when the named boolean property is true
 	// (public subnets are green, private ones teal).
 	StyleVariants map[string]Style `yaml:"style_variants,omitempty" json:"style_variants,omitempty"`
+	// Transparent containers have no Terraform meaning (generic groups, data
+	// centers): their children behave as if placed in the container's parent.
+	Transparent bool `yaml:"transparent,omitempty" json:"transparent,omitempty"`
 	// Attachment marks a generated element with no graphical counterpart: it is
 	// not drawn on the canvas but configured inside the element it references.
 	Attachment bool `yaml:"-" json:"attachment,omitempty"`
@@ -182,6 +185,22 @@ type Provider struct {
 	Version         string            `yaml:"version" json:"version"`
 	RequiredVersion string            `yaml:"required_version,omitempty" json:"required_version,omitempty"`
 	Extra           map[string]Source `yaml:"extra_providers,omitempty" json:"extra_providers,omitempty"`
+	// NoTerraform marks a provider-neutral vocabulary (groups, actors, notes)
+	// that the generator ignores.
+	NoTerraform bool `yaml:"no_terraform,omitempty" json:"no_terraform,omitempty"`
+}
+
+// AnyParent in allowed_parents means any container, or the canvas.
+const AnyParent = "*"
+
+// FlowKind is the informational edge between an actor or note and anything
+// else: it draws an arrow and sets no Terraform input.
+const FlowKind = "flow"
+
+// HasTerraform reports whether elements of the provider render to Terraform.
+func (c *Catalog) HasTerraform(provider string) bool {
+	p, ok := c.Providers[provider]
+	return ok && !p.NoTerraform
 }
 
 // LocalName returns the Terraform provider name used in configuration.
@@ -257,14 +276,19 @@ func (c *Catalog) CanContain(parentType, childType string) bool {
 	if child.Component {
 		return contains(child.AllowedParents, parentType)
 	}
-	if !contains(child.AllowedParents, parentType) {
-		return false
-	}
 	if parentType == Root {
-		return true
+		return contains(child.AllowedParents, Root) || contains(child.AllowedParents, AnyParent)
 	}
 	parent, ok := c.Get(parentType)
 	if !ok || parent.Kind != KindContainer {
+		return false
+	}
+	// A transparent container accepts anything its own parent could; the
+	// validator checks the child against that logical parent.
+	if parent.Transparent {
+		return true
+	}
+	if !contains(child.AllowedParents, parentType) && !contains(child.AllowedParents, AnyParent) {
 		return false
 	}
 	if len(parent.AllowedChildren) > 0 && !contains(parent.AllowedChildren, childType) {
@@ -280,6 +304,11 @@ func (c *Catalog) Connection(fromType, toType string) (Rule, bool) {
 		if r.From == fromType && r.To == toType {
 			return r, true
 		}
+	}
+	from, fok := c.Get(fromType)
+	to, tok := c.Get(toType)
+	if fok && tok && (!c.HasTerraform(from.Provider) || !c.HasTerraform(to.Provider)) {
+		return Rule{From: fromType, To: toType, Kind: FlowKind}, true
 	}
 	if from, ok := c.Get(fromType); ok && from.Terraform != nil && from.Terraform.Role == RoleResource {
 		if to, ok := c.Get(toType); ok && to.Provider == from.Provider {
@@ -345,7 +374,7 @@ func (c *Catalog) compile() error {
 	seen := map[string]bool{}
 	for _, e := range c.Entries {
 		for _, p := range e.AllowedParents {
-			if p != Root {
+			if p != Root && p != AnyParent {
 				if pe, ok := c.byID[p]; !ok {
 					return fmt.Errorf("%s: unknown parent %q", e.ID, p)
 				} else if pe.Kind != KindContainer {

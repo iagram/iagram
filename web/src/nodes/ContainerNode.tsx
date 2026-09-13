@@ -11,10 +11,13 @@ import { useTargetState } from './useTargetState'
 // object per call would re-render forever.
 function styleOf(entry: Entry | undefined, props: Record<string, unknown>): BoxStyle | undefined {
   if (!entry) return undefined
-  for (const [prop, style] of Object.entries(entry.style_variants ?? {})) {
-    if (props[prop] === true) return { ...entry.style, ...style }
+  let style = entry.style
+  for (const [prop, variant] of Object.entries(entry.style_variants ?? {})) {
+    if (props[prop] === true) style = { ...style, ...variant }
   }
-  return entry.style
+  // A group's own colour property wins over the catalog colour.
+  if (typeof props.color === 'string' && props.color.trim()) style = { ...style, border: props.color.trim() }
+  return style
 }
 
 function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {

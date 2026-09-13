@@ -14,7 +14,7 @@ import { fromDocument, makeEdge, makeNode, newId, toDocument, zIndexFor, type RF
 import type { Document } from './types'
 import { rfStore } from './rf'
 import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, Entry, Family, GeneratedSummary, Job, PlanResult, Problem } from './types'
-import { ROOT } from './types'
+import { COMMON, ROOT } from './types'
 
 interface State {
   catalog: Catalog | null
@@ -125,6 +125,8 @@ interface State {
   /** Switch a generated element to a sibling resource type of its family (properties reset to defaults). */
   changeNodeType: (id: string, type: string) => Promise<void>
   /** Provider of the real nodes (the source tab); '' when empty. */
+  /** Type of the nearest non-transparent ancestor (groups do not count), or ROOT. */
+  logicalParentType: (parentId: string | null | undefined) => string
   primaryProvider: () => string
   setMirror: (v: boolean) => void
   refreshProjection: () => Promise<void>
@@ -226,8 +228,8 @@ export const useStore = create<State>((set, get) => ({
         for (const e of Object.values(r.entries)) rules.register(e)
       }
       const { nodes, edges } = fromDocument(rules, res.document)
-      const providers = [...new Set(catalog.entries.map((e) => e.provider))].sort()
-      const used = [...new Set(res.document.nodes.map((n) => n.type.split('.')[0]))]
+      const providers = [...new Set(catalog.entries.map((e) => e.provider))].filter((p) => p !== COMMON).sort()
+      const used = [...new Set(res.document.nodes.map((n) => n.type.split('.')[0]))].filter((p) => p !== COMMON)
       const current = get().activeProvider
       const activeProvider = providers.includes(current) ? current : used.find((p) => providers.includes(p)) ?? providers[0] ?? ''
       set({ catalog, rules, nodes, edges, docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
@@ -300,7 +302,7 @@ export const useStore = create<State>((set, get) => ({
     if (!rules) return null
     const entry = rules.entry(type)
     if (!entry) return null
-    const parentType = parentId ? nodes.find((n) => n.id === parentId)?.data.type ?? '' : ROOT
+    const parentType = get().logicalParentType(parentId)
     if (!rules.canContain(parentType, type)) {
       const where = parentType === ROOT ? 'directly on the canvas' : `inside a ${rules.entry(parentType)?.label ?? parentType}`
       get().showToast(`${entry.label} cannot be placed ${where}`)
@@ -572,10 +574,22 @@ export const useStore = create<State>((set, get) => ({
     void get().refreshProjection()
   },
 
+  logicalParentType(parentId) {
+    const { rules, nodes } = get()
+    let cur = parentId ? nodes.find((n) => n.id === parentId) : undefined
+    const seen = new Set<string>()
+    while (cur && rules?.isTransparent(cur.data.type) && !seen.has(cur.id)) {
+      seen.add(cur.id)
+      cur = cur.parentId ? nodes.find((n) => n.id === cur!.parentId) : undefined
+    }
+    return cur ? cur.data.type : ROOT
+  },
+
   primaryProvider() {
     const counts: Record<string, number> = {}
     for (const n of get().nodes) {
       const p = n.data.type.split('.')[0]
+      if (p === COMMON) continue
       counts[p] = (counts[p] ?? 0) + 1
     }
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
@@ -586,7 +600,7 @@ export const useStore = create<State>((set, get) => ({
     if (!mirror || nodes.length === 0) return false
     const primary = get().primaryProvider()
     // A file that already mixes providers is edited as independent canvases.
-    const providers = new Set(nodes.map((n) => n.data.type.split('.')[0]))
+    const providers = new Set(nodes.map((n) => n.data.type.split('.')[0]).filter((p) => p !== COMMON))
     if (providers.size > 1) return false
     return activeProvider !== primary
   },

@@ -137,7 +137,21 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 	idMap := map[string]string{} // source -> target node id
 	for _, n := range d.Nodes {
 		e, ok := c.Get(n.Type)
-		if !ok || e.Terraform == nil {
+		if !ok {
+			continue
+		}
+		if !c.HasTerraform(e.Provider) {
+			// Groups, actors and notes are cloud-neutral: copied as they are.
+			cp := n
+			cp.Props = map[string]any{}
+			for k, v := range n.Props {
+				cp.Props[k] = v
+			}
+			out.Nodes = append(out.Nodes, cp)
+			idMap[n.ID] = n.ID
+			continue
+		}
+		if e.Terraform == nil {
 			continue
 		}
 		if e.Terraform.Role == catalog.RoleAccount || e.Terraform.Role == catalog.RoleRegion {

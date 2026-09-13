@@ -341,3 +341,31 @@ func TestClustersAreBoxesWithComponents(t *testing.T) {
 		t.Errorf("ecs service should be offered as a component of the cluster: %+v", opts)
 	}
 }
+
+func TestCommonVocabulary(t *testing.T) {
+	c := load(t)
+	if c.HasTerraform("common") || !c.HasTerraform("aws") {
+		t.Fatal("common must be the provider without Terraform")
+	}
+	for _, id := range []string{"common.group", "common.datacenter", "common.note", "common.user", "common.internet"} {
+		if _, ok := c.Get(id); !ok {
+			t.Errorf("%s missing", id)
+		}
+	}
+	// Groups go anywhere and accept anything; the validator checks children
+	// against the group's own parent.
+	for _, parent := range []string{catalog.Root, "aws.account", "aws.vpc", "aws.subnet", "gcp.project"} {
+		if !c.CanContain(parent, "common.group") || !c.CanContain(parent, "common.user") || !c.CanContain(parent, "common.note") {
+			t.Errorf("%s should accept group, actor and note", parent)
+		}
+	}
+	if !c.CanContain("common.group", "aws.ec2_instance") || !c.CanContain("common.datacenter", "aws.subnet") {
+		t.Error("transparent containers accept any element")
+	}
+	if r, ok := c.Connection("common.users", "aws.alb"); !ok || r.Kind != catalog.FlowKind || r.Terraform != nil {
+		t.Errorf("actor -> element should be a flow edge: %+v %v", r, ok)
+	}
+	if r, ok := c.Connection("aws.lambda_function", "common.saas"); !ok || r.Kind != catalog.FlowKind {
+		t.Errorf("element -> actor should be a flow edge: %+v %v", r, ok)
+	}
+}

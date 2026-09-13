@@ -40,7 +40,7 @@ func Load(fsys fs.FS) (*Catalog, error) {
 			if err := yaml.Unmarshal(raw, &p); err != nil {
 				return nil, fmt.Errorf("%s: %w", f, err)
 			}
-			if p.Name != path.Base(path.Dir(f)) || p.Source == "" {
+			if p.Name != path.Base(path.Dir(f)) || (p.Source == "" && !p.NoTerraform) {
 				return nil, fmt.Errorf("%s: name must match directory and source is required", f)
 			}
 			c.Providers[p.Name] = p

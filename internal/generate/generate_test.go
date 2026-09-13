@@ -167,3 +167,27 @@ func TestBracketedParentRefYieldsOneElementList(t *testing.T) {
 		t.Errorf("vpc_id = %v", fn2["vpc_id"])
 	}
 }
+
+func TestCommonNodesAreIgnoredSilently(t *testing.T) {
+	c, d := fixture(t)
+	d.Nodes = append(d.Nodes,
+		document.Node{ID: "g1", Type: "common.group", Name: "tier", Props: map[string]any{}},
+		document.Node{ID: "n1", Type: "common.note", Name: "n", Parent: "g1", Props: map[string]any{"text": "hello"}},
+		document.Node{ID: "u1", Type: "common.users", Name: "customers", Props: map[string]any{}},
+	)
+	d.Edges = append(d.Edges, document.Edge{ID: "f1", Kind: "flow", Source: "u1", Target: d.Nodes[0].ID})
+	res, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Warnings) != 0 {
+		t.Errorf("no warnings expected for common nodes: %v", res.Warnings)
+	}
+	for _, id := range []string{"g1", "n1", "u1"} {
+		for name, node := range res.ModuleToNode {
+			if node == id {
+				t.Errorf("common node %s rendered as module %s", id, name)
+			}
+		}
+	}
+}

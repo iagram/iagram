@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useStore } from '../store'
 import type { Entry } from '../types'
-import { ROOT } from '../types'
+import { COMMON, ROOT } from '../types'
 
-const ORDER = ['account', 'network', 'compute', 'database', 'storage', 'security', 'serverless', 'integration']
+const ORDER = ['account', 'network', 'compute', 'database', 'storage', 'security', 'serverless', 'integration', 'general', 'annotation']
 
 export const DND_TYPE = 'application/x-iagram-type'
 
@@ -49,7 +49,7 @@ export function Palette() {
 
   const groups = new Map<string, Entry[]>()
   for (const e of catalog.entries) {
-    if (e.provider !== provider) continue
+    if (e.provider !== provider && e.provider !== COMMON) continue
     if (q && !e.label.toLowerCase().includes(q) && !e.id.includes(q)) continue
     ;(groups.get(e.category) ?? groups.set(e.category, []).get(e.category)!).push(e)
   }
