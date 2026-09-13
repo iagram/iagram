@@ -21,19 +21,27 @@ nodes:
 - {id: audit-logs-bq-sink, type: gcp.res.google_logging_project_sink, name: audit-logs-bq-sink, parent: prj-log-analytics, props: {destination: changeme, name: changeme}}
 - {id: archive-gcs-sink, type: gcp.res.google_logging_project_sink, name: archive-gcs-sink, parent: prj-log-analytics, props: {destination: changeme, name: changeme}}
 - {id: security-logs-dataset, type: gcp.bigquery_dataset, name: security-logs-dataset, parent: prj-log-analytics}
+- {id: cloudaudit-activity-table, type: gcp.res.google_bigquery_table, name: cloudaudit-activity-table, parent: prj-log-analytics, props: {dataset_id: changeme, table_id: changeme}}
 - {id: logs-archive-bucket, type: gcp.storage_bucket, name: logs-archive-bucket, parent: prj-log-analytics}
 - id: threat-detection-scheduled-query
   type: gcp.res.google_bigquery_data_transfer_config
   name: threat-detection-scheduled-query
   parent: prj-log-analytics
   props: {data_source_id: changeme, display_name: changeme, params: {}}
+- {id: findings-table, type: gcp.res.google_bigquery_table, name: findings-table, parent: prj-log-analytics, props: {dataset_id: changeme, table_id: changeme}}
 edges:
 - {from: api-service, to: audit-logs-bq-sink, label: Cloud Audit Logs, step: '1'}
 - {from: app-database, to: audit-logs-bq-sink, label: data access logs, step: '2'}
+- {from: audit-logs-bq-sink, to: cloudaudit-activity-table, label: stream partitioned rows, step: '3'}
 - {from: archive-gcs-sink, to: logs-archive-bucket, label: hourly batches, step: '4'}
 - {from: threat-detection-scheduled-query, to: security-logs-dataset, label: CSA SQL detections, step: '5'}
+- {from: threat-detection-scheduled-query, to: findings-table, label: write findings, step: '6'}
+- {from: users, to: findings-table, label: Looker Studio dashboards, step: '7'}
 steps:
 - {n: '1', text: 'api-service → audit-logs-bq-sink: Cloud Audit Logs'}
 - {n: '2', text: 'app-database → audit-logs-bq-sink: data access logs'}
+- {n: '3', text: 'audit-logs-bq-sink → cloudaudit-activity-table: stream partitioned rows'}
 - {n: '4', text: 'archive-gcs-sink → logs-archive-bucket: hourly batches'}
 - {n: '5', text: 'threat-detection-scheduled-query → security-logs-dataset: CSA SQL detections'}
+- {n: '6', text: 'threat-detection-scheduled-query → findings-table: write findings'}
+- {n: '7', text: 'users → findings-table: Looker Studio dashboards'}

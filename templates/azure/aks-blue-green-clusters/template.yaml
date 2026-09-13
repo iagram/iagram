@@ -1,0 +1,75 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/guide/aks/blue-green-deployment-for-aks); edit freely.
+title: Blue-green deployment of AKS clusters
+category: devops
+tags:
+- aks
+- blue-green
+- front door
+- application gateway
+- dns switch
+- cluster upgrade
+source: https://learn.microsoft.com/en-us/azure/architecture/guide/aks/blue-green-deployment-for-aks
+description: A new (green) AKS cluster is deployed next to the live (blue) cluster, its Kubernetes state is synced by CI/CD or GitOps, and it is validated with Azure Monitor metrics before traffic is switched.
+  Each cluster sits behind its own Application Gateway; Azure Front Door and Azure DNS A/CNAME record changes perform the switch, after which the blue cluster is destroyed.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-aks-bluegreen, type: azure.resource_group, name: rg-aks-bluegreen, parent: sub-workload, props: {location: westeurope}}
+- {id: grp-global-edge, type: common.group, name: Global edge, parent: rg-rg-aks-bluegreen}
+- {id: vpc-vnet-aks, type: azure.vnet, name: vnet-aks, parent: rg-rg-aks-bluegreen, props: {cidr: 10.20.0.0/16}}
+- {id: sub-snet-appgw-blue, type: azure.subnet, name: snet-appgw-blue, parent: vpc-vnet-aks, props: {cidr: 10.20.0.0/24}}
+- {id: sub-snet-appgw-green, type: azure.subnet, name: snet-appgw-green, parent: vpc-vnet-aks, props: {cidr: 10.20.1.0/24}}
+- {id: sub-snet-aks-blue, type: azure.subnet, name: snet-aks-blue, parent: vpc-vnet-aks, props: {cidr: 10.20.16.0/20}}
+- {id: sub-snet-aks-green, type: azure.subnet, name: snet-aks-green, parent: vpc-vnet-aks, props: {cidr: 10.20.32.0/20}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: afd-official-host, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-official-host, parent: grp-global-edge, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: dns-contoso, type: azure.dns_zone, name: dns-contoso, parent: grp-global-edge, props: {domain: example.com}}
+- id: agw-blue
+  type: azure.res.azurerm_application_gateway
+  name: agw-blue
+  parent: sub-snet-appgw-blue
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- id: agw-green
+  type: azure.res.azurerm_application_gateway
+  name: agw-green
+  parent: sub-snet-appgw-green
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: aks-blue, type: azure.aks_cluster, name: aks-blue, parent: sub-snet-aks-blue}
+- {id: aks-green, type: azure.aks_cluster, name: aks-green, parent: sub-snet-aks-green}
+- {id: acr-shared, type: azure.container_registry, name: acr-shared, parent: rg-rg-aks-bluegreen}
+- {id: kv-aks-shared, type: azure.key_vault, name: kv-aks-shared, parent: rg-rg-aks-bluegreen}
+- {id: law-aks, type: azure.res.azurerm_log_analytics_workspace, name: law-aks, parent: rg-rg-aks-bluegreen, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: afd-official-host, label: HTTPS official-aks.contoso.com, step: '1'}
+- {from: afd-official-host, to: dns-contoso, label: origin resolves aks.contoso.com, step: '2'}
+- {from: dns-contoso, to: agw-blue, label: 'A record: live (T0)', step: '3'}
+- {from: dns-contoso, to: agw-green, label: 'A record: after switch (T3)', step: '5'}
+- {from: agw-blue, to: aks-blue, label: ingress}
+- {from: agw-green, to: aks-green, label: ingress}
+- {from: saas, to: aks-green, label: 'T2: sync Kubernetes state (CI/CD or GitOps)', step: '4'}
+- {from: acr-shared, to: aks-green, label: images + Helm charts}
+- {from: aks-green, to: kv-aks-shared, label: secrets + certificates}
+- {from: aks-blue, to: law-aks, label: Container insights}
+- {from: aks-green, to: law-aks, label: 'T1 validation: Azure Monitor metrics'}
+steps:
+- {n: '1', text: 'users → afd-official-host: HTTPS official-aks.contoso.com'}
+- {n: '2', text: 'afd-official-host → dns-contoso: origin resolves aks.contoso.com'}
+- {n: '3', text: 'dns-contoso → agw-blue: A record: live (T0)'}
+- {n: '4', text: 'saas → aks-green: T2: sync Kubernetes state (CI/CD or GitOps)'}
+- {n: '5', text: 'dns-contoso → agw-green: A record: after switch (T3)'}

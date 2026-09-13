@@ -19,6 +19,7 @@ nodes:
 - {id: user, type: common.user, name: user}
 - {id: users, type: common.users, name: users}
 - {id: saas, type: common.saas, name: saas}
+- {id: payroll-key, type: gcp.res.google_kms_crypto_key, name: payroll-key, parent: prj-prj-c-secrets, props: {key_ring: changeme, name: changeme}}
 - id: payroll-db-secret
   type: gcp.res.google_secret_manager_secret
   name: payroll-db-secret
@@ -41,7 +42,9 @@ nodes:
 - {id: alert-to-chat-fn, type: gcp.res.google_cloudfunctions2_function, name: alert-to-chat-fn, parent: prj-prj-c-monitoring, props: {location: westeurope, name: changeme}}
 - {id: key-access-dashboard, type: gcp.res.google_monitoring_dashboard, name: key-access-dashboard, parent: prj-prj-c-monitoring, props: {dashboard_json: changeme}}
 edges:
+- {from: user, to: payroll-key, label: interactive Decrypt call, step: '1'}
 - {from: user, to: payroll-db-secret, label: AccessSecretVersion, step: '1'}
+- {from: payroll-key, to: audit-to-monitoring-sink, label: Data Access audit log, step: '2'}
 - {from: audit-to-monitoring-sink, to: security-audit-bucket, label: route to central bucket, step: '3'}
 - {from: security-audit-bucket, to: human-key-access-alert, label: LogMatch on non-service-account principal, step: '4'}
 - {from: security-audit-bucket, to: human-key-access-count, label: log-based metric, step: '5'}
@@ -53,7 +56,8 @@ edges:
 - {from: security-email-channel, to: users, label: email security team, step: '9'}
 - {from: human-key-access-count, to: key-access-dashboard, label: chart, step: '10'}
 steps:
-- {n: '1', text: 'user → payroll-db-secret: AccessSecretVersion'}
+- {n: '1', text: 'user → payroll-key: interactive Decrypt call'}
+- {n: '2', text: 'payroll-key → audit-to-monitoring-sink: Data Access audit log'}
 - {n: '3', text: 'audit-to-monitoring-sink → security-audit-bucket: route to central bucket'}
 - {n: '4', text: 'security-audit-bucket → human-key-access-alert: LogMatch on non-service-account principal'}
 - {n: '5', text: 'security-audit-bucket → human-key-access-count: log-based metric'}

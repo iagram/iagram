@@ -1,0 +1,49 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/healthcare-apis/healthcare-apis-overview); edit freely.
+title: Health data platform with Azure Health Data Services (FHIR and DICOM)
+category: industry
+tags:
+- healthcare
+- fhir
+- dicom
+- medical imaging
+- health data services
+- smart on fhir
+- data lake
+- de-identification
+source: https://learn.microsoft.com/en-us/azure/healthcare-apis/healthcare-apis-overview
+description: An Azure Health Data Services workspace hosts a managed FHIR service for clinical records and a DICOM service for medical imaging, with Microsoft Entra RBAC, private link, customer-managed
+  keys and per-instance data isolation. EHR systems and SMART on FHIR apps exchange data through the FHIR API, DICOMweb clients store and query imaging studies whose metadata can be projected into FHIR
+  ImagingStudy resources, and exports feed a data lake for de-identification, analytics and machine learning.
+nodes:
+- {id: dc-hospital, type: common.datacenter, name: hospital}
+- {id: sub-healthcare, type: azure.subscription, name: healthcare, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-health-data, type: azure.resource_group, name: rg-health-data, parent: sub-healthcare, props: {location: westeurope}}
+- {id: vpc-vnet-health, type: azure.vnet, name: vnet-health, parent: rg-rg-health-data, props: {cidr: 10.100.0.0/16}}
+- {id: sub-snet-private-endpoints, type: azure.subnet, name: snet-private-endpoints, parent: vpc-vnet-health, props: {cidr: 10.100.1.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: idp, type: common.idp, name: idp}
+- {id: ahds-workspace, type: azure.res.azurerm_healthcare_workspace, name: ahds-workspace, parent: rg-rg-health-data, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: pe-ahds
+  type: azure.res.azurerm_private_endpoint
+  name: pe-ahds
+  parent: sub-snet-private-endpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: sthealthlake, type: azure.storage_account, name: sthealthlake, parent: rg-rg-health-data}
+- {id: synw-health, type: azure.res.azurerm_synapse_workspace, name: synw-health, parent: rg-rg-health-data, props: {location: westeurope, name: changeme, resource_group_name: changeme, storage_data_lake_gen2_filesystem_id: changeme}}
+- {id: kv-health-cmk, type: azure.key_vault, name: kv-health-cmk, parent: rg-rg-health-data}
+- id: app-smart-on-fhir
+  type: azure.res.azurerm_linux_web_app
+  name: app-smart-on-fhir
+  parent: rg-rg-health-data
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: law-health-audit, type: azure.res.azurerm_log_analytics_workspace, name: law-health-audit, parent: rg-rg-health-data, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: app-smart-on-fhir, label: patient / provider app}
+- {from: app-smart-on-fhir, to: idp, label: SMART on FHIR authorization (Entra ID), step: '3'}
+- {from: pe-ahds, to: ahds-workspace, label: private link}
+- {from: sthealthlake, to: synw-health, label: de-identified analytics and ML, step: '6'}
+- {from: ahds-workspace, to: kv-health-cmk, label: customer-managed keys}
+- {from: ahds-workspace, to: law-health-audit, label: audit logs}
+steps:
+- {n: '3', text: 'app-smart-on-fhir → idp: SMART on FHIR authorization (Entra ID)'}
+- {n: '6', text: 'sthealthlake → synw-health: de-identified analytics and ML'}

@@ -1,0 +1,63 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/data-share/overview); edit freely.
+title: Cross-organization data sharing with Azure Data Share
+category: data
+tags:
+- data-share
+- snapshot-sharing
+- in-place-sharing
+- data-lake-storage
+- synapse
+- azure-data-explorer
+- provider-consumer
+source: https://learn.microsoft.com/en-us/azure/data-share/overview
+description: A data provider creates a share of datasets from Data Lake Storage, Blob Storage, Azure SQL Database or Azure Synapse Analytics, sets terms of use and a snapshot schedule, and invites consumers
+  in other Azure subscriptions. Consumers accept the invitation and receive full or incremental snapshots into their own storage or SQL targets, or use in-place sharing for Azure Data Explorer where a symbolic
+  link exposes live data without copying; providers can revoke access at any time.
+nodes:
+- {id: sub-data-provider, type: azure.subscription, name: data-provider, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-share-provider, type: azure.resource_group, name: rg-share-provider, parent: sub-data-provider, props: {location: westeurope}}
+- {id: grp-provider-sources, type: common.group, name: Provider sources, parent: rg-rg-share-provider}
+- {id: sub-data-consumer, type: azure.subscription, name: data-consumer, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-share-consumer, type: azure.resource_group, name: rg-share-consumer, parent: sub-data-consumer, props: {location: northeurope}}
+- {id: grp-consumer-targets, type: common.group, name: Consumer targets, parent: rg-rg-share-consumer}
+- {id: users, type: common.users, name: users}
+- id: dsa-provider
+  type: azure.res.azurerm_data_share_account
+  name: dsa-provider
+  parent: grp-provider-sources
+  props: {identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: ds-pos-daily, type: azure.res.azurerm_data_share, name: ds-pos-daily, parent: grp-provider-sources, props: {account_id: changeme, kind: changeme, name: changeme}}
+- {id: stprovider-lake, type: azure.storage_account, name: stprovider-lake, parent: grp-provider-sources}
+- {id: synw-provider-dw, type: azure.res.azurerm_synapse_workspace, name: synw-provider-dw, parent: grp-provider-sources, props: {location: westeurope, name: changeme, resource_group_name: changeme, storage_data_lake_gen2_filesystem_id: changeme}}
+- id: adx-provider-live
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-provider-live
+  parent: grp-provider-sources
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: dsa-consumer
+  type: azure.res.azurerm_data_share_account
+  name: dsa-consumer
+  parent: grp-consumer-targets
+  props: {identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: stconsumer-lake, type: azure.storage_account, name: stconsumer-lake, parent: grp-consumer-targets}
+- {id: sql-consumer-analytics, type: azure.res.azurerm_mssql_server, name: sql-consumer-analytics, parent: grp-consumer-targets, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    version: changeme}}
+- id: adx-consumer-follower
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-consumer-follower
+  parent: grp-consumer-targets
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+edges:
+- {from: stprovider-lake, to: ds-pos-daily, label: add ADLS Gen2 dataset, step: '1'}
+- {from: synw-provider-dw, to: ds-pos-daily, label: add SQL dataset, step: '1'}
+- {from: adx-provider-live, to: ds-pos-daily, label: add Kusto database (in-place), step: '1'}
+- {from: ds-pos-daily, to: dsa-consumer, label: invitation with terms of use, step: '2'}
+- {from: dsa-consumer, to: stconsumer-lake, label: scheduled snapshot (hourly / daily), step: '3'}
+- {from: dsa-consumer, to: sql-consumer-analytics, label: snapshot into SQL target, step: '3'}
+- {from: adx-provider-live, to: adx-consumer-follower, label: in-place share (symbolic link), step: '3'}
+- {from: users, to: dsa-provider, label: manage shares, step: '4'}
+steps:
+- {n: '1', text: 'stprovider-lake → ds-pos-daily: add ADLS Gen2 dataset'}
+- {n: '2', text: 'ds-pos-daily → dsa-consumer: invitation with terms of use'}
+- {n: '3', text: 'dsa-consumer → stconsumer-lake: scheduled snapshot (hourly / daily)'}
+- {n: '4', text: 'users → dsa-provider: manage shares'}

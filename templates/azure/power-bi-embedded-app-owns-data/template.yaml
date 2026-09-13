@@ -1,0 +1,57 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/power-bi/developer/embedded/embedded-analytics-power-bi); edit freely.
+title: Power BI embedded analytics for your customers
+category: analytics-bi
+tags:
+- power-bi-embedded
+- app-owns-data
+- service-principal
+- a-sku
+- app-service
+- entra-id
+source: https://learn.microsoft.com/en-us/power-bi/developer/embedded/embedded-analytics-power-bi
+description: In the embed-for-your-customers (app owns data) model an ISV web application authenticates to Power BI non-interactively with a service principal or master user, generates embed tokens and
+  renders reports, dashboards and tiles in its own UI for external users who need no Power BI licence. Production embedding runs on a Power BI Embedded A-SKU capacity provisioned in Azure while semantic
+  models query Azure SQL Database and Data Lake Storage.
+nodes:
+- {id: sub-isv-saas, type: azure.subscription, name: isv-saas, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-pbi-embedded, type: azure.resource_group, name: rg-pbi-embedded, parent: sub-isv-saas, props: {location: westeurope}}
+- {id: grp-application, type: common.group, name: Application, parent: rg-rg-pbi-embedded}
+- {id: grp-capacity, type: common.group, name: Capacity, parent: rg-rg-pbi-embedded}
+- {id: grp-data-sources, type: common.group, name: Data sources, parent: rg-rg-pbi-embedded}
+- {id: users, type: common.users, name: users}
+- {id: idp, type: common.idp, name: idp}
+- {id: asp-portal, type: azure.res.azurerm_service_plan, name: asp-portal, parent: grp-application, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-customer-portal
+  type: azure.res.azurerm_linux_web_app
+  name: app-customer-portal
+  parent: grp-application
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: kv-service-principal, type: azure.key_vault, name: kv-service-principal, parent: grp-application}
+- id: pbie-a2-capacity
+  type: azure.res.azurerm_powerbi_embedded
+  name: pbie-a2-capacity
+  parent: grp-capacity
+  props:
+    administrators: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku_name: changeme
+- {id: sql-reporting-db, type: azure.res.azurerm_mssql_server, name: sql-reporting-db, parent: grp-data-sources, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: stdatalake-reports, type: azure.storage_account, name: stdatalake-reports, parent: grp-data-sources}
+- {id: appi-portal, type: azure.res.azurerm_application_insights, name: appi-portal, parent: grp-application, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: app-customer-portal, label: sign in with app's own auth, step: '1'}
+- {from: app-customer-portal, to: idp, label: service principal token (Entra ID), step: '2'}
+- {from: app-customer-portal, to: pbie-a2-capacity, label: Power BI REST API embed token, step: '3'}
+- {from: pbie-a2-capacity, to: users, label: embedded report iframe, step: '4'}
+- {from: pbie-a2-capacity, to: sql-reporting-db, label: DirectQuery / import refresh}
+- {from: pbie-a2-capacity, to: stdatalake-reports, label: semantic model source}
+- {from: app-customer-portal, to: kv-service-principal, label: client secret}
+- {from: app-customer-portal, to: appi-portal, label: telemetry}
+- {from: asp-portal, to: app-customer-portal, label: hosts}
+steps:
+- {n: '1', text: 'users → app-customer-portal: sign in with app''s own auth'}
+- {n: '2', text: 'app-customer-portal → idp: service principal token (Entra ID)'}
+- {n: '3', text: 'app-customer-portal → pbie-a2-capacity: Power BI REST API embed token'}
+- {n: '4', text: 'pbie-a2-capacity → users: embedded report iframe'}

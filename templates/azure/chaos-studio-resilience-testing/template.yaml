@@ -1,0 +1,70 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/chaos-studio/chaos-studio-overview); edit freely.
+title: Resilience testing with Azure Chaos Studio
+category: resilience
+tags:
+- chaos studio
+- chaos engineering
+- fault injection
+- service-direct faults
+- agent-based faults
+- game day
+- ci/cd gate
+source: https://learn.microsoft.com/en-us/azure/chaos-studio/chaos-studio-overview
+description: Chaos Studio Workspaces discover the resources in a subscription or resource group scope and run Scenarios such as Compute Zone Down or DNS Outage against onboarded targets; the classic Experiments
+  model composes service-direct faults (VM shutdown, SQL failover, Redis flush) and agent-based in-guest faults into steps and branches. Results are paired with Azure Monitor telemetry to assess recovery,
+  and experiments can run as deployment gates in CI/CD pipelines or in game days.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-chaos-target, type: azure.resource_group, name: rg-chaos-target, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-target, type: azure.vnet, name: vnet-target, parent: rg-rg-chaos-target, props: {cidr: 10.70.0.0/16}}
+- {id: sub-snet-web, type: azure.subnet, name: snet-web, parent: vpc-vnet-target, props: {cidr: 10.70.0.0/24}}
+- {id: sub-snet-aks, type: azure.subnet, name: snet-aks, parent: vpc-vnet-target, props: {cidr: 10.70.16.0/20}}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- id: chaos-zone-down
+  type: azure.res.azurerm_chaos_studio_experiment
+  name: chaos-zone-down
+  parent: rg-rg-chaos-target
+  props:
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    selectors: []
+    steps: []
+- {id: chaos-target-vmss, type: azure.res.azurerm_chaos_studio_target, name: chaos-target-vmss, parent: rg-rg-chaos-target, props: {location: westeurope, target_resource_id: changeme, target_type: changeme}}
+- id: vmss-web
+  type: azure.res.azurerm_linux_virtual_machine_scale_set
+  name: vmss-web
+  parent: sub-snet-web
+  props:
+    admin_username: changeme
+    location: westeurope
+    name: changeme
+    network_interface: []
+    os_disk: {}
+    resource_group_name: changeme
+    sku: changeme
+- {id: aks-target, type: azure.aks_cluster, name: aks-target, parent: sub-snet-aks}
+- {id: sql-target, type: azure.res.azurerm_mssql_server, name: sql-target, parent: rg-rg-chaos-target, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: redis-target, type: azure.res.azurerm_redis_cache, name: redis-target, parent: rg-rg-chaos-target, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: law-chaos, type: azure.res.azurerm_log_analytics_workspace, name: law-chaos, parent: rg-rg-chaos-target, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: appi-chaos, type: azure.res.azurerm_application_insights, name: appi-chaos, parent: rg-rg-chaos-target, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: alt-baseline, type: azure.res.azurerm_load_test, name: alt-baseline, parent: rg-rg-chaos-target, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: saas, to: chaos-zone-down, label: pipeline stage starts experiment (deployment gate), step: '1'}
+- {from: user, to: chaos-zone-down, label: game day run}
+- {from: chaos-zone-down, to: chaos-target-vmss, label: agent-based fault (CPU pressure, step: '2'}
+- {from: chaos-target-vmss, to: vmss-web, label: onboarded target}
+- {from: chaos-zone-down, to: aks-target, label: service-direct fault (Chaos Mesh pod faults), step: '2'}
+- {from: chaos-zone-down, to: sql-target, label: service-direct fault (failover), step: '2'}
+- {from: chaos-zone-down, to: redis-target, label: service-direct fault (cache flush), step: '2'}
+- {from: alt-baseline, to: vmss-web, label: load during experiment, step: '3'}
+- {from: vmss-web, to: appi-chaos, label: application telemetry}
+- {from: aks-target, to: law-chaos, label: platform metrics and logs}
+- {from: appi-chaos, to: user, label: assess recovery with Scenario report, step: '4'}
+steps:
+- {n: '1', text: 'saas → chaos-zone-down: pipeline stage starts experiment (deployment gate)'}
+- {n: '2', text: 'chaos-zone-down → chaos-target-vmss: agent-based fault (CPU pressure'}
+- {n: '3', text: 'alt-baseline → vmss-web: load during experiment'}
+- {n: '4', text: 'appi-chaos → user: assess recovery with Scenario report'}

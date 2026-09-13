@@ -26,6 +26,7 @@ nodes:
   props: {data_source_id: changeme, display_name: changeme, params: {}}
 - {id: staging-dataset, type: gcp.bigquery_dataset, name: staging-dataset, parent: grp-load}
 - {id: marts-dataset, type: gcp.bigquery_dataset, name: marts-dataset, parent: grp-serve}
+- {id: revenue-mart-table, type: gcp.res.google_bigquery_table, name: revenue-mart-table, parent: grp-serve, props: {dataset_id: changeme, table_id: changeme}}
 - id: analytics-looker
   type: gcp.res.google_looker_instance
   name: analytics-looker
@@ -35,9 +36,11 @@ edges:
 - {from: saas, to: saas-transfer, label: API extract, step: '1'}
 - {from: saas-transfer, to: staging-dataset, label: load, step: '2'}
 - {from: raw-export-bucket, to: staging-dataset, label: load CSV/Parquet, step: '3'}
+- {from: analytics-looker, to: revenue-mart-table, label: LookML queries, step: '8'}
 - {from: users, to: analytics-looker, label: explore, step: '9'}
 steps:
 - {n: '1', text: 'saas → saas-transfer: API extract'}
 - {n: '2', text: 'saas-transfer → staging-dataset: load'}
 - {n: '3', text: 'raw-export-bucket → staging-dataset: load CSV/Parquet'}
+- {n: '8', text: 'analytics-looker → revenue-mart-table: LookML queries'}
 - {n: '9', text: 'users → analytics-looker: explore'}

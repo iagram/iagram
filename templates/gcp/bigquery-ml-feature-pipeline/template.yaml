@@ -25,15 +25,29 @@ nodes:
   parent: grp-features
   props: {data_source_id: changeme, display_name: changeme, params: {}}
 - {id: features-dataset, type: gcp.bigquery_dataset, name: features-dataset, parent: grp-features}
+- {id: customer-features-table, type: gcp.res.google_bigquery_table, name: customer-features-table, parent: grp-features, props: {dataset_id: changeme, table_id: changeme}}
+- {id: train-churn-model-procedure, type: gcp.res.google_bigquery_routine, name: train-churn-model-procedure, parent: grp-training, props: {dataset_id: changeme, definition_body: changeme, routine_id: changeme,
+    routine_type: changeme}}
+- {id: churn-predictions-table, type: gcp.res.google_bigquery_table, name: churn-predictions-table, parent: grp-training, props: {dataset_id: changeme, table_id: changeme}}
 - {id: churn-online-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: churn-online-endpoint, parent: grp-serving, props: {display_name: changeme, location: westeurope, name: changeme}}
 - {id: churn-api-service, type: gcp.cloud_run_service, name: churn-api-service, parent: grp-serving}
 edges:
 - {from: raw-events-bucket, to: raw-events-dataset, label: load, step: '1'}
 - {from: feature-scheduled-query, to: raw-events-dataset, label: read events, step: '2'}
+- {from: feature-scheduled-query, to: customer-features-table, label: write features, step: '3'}
+- {from: train-churn-model-procedure, to: customer-features-table, label: CREATE MODEL, step: '4'}
+- {from: train-churn-model-procedure, to: churn-predictions-table, label: ML.PREDICT batch, step: '5'}
+- {from: train-churn-model-procedure, to: churn-online-endpoint, label: register and deploy to Vertex AI, step: '6'}
 - {from: churn-api-service, to: churn-online-endpoint, label: online prediction, step: '7'}
 - {from: client, to: churn-api-service, label: HTTPS, step: '8'}
+- {from: users, to: churn-predictions-table, label: analyze predictions, step: '9'}
 steps:
 - {n: '1', text: 'raw-events-bucket → raw-events-dataset: load'}
 - {n: '2', text: 'feature-scheduled-query → raw-events-dataset: read events'}
+- {n: '3', text: 'feature-scheduled-query → customer-features-table: write features'}
+- {n: '4', text: 'train-churn-model-procedure → customer-features-table: CREATE MODEL'}
+- {n: '5', text: 'train-churn-model-procedure → churn-predictions-table: ML.PREDICT batch'}
+- {n: '6', text: 'train-churn-model-procedure → churn-online-endpoint: register and deploy to Vertex AI'}
 - {n: '7', text: 'churn-api-service → churn-online-endpoint: online prediction'}
 - {n: '8', text: 'client → churn-api-service: HTTPS'}
+- {n: '9', text: 'users → churn-predictions-table: analyze predictions'}

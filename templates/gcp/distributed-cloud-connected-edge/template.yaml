@@ -1,0 +1,57 @@
+# Generated from the official reference (https://docs.cloud.google.com/distributed-cloud/edge/latest/docs/overview); edit freely.
+title: Google Distributed Cloud connected edge clusters managed from a Google Cloud region
+category: edge
+tags:
+- google distributed cloud
+- edge
+- gke
+- cloud vpn
+- fleet
+- config sync
+source: https://docs.cloud.google.com/distributed-cloud/edge/latest/docs/overview
+description: Google Distributed Cloud connected runs GKE clusters on Google-provided hardware installed at the customer site, and each deployment reaches Google Cloud services and the customer VPC over
+  a Cloud VPN connection. Clusters are registered to a fleet so that container images, configuration and monitoring are managed centrally from the region while workloads (containers, VMs, GPU jobs) run
+  locally at the edge.
+nodes:
+- {id: dc-edge-site, type: common.datacenter, name: edge-site}
+- {id: prj-edge-mgmt-prj, type: gcp.project, name: edge-mgmt-prj, props: {project_id: edge-mgmt-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-core-vpc, type: gcp.vpc, name: core-vpc, parent: prj-edge-mgmt-prj, props: {cidr: 10.50.0.0/16}}
+- {id: sub-core-sub, type: gcp.subnetwork, name: core-sub, parent: vpc-core-vpc, props: {cidr: 10.50.1.0/24, region: europe-west1}}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: vpc-prj-edge-mgmt-prj, type: gcp.vpc, name: main, parent: prj-edge-mgmt-prj}
+- {id: sub-prj-edge-mgmt-prj, type: gcp.subnetwork, name: main, parent: vpc-prj-edge-mgmt-prj, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- id: edge-gke-cluster
+  type: gcp.res.google_edgecontainer_cluster
+  name: edge-gke-cluster
+  parent: sub-prj-edge-mgmt-prj
+  props: {authorization: {}, fleet: {}, location: westeurope, name: changeme, networking: {}}
+- {id: edge-nodepool, type: gcp.res.google_edgecontainer_node_pool, name: edge-nodepool, parent: edge-gke-cluster, props: {cluster: changeme, location: westeurope, name: changeme, node_count: 1, node_location: changeme}}
+- {id: edge-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: edge-vpn-gw, parent: vpc-core-vpc, props: {name: changeme, network: changeme}}
+- {id: edge-router, type: gcp.res.google_compute_router, name: edge-router, parent: vpc-core-vpc, props: {name: changeme, network: changeme}}
+- {id: edge-fleet-membership, type: gcp.res.google_gke_hub_membership, name: edge-fleet-membership, parent: prj-edge-mgmt-prj, props: {membership_id: changeme}}
+- {id: config-management-feature, type: gcp.res.google_gke_hub_feature, name: config-management-feature, parent: prj-edge-mgmt-prj, props: {location: westeurope}}
+- {id: edge-images, type: gcp.res.google_artifact_registry_repository, name: edge-images, parent: prj-edge-mgmt-prj, props: {format: changeme, repository_id: changeme}}
+- {id: edge-events, type: gcp.pubsub_topic, name: edge-events, parent: prj-edge-mgmt-prj}
+- {id: edge-analytics, type: gcp.bigquery_dataset, name: edge-analytics, parent: prj-edge-mgmt-prj}
+- {id: core-backend-vm, type: gcp.compute_instance, name: core-backend-vm, parent: sub-core-sub}
+edges:
+- {from: device, to: edge-gke-cluster, label: local sensors and cameras, step: '1'}
+- {from: edge-gke-cluster, to: edge-vpn-gw, label: edgecontainer vpn connection}
+- {from: edge-vpn-gw, to: edge-router, label: BGP over Cloud VPN, step: '2'}
+- {from: edge-gke-cluster, to: edge-fleet-membership, label: fleet registration, step: '3'}
+- {from: config-management-feature, to: edge-gke-cluster, label: Config Sync policies, step: '4'}
+- {from: edge-images, to: edge-gke-cluster, label: image pull, step: '5'}
+- {from: edge-gke-cluster, to: edge-events, label: aggregated events, step: '6'}
+- {from: edge-events, to: edge-analytics, label: pubsub subscription}
+- {from: edge-gke-cluster, to: core-backend-vm, label: private VPC access, step: '7'}
+- {from: users, to: edge-fleet-membership, label: fleet console, step: '8'}
+steps:
+- {n: '1', text: 'device → edge-gke-cluster: local sensors and cameras'}
+- {n: '2', text: 'edge-vpn-gw → edge-router: BGP over Cloud VPN'}
+- {n: '3', text: 'edge-gke-cluster → edge-fleet-membership: fleet registration'}
+- {n: '4', text: 'config-management-feature → edge-gke-cluster: Config Sync policies'}
+- {n: '5', text: 'edge-images → edge-gke-cluster: image pull'}
+- {n: '6', text: 'edge-gke-cluster → edge-events: aggregated events'}
+- {n: '7', text: 'edge-gke-cluster → core-backend-vm: private VPC access'}
+- {n: '8', text: 'users → edge-fleet-membership: fleet console'}

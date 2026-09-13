@@ -25,6 +25,7 @@ nodes:
 - {id: analytics-lake, type: gcp.res.google_dataplex_lake, name: analytics-lake, parent: grp-processing, props: {location: westeurope, name: changeme}}
 - {id: biglake-gcs-connection, type: gcp.res.google_bigquery_connection, name: biglake-gcs-connection, parent: grp-serving}
 - {id: lakehouse-dataset, type: gcp.bigquery_dataset, name: lakehouse-dataset, parent: grp-serving}
+- {id: iceberg-biglake-table, type: gcp.res.google_bigquery_table, name: iceberg-biglake-table, parent: grp-serving, props: {dataset_id: changeme, table_id: changeme}}
 - id: lakehouse-looker
   type: gcp.res.google_looker_instance
   name: lakehouse-looker
@@ -36,6 +37,7 @@ edges:
 - {from: spark-transform-cluster, to: raw-landing-bucket, label: read raw, step: '3'}
 - {from: spark-transform-cluster, to: iceberg-warehouse-bucket, label: write Iceberg tables, step: '4'}
 - {from: analytics-lake, to: iceberg-warehouse-bucket, label: discover and catalog, step: '5'}
+- {from: iceberg-biglake-table, to: biglake-gcs-connection, label: read via connection, step: '6'}
 - {from: biglake-gcs-connection, to: iceberg-warehouse-bucket, label: Parquet and Iceberg metadata, step: '7'}
 - {from: lakehouse-looker, to: lakehouse-dataset, label: SQL queries, step: '8'}
 - {from: users, to: lakehouse-looker, label: dashboards, step: '9'}
@@ -45,6 +47,7 @@ steps:
 - {n: '3', text: 'spark-transform-cluster → raw-landing-bucket: read raw'}
 - {n: '4', text: 'spark-transform-cluster → iceberg-warehouse-bucket: write Iceberg tables'}
 - {n: '5', text: 'analytics-lake → iceberg-warehouse-bucket: discover and catalog'}
+- {n: '6', text: 'iceberg-biglake-table → biglake-gcs-connection: read via connection'}
 - {n: '7', text: 'biglake-gcs-connection → iceberg-warehouse-bucket: Parquet and Iceberg metadata'}
 - {n: '8', text: 'lakehouse-looker → lakehouse-dataset: SQL queries'}
 - {n: '9', text: 'users → lakehouse-looker: dashboards'}

@@ -19,6 +19,8 @@ nodes:
 - {id: metrics-bigquery-sub, type: gcp.res.google_pubsub_subscription, name: metrics-bigquery-sub, parent: prj-realtime-bi, props: {name: changeme, topic: changeme}}
 - {id: metrics-deadletter-topic, type: gcp.pubsub_topic, name: metrics-deadletter-topic, parent: prj-realtime-bi}
 - {id: realtime-dataset, type: gcp.bigquery_dataset, name: realtime-dataset, parent: prj-realtime-bi}
+- {id: metrics-live-table, type: gcp.res.google_bigquery_table, name: metrics-live-table, parent: prj-realtime-bi, props: {dataset_id: changeme, table_id: changeme}}
+- {id: metrics-materialized-view, type: gcp.res.google_bigquery_table, name: metrics-materialized-view, parent: prj-realtime-bi, props: {dataset_id: changeme, table_id: changeme}}
 - {id: dashboard-bi-engine, type: gcp.res.google_bigquery_bi_reservation, name: dashboard-bi-engine, parent: prj-realtime-bi, props: {location: westeurope}}
 - id: realtime-looker
   type: gcp.res.google_looker_instance
@@ -29,13 +31,19 @@ edges:
 - {from: device, to: metrics-topic, label: publish metrics, step: '1'}
 - {from: metrics-avro-schema, to: metrics-topic, label: schema validation, step: '2'}
 - {from: metrics-topic, to: metrics-bigquery-sub, label: deliver, step: '3'}
+- {from: metrics-bigquery-sub, to: metrics-live-table, label: Storage Write API, step: '4'}
 - {from: metrics-bigquery-sub, to: metrics-deadletter-topic, label: failed writes, step: '5'}
+- {from: metrics-live-table, to: metrics-materialized-view, label: incremental refresh, step: '6'}
 - {from: dashboard-bi-engine, to: realtime-dataset, label: in-memory acceleration, step: '7'}
+- {from: realtime-looker, to: metrics-materialized-view, label: dashboard queries, step: '8'}
 - {from: users, to: realtime-looker, label: live dashboards, step: '9'}
 steps:
 - {n: '1', text: 'device → metrics-topic: publish metrics'}
 - {n: '2', text: 'metrics-avro-schema → metrics-topic: schema validation'}
 - {n: '3', text: 'metrics-topic → metrics-bigquery-sub: deliver'}
+- {n: '4', text: 'metrics-bigquery-sub → metrics-live-table: Storage Write API'}
 - {n: '5', text: 'metrics-bigquery-sub → metrics-deadletter-topic: failed writes'}
+- {n: '6', text: 'metrics-live-table → metrics-materialized-view: incremental refresh'}
 - {n: '7', text: 'dashboard-bi-engine → realtime-dataset: in-memory acceleration'}
+- {n: '8', text: 'realtime-looker → metrics-materialized-view: dashboard queries'}
 - {n: '9', text: 'users → realtime-looker: live dashboards'}

@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.cloud.google.com/healthcare-api/docs/how-tos/fhir-bigquery-streaming); edit freely.
+title: Healthcare data platform with Cloud Healthcare API FHIR store streaming to BigQuery
+category: industry
+tags:
+- healthcare
+- fhir
+- cloud healthcare api
+- bigquery
+- pub/sub
+- cloud run
+source: https://docs.cloud.google.com/healthcare-api/docs/how-tos/fhir-bigquery-streaming
+description: Clinical applications read and write FHIR resources through a Cloud Healthcare API FHIR store inside a healthcare dataset, and a StreamConfigs export streams every create, update, patch and
+  delete to BigQuery tables in near real time using the Analytics schema. Pub/Sub notifications from the FHIR store trigger a function for downstream workflows, and bulk FHIR bundles are imported from Cloud
+  Storage.
+nodes:
+- {id: prj-health-prj, type: gcp.project, name: health-prj, props: {project_id: health-prj-123456, project: changeme, region: europe-west4}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: clinical-app-glb, type: gcp.res.google_compute_global_forwarding_rule, name: clinical-app-glb, parent: prj-health-prj, props: {name: changeme, target: changeme}}
+- {id: clinical-app, type: gcp.cloud_run_service, name: clinical-app, parent: prj-health-prj}
+- {id: clinical-dataset, type: gcp.res.google_healthcare_dataset, name: clinical-dataset, parent: prj-health-prj, props: {location: westeurope, name: changeme}}
+- {id: fhir-store, type: gcp.res.google_healthcare_fhir_store, name: fhir-store, parent: prj-health-prj, props: {dataset: changeme, name: changeme, version: changeme}}
+- {id: fhir-analytics, type: gcp.bigquery_dataset, name: fhir-analytics, parent: prj-health-prj}
+- {id: fhir-notifications, type: gcp.pubsub_topic, name: fhir-notifications, parent: prj-health-prj}
+- {id: fhir-event-fn, type: gcp.res.google_cloudfunctions2_function, name: fhir-event-fn, parent: prj-health-prj, props: {location: westeurope, name: changeme}}
+- {id: fhir-import-bucket, type: gcp.storage_bucket, name: fhir-import-bucket, parent: prj-health-prj}
+edges:
+- {from: users, to: clinical-app-glb, label: clinicians HTTPS, step: '1'}
+- {from: clinical-app-glb, to: clinical-app, label: serverless NEG, step: '2'}
+- {from: clinical-app, to: fhir-store, label: FHIR REST read/write, step: '3'}
+- {from: clinical-dataset, to: fhir-store, label: contains}
+- {from: fhir-store, to: fhir-analytics, label: streaming export (StreamConfigs), step: '4'}
+- {from: fhir-store, to: fhir-notifications, label: resource change notification, step: '5'}
+- {from: fhir-notifications, to: fhir-event-fn, label: pubsub subscription}
+- {from: saas, to: fhir-import-bucket, label: EHR bulk FHIR bundles, step: '6'}
+- {from: fhir-import-bucket, to: fhir-store, label: FHIR import, step: '7'}
+- {from: users, to: fhir-analytics, label: analysts SQL / Looker, step: '8'}
+steps:
+- {n: '1', text: 'users → clinical-app-glb: clinicians HTTPS'}
+- {n: '2', text: 'clinical-app-glb → clinical-app: serverless NEG'}
+- {n: '3', text: 'clinical-app → fhir-store: FHIR REST read/write'}
+- {n: '4', text: 'fhir-store → fhir-analytics: streaming export (StreamConfigs)'}
+- {n: '5', text: 'fhir-store → fhir-notifications: resource change notification'}
+- {n: '6', text: 'saas → fhir-import-bucket: EHR bulk FHIR bundles'}
+- {n: '7', text: 'fhir-import-bucket → fhir-store: FHIR import'}
+- {n: '8', text: 'users → fhir-analytics: analysts SQL / Looker'}

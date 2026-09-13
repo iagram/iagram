@@ -33,6 +33,8 @@ nodes:
 - {id: common-folder, type: gcp.res.google_folder, name: common-folder, parent: sub-prj-prj-b-seed, props: {display_name: changeme, parent: changeme}}
 - {id: network-folder, type: gcp.res.google_folder, name: network-folder, parent: sub-prj-prj-b-seed, props: {display_name: changeme, parent: changeme}}
 - {id: production-folder, type: gcp.res.google_folder, name: production-folder, parent: sub-prj-prj-b-seed, props: {display_name: changeme, parent: changeme}}
+- {id: restrict-external-ip-policy, type: gcp.res.google_org_policy_policy, name: restrict-external-ip-policy, parent: sub-prj-prj-b-seed, props: {name: changeme, parent: changeme}}
+- {id: allowed-member-domains-policy, type: gcp.res.google_org_policy_policy, name: allowed-member-domains-policy, parent: sub-prj-prj-b-seed, props: {name: changeme, parent: changeme}}
 - {id: tf-state-bucket, type: gcp.storage_bucket, name: tf-state-bucket, parent: prj-prj-b-seed}
 - {id: sk-c-logging-la, type: gcp.res.google_logging_organization_sink, name: sk-c-logging-la, parent: prj-prj-c-logging, props: {destination: changeme, name: changeme, org_id: changeme}}
 - {id: org-key-ring, type: gcp.res.google_kms_key_ring, name: org-key-ring, parent: prj-prj-c-kms, props: {location: westeurope, name: changeme}}
@@ -47,11 +49,13 @@ nodes:
 edges:
 - {from: users, to: tf-state-bucket, label: foundation pipeline applies Terraform, step: '1'}
 - {from: shared-vpc-host, to: prj-prj-p-workload, label: compute shared vpc service project}
+- {from: restrict-external-ip-policy, to: workload-vm, label: org policy inherited, step: '2'}
 - {from: workload-vm, to: sk-c-logging-la, label: audit and flow logs, step: '3'}
 - {from: workload-vm, to: org-key-ring, label: CMEK encrypt/decrypt, step: '4'}
 - {from: workload-vm, to: org-shared-secret, label: secret access, step: '5'}
 steps:
 - {n: '1', text: 'users → tf-state-bucket: foundation pipeline applies Terraform'}
+- {n: '2', text: 'restrict-external-ip-policy → workload-vm: org policy inherited'}
 - {n: '3', text: 'workload-vm → sk-c-logging-la: audit and flow logs'}
 - {n: '4', text: 'workload-vm → org-key-ring: CMEK encrypt/decrypt'}
 - {n: '5', text: 'workload-vm → org-shared-secret: secret access'}

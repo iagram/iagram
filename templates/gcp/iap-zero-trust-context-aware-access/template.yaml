@@ -29,17 +29,22 @@ nodes:
     base_instance_name: changeme
     name: changeme
     version: []
+- {id: intranet-oauth-client, type: gcp.res.google_iap_client, name: intranet-oauth-client, parent: prj-prj-p-intranet, props: {brand: changeme, display_name: changeme}}
 - {id: corp-access-policy, type: gcp.res.google_access_context_manager_access_policy, name: corp-access-policy, parent: prj-prj-p-intranet, props: {parent: changeme, title: changeme}}
 - {id: trusted-device-corp-ip, type: gcp.res.google_access_context_manager_access_level, name: trusted-device-corp-ip, parent: prj-prj-p-intranet, props: {name: changeme, parent: changeme, title: changeme}}
 - {id: allow-iap-only, type: gcp.firewall_rule, name: allow-iap-only, parent: vpc-intranet-vpc}
 edges:
 - {from: users, to: intranet-https-rule, label: HTTPS, step: '1'}
+- {from: intranet-https-rule, to: intranet-oauth-client, label: IAP sign-in redirect, step: '2'}
+- {from: intranet-oauth-client, to: idp, label: Google or federated authentication, step: '3'}
 - {from: device, to: trusted-device-corp-ip, label: device posture and IP, step: '4'}
 - {from: trusted-device-corp-ip, to: intranet-backend, label: IAM condition on IAP role, step: '5'}
 - {from: intranet-backend, to: intranet-mig, label: signed JWT header, step: '6'}
 - {from: allow-iap-only, to: intranet-mig, label: allow only 35.235.240.0/20, step: '7'}
 steps:
 - {n: '1', text: 'users → intranet-https-rule: HTTPS'}
+- {n: '2', text: 'intranet-https-rule → intranet-oauth-client: IAP sign-in redirect'}
+- {n: '3', text: 'intranet-oauth-client → idp: Google or federated authentication'}
 - {n: '4', text: 'device → trusted-device-corp-ip: device posture and IP'}
 - {n: '5', text: 'trusted-device-corp-ip → intranet-backend: IAM condition on IAP role'}
 - {n: '6', text: 'intranet-backend → intranet-mig: signed JWT header'}

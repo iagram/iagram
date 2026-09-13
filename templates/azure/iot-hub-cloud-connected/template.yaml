@@ -1,0 +1,56 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/iot/iot-introduction); edit freely.
+title: Cloud-connected IoT solution with IoT Hub, DPS and Digital Twins
+category: iot
+tags:
+- iot hub
+- device provisioning service
+- digital twins
+- device registry
+- fabric
+- mqtt
+- cloud-connected
+source: https://learn.microsoft.com/en-us/azure/iot/iot-introduction
+description: In the cloud-connected pattern devices speak MQTT, AMQP or HTTPS directly to IoT Hub, are provisioned zero-touch by the Device Provisioning Service and are represented as Azure resources through
+  Azure Device Registry. IoT Hub routes telemetry to Event Hubs and downstream analytics and storage, Azure Digital Twins models the environment, and commands flow back from the cloud to devices.
+nodes:
+- {id: sub-iot, type: azure.subscription, name: iot, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-iot-cloud, type: azure.resource_group, name: rg-iot-cloud, parent: sub-iot, props: {location: westeurope}}
+- {id: grp-device-connectivity, type: common.group, name: Device connectivity, parent: rg-rg-iot-cloud}
+- {id: grp-data-and-insights, type: common.group, name: Data and insights, parent: rg-rg-iot-cloud}
+- {id: device, type: common.device, name: device}
+- {id: user, type: common.user, name: user}
+- id: iothub-fleet
+  type: azure.res.azurerm_iothub
+  name: iothub-fleet
+  parent: grp-device-connectivity
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: evhns-telemetry, type: azure.res.azurerm_eventhub_namespace, name: evhns-telemetry, parent: grp-data-and-insights, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-telemetry, type: azure.res.azurerm_eventhub, name: evh-telemetry, parent: grp-data-and-insights, props: {name: changeme, partition_count: 1}}
+- {id: asa-hot-path, type: azure.res.azurerm_stream_analytics_job, name: asa-hot-path, parent: grp-data-and-insights, props: {location: westeurope, name: changeme, resource_group_name: changeme, transformation_query: changeme}}
+- {id: adt-fleet, type: azure.res.azurerm_digital_twins_instance, name: adt-fleet, parent: grp-data-and-insights, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stiotcold, type: azure.storage_account, name: stiotcold, parent: grp-data-and-insights}
+- id: adx-iot
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-iot
+  parent: grp-data-and-insights
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: func-twin-updater
+  type: azure.res.azurerm_linux_function_app
+  name: func-twin-updater
+  parent: grp-data-and-insights
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+edges:
+- {from: device, to: iothub-fleet, label: MQTT / AMQP telemetry, step: '3'}
+- {from: iothub-fleet, to: device, label: cloud-to-device commands}
+- {from: iothub-fleet, to: evh-telemetry, label: message routing, step: '4'}
+- {from: evh-telemetry, to: asa-hot-path, label: hot path, step: '5'}
+- {from: iothub-fleet, to: stiotcold, label: cold path archive}
+- {from: evh-telemetry, to: func-twin-updater, label: Event Hubs trigger}
+- {from: func-twin-updater, to: adt-fleet, label: update twin properties, step: '6'}
+- {from: asa-hot-path, to: adx-iot, label: analytics store}
+- {from: user, to: adx-iot, label: KQL dashboards}
+steps:
+- {n: '3', text: 'device → iothub-fleet: MQTT / AMQP telemetry'}
+- {n: '4', text: 'iothub-fleet → evh-telemetry: message routing'}
+- {n: '5', text: 'evh-telemetry → asa-hot-path: hot path'}
+- {n: '6', text: 'func-twin-updater → adt-fleet: update twin properties'}

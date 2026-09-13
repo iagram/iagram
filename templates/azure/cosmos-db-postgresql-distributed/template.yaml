@@ -1,0 +1,56 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/cosmos-db/postgresql/introduction); edit freely.
+title: Distributed PostgreSQL with Azure Cosmos DB for PostgreSQL (Citus)
+category: database
+tags:
+- cosmos-db-for-postgresql
+- citus
+- distributed-tables
+- sharding
+- pgbouncer
+- multi-tenant-saas
+- real-time-analytics
+- stream-analytics
+source: https://learn.microsoft.com/en-us/azure/cosmos-db/postgresql/introduction
+description: Azure Cosmos DB for PostgreSQL runs PostgreSQL extended with the Citus extension so a cluster starts as a single node and transparently scales to a coordinator plus worker nodes by distributing
+  tables, serving multi-tenant SaaS, real-time operational analytics and high-throughput transactional apps. The managed service adds high availability, read replicas, built-in pgBouncer, private endpoints
+  and ingestion from Stream Analytics and Data Factory; Microsoft now recommends Elastic Clusters in Azure Database for PostgreSQL for new projects.
+nodes:
+- {id: sub-saas-platform, type: azure.subscription, name: saas-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-citus-analytics, type: azure.resource_group, name: rg-citus-analytics, parent: sub-saas-platform, props: {location: westeurope}}
+- {id: vpc-vnet-saas, type: azure.vnet, name: vnet-saas, parent: rg-rg-citus-analytics, props: {cidr: 10.60.0.0/16}}
+- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-vnet-saas, props: {cidr: 10.60.1.0/24}}
+- {id: sub-snet-private-endpoints, type: azure.subnet, name: snet-private-endpoints, parent: vpc-vnet-saas, props: {cidr: 10.60.2.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: device, type: common.device, name: device}
+- id: app-tenant-api
+  type: azure.res.azurerm_linux_web_app
+  name: app-tenant-api
+  parent: sub-snet-app
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: pe-citus-coordinator
+  type: azure.res.azurerm_private_endpoint
+  name: pe-citus-coordinator
+  parent: sub-snet-private-endpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: citus-multitenant, type: azure.res.azurerm_cosmosdb_postgresql_cluster, name: citus-multitenant, parent: rg-rg-citus-analytics, props: {location: westeurope, name: changeme, node_count: 1, resource_group_name: changeme}}
+- {id: evhns-clickstream, type: azure.res.azurerm_eventhub_namespace, name: evhns-clickstream, parent: rg-rg-citus-analytics, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}}
+- {id: asa-rollups, type: azure.res.azurerm_stream_analytics_job, name: asa-rollups, parent: rg-rg-citus-analytics, props: {location: westeurope, name: changeme, resource_group_name: changeme, transformation_query: changeme}}
+- {id: adf-batch-ingest, type: azure.res.azurerm_data_factory, name: adf-batch-ingest, parent: rg-rg-citus-analytics, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: kv-db-credentials, type: azure.key_vault, name: kv-db-credentials, parent: rg-rg-citus-analytics}
+- {id: law-citus-metrics, type: azure.res.azurerm_log_analytics_workspace, name: law-citus-metrics, parent: rg-rg-citus-analytics, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: app-tenant-api, label: HTTPS, step: '1'}
+- {from: app-tenant-api, to: pe-citus-coordinator, label: pgBouncer port 6432, step: '2'}
+- {from: pe-citus-coordinator, to: citus-multitenant, label: private endpoint to coordinator}
+- {from: citus-multitenant, to: citus-multitenant, label: shard queries to worker nodes (tenant_id), step: '3'}
+- {from: device, to: evhns-clickstream, label: events, step: '1'}
+- {from: evhns-clickstream, to: asa-rollups, label: stream input, step: '2'}
+- {from: asa-rollups, to: citus-multitenant, label: PostgreSQL output (rollup tables), step: '3'}
+- {from: adf-batch-ingest, to: citus-multitenant, label: COPY batch loads}
+- {from: app-tenant-api, to: kv-db-credentials, label: connection secret}
+- {from: citus-multitenant, to: law-citus-metrics, label: metrics and slow query logs}
+steps:
+- {n: '1', text: 'users → app-tenant-api: HTTPS'}
+- {n: '2', text: 'app-tenant-api → pe-citus-coordinator: pgBouncer port 6432'}
+- {n: '3', text: 'citus-multitenant → citus-multitenant: shard queries to worker nodes (tenant_id)'}

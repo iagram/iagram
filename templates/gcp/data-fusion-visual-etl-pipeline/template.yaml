@@ -20,14 +20,20 @@ nodes:
 - {id: etl-fusion-instance, type: gcp.res.google_data_fusion_instance, name: etl-fusion-instance, parent: prj-data-fusion, props: {name: changeme, type: changeme}}
 - {id: fusion-ephemeral-dataproc, type: gcp.res.google_dataproc_cluster, name: fusion-ephemeral-dataproc, parent: sub-dataproc-subnet, props: {name: changeme}}
 - {id: campaign-dataset, type: gcp.bigquery_dataset, name: campaign-dataset, parent: prj-data-fusion}
+- {id: state-abbreviations-table, type: gcp.res.google_bigquery_table, name: state-abbreviations-table, parent: prj-data-fusion, props: {dataset_id: changeme, table_id: changeme}}
+- {id: campaign-targets-table, type: gcp.res.google_bigquery_table, name: campaign-targets-table, parent: prj-data-fusion, props: {dataset_id: changeme, table_id: changeme}}
 - {id: fusion-temp-bucket, type: gcp.storage_bucket, name: fusion-temp-bucket, parent: prj-data-fusion}
 edges:
 - {from: users, to: etl-fusion-instance, label: design pipeline in Studio, step: '1'}
 - {from: etl-fusion-instance, to: fusion-ephemeral-dataproc, label: provision and run, step: '2'}
 - {from: fusion-ephemeral-dataproc, to: customers-csv-bucket, label: read CSV, step: '3'}
+- {from: fusion-ephemeral-dataproc, to: state-abbreviations-table, label: join lookup, step: '4'}
 - {from: fusion-ephemeral-dataproc, to: fusion-temp-bucket, label: staging, step: '5'}
+- {from: fusion-ephemeral-dataproc, to: campaign-targets-table, label: write output, step: '6'}
 steps:
 - {n: '1', text: 'users → etl-fusion-instance: design pipeline in Studio'}
 - {n: '2', text: 'etl-fusion-instance → fusion-ephemeral-dataproc: provision and run'}
 - {n: '3', text: 'fusion-ephemeral-dataproc → customers-csv-bucket: read CSV'}
+- {n: '4', text: 'fusion-ephemeral-dataproc → state-abbreviations-table: join lookup'}
 - {n: '5', text: 'fusion-ephemeral-dataproc → fusion-temp-bucket: staging'}
+- {n: '6', text: 'fusion-ephemeral-dataproc → campaign-targets-table: write output'}

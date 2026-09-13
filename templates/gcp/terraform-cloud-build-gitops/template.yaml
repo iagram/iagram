@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.cloud.google.com/docs/terraform/resource-management/managing-infrastructure-as-code); edit freely.
+title: Infrastructure as code with Terraform, Cloud Build triggers and a GCS state backend
+category: devops
+tags:
+- terraform
+- cloud build
+- gitops
+- infrastructure as code
+- cloud storage state
+source: https://docs.cloud.google.com/docs/terraform/resource-management/managing-infrastructure-as-code
+description: A single Git repository holds Terraform code with a dev and a prod branch, and Cloud Build triggers run terraform plan on feature-branch pull requests and terraform init, plan and apply on
+  merges to an environment branch. Terraform state is stored remotely in a Cloud Storage bucket and the Cloud Build service account carries the IAM permissions needed to create resources in the target environments.
+nodes:
+- {id: prj-iac-prj, type: gcp.project, name: iac-prj, props: {project_id: iac-prj-123456, project: changeme, region: europe-west1}}
+- {id: prj-dev-env-prj, type: gcp.project, name: dev-env-prj, props: {project_id: dev-env-prj-123456, project: changeme, region: europe-west1}}
+- {id: prj-prod-env-prj, type: gcp.project, name: prod-env-prj, props: {project_id: prod-env-prj-123456, project: changeme, region: europe-west1}}
+- {id: user, type: common.user, name: user}
+- {id: github-connection, type: gcp.res.google_cloudbuildv2_connection, name: github-connection, parent: prj-iac-prj, props: {location: westeurope, name: changeme}}
+- {id: infra-repo, type: gcp.res.google_cloudbuildv2_repository, name: infra-repo, parent: prj-iac-prj, props: {name: changeme, parent_connection: changeme, remote_uri: changeme}}
+- {id: pr-plan-trigger, type: gcp.res.google_cloudbuild_trigger, name: pr-plan-trigger, parent: prj-iac-prj}
+- {id: dev-apply-trigger, type: gcp.res.google_cloudbuild_trigger, name: dev-apply-trigger, parent: prj-iac-prj}
+- {id: prod-apply-trigger, type: gcp.res.google_cloudbuild_trigger, name: prod-apply-trigger, parent: prj-iac-prj}
+- {id: tfstate-bucket, type: gcp.storage_bucket, name: tfstate-bucket, parent: prj-iac-prj}
+- {id: cloudbuild-terraform-sa, type: gcp.res.google_service_account, name: cloudbuild-terraform-sa, parent: prj-iac-prj, props: {account_id: changeme}}
+- {id: dev-vpc, type: gcp.vpc, name: dev-vpc, parent: prj-dev-env-prj}
+- {id: prod-vpc, type: gcp.vpc, name: prod-vpc, parent: prj-prod-env-prj}
+edges:
+- {from: user, to: infra-repo, label: pull request to feature branch, step: '1'}
+- {from: github-connection, to: infra-repo, label: GitHub connection}
+- {from: infra-repo, to: pr-plan-trigger, label: PR event, step: '2'}
+- {from: pr-plan-trigger, to: tfstate-bucket, label: terraform plan (read state), step: '3'}
+- {from: infra-repo, to: dev-apply-trigger, label: merge to dev branch, step: '4'}
+- {from: dev-apply-trigger, to: dev-vpc, label: terraform apply, step: '5'}
+- {from: infra-repo, to: prod-apply-trigger, label: merge to prod branch, step: '6'}
+- {from: prod-apply-trigger, to: prod-vpc, label: terraform apply, step: '7'}
+- {from: dev-apply-trigger, to: tfstate-bucket, label: state lock and write, step: '5'}
+- {from: prod-apply-trigger, to: tfstate-bucket, label: state lock and write, step: '7'}
+- {from: cloudbuild-terraform-sa, to: prod-apply-trigger, label: build service account}
+steps:
+- {n: '1', text: 'user → infra-repo: pull request to feature branch'}
+- {n: '2', text: 'infra-repo → pr-plan-trigger: PR event'}
+- {n: '3', text: 'pr-plan-trigger → tfstate-bucket: terraform plan (read state)'}
+- {n: '4', text: 'infra-repo → dev-apply-trigger: merge to dev branch'}
+- {n: '5', text: 'dev-apply-trigger → dev-vpc: terraform apply'}
+- {n: '6', text: 'infra-repo → prod-apply-trigger: merge to prod branch'}
+- {n: '7', text: 'prod-apply-trigger → prod-vpc: terraform apply'}

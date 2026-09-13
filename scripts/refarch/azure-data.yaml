@@ -1,0 +1,802 @@
+# Azure reference architectures: data and analytics
+# Format: see FORMAT.md. Provider: azure. One official Microsoft Learn source per entry.
+
+- slug: databricks-medallion-analytics
+  title: Modern analytics architecture with Azure Databricks (medallion)
+  category: data
+  tags: [databricks, delta-lake, medallion, data-lake-storage, event-hubs, mlflow, unity-catalog, power-bi]
+  source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/azure-databricks-modern-analytics-architecture
+  description: Azure Databricks ingests streaming data from Event Hubs with Lakeflow declarative pipelines while Data Factory lands batch data in Data Lake Storage, then organises Delta Lake tables into Bronze, Silver and Gold layers. MLflow tracks models served through Azure Machine Learning, Databricks SQL warehouses feed Power BI, and Unity Catalog, Microsoft Purview, Key Vault and Azure Monitor provide governance and operations.
+  containers:
+    - subscription: data-platform
+      resource_group: {name: rg-databricks-analytics, location: westeurope}
+      groups:
+        - {label: Ingest}
+        - {label: Lakehouse}
+        - {label: Serve}
+        - {label: Platform}
+  elements:
+    - {tf: azurerm_eventhub_namespace, name: evhns-stream-ingest, in: group:Ingest}
+    - {tf: azurerm_data_factory, name: adf-batch-ingest, in: group:Ingest}
+    - {tf: azurerm_storage_account, name: stdatalake, in: group:Lakehouse}
+    - {tf: azurerm_databricks_workspace, name: dbw-medallion, in: group:Lakehouse}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-model-serving, in: group:Serve}
+    - {tf: azurerm_kubernetes_cluster, name: aks-inference, in: group:Serve}
+    - {tf: azurerm_purview_account, name: pview-catalog, in: group:Platform}
+    - {tf: azurerm_key_vault, name: kv-secrets, in: group:Platform}
+    - {tf: azurerm_log_analytics_workspace, name: law-platform, in: group:Platform}
+  actors: [device, database, users]
+  flows:
+    - {from: device, to: evhns-stream-ingest, label: raw events, step: 1}
+    - {from: evhns-stream-ingest, to: dbw-medallion, label: Lakeflow streaming pipeline, step: 2}
+    - {from: database, to: adf-batch-ingest, label: batch extract, step: 1}
+    - {from: adf-batch-ingest, to: stdatalake, label: raw batch load, step: 2}
+    - {from: dbw-medallion, to: stdatalake, label: "Delta Lake: bronze / silver / gold", step: 3}
+    - {from: dbw-medallion, to: mlw-model-serving, label: MLflow model registry, step: 4}
+    - {from: mlw-model-serving, to: aks-inference, label: Kubernetes online endpoint, step: 5}
+    - {from: dbw-medallion, to: users, label: SQL warehouse to Power BI (Direct Lake), step: 6}
+    - {from: pview-catalog, to: stdatalake, label: scan, classify, lineage}
+    - {from: dbw-medallion, to: kv-secrets, label: Key Vault-backed secret scope}
+    - {from: dbw-medallion, to: law-platform, label: diagnostics}
+
+- slug: databricks-stream-processing-cosmos
+  title: Stream processing with Azure Databricks
+  category: data
+  tags: [databricks, event-hubs, structured-streaming, cosmos-db, fabric-mirroring, log-analytics]
+  source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/data/stream-processing-databricks
+  description: Two real-time streams (taxi rides and fares) are published to separate event hubs; an Azure Databricks Spark Structured Streaming job joins and enriches them with neighbourhood lookup data and computes windowed averages. Results are written to Azure Cosmos DB for NoSQL, mirrored into Microsoft Fabric for analytics, and Spark metrics and logs land in a Log Analytics workspace.
+  containers:
+    - subscription: streaming
+      resource_group: {name: rg-stream-databricks, location: westeurope}
+      groups:
+        - {label: Ingest}
+        - {label: Process}
+        - {label: Store and analyze}
+        - {label: Monitor}
+  elements:
+    - {tf: azurerm_eventhub_namespace, name: evhns-taxi, in: group:Ingest}
+    - {tf: azurerm_eventhub, name: evh-taxi-ride, in: group:Ingest}
+    - {tf: azurerm_eventhub, name: evh-taxi-fare, in: group:Ingest}
+    - {tf: azurerm_databricks_workspace, name: dbw-stream-job, in: group:Process}
+    - {tf: azurerm_storage_account, name: stdbfsroot, in: group:Process}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-taxi-results, in: group:Store and analyze}
+    - {tf: azurerm_fabric_capacity, name: fabric-mirroring, in: group:Store and analyze}
+    - {tf: azurerm_key_vault, name: kv-databricks-scope, in: group:Monitor}
+    - {tf: azurerm_log_analytics_workspace, name: law-spark-metrics, in: group:Monitor}
+  actors: [device, users]
+  flows:
+    - {from: device, to: evh-taxi-ride, label: ride events (JSON), step: 1}
+    - {from: device, to: evh-taxi-fare, label: fare events (CSV), step: 1}
+    - {from: evh-taxi-ride, to: dbw-stream-job, label: readStream (eventhubs), step: 2}
+    - {from: evh-taxi-fare, to: dbw-stream-job, label: readStream (eventhubs), step: 2}
+    - {from: stdbfsroot, to: dbw-stream-job, label: neighbourhood shapefile lookup}
+    - {from: dbw-stream-job, to: cosmos-taxi-results, label: writeStream cosmos.oltp, step: 3}
+    - {from: cosmos-taxi-results, to: fabric-mirroring, label: Fabric mirroring (no ETL), step: 4}
+    - {from: fabric-mirroring, to: users, label: SQL endpoint / KQL / Power BI, step: 5}
+    - {from: dbw-stream-job, to: kv-databricks-scope, label: secret scope}
+    - {from: dbw-stream-job, to: law-spark-metrics, label: Dropwizard sink logs and metrics}
+
+- slug: synapse-data-warehouse-adf
+  title: Data warehousing and analytics with Azure Synapse and Data Factory
+  category: data
+  tags: [synapse, dedicated-sql-pool, data-factory, polybase, analysis-services, power-bi, data-lake-storage]
+  source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/data-warehouse
+  description: Updates from on-premises SQL Server and Oracle, Azure SQL Database, Table Storage and Azure Cosmos DB are exported to a staging area in Data Lake Storage, then Data Factory incrementally loads and transforms them into Azure Synapse Analytics using PolyBase. An Azure Analysis Services tabular model is refreshed after each load and business analysts query it from Power BI, authenticated through Microsoft Entra ID.
+  containers:
+    - datacenter: on-premises
+    - subscription: analytics
+      resource_group: {name: rg-synapse-dw, location: westeurope}
+      groups:
+        - {label: Sources}
+        - {label: Ingest}
+        - {label: Warehouse}
+        - {label: Serve}
+  elements:
+    - {tf: azurerm_mssql_server, name: sql-sales-source, in: group:Sources}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-web-events, in: group:Sources}
+    - {tf: azurerm_storage_account, name: sttablestorage, in: group:Sources}
+    - {tf: azurerm_storage_account, name: stdatalake-staging, in: group:Ingest}
+    - {tf: azurerm_data_factory, name: adf-warehouse-load, in: group:Ingest}
+    - {tf: azurerm_synapse_workspace, name: synw-enterprise, in: group:Warehouse}
+    - {tf: azurerm_synapse_sql_pool, name: syndp-warehouse, in: group:Warehouse}
+    - {tf: azurerm_analysis_services_server, name: asazure-semantic, in: group:Serve}
+  actors: [datacenter, users]
+  flows:
+    - {from: datacenter, to: stdatalake-staging, label: SQL Server / Oracle exports, step: 1}
+    - {from: sql-sales-source, to: stdatalake-staging, label: periodic export, step: 1}
+    - {from: cosmos-web-events, to: stdatalake-staging, label: periodic export, step: 1}
+    - {from: sttablestorage, to: stdatalake-staging, label: periodic export, step: 1}
+    - {from: adf-warehouse-load, to: stdatalake-staging, label: read staged files, step: 2}
+    - {from: adf-warehouse-load, to: syndp-warehouse, label: PolyBase incremental load, step: 2}
+    - {from: syndp-warehouse, to: asazure-semantic, label: tabular model refresh, step: 3}
+    - {from: users, to: asazure-semantic, label: Power BI (Entra ID auth), step: 4}
+
+- slug: synapse-near-real-time-lakehouse-cdc
+  title: Near real-time lakehouse processing with Azure Synapse Analytics
+  category: data
+  tags: [synapse, spark-pool, event-hubs, debezium, cdc, delta-lake, cosmos-db, ai-search, machine-learning]
+  source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/real-time-lakehouse-data-processing
+  description: Debezium connectors capture row-level changes from OLTP databases and publish them to Event Hubs, which streams into Azure Synapse Spark pools or lands raw data in Data Lake Storage. Spark validates and writes Delta Lake tables, loads curated data into a dedicated SQL pool for Power BI, and denormalised documents into Azure Cosmos DB and Azure AI Search for low-latency APIs, while serverless SQL pools and Azure Machine Learning consume the validated zone.
+  containers:
+    - subscription: analytics
+      resource_group: {name: rg-synapse-realtime, location: westeurope}
+      groups:
+        - {label: Change capture}
+        - {label: Lake and processing}
+        - {label: Serve}
+  elements:
+    - {tf: azurerm_mssql_server, name: sql-oltp-source, in: group:Change capture}
+    - {tf: azurerm_container_app, name: ca-debezium-connect, in: group:Change capture}
+    - {tf: azurerm_eventhub_namespace, name: evhns-cdc, in: group:Change capture}
+    - {tf: azurerm_storage_account, name: stlakehouse, in: group:Lake and processing}
+    - {tf: azurerm_synapse_workspace, name: synw-realtime, in: group:Lake and processing}
+    - {tf: azurerm_synapse_spark_pool, name: synsp-streaming, in: group:Lake and processing}
+    - {tf: azurerm_synapse_sql_pool, name: syndp-serving, in: group:Serve}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-api-store, in: group:Serve}
+    - {tf: azurerm_search_service, name: srch-api-index, in: group:Serve}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-training, in: group:Serve}
+  actors: [client, users]
+  flows:
+    - {from: sql-oltp-source, to: ca-debezium-connect, label: CDC log read, step: 1}
+    - {from: ca-debezium-connect, to: evhns-cdc, label: change events (Kafka API), step: 2}
+    - {from: evhns-cdc, to: synsp-streaming, label: structured streaming, step: 3}
+    - {from: evhns-cdc, to: stlakehouse, label: Event Hubs Capture (raw zone), step: 3}
+    - {from: synsp-streaming, to: stlakehouse, label: validated Delta Lake zone, step: 4}
+    - {from: synsp-streaming, to: syndp-serving, label: curated load, step: 5}
+    - {from: syndp-serving, to: users, label: Power BI dashboards, step: 6}
+    - {from: synsp-streaming, to: cosmos-api-store, label: denormalised documents, step: 7}
+    - {from: cosmos-api-store, to: srch-api-index, label: index for full-text search, step: 8}
+    - {from: srch-api-index, to: client, label: low-latency API responses}
+    - {from: stlakehouse, to: mlw-training, label: model training on validated data}
+
+- slug: fabric-greenfield-lakehouse
+  title: Greenfield lakehouse on Microsoft Fabric
+  category: data
+  tags: [fabric, onelake, lakehouse, medallion, eventstream, eventhouse, data-factory, power-bi, direct-lake]
+  source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/greenfield-lakehouse-fabric
+  description: A Lambda-style design on Microsoft Fabric where Data Factory pipelines ingest batch data into bronze, silver and gold lakehouses refined by Spark notebooks and dataflows, and eventstreams ingest real-time data into eventhouses and the bronze lakehouse. Data is served through SQL analytics endpoints, notebooks, Power BI Direct Lake semantic models, Real-Time Intelligence dashboards and Fabric Activator triggers, with OneLake and Microsoft Purview as foundations.
+  containers:
+    - subscription: fabric-platform
+      resource_group: {name: rg-fabric-lakehouse, location: westeurope}
+      groups:
+        - {label: Ingest}
+        - {label: Fabric capacity}
+        - {label: Governance}
+  elements:
+    - {tf: azurerm_eventhub_namespace, name: evhns-iot-events, in: group:Ingest}
+    - {tf: azurerm_storage_account, name: stlanding-files, in: group:Ingest}
+    - {tf: azurerm_data_factory, name: adf-batch-orchestration, in: group:Ingest}
+    - {tf: azurerm_fabric_capacity, name: fabric-lakehouse-f64, in: group:Fabric capacity}
+    - {tf: azurerm_purview_account, name: pview-lakehouse, in: group:Governance}
+    - {tf: azurerm_key_vault, name: kv-fabric-connections, in: group:Governance}
+  actors: [database, device, users]
+  flows:
+    - {from: database, to: adf-batch-orchestration, label: relational and file sources, step: 1}
+    - {from: adf-batch-orchestration, to: stlanding-files, label: stage semi-structured files, step: 1}
+    - {from: adf-batch-orchestration, to: fabric-lakehouse-f64, label: pipelines into bronze lakehouse, step: 2}
+    - {from: device, to: evhns-iot-events, label: sensor streams, step: 3}
+    - {from: evhns-iot-events, to: fabric-lakehouse-f64, label: eventstream to eventhouse and bronze, step: 4}
+    - {from: fabric-lakehouse-f64, to: users, label: Power BI Direct Lake and RTI dashboards, step: 5}
+    - {from: pview-lakehouse, to: fabric-lakehouse-f64, label: catalog, lineage, sensitivity labels}
+    - {from: fabric-lakehouse-f64, to: kv-fabric-connections, label: connection credentials}
+
+- slug: fabric-analytics-end-to-end
+  title: Analytics end-to-end with Microsoft Fabric
+  category: data
+  tags: [fabric, onelake, mirroring, eventstream, eventhouse, data-warehouse, purview, machine-learning, power-bi]
+  source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/dataplate2e/data-platform-end-to-end
+  description: OneLake is the single store for a Fabric platform that mirrors Azure SQL Database, Azure Databricks and Snowflake sources, ingests files with Data Factory pipelines and streams events into eventhouses through eventstreams. Lakehouses, warehouses and KQL databases serve Power BI, Fabric data agents and GraphQL APIs, while Azure Machine Learning shares the same Data Lake Storage via shortcuts and Microsoft Purview, Key Vault, Entra ID and Azure Policy govern the estate.
+  containers:
+    - subscription: data-platform
+      resource_group: {name: rg-fabric-e2e, location: westeurope}
+      groups:
+        - {label: Sources}
+        - {label: Ingest}
+        - {label: Fabric}
+        - {label: Enrich and govern}
+  elements:
+    - {tf: azurerm_mssql_server, name: sql-operational-db, in: group:Sources}
+    - {tf: azurerm_databricks_workspace, name: dbw-unity-catalog, in: group:Sources}
+    - {tf: azurerm_storage_account, name: stadls-shortcuts, in: group:Sources}
+    - {tf: azurerm_eventhub_namespace, name: evhns-realtime, in: group:Ingest}
+    - {tf: azurerm_fabric_capacity, name: fabric-onelake, in: group:Fabric}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-batch-endpoints, in: group:Enrich and govern}
+    - {tf: azurerm_purview_account, name: pview-unified-catalog, in: group:Enrich and govern}
+    - {tf: azurerm_key_vault, name: kv-gateway-credentials, in: group:Enrich and govern}
+  actors: [saas, device, users]
+  flows:
+    - {from: sql-operational-db, to: fabric-onelake, label: mirroring (CDC to Delta), step: 1}
+    - {from: dbw-unity-catalog, to: fabric-onelake, label: Databricks mirroring / shortcuts, step: 1}
+    - {from: saas, to: fabric-onelake, label: Data Factory pipelines and Dataflow Gen2, step: 2}
+    - {from: stadls-shortcuts, to: fabric-onelake, label: OneLake shortcuts (zero copy), step: 2}
+    - {from: device, to: evhns-realtime, label: telemetry, step: 3}
+    - {from: evhns-realtime, to: fabric-onelake, label: eventstream to eventhouse, step: 4}
+    - {from: fabric-onelake, to: mlw-batch-endpoints, label: shared Data Lake Storage for training}
+    - {from: fabric-onelake, to: users, label: Power BI, data agents, GraphQL API, step: 5}
+    - {from: pview-unified-catalog, to: fabric-onelake, label: scan, lineage, sensitivity labels}
+    - {from: fabric-onelake, to: kv-gateway-credentials, label: Key Vault references}
+
+- slug: adf-medallion-landing-zone-baseline
+  title: Azure Data Factory baseline architecture in an Azure landing zone
+  category: data
+  tags: [data-factory, self-hosted-integration-runtime, medallion, databricks, azure-sql, purview, private-link, landing-zone]
+  source: https://learn.microsoft.com/en-us/azure/architecture/databases/architecture/azure-data-factory-on-azure-landing-zones-baseline
+  description: Data Factory with a self-hosted integration runtime on Azure VMs ingests an on-premises finance system nightly into Data Lake Storage and orchestrates Azure Databricks notebooks that build bronze, silver and gold Delta Lake tables. Azure SQL Database hosts the conformed enterprise model for Power BI, Microsoft Purview catalogs the platform, Key Vault and Private Link secure access, and Site Recovery protects the SHIR VMs.
+  containers:
+    - datacenter: on-premises
+    - subscription: data-landing-zone
+      resource_group: {name: rg-adf-baseline, location: westeurope}
+      vnets:
+        - name: vnet-data
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: snet-shir, cidr: 10.20.1.0/24}
+            - {name: snet-private-endpoints, cidr: 10.20.2.0/24}
+            - {name: snet-databricks-public, cidr: 10.20.3.0/24}
+            - {name: snet-databricks-private, cidr: 10.20.4.0/24}
+  elements:
+    - {tf: azurerm_data_factory, name: adf-finance, in: resource_group:rg-adf-baseline}
+    - {tf: azurerm_windows_virtual_machine, name: vm-shir-01, in: subnet:snet-shir}
+    - {tf: azurerm_storage_account, name: stfinancelake, in: resource_group:rg-adf-baseline}
+    - {tf: azurerm_private_endpoint, name: pe-datalake, in: subnet:snet-private-endpoints}
+    - {tf: azurerm_databricks_workspace, name: dbw-finance, in: subnet:snet-databricks-private}
+    - {tf: azurerm_mssql_server, name: sql-enterprise-model, in: resource_group:rg-adf-baseline}
+    - {tf: azurerm_purview_account, name: pview-finance, in: resource_group:rg-adf-baseline}
+    - {tf: azurerm_key_vault, name: kv-adf-secrets, in: resource_group:rg-adf-baseline}
+    - {tf: azurerm_recovery_services_vault, name: rsv-shir-protection, in: resource_group:rg-adf-baseline}
+    - {tf: azurerm_log_analytics_workspace, name: law-data-platform, in: resource_group:rg-adf-baseline}
+  actors: [datacenter, users]
+  flows:
+    - {from: datacenter, to: vm-shir-01, label: nightly batch over private connectivity, step: 1}
+    - {from: vm-shir-01, to: adf-finance, label: self-hosted integration runtime, step: 1}
+    - {from: adf-finance, to: pe-datalake, label: copy to bronze via private endpoint, step: 2}
+    - {from: pe-datalake, to: stfinancelake, label: Private Link}
+    - {from: adf-finance, to: dbw-finance, label: orchestrate notebooks, step: 3}
+    - {from: dbw-finance, to: stfinancelake, label: silver / gold Delta tables, step: 3}
+    - {from: adf-finance, to: sql-enterprise-model, label: load conformed hierarchies, step: 4}
+    - {from: sql-enterprise-model, to: users, label: Power BI management dashboards, step: 5}
+    - {from: pview-finance, to: stfinancelake, label: catalog and lineage}
+    - {from: adf-finance, to: kv-adf-secrets, label: linked service secrets}
+    - {from: rsv-shir-protection, to: vm-shir-01, label: Site Recovery replication}
+    - {from: adf-finance, to: law-data-platform, label: pipeline diagnostics}
+
+- slug: stream-analytics-taxi-pipeline
+  title: Stream processing with Azure Stream Analytics
+  category: data
+  tags: [stream-analytics, event-hubs, cosmos-db, hopping-window, temporal-join, power-bi, azure-monitor]
+  source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/data/stream-processing-stream-analytics
+  description: Two event hubs ingest taxi ride and fare streams partitioned by the same key so a Stream Analytics job can correlate them with a temporal join and compute average tip per mile over a five-minute hopping window. Results are written as JSON documents to Azure Cosmos DB for Power BI analysis, Azure Monitor tracks streaming units and throttling, and a network security perimeter restricts access to Event Hubs.
+  containers:
+    - subscription: streaming
+      resource_group: {name: rg-stream-analytics, location: westeurope}
+      groups:
+        - {label: Ingest}
+        - {label: Process}
+        - {label: Store and report}
+  elements:
+    - {tf: azurerm_eventhub_namespace, name: evhns-taxi-streams, in: group:Ingest}
+    - {tf: azurerm_eventhub, name: evh-taxi-ride, in: group:Ingest}
+    - {tf: azurerm_eventhub, name: evh-taxi-fare, in: group:Ingest}
+    - {tf: azurerm_stream_analytics_job, name: asa-tip-per-mile, in: group:Process}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-taxi-drain, in: group:Store and report}
+    - {tf: azurerm_log_analytics_workspace, name: law-streaming, in: group:Store and report}
+    - {tf: azurerm_monitor_action_group, name: ag-streaming-alerts, in: group:Store and report}
+  actors: [device, users]
+  flows:
+    - {from: device, to: evh-taxi-ride, label: ride data (partition key medallion), step: 1}
+    - {from: device, to: evh-taxi-fare, label: fare data (same partition key), step: 1}
+    - {from: evh-taxi-ride, to: asa-tip-per-mile, label: input TaxiRide, step: 2}
+    - {from: evh-taxi-fare, to: asa-tip-per-mile, label: input TaxiFare, step: 2}
+    - {from: asa-tip-per-mile, to: cosmos-taxi-drain, label: hopping-window output (JSON), step: 3}
+    - {from: cosmos-taxi-drain, to: users, label: Power BI historical analysis, step: 4}
+    - {from: asa-tip-per-mile, to: law-streaming, label: SU utilisation and throttling metrics}
+    - {from: law-streaming, to: ag-streaming-alerts, label: scale-out alerts}
+
+- slug: adx-real-time-analytics-platform
+  title: Real-time analytics with Azure Data Explorer
+  category: data
+  tags: [azure-data-explorer, kusto, kql, event-hubs, event-grid, streaming-ingestion, power-bi, grafana]
+  source: https://learn.microsoft.com/en-us/azure/data-explorer/data-explorer-overview
+  description: An Azure Data Explorer cluster hosts databases and tables of automatically indexed, partitioned extents; events arrive by queued or streaming ingestion through Event Hubs and blob-arrival Event Grid notifications, while Data Factory copies historical batches. Analysts run KQL time series, anomaly detection and geospatial queries in the web UI, dashboards, Power BI and Grafana, and continuous export writes Parquet back to Data Lake Storage.
+  containers:
+    - subscription: analytics
+      resource_group: {name: rg-adx-realtime, location: westeurope}
+      groups:
+        - {label: Ingest}
+        - {label: Analytics engine}
+        - {label: Consume}
+  elements:
+    - {tf: azurerm_eventhub_namespace, name: evhns-app-telemetry, in: group:Ingest}
+    - {tf: azurerm_storage_account, name: stlanding-blobs, in: group:Ingest}
+    - {tf: azurerm_eventgrid_system_topic, name: egst-blob-created, in: group:Ingest}
+    - {tf: azurerm_data_factory, name: adf-historical-load, in: group:Ingest}
+    - {tf: azurerm_kusto_cluster, name: adx-analytics, in: group:Analytics engine}
+    - {tf: azurerm_kusto_database, name: adxdb-telemetry, in: group:Analytics engine}
+    - {tf: azurerm_storage_account, name: stcontinuous-export, in: group:Consume}
+    - {tf: azurerm_linux_web_app, name: app-grafana-dashboards, in: group:Consume}
+  actors: [device, server, users]
+  flows:
+    - {from: device, to: evhns-app-telemetry, label: events and logs, step: 1}
+    - {from: evhns-app-telemetry, to: adxdb-telemetry, link: azurerm_kusto_eventhub_data_connection, label: streaming / queued ingestion, step: 2}
+    - {from: server, to: stlanding-blobs, label: batch files, step: 1}
+    - {from: stlanding-blobs, to: egst-blob-created, label: BlobCreated event}
+    - {from: egst-blob-created, to: adxdb-telemetry, link: azurerm_kusto_eventgrid_data_connection, label: Event Grid ingestion, step: 2}
+    - {from: adf-historical-load, to: adxdb-telemetry, label: copy activity (historical), step: 2}
+    - {from: adxdb-telemetry, to: stcontinuous-export, label: continuous export (Parquet), step: 3}
+    - {from: users, to: adx-analytics, label: KQL in web UI / Power BI, step: 4}
+    - {from: app-grafana-dashboards, to: adx-analytics, label: Grafana ADX plugin}
+
+- slug: adx-log-analytics-export
+  title: Log Analytics data export to Event Hubs and Azure Data Explorer
+  category: observability
+  tags: [azure-monitor, log-analytics, data-export, event-hubs, azure-data-explorer, long-term-retention, kql]
+  source: https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-data-export
+  description: Log Analytics data export rules continuously copy selected workspace tables to a storage account and an Event Hubs namespace as records arrive, decoupling long-term retention and downstream analytics from Azure Monitor pricing tiers. An Azure Data Explorer cluster consumes the event hubs for cross-source KQL analysis over years of logs, and the storage account keeps immutable archives for compliance.
+  containers:
+    - subscription: platform-observability
+      resource_group: {name: rg-log-export, location: westeurope}
+      groups:
+        - {label: Sources}
+        - {label: Azure Monitor}
+        - {label: Export destinations}
+        - {label: Analytics}
+  elements:
+    - {tf: azurerm_kubernetes_cluster, name: aks-workload, in: group:Sources}
+    - {tf: azurerm_linux_function_app, name: func-api, in: group:Sources}
+    - {tf: azurerm_log_analytics_workspace, name: law-central, in: group:Azure Monitor}
+    - {tf: azurerm_storage_account, name: stlogarchive, in: group:Export destinations}
+    - {tf: azurerm_eventhub_namespace, name: evhns-log-export, in: group:Export destinations}
+    - {tf: azurerm_eventhub, name: evh-am-containerlog, in: group:Export destinations}
+    - {tf: azurerm_kusto_cluster, name: adx-log-analytics, in: group:Analytics}
+    - {tf: azurerm_kusto_database, name: adxdb-logs, in: group:Analytics}
+  actors: [users]
+  flows:
+    - {from: aks-workload, to: law-central, label: container insights / diagnostics, step: 1}
+    - {from: func-api, to: law-central, label: application logs, step: 1}
+    - {from: law-central, to: stlogarchive, link: azurerm_log_analytics_data_export_rule, label: export selected tables (hourly blobs), step: 2}
+    - {from: law-central, to: evh-am-containerlog, link: azurerm_log_analytics_data_export_rule, label: export selected tables (near real time), step: 2}
+    - {from: evh-am-containerlog, to: adxdb-logs, link: azurerm_kusto_eventhub_data_connection, label: Event Hubs data connection, step: 3}
+    - {from: stlogarchive, to: adxdb-logs, label: historical ingestion (LightIngest)}
+    - {from: users, to: adx-log-analytics, label: KQL over long-term logs, step: 4}
+
+- slug: iot-analytics-adx-cosmos
+  title: IoT analytics with Azure Data Explorer and IoT Hub
+  category: iot
+  tags: [iot-hub, event-hubs, azure-data-explorer, cosmos-db, stream-analytics, functions, digital-twins, time-series]
+  source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/iot-azure-data-explorer
+  description: IoT Hub, Event Hubs or Kafka ingest device telemetry; Azure Functions or Stream Analytics process it and Azure Cosmos DB serves an operational app while Azure Data Explorer ingests the same streams through native connectors for near real-time analytics. Cosmos DB change feed triggers Functions that push events back to Event Hubs or Azure Digital Twins, and ADX feeds dashboards, Power BI, Grafana, Logic Apps alerts and Databricks or Machine Learning scoring.
+  containers:
+    - subscription: iot-platform
+      resource_group: {name: rg-iot-analytics, location: westeurope}
+      groups:
+        - {label: Ingest}
+        - {label: Operational path}
+        - {label: Analytical path}
+        - {label: Serve}
+  elements:
+    - {tf: azurerm_iothub, name: iot-fleet-hub, in: group:Ingest}
+    - {tf: azurerm_eventhub_namespace, name: evhns-business-events, in: group:Ingest}
+    - {tf: azurerm_stream_analytics_job, name: asa-hot-path, in: group:Operational path}
+    - {tf: azurerm_linux_function_app, name: func-change-feed, in: group:Operational path}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-operational, in: group:Operational path}
+    - {tf: azurerm_digital_twins_instance, name: dt-fleet-model, in: group:Operational path}
+    - {tf: azurerm_kusto_cluster, name: adx-iot, in: group:Analytical path}
+    - {tf: azurerm_kusto_database, name: adxdb-telemetry, in: group:Analytical path}
+    - {tf: azurerm_storage_account, name: stiot-lake, in: group:Analytical path}
+    - {tf: azurerm_databricks_workspace, name: dbw-iot-ml, in: group:Serve}
+    - {tf: azurerm_logic_app_workflow, name: logic-anomaly-alerts, in: group:Serve}
+  actors: [device, users, mobile]
+  flows:
+    - {from: device, to: iot-fleet-hub, label: device telemetry (MQTT/AMQP), step: 1}
+    - {from: device, to: evhns-business-events, label: business events, step: 1}
+    - {from: iot-fleet-hub, to: asa-hot-path, label: near real-time processing, step: 2}
+    - {from: asa-hot-path, to: cosmos-operational, label: JSON documents, step: 3}
+    - {from: cosmos-operational, to: mobile, label: operational app}
+    - {from: cosmos-operational, to: func-change-feed, label: change feed trigger, step: 5}
+    - {from: func-change-feed, to: dt-fleet-model, label: update twins via API, step: 5}
+    - {from: func-change-feed, to: evhns-business-events, label: re-publish for analytics, step: 5}
+    - {from: iot-fleet-hub, to: adxdb-telemetry, link: azurerm_kusto_iothub_data_connection, label: IoT Hub data connection, step: 4}
+    - {from: evhns-business-events, to: adxdb-telemetry, link: azurerm_kusto_eventhub_data_connection, label: Event Hubs data connection, step: 4}
+    - {from: adxdb-telemetry, to: stiot-lake, label: continuous export (Parquet)}
+    - {from: adx-iot, to: dbw-iot-ml, label: Spark connector for ML}
+    - {from: adx-iot, to: logic-anomaly-alerts, label: alerts and notifications, step: 6}
+    - {from: users, to: adx-iot, label: ADX dashboards / Power BI / Grafana, step: 6}
+
+- slug: cosmos-synapse-link-htap
+  title: HTAP with Azure Cosmos DB analytical store and Azure Synapse Link
+  category: data
+  tags: [cosmos-db, analytical-store, synapse-link, htap, synapse-spark, serverless-sql, private-endpoint, customer-managed-keys]
+  source: https://learn.microsoft.com/en-us/azure/cosmos-db/synapse-link
+  description: Enabling Synapse Link on an Azure Cosmos DB account creates a fully isolated column-oriented analytical store that auto-syncs inserts, updates and deletes from the transactional store with no ETL and no request-unit consumption. Azure Synapse Spark pools and serverless SQL pools query the analytical store directly for near real-time BI, data science and Power BI, with separate managed private endpoints per store and customer-managed keys from Key Vault. Microsoft now steers new projects to Cosmos DB mirroring in Fabric.
+  containers:
+    - subscription: apps-and-analytics
+      resource_group: {name: rg-cosmos-htap, location: westeurope}
+      groups:
+        - {label: Operational}
+        - {label: Analytical}
+        - {label: Security}
+  elements:
+    - {tf: azurerm_linux_web_app, name: app-orders-api, in: group:Operational}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-orders-htap, in: group:Operational}
+    - {tf: azurerm_synapse_workspace, name: synw-link, in: group:Analytical}
+    - {tf: azurerm_synapse_spark_pool, name: synsp-analytics, in: group:Analytical}
+    - {tf: azurerm_storage_account, name: stsynapse-primary, in: group:Analytical}
+    - {tf: azurerm_private_endpoint, name: pe-analytical-store, in: group:Security}
+    - {tf: azurerm_key_vault, name: kv-cmk, in: group:Security}
+  actors: [users, client]
+  flows:
+    - {from: client, to: app-orders-api, label: HTTPS, step: 1}
+    - {from: app-orders-api, to: cosmos-orders-htap, label: transactional writes (row store), step: 2}
+    - {from: cosmos-orders-htap, to: cosmos-orders-htap, label: auto-sync to analytical column store, step: 3}
+    - {from: synsp-analytics, to: pe-analytical-store, label: Spark reads analytical store, step: 4}
+    - {from: pe-analytical-store, to: cosmos-orders-htap, label: managed private endpoint}
+    - {from: synw-link, to: cosmos-orders-htap, label: serverless SQL OPENROWSET, step: 4}
+    - {from: synsp-analytics, to: stsynapse-primary, label: curated outputs}
+    - {from: synw-link, to: users, label: Power BI near real-time reports, step: 5}
+    - {from: kv-cmk, to: cosmos-orders-htap, label: customer-managed key (managed identity)}
+
+- slug: debezium-cdc-event-hubs-postgres
+  title: Change data capture with Debezium, Kafka Connect and Event Hubs
+  category: data
+  tags: [cdc, debezium, kafka-connect, event-hubs, postgresql, logical-decoding, kafka-api]
+  source: https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-kafka-connect-debezium
+  description: A Kafka Connect worker running the Debezium PostgreSQL connector uses logical decoding on Azure Database for PostgreSQL to capture row-level create, update and delete operations and publishes them as change events to Kafka topics hosted on an Event Hubs namespace over SASL_SSL. Connect stores its config, offset and status topics in Event Hubs, one event hub is auto-created per captured table, and sink connectors or consumers read the change stream downstream.
+  containers:
+    - subscription: integration
+      resource_group: {name: rg-cdc-debezium, location: westeurope}
+      vnets:
+        - name: vnet-cdc
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: snet-connect, cidr: 10.30.1.0/24}
+            - {name: snet-postgres, cidr: 10.30.2.0/24}
+  elements:
+    - {tf: azurerm_postgresql_flexible_server, name: psql-source-orders, in: subnet:snet-postgres}
+    - {tf: azurerm_linux_virtual_machine, name: vm-kafka-connect, in: subnet:snet-connect}
+    - {tf: azurerm_eventhub_namespace, name: evhns-kafka-cdc, in: resource_group:rg-cdc-debezium}
+    - {tf: azurerm_eventhub, name: evh-public-todos, in: resource_group:rg-cdc-debezium}
+    - {tf: azurerm_eventhub, name: evh-connect-offsets, in: resource_group:rg-cdc-debezium}
+    - {tf: azurerm_storage_account, name: stcdc-sink, in: resource_group:rg-cdc-debezium}
+    - {tf: azurerm_linux_function_app, name: func-cdc-consumer, in: resource_group:rg-cdc-debezium}
+    - {tf: azurerm_key_vault, name: kv-connect-secrets, in: resource_group:rg-cdc-debezium}
+  actors: [client, users]
+  flows:
+    - {from: client, to: psql-source-orders, label: INSERT / UPDATE / DELETE, step: 1}
+    - {from: psql-source-orders, to: vm-kafka-connect, label: logical decoding (wal2json), step: 2}
+    - {from: vm-kafka-connect, to: evh-public-todos, label: change events over Kafka API (SASL_SSL), step: 3}
+    - {from: vm-kafka-connect, to: evh-connect-offsets, label: connect config / offset / status topics}
+    - {from: evh-public-todos, to: func-cdc-consumer, label: consume change stream, step: 4}
+    - {from: evh-public-todos, to: stcdc-sink, label: Event Hubs Capture (Avro), step: 4}
+    - {from: vm-kafka-connect, to: kv-connect-secrets, label: connection strings}
+    - {from: users, to: vm-kafka-connect, label: Connect REST API (connector config)}
+
+- slug: mongodb-atlas-fabric-open-mirroring
+  title: Real-time sync of MongoDB Atlas changes to Microsoft Fabric
+  category: data
+  tags: [fabric, open-mirroring, mongodb-atlas, change-streams, onelake, app-service, delta-lake, power-bi]
+  source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/analytics/sync-mongodb-atlas-fabric-analytics
+  description: A Python mirroring accelerator hosted on Azure App Service performs an initial load and then subscribes to MongoDB Atlas change streams, writing insert, update and delete events as Parquet files into the landing zone of an open mirrored database in Fabric. Fabric converts the files to Delta tables in OneLake, keeps them synchronised, generates a default semantic model and exposes the data to lakehouses, warehouses and Power BI Direct Lake reports.
+  containers:
+    - subscription: analytics
+      resource_group: {name: rg-mongodb-fabric, location: westeurope}
+      groups:
+        - {label: Mirroring app}
+        - {label: Fabric}
+        - {label: Security and ops}
+  elements:
+    - {tf: azurerm_service_plan, name: asp-mirroring, in: group:Mirroring app}
+    - {tf: azurerm_linux_web_app, name: app-mongo-mirroring, in: group:Mirroring app}
+    - {tf: azurerm_fabric_capacity, name: fabric-mirrored-db, in: group:Fabric}
+    - {tf: azurerm_storage_account, name: stlanding-zone-staging, in: group:Fabric}
+    - {tf: azurerm_key_vault, name: kv-atlas-credentials, in: group:Security and ops}
+    - {tf: azurerm_log_analytics_workspace, name: law-mirroring, in: group:Security and ops}
+  actors: [saas, users]
+  flows:
+    - {from: saas, to: app-mongo-mirroring, label: MongoDB Atlas change streams, step: 1}
+    - {from: app-mongo-mirroring, to: fabric-mirrored-db, label: Parquet to open mirroring landing zone, step: 2}
+    - {from: fabric-mirrored-db, to: fabric-mirrored-db, label: convert to Delta tables in OneLake, step: 3}
+    - {from: fabric-mirrored-db, to: users, label: Power BI Direct Lake / SQL endpoint, step: 4}
+    - {from: app-mongo-mirroring, to: kv-atlas-credentials, label: Atlas connection secret}
+    - {from: app-mongo-mirroring, to: law-mirroring, label: app logs}
+    - {from: asp-mirroring, to: app-mongo-mirroring, label: hosts}
+
+- slug: unified-data-platform-domains-purview
+  title: Fabric unified data platform with data domains and Purview governance
+  category: data
+  tags: [data-mesh, data-domains, data-products, fabric, onelake, purview, databricks, landing-zones]
+  source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/data/architecture-fabric-data-lake-unify-data-platform
+  description: Each data domain owns Fabric workspaces and a Fabric capacity hosted in a data management landing zone, producing governed data products in OneLake with Fabric and Azure Databricks while Microsoft Purview provides the shared catalog, lineage and governance domains. Copilot, Foundry agents, Power BI and data science tools consume the products, and region, disaster recovery and workspace ownership are set as central platform decisions.
+  containers:
+    - subscription: data-management-landing-zone
+      resource_group: {name: rg-data-governance, location: westeurope}
+      groups:
+        - {label: Shared governance}
+    - subscription: data-domain-sales
+      resource_group: {name: rg-domain-sales, location: westeurope}
+      groups:
+        - {label: Sales data products}
+    - subscription: data-domain-supply-chain
+      resource_group: {name: rg-domain-supply-chain, location: westeurope}
+      groups:
+        - {label: Supply chain data products}
+  elements:
+    - {tf: azurerm_purview_account, name: pview-enterprise, in: group:Shared governance}
+    - {tf: azurerm_key_vault, name: kv-platform, in: group:Shared governance}
+    - {tf: azurerm_log_analytics_workspace, name: law-data-platform, in: group:Shared governance}
+    - {tf: azurerm_fabric_capacity, name: fabric-sales-f64, in: group:Sales data products}
+    - {tf: azurerm_storage_account, name: stsales-raw, in: group:Sales data products}
+    - {tf: azurerm_fabric_capacity, name: fabric-supply-f32, in: group:Supply chain data products}
+    - {tf: azurerm_databricks_workspace, name: dbw-supply-engineering, in: group:Supply chain data products}
+    - {tf: azurerm_storage_account, name: stsupply-raw, in: group:Supply chain data products}
+  actors: [database, saas, users]
+  flows:
+    - {from: database, to: stsales-raw, label: source extracts, step: 1}
+    - {from: stsales-raw, to: fabric-sales-f64, label: OneLake shortcut / pipelines, step: 2}
+    - {from: saas, to: stsupply-raw, label: supplier feeds, step: 1}
+    - {from: stsupply-raw, to: dbw-supply-engineering, label: Delta engineering, step: 2}
+    - {from: dbw-supply-engineering, to: fabric-supply-f32, label: mirror Unity Catalog tables to OneLake, step: 3}
+    - {from: fabric-sales-f64, to: fabric-supply-f32, label: cross-domain data product sharing (shortcuts), step: 4}
+    - {from: pview-enterprise, to: fabric-sales-f64, label: scan, lineage, governance domain}
+    - {from: pview-enterprise, to: fabric-supply-f32, label: scan, lineage, governance domain}
+    - {from: pview-enterprise, to: dbw-supply-engineering, label: Unity Catalog metadata}
+    - {from: users, to: pview-enterprise, label: discover and request data products, step: 5}
+    - {from: fabric-sales-f64, to: users, label: Power BI, Copilot, data agents, step: 6}
+
+- slug: hdinsight-etl-at-scale
+  title: Extract, transform and load at scale with Azure HDInsight
+  category: data
+  tags: [hdinsight, hadoop, hive, spark, kafka, oozie, data-factory, data-lake-storage, synapse, hbase]
+  source: https://learn.microsoft.com/en-us/azure/hdinsight/hadoop/apache-hadoop-etl-at-scale
+  description: Source files land in Azure Storage or Data Lake Storage (through Data Factory, DistCp or Sqoop) and HDInsight Hadoop, Spark and Kafka clusters clean and transform them with Hive, Pig and Spark SQL, coordinated by Apache Oozie inside the cluster or Data Factory as PaaS orchestration. Prepared results load into Azure Synapse Analytics, Azure SQL Database or HBase and are modelled in Azure Analysis Services for Power BI.
+  containers:
+    - datacenter: on-premises
+    - subscription: big-data
+      resource_group: {name: rg-hdinsight-etl, location: westeurope}
+      vnets:
+        - name: vnet-hdinsight
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: snet-clusters, cidr: 10.40.1.0/24}
+  elements:
+    - {tf: azurerm_data_factory, name: adf-etl-orchestrator, in: resource_group:rg-hdinsight-etl}
+    - {tf: azurerm_storage_account, name: stadls-ingest, in: resource_group:rg-hdinsight-etl}
+    - {tf: azurerm_hdinsight_kafka_cluster, name: hdi-kafka-ingest, in: subnet:snet-clusters}
+    - {tf: azurerm_hdinsight_hadoop_cluster, name: hdi-hive-transform, in: subnet:snet-clusters}
+    - {tf: azurerm_hdinsight_spark_cluster, name: hdi-spark-transform, in: subnet:snet-clusters}
+    - {tf: azurerm_hdinsight_hbase_cluster, name: hdi-hbase-serving, in: subnet:snet-clusters}
+    - {tf: azurerm_mssql_server, name: sql-hive-metastore, in: resource_group:rg-hdinsight-etl}
+    - {tf: azurerm_synapse_workspace, name: synw-results, in: resource_group:rg-hdinsight-etl}
+    - {tf: azurerm_synapse_sql_pool, name: syndp-results, in: resource_group:rg-hdinsight-etl}
+    - {tf: azurerm_analysis_services_server, name: asazure-cubes, in: resource_group:rg-hdinsight-etl}
+  actors: [datacenter, device, users]
+  flows:
+    - {from: datacenter, to: stadls-ingest, label: ExpressRoute / DistCp / Sqoop, step: 1}
+    - {from: device, to: hdi-kafka-ingest, label: streaming events, step: 1}
+    - {from: hdi-kafka-ingest, to: stadls-ingest, label: land raw events}
+    - {from: adf-etl-orchestrator, to: hdi-hive-transform, label: Hive activity, step: 2}
+    - {from: adf-etl-orchestrator, to: hdi-spark-transform, label: Spark activity, step: 2}
+    - {from: hdi-hive-transform, to: stadls-ingest, label: read and write via WASB/ABFS, step: 3}
+    - {from: hdi-spark-transform, to: stadls-ingest, label: read and write via ABFS, step: 3}
+    - {from: hdi-hive-transform, to: sql-hive-metastore, label: external Hive metastore}
+    - {from: adf-etl-orchestrator, to: syndp-results, label: load prepared results, step: 4}
+    - {from: hdi-spark-transform, to: hdi-hbase-serving, label: sensor and log serving store}
+    - {from: syndp-results, to: asazure-cubes, label: tabular model, step: 5}
+    - {from: asazure-cubes, to: users, label: Power BI / Excel, step: 6}
+
+- slug: power-bi-embedded-app-owns-data
+  title: Power BI embedded analytics for your customers
+  category: analytics-bi
+  tags: [power-bi-embedded, app-owns-data, service-principal, a-sku, app-service, entra-id]
+  source: https://learn.microsoft.com/en-us/power-bi/developer/embedded/embedded-analytics-power-bi
+  description: In the embed-for-your-customers (app owns data) model an ISV web application authenticates to Power BI non-interactively with a service principal or master user, generates embed tokens and renders reports, dashboards and tiles in its own UI for external users who need no Power BI licence. Production embedding runs on a Power BI Embedded A-SKU capacity provisioned in Azure while semantic models query Azure SQL Database and Data Lake Storage.
+  containers:
+    - subscription: isv-saas
+      resource_group: {name: rg-pbi-embedded, location: westeurope}
+      groups:
+        - {label: Application}
+        - {label: Capacity}
+        - {label: Data sources}
+  elements:
+    - {tf: azurerm_service_plan, name: asp-portal, in: group:Application}
+    - {tf: azurerm_linux_web_app, name: app-customer-portal, in: group:Application}
+    - {tf: azurerm_key_vault, name: kv-service-principal, in: group:Application}
+    - {tf: azurerm_powerbi_embedded, name: pbie-a2-capacity, in: group:Capacity}
+    - {tf: azurerm_mssql_server, name: sql-reporting-db, in: group:Data sources}
+    - {tf: azurerm_storage_account, name: stdatalake-reports, in: group:Data sources}
+    - {tf: azurerm_application_insights, name: appi-portal, in: group:Application}
+  actors: [users, idp]
+  flows:
+    - {from: users, to: app-customer-portal, label: sign in with app's own auth, step: 1}
+    - {from: app-customer-portal, to: idp, label: service principal token (Entra ID), step: 2}
+    - {from: app-customer-portal, to: pbie-a2-capacity, label: Power BI REST API embed token, step: 3}
+    - {from: pbie-a2-capacity, to: users, label: embedded report iframe, step: 4}
+    - {from: pbie-a2-capacity, to: sql-reporting-db, label: DirectQuery / import refresh}
+    - {from: pbie-a2-capacity, to: stdatalake-reports, label: semantic model source}
+    - {from: app-customer-portal, to: kv-service-principal, label: client secret}
+    - {from: app-customer-portal, to: appi-portal, label: telemetry}
+    - {from: asp-portal, to: app-customer-portal, label: hosts}
+
+- slug: sql-managed-instance-migration
+  title: Migrate SQL Server to Azure SQL Managed Instance
+  category: migration
+  tags: [sql-managed-instance, managed-instance-link, log-replay-service, native-backup-restore, azure-migrate, database-migration-service, expressroute]
+  source: https://learn.microsoft.com/en-us/data-migration/sql-server/managed-instance/overview
+  description: Azure Migrate assesses the on-premises SQL Server estate and recommends a service tier; databases then move to a SQL Managed Instance in a dedicated subnet via the Managed Instance link (distributed availability group replication for minimal downtime), the Log Replay Service restoring backups from Blob Storage, or native backup and restore. Azure Database Migration Service handles logins, SQL Agent jobs and SSIS packages, and Key Vault holds migrated TDE certificates.
+  containers:
+    - datacenter: on-premises
+    - subscription: data-migration
+      resource_group: {name: rg-sqlmi-migration, location: westeurope}
+      vnets:
+        - name: vnet-sqlmi
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: snet-managed-instance, cidr: 10.50.1.0/24}
+            - {name: snet-dms, cidr: 10.50.2.0/24}
+            - {name: GatewaySubnet, cidr: 10.50.255.0/27}
+  elements:
+    - {tf: azurerm_virtual_network_gateway, name: vpngw-hybrid, in: subnet:GatewaySubnet}
+    - {tf: azurerm_mssql_managed_instance, name: sqlmi-prod-bc, in: subnet:snet-managed-instance}
+    - {tf: azurerm_database_migration_service, name: dms-sqlserver, in: subnet:snet-dms}
+    - {tf: azurerm_storage_account, name: stbackups-lrs, in: resource_group:rg-sqlmi-migration}
+    - {tf: azurerm_key_vault, name: kv-tde-certificates, in: resource_group:rg-sqlmi-migration}
+    - {tf: azurerm_log_analytics_workspace, name: law-sql-insights, in: resource_group:rg-sqlmi-migration}
+    - {tf: azurerm_data_factory, name: adf-data-copy, in: resource_group:rg-sqlmi-migration}
+  actors: [datacenter, users]
+  flows:
+    - {from: datacenter, to: vpngw-hybrid, label: ExpressRoute / site-to-site VPN, step: 1}
+    - {from: datacenter, to: sqlmi-prod-bc, label: Managed Instance link (distributed AG), step: 2}
+    - {from: datacenter, to: stbackups-lrs, label: full, differential and log backups, step: 2}
+    - {from: stbackups-lrs, to: sqlmi-prod-bc, label: Log Replay Service / native restore, step: 3}
+    - {from: dms-sqlserver, to: sqlmi-prod-bc, label: logins, SQL Agent jobs, SSIS packages, step: 4}
+    - {from: adf-data-copy, to: sqlmi-prod-bc, label: copy activity (optional table migration)}
+    - {from: kv-tde-certificates, to: sqlmi-prod-bc, label: TDE certificate}
+    - {from: sqlmi-prod-bc, to: law-sql-insights, label: Azure SQL Analytics}
+    - {from: users, to: sqlmi-prod-bc, label: application cutover (TDS 1433), step: 5}
+
+- slug: cosmos-db-postgresql-distributed
+  title: Distributed PostgreSQL with Azure Cosmos DB for PostgreSQL (Citus)
+  category: database
+  tags: [cosmos-db-for-postgresql, citus, distributed-tables, sharding, pgbouncer, multi-tenant-saas, real-time-analytics, stream-analytics]
+  source: https://learn.microsoft.com/en-us/azure/cosmos-db/postgresql/introduction
+  description: Azure Cosmos DB for PostgreSQL runs PostgreSQL extended with the Citus extension so a cluster starts as a single node and transparently scales to a coordinator plus worker nodes by distributing tables, serving multi-tenant SaaS, real-time operational analytics and high-throughput transactional apps. The managed service adds high availability, read replicas, built-in pgBouncer, private endpoints and ingestion from Stream Analytics and Data Factory; Microsoft now recommends Elastic Clusters in Azure Database for PostgreSQL for new projects.
+  containers:
+    - subscription: saas-platform
+      resource_group: {name: rg-citus-analytics, location: westeurope}
+      vnets:
+        - name: vnet-saas
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: snet-app, cidr: 10.60.1.0/24}
+            - {name: snet-private-endpoints, cidr: 10.60.2.0/24}
+  elements:
+    - {tf: azurerm_linux_web_app, name: app-tenant-api, in: subnet:snet-app}
+    - {tf: azurerm_private_endpoint, name: pe-citus-coordinator, in: subnet:snet-private-endpoints}
+    - {tf: azurerm_cosmosdb_postgresql_cluster, name: citus-multitenant, in: resource_group:rg-citus-analytics}
+    - {tf: azurerm_eventhub_namespace, name: evhns-clickstream, in: resource_group:rg-citus-analytics}
+    - {tf: azurerm_stream_analytics_job, name: asa-rollups, in: resource_group:rg-citus-analytics}
+    - {tf: azurerm_data_factory, name: adf-batch-ingest, in: resource_group:rg-citus-analytics}
+    - {tf: azurerm_key_vault, name: kv-db-credentials, in: resource_group:rg-citus-analytics}
+    - {tf: azurerm_log_analytics_workspace, name: law-citus-metrics, in: resource_group:rg-citus-analytics}
+  actors: [users, device]
+  flows:
+    - {from: users, to: app-tenant-api, label: HTTPS, step: 1}
+    - {from: app-tenant-api, to: pe-citus-coordinator, label: pgBouncer port 6432, step: 2}
+    - {from: pe-citus-coordinator, to: citus-multitenant, label: private endpoint to coordinator}
+    - {from: citus-multitenant, to: citus-multitenant, label: shard queries to worker nodes (tenant_id), step: 3}
+    - {from: device, to: evhns-clickstream, label: events, step: 1}
+    - {from: evhns-clickstream, to: asa-rollups, label: stream input, step: 2}
+    - {from: asa-rollups, to: citus-multitenant, label: PostgreSQL output (rollup tables), step: 3}
+    - {from: adf-batch-ingest, to: citus-multitenant, label: COPY batch loads}
+    - {from: app-tenant-api, to: kv-db-credentials, label: connection secret}
+    - {from: citus-multitenant, to: law-citus-metrics, label: metrics and slow query logs}
+
+- slug: redis-write-through-cache-sql
+  title: Write-through caching with Azure Managed Redis and Azure SQL Database
+  category: database
+  tags: [redis, write-through, cache-aside, azure-sql, functions, app-service, outbox, private-endpoint]
+  source: https://learn.microsoft.com/en-us/azure/architecture/databases/architecture/write-through-caching-azure-sql-managed-redis
+  description: App Service serves reads from Azure Managed Redis and falls back to Azure SQL Database on a cache miss, while every write goes through an HTTP-triggered Azure Function that validates idempotency, commits to SQL with a durable outbox row, then updates the versioned Redis key before returning. A repair function replays pending outbox entries when Redis updates fail, SQL and Redis are reached only through private endpoints, and Azure Monitor tracks hit ratio and outbox depth.
+  containers:
+    - subscription: web-platform
+      resource_group: {name: rg-redis-write-through, location: westeurope}
+      vnets:
+        - name: vnet-app
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: snet-app-integration, cidr: 10.70.1.0/24}
+            - {name: snet-functions, cidr: 10.70.2.0/24}
+            - {name: snet-private-endpoints, cidr: 10.70.3.0/24}
+  elements:
+    - {tf: azurerm_linux_web_app, name: app-catalog-web, in: subnet:snet-app-integration}
+    - {tf: azurerm_linux_function_app, name: func-write-through, in: subnet:snet-functions}
+    - {tf: azurerm_linux_function_app, name: func-outbox-repair, in: subnet:snet-functions}
+    - {tf: azurerm_redis_cache, name: redis-read-cache, in: resource_group:rg-redis-write-through}
+    - {tf: azurerm_mssql_server, name: sql-system-of-record, in: resource_group:rg-redis-write-through}
+    - {tf: azurerm_private_endpoint, name: pe-redis, in: subnet:snet-private-endpoints}
+    - {tf: azurerm_private_endpoint, name: pe-sql, in: subnet:snet-private-endpoints}
+    - {tf: azurerm_application_insights, name: appi-cache-telemetry, in: resource_group:rg-redis-write-through}
+  actors: [client]
+  flows:
+    - {from: client, to: app-catalog-web, label: HTTPS read / write, step: 1}
+    - {from: app-catalog-web, to: pe-redis, label: cache lookup (deterministic key), step: 2}
+    - {from: pe-redis, to: redis-read-cache, label: Private Link}
+    - {from: app-catalog-web, to: pe-sql, label: cache-miss read, step: 3}
+    - {from: pe-sql, to: sql-system-of-record, label: Private Link}
+    - {from: app-catalog-web, to: func-write-through, label: write request (idempotency key), step: 4}
+    - {from: func-write-through, to: pe-sql, label: commit + outbox row, step: 5}
+    - {from: func-write-through, to: pe-redis, label: set versioned key with TTL, step: 6}
+    - {from: func-outbox-repair, to: pe-sql, label: read pending outbox entries}
+    - {from: func-outbox-repair, to: pe-redis, label: idempotent repair}
+    - {from: func-write-through, to: appi-cache-telemetry, label: traces, outbox metrics}
+
+- slug: data-share-cross-organization
+  title: Cross-organization data sharing with Azure Data Share
+  category: data
+  tags: [data-share, snapshot-sharing, in-place-sharing, data-lake-storage, synapse, azure-data-explorer, provider-consumer]
+  source: https://learn.microsoft.com/en-us/azure/data-share/overview
+  description: A data provider creates a share of datasets from Data Lake Storage, Blob Storage, Azure SQL Database or Azure Synapse Analytics, sets terms of use and a snapshot schedule, and invites consumers in other Azure subscriptions. Consumers accept the invitation and receive full or incremental snapshots into their own storage or SQL targets, or use in-place sharing for Azure Data Explorer where a symbolic link exposes live data without copying; providers can revoke access at any time.
+  containers:
+    - subscription: data-provider
+      resource_group: {name: rg-share-provider, location: westeurope}
+      groups:
+        - {label: Provider sources}
+    - subscription: data-consumer
+      resource_group: {name: rg-share-consumer, location: northeurope}
+      groups:
+        - {label: Consumer targets}
+  elements:
+    - {tf: azurerm_data_share_account, name: dsa-provider, in: group:Provider sources}
+    - {tf: azurerm_data_share, name: ds-pos-daily, in: group:Provider sources}
+    - {tf: azurerm_storage_account, name: stprovider-lake, in: group:Provider sources}
+    - {tf: azurerm_synapse_workspace, name: synw-provider-dw, in: group:Provider sources}
+    - {tf: azurerm_kusto_cluster, name: adx-provider-live, in: group:Provider sources}
+    - {tf: azurerm_data_share_account, name: dsa-consumer, in: group:Consumer targets}
+    - {tf: azurerm_storage_account, name: stconsumer-lake, in: group:Consumer targets}
+    - {tf: azurerm_mssql_server, name: sql-consumer-analytics, in: group:Consumer targets}
+    - {tf: azurerm_kusto_cluster, name: adx-consumer-follower, in: group:Consumer targets}
+  actors: [users]
+  flows:
+    - {from: stprovider-lake, to: ds-pos-daily, link: azurerm_data_share_dataset_data_lake_gen2, label: add ADLS Gen2 dataset, step: 1}
+    - {from: synw-provider-dw, to: ds-pos-daily, label: add SQL dataset, step: 1}
+    - {from: adx-provider-live, to: ds-pos-daily, link: azurerm_data_share_dataset_kusto_database, label: add Kusto database (in-place), step: 1}
+    - {from: ds-pos-daily, to: dsa-consumer, label: invitation with terms of use, step: 2}
+    - {from: dsa-consumer, to: stconsumer-lake, label: scheduled snapshot (hourly / daily), step: 3}
+    - {from: dsa-consumer, to: sql-consumer-analytics, label: snapshot into SQL target, step: 3}
+    - {from: adx-provider-live, to: adx-consumer-follower, label: in-place share (symbolic link), step: 3}
+    - {from: users, to: dsa-provider, label: manage shares, monitor, revoke, step: 4}
+
+- slug: geospatial-analytics-azure-maps-adx
+  title: Geospatial analytics with Azure Maps and Azure Data Explorer
+  category: data
+  tags: [azure-maps, geospatial, geofencing, event-hubs, azure-data-explorer, kql-geo, power-bi-azure-maps-visual, fabric-maps]
+  source: https://learn.microsoft.com/en-us/azure/azure-maps/about-azure-maps
+  description: Azure Maps provides render, search, geocoding, routing, geofencing, traffic and weather REST APIs and a WebGL Web SDK, while Azure Data Explorer evaluates geospatial KQL functions over high-volume location telemetry ingested from Event Hubs and IoT Hub. Functions enrich positions with Maps geocoding and geofence checks, results are visualised in the Azure Maps Power BI visual and Maps in Fabric Real-Time Intelligence, and GeoJSON reference data is kept in Data Lake Storage.
+  containers:
+    - subscription: location-intelligence
+      resource_group: {name: rg-geospatial, location: westeurope}
+      groups:
+        - {label: Ingest}
+        - {label: Enrich}
+        - {label: Analyze}
+        - {label: Visualize}
+  elements:
+    - {tf: azurerm_iothub, name: iot-vehicle-positions, in: group:Ingest}
+    - {tf: azurerm_eventhub_namespace, name: evhns-location-events, in: group:Ingest}
+    - {tf: azurerm_maps_account, name: maps-location-services, in: group:Enrich}
+    - {tf: azurerm_linux_function_app, name: func-geocode-geofence, in: group:Enrich}
+    - {tf: azurerm_kusto_cluster, name: adx-geo, in: group:Analyze}
+    - {tf: azurerm_kusto_database, name: adxdb-positions, in: group:Analyze}
+    - {tf: azurerm_storage_account, name: stgeojson-reference, in: group:Analyze}
+    - {tf: azurerm_fabric_capacity, name: fabric-rti-maps, in: group:Visualize}
+    - {tf: azurerm_linux_web_app, name: app-maps-web-sdk, in: group:Visualize}
+  actors: [device, users]
+  flows:
+    - {from: device, to: iot-vehicle-positions, label: GPS positions, step: 1}
+    - {from: iot-vehicle-positions, to: evhns-location-events, label: message routing, step: 2}
+    - {from: evhns-location-events, to: func-geocode-geofence, label: trigger, step: 3}
+    - {from: func-geocode-geofence, to: maps-location-services, label: reverse geocode, geofence, route APIs, step: 3}
+    - {from: evhns-location-events, to: adxdb-positions, link: azurerm_kusto_eventhub_data_connection, label: telemetry ingestion, step: 4}
+    - {from: stgeojson-reference, to: adxdb-positions, label: GeoJSON polygons (external table)}
+    - {from: adxdb-positions, to: fabric-rti-maps, label: KQL geo queries to Maps in Fabric / Power BI visual, step: 5}
+    - {from: app-maps-web-sdk, to: maps-location-services, label: Web SDK tiles and search}
+    - {from: users, to: app-maps-web-sdk, label: interactive map, step: 6}

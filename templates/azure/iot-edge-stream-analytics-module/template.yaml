@@ -1,0 +1,51 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/iot-edge/tutorial-deploy-stream-analytics); edit freely.
+title: Stream Analytics as an IoT Edge module
+category: edge
+tags:
+- iot edge
+- stream analytics
+- edge hub
+- deployment manifest
+- local processing
+- iot hub
+source: https://learn.microsoft.com/en-us/azure/iot-edge/tutorial-deploy-stream-analytics
+description: A Stream Analytics job with the Edge hosting environment is exported as a container definition to a storage account and deployed to an IoT Edge device through an IoT Hub deployment manifest,
+  alongside a simulated temperature sensor module. Edge hub routes sensor telemetry into the job, which computes a 30-second tumbling-window average and sends a reset command back to the sensor module when
+  the threshold is exceeded, while telemetry and alerts also flow upstream to IoT Hub.
+nodes:
+- {id: dc-factory-floor, type: common.datacenter, name: factory-floor}
+- {id: sub-iot, type: azure.subscription, name: iot, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-iot-edge, type: azure.resource_group, name: rg-iot-edge, parent: sub-iot, props: {location: westeurope}}
+- {id: device, type: common.device, name: device}
+- {id: user, type: common.user, name: user}
+- id: iothub-edge
+  type: azure.res.azurerm_iothub
+  name: iothub-edge
+  parent: rg-rg-iot-edge
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: asa-edge-job, type: azure.res.azurerm_stream_analytics_job, name: asa-edge-job, parent: rg-rg-iot-edge, props: {location: westeurope, name: changeme, resource_group_name: changeme, transformation_query: changeme}}
+- {id: stasajobdef, type: azure.storage_account, name: stasajobdef, parent: rg-rg-iot-edge}
+- {id: acr-edge-modules, type: azure.container_registry, name: acr-edge-modules, parent: rg-rg-iot-edge}
+- {id: vpc-rg-rg-iot-edge, type: azure.vnet, name: main, parent: rg-rg-iot-edge, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-iot-edge, type: azure.subnet, name: main, parent: vpc-rg-rg-iot-edge, props: {cidr: 10.200.0.0/24}}
+- {id: vm-iot-edge-device, type: azure.virtual_machine, name: vm-iot-edge-device, parent: sub-rg-rg-iot-edge}
+- {id: law-edge, type: azure.res.azurerm_log_analytics_workspace, name: law-edge, parent: rg-rg-iot-edge, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: asa-edge-job, label: define input/output (Edge Hub) and query, step: '1'}
+- {from: asa-edge-job, to: stasajobdef, label: publish job definition to blob container, step: '2'}
+- {from: user, to: iothub-edge, label: Set modules deployment manifest, step: '3'}
+- {from: iothub-edge, to: vm-iot-edge-device, label: deployment manifest to edgeAgent, step: '4'}
+- {from: acr-edge-modules, to: vm-iot-edge-device, label: pull module images}
+- {from: stasajobdef, to: vm-iot-edge-device, label: ASAJobInfo fetches job definition}
+- {from: device, to: vm-iot-edge-device, label: temperature telemetry to edgeHub, step: '5'}
+- {from: vm-iot-edge-device, to: device, label: reset command when avg > 70 (alertsToReset), step: '6'}
+- {from: vm-iot-edge-device, to: iothub-edge, label: telemetryToCloud + alertsToCloud ($upstream), step: '7'}
+- {from: iothub-edge, to: law-edge, label: diagnostics}
+steps:
+- {n: '1', text: 'user → asa-edge-job: define input/output (Edge Hub) and query'}
+- {n: '2', text: 'asa-edge-job → stasajobdef: publish job definition to blob container'}
+- {n: '3', text: 'user → iothub-edge: Set modules deployment manifest'}
+- {n: '4', text: 'iothub-edge → vm-iot-edge-device: deployment manifest to edgeAgent'}
+- {n: '5', text: 'device → vm-iot-edge-device: temperature telemetry to edgeHub'}
+- {n: '6', text: 'vm-iot-edge-device → device: reset command when avg > 70 (alertsToReset)'}
+- {n: '7', text: 'vm-iot-edge-device → iothub-edge: telemetryToCloud + alertsToCloud ($upstream)'}

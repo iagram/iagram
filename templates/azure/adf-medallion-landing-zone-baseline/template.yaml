@@ -1,0 +1,74 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/databases/architecture/azure-data-factory-on-azure-landing-zones-baseline); edit freely.
+title: Azure Data Factory baseline architecture in an Azure landing zone
+category: data
+tags:
+- data-factory
+- self-hosted-integration-runtime
+- medallion
+- databricks
+- azure-sql
+- purview
+- private-link
+- landing-zone
+source: https://learn.microsoft.com/en-us/azure/architecture/databases/architecture/azure-data-factory-on-azure-landing-zones-baseline
+description: Data Factory with a self-hosted integration runtime on Azure VMs ingests an on-premises finance system nightly into Data Lake Storage and orchestrates Azure Databricks notebooks that build
+  bronze, silver and gold Delta Lake tables. Azure SQL Database hosts the conformed enterprise model for Power BI, Microsoft Purview catalogs the platform, Key Vault and Private Link secure access, and
+  Site Recovery protects the SHIR VMs.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-data-landing-zone, type: azure.subscription, name: data-landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-adf-baseline, type: azure.resource_group, name: rg-adf-baseline, parent: sub-data-landing-zone, props: {location: westeurope}}
+- {id: vpc-vnet-data, type: azure.vnet, name: vnet-data, parent: rg-rg-adf-baseline, props: {cidr: 10.20.0.0/16}}
+- {id: sub-snet-shir, type: azure.subnet, name: snet-shir, parent: vpc-vnet-data, props: {cidr: 10.20.1.0/24}}
+- {id: sub-snet-private-endpoints, type: azure.subnet, name: snet-private-endpoints, parent: vpc-vnet-data, props: {cidr: 10.20.2.0/24}}
+- {id: sub-snet-databricks-public, type: azure.subnet, name: snet-databricks-public, parent: vpc-vnet-data, props: {cidr: 10.20.3.0/24}}
+- {id: sub-snet-databricks-private, type: azure.subnet, name: snet-databricks-private, parent: vpc-vnet-data, props: {cidr: 10.20.4.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: adf-finance, type: azure.res.azurerm_data_factory, name: adf-finance, parent: rg-rg-adf-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: vm-shir-01
+  type: azure.res.azurerm_windows_virtual_machine
+  name: vm-shir-01
+  parent: sub-snet-shir
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- {id: stfinancelake, type: azure.storage_account, name: stfinancelake, parent: rg-rg-adf-baseline}
+- id: pe-datalake
+  type: azure.res.azurerm_private_endpoint
+  name: pe-datalake
+  parent: sub-snet-private-endpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: dbw-finance, type: azure.res.azurerm_databricks_workspace, name: dbw-finance, parent: sub-snet-databricks-private, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: sql-enterprise-model, type: azure.res.azurerm_mssql_server, name: sql-enterprise-model, parent: rg-rg-adf-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- id: pview-finance
+  type: azure.res.azurerm_purview_account
+  name: pview-finance
+  parent: rg-rg-adf-baseline
+  props: {identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: kv-adf-secrets, type: azure.key_vault, name: kv-adf-secrets, parent: rg-rg-adf-baseline}
+- {id: rsv-shir-protection, type: azure.res.azurerm_recovery_services_vault, name: rsv-shir-protection, parent: rg-rg-adf-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}}
+- {id: law-data-platform, type: azure.res.azurerm_log_analytics_workspace, name: law-data-platform, parent: rg-rg-adf-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: dc-on-premises, to: vm-shir-01, label: nightly batch over private connectivity, step: '1'}
+- {from: vm-shir-01, to: adf-finance, label: self-hosted integration runtime, step: '1'}
+- {from: adf-finance, to: pe-datalake, label: copy to bronze via private endpoint, step: '2'}
+- {from: pe-datalake, to: stfinancelake, label: Private Link}
+- {from: adf-finance, to: dbw-finance, label: orchestrate notebooks, step: '3'}
+- {from: dbw-finance, to: stfinancelake, label: silver / gold Delta tables, step: '3'}
+- {from: adf-finance, to: sql-enterprise-model, label: load conformed hierarchies, step: '4'}
+- {from: sql-enterprise-model, to: users, label: Power BI management dashboards, step: '5'}
+- {from: pview-finance, to: stfinancelake, label: catalog and lineage}
+- {from: adf-finance, to: kv-adf-secrets, label: linked service secrets}
+- {from: rsv-shir-protection, to: vm-shir-01, label: Site Recovery replication}
+- {from: adf-finance, to: law-data-platform, label: pipeline diagnostics}
+steps:
+- {n: '1', text: 'datacenter → vm-shir-01: nightly batch over private connectivity'}
+- {n: '2', text: 'adf-finance → pe-datalake: copy to bronze via private endpoint'}
+- {n: '3', text: 'adf-finance → dbw-finance: orchestrate notebooks'}
+- {n: '4', text: 'adf-finance → sql-enterprise-model: load conformed hierarchies'}
+- {n: '5', text: 'sql-enterprise-model → users: Power BI management dashboards'}

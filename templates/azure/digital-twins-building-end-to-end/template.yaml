@@ -1,0 +1,59 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/digital-twins/tutorial-end-to-end); edit freely.
+title: End-to-end Azure Digital Twins solution driven by IoT Hub device data
+category: iot
+tags:
+- digital twins
+- dtdl
+- iot hub
+- azure functions
+- event grid
+- twin graph
+- smart building
+source: https://learn.microsoft.com/en-us/azure/digital-twins/tutorial-end-to-end
+description: A twin graph (floor contains room contains thermostat) is created in an Azure Digital Twins instance; an Event Grid subscription on IoT Hub device telemetry triggers a function that updates
+  the thermostat twin's Temperature property. Twin property-change events are routed through an Azure Digital Twins endpoint to an Event Grid topic, where a second function propagates the change to the
+  parent room twin.
+nodes:
+- {id: sub-iot, type: azure.subscription, name: iot, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-adt-building, type: azure.resource_group, name: rg-adt-building, parent: sub-iot, props: {location: westeurope}}
+- {id: device, type: common.device, name: device}
+- {id: user, type: common.user, name: user}
+- id: iothub-building
+  type: azure.res.azurerm_iothub
+  name: iothub-building
+  parent: rg-rg-adt-building
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: func-hub-to-dt
+  type: azure.res.azurerm_linux_function_app
+  name: func-hub-to-dt
+  parent: rg-rg-adt-building
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: func-dt-routed-data
+  type: azure.res.azurerm_linux_function_app
+  name: func-dt-routed-data
+  parent: rg-rg-adt-building
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: stfuncapp, type: azure.storage_account, name: stfuncapp, parent: rg-rg-adt-building}
+- {id: adt-building, type: azure.res.azurerm_digital_twins_instance, name: adt-building, parent: rg-rg-adt-building, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: egt-twin-changes, type: azure.res.azurerm_eventgrid_topic, name: egt-twin-changes, parent: rg-rg-adt-building, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: appi-adt, type: azure.res.azurerm_application_insights, name: appi-adt, parent: rg-rg-adt-building, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: adt-building, label: SetupBuildingScenario (DTDL models + twins), step: '1'}
+- {from: device, to: iothub-building, label: thermostat67 telemetry, step: '2'}
+- {from: iothub-building, to: func-hub-to-dt, label: DeviceTelemetry event subscription, step: '3'}
+- {from: func-hub-to-dt, to: adt-building, label: update thermostat67.Temperature, step: '4'}
+- {from: adt-building, to: egt-twin-changes, label: endpoint + route (property change events), step: '5'}
+- {from: egt-twin-changes, to: func-dt-routed-data, label: topic subscription, step: '6'}
+- {from: func-dt-routed-data, to: adt-building, label: update room21.Temperature, step: '7'}
+- {from: func-hub-to-dt, to: stfuncapp, label: function app storage}
+- {from: func-dt-routed-data, to: appi-adt, label: telemetry}
+- {from: user, to: adt-building, label: ObserveProperties query, step: '8'}
+steps:
+- {n: '1', text: 'user → adt-building: SetupBuildingScenario (DTDL models + twins)'}
+- {n: '2', text: 'device → iothub-building: thermostat67 telemetry'}
+- {n: '3', text: 'iothub-building → func-hub-to-dt: DeviceTelemetry event subscription'}
+- {n: '4', text: 'func-hub-to-dt → adt-building: update thermostat67.Temperature'}
+- {n: '5', text: 'adt-building → egt-twin-changes: endpoint + route (property change events)'}
+- {n: '6', text: 'egt-twin-changes → func-dt-routed-data: topic subscription'}
+- {n: '7', text: 'func-dt-routed-data → adt-building: update room21.Temperature'}
+- {n: '8', text: 'user → adt-building: ObserveProperties query'}

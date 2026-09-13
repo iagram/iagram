@@ -1,0 +1,51 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/guide/devsecops/devsecops-on-aks); edit freely.
+title: DevSecOps on Azure Kubernetes Service
+category: security
+tags:
+- devsecops
+- aks
+- github actions
+- github advanced security
+- defender for containers
+- azure policy
+- key vault
+- sentinel
+source: https://learn.microsoft.com/en-us/azure/architecture/guide/devsecops/devsecops-on-aks
+description: Developers authenticate to GitHub through Microsoft Entra ID and commit to a governed repository where GitHub Advanced Security runs code, secret and dependency scanning; GitHub Actions builds
+  the container image, pushes it to Azure Container Registry and deploys to AKS after environment approvals. Defender for Containers scans the registry and cluster, Azure Policy enforces admission rules
+  through Gatekeeper, Key Vault injects secrets at runtime, and Azure Monitor with Managed Prometheus, Log Analytics and Microsoft Sentinel provide monitoring and SIEM.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-devsecops-aks, type: azure.resource_group, name: rg-devsecops-aks, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-devsecops, type: azure.vnet, name: vnet-devsecops, parent: rg-rg-devsecops-aks, props: {cidr: 10.50.0.0/16}}
+- {id: sub-snet-aks, type: azure.subnet, name: snet-aks, parent: vpc-vnet-devsecops, props: {cidr: 10.50.0.0/20}}
+- {id: user, type: common.user, name: user}
+- {id: idp, type: common.idp, name: idp}
+- {id: saas, type: common.saas, name: saas}
+- {id: acr-secure, type: azure.container_registry, name: acr-secure, parent: rg-rg-devsecops-aks}
+- {id: aks-secure, type: azure.aks_cluster, name: aks-secure, parent: sub-snet-aks}
+- {id: kv-runtime-secrets, type: azure.key_vault, name: kv-runtime-secrets, parent: rg-rg-devsecops-aks}
+- {id: defender-containers, type: azure.res.azurerm_security_center_subscription_pricing, name: defender-containers, parent: rg-rg-devsecops-aks, props: {tier: changeme}}
+- {id: amw-prometheus, type: azure.res.azurerm_monitor_workspace, name: amw-prometheus, parent: rg-rg-devsecops-aks, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: grafana-aks, type: azure.res.azurerm_dashboard_grafana, name: grafana-aks, parent: rg-rg-devsecops-aks, props: {grafana_major_version: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-aks-secure, type: azure.res.azurerm_log_analytics_workspace, name: law-aks-secure, parent: rg-rg-devsecops-aks, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: sentinel-aks, type: azure.res.azurerm_sentinel_log_analytics_workspace_onboarding, name: sentinel-aks, parent: rg-rg-devsecops-aks, props: {workspace_id: changeme}}
+edges:
+- {from: user, to: idp, label: Entra ID sign-in with MFA, step: '1'}
+- {from: user, to: saas, label: commit to GitHub Enterprise (Advanced Security scans), step: '2'}
+- {from: saas, to: acr-secure, label: GitHub Actions CI builds and pushes image, step: '3'}
+- {from: defender-containers, to: acr-secure, label: image vulnerability scan, step: '4'}
+- {from: saas, to: aks-secure, label: CD after environment approval (OIDC), step: '5'}
+- {from: acr-secure, to: aks-secure, label: pull only trusted registries (Azure Policy)}
+- {from: aks-secure, to: kv-runtime-secrets, label: secrets injected at runtime}
+- {from: defender-containers, to: aks-secure, label: runtime threat protection}
+- {from: aks-secure, to: amw-prometheus, label: Managed Prometheus metrics}
+- {from: amw-prometheus, to: grafana-aks, label: dashboards}
+- {from: aks-secure, to: law-aks-secure, label: container logs + audit}
+- {from: law-aks-secure, to: sentinel-aks, label: SIEM correlation}
+steps:
+- {n: '1', text: 'user → idp: Entra ID sign-in with MFA'}
+- {n: '2', text: 'user → saas: commit to GitHub Enterprise (Advanced Security scans)'}
+- {n: '3', text: 'saas → acr-secure: GitHub Actions CI builds and pushes image'}
+- {n: '4', text: 'defender-containers → acr-secure: image vulnerability scan'}
+- {n: '5', text: 'saas → aks-secure: CD after environment approval (OIDC)'}

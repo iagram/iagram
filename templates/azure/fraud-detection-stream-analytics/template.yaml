@@ -1,0 +1,53 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/stream-analytics/stream-analytics-real-time-fraud-detection); edit freely.
+title: Real-time fraud detection with Stream Analytics
+category: industry
+tags:
+- financial services
+- fraud detection
+- event hubs
+- stream analytics
+- power bi
+- self-join
+- tumbling window
+source: https://learn.microsoft.com/en-us/azure/stream-analytics/stream-analytics-real-time-fraud-detection
+description: A generator sends call detail records to an Event Hubs namespace; a Stream Analytics job reads the stream with a dedicated consumer group and uses a self-join with DATEDIFF to flag calls from
+  the same subscriber identity in different regions within five seconds, aggregated over tumbling windows. Flagged records are written to a Power BI streaming dataset for a live dashboard, and the same
+  technique applies to credit card fraud and identity theft.
+nodes:
+- {id: sub-fraud-analytics, type: azure.subscription, name: fraud-analytics, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-fraud-detection, type: azure.resource_group, name: rg-fraud-detection, parent: sub-fraud-analytics, props: {location: westeurope}}
+- {id: client, type: common.client, name: client}
+- {id: users, type: common.users, name: users}
+- {id: evhns-calls, type: azure.res.azurerm_eventhub_namespace, name: evhns-calls, parent: rg-rg-fraud-detection, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-call-stream, type: azure.res.azurerm_eventhub, name: evh-call-stream, parent: rg-rg-fraud-detection, props: {name: changeme, partition_count: 1}}
+- {id: asa-fraud, type: azure.res.azurerm_stream_analytics_job, name: asa-fraud, parent: rg-rg-fraud-detection, props: {location: westeurope, name: changeme, resource_group_name: changeme, transformation_query: changeme}}
+- id: pbi-fraud-dashboard
+  type: azure.res.azurerm_powerbi_embedded
+  name: pbi-fraud-dashboard
+  parent: rg-rg-fraud-detection
+  props:
+    administrators: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku_name: changeme
+- {id: stfraudarchive, type: azure.storage_account, name: stfraudarchive, parent: rg-rg-fraud-detection}
+- id: app-embedded-dashboard
+  type: azure.res.azurerm_linux_web_app
+  name: app-embedded-dashboard
+  parent: rg-rg-fraud-detection
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+edges:
+- {from: client, to: evh-call-stream, label: TelcoGenerator call records (AMQP), step: '1'}
+- {from: evh-call-stream, to: asa-fraud, label: CallStream input, step: '2'}
+- {from: asa-fraud, to: asa-fraud, label: 'self-join: same IMSI, different switch within 5 s', step: '3'}
+- {from: asa-fraud, to: pbi-fraud-dashboard, label: Power BI streaming dataset output, step: '4'}
+- {from: evh-call-stream, to: stfraudarchive, label: Event Hubs Capture archive}
+- {from: pbi-fraud-dashboard, to: app-embedded-dashboard, label: embedded dashboard}
+- {from: users, to: app-embedded-dashboard, label: fraudulent calls dashboard, step: '5'}
+steps:
+- {n: '1', text: 'client → evh-call-stream: TelcoGenerator call records (AMQP)'}
+- {n: '2', text: 'evh-call-stream → asa-fraud: CallStream input'}
+- {n: '3', text: 'asa-fraud → asa-fraud: self-join: same IMSI, different switch within 5 s'}
+- {n: '4', text: 'asa-fraud → pbi-fraud-dashboard: Power BI streaming dataset output'}
+- {n: '5', text: 'users → app-embedded-dashboard: fraudulent calls dashboard'}

@@ -1,0 +1,55 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/greenfield-lakehouse-fabric); edit freely.
+title: Greenfield lakehouse on Microsoft Fabric
+category: data
+tags:
+- fabric
+- onelake
+- lakehouse
+- medallion
+- eventstream
+- eventhouse
+- data-factory
+- power-bi
+- direct-lake
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/greenfield-lakehouse-fabric
+description: A Lambda-style design on Microsoft Fabric where Data Factory pipelines ingest batch data into bronze, silver and gold lakehouses refined by Spark notebooks and dataflows, and eventstreams ingest
+  real-time data into eventhouses and the bronze lakehouse. Data is served through SQL analytics endpoints, notebooks, Power BI Direct Lake semantic models, Real-Time Intelligence dashboards and Fabric
+  Activator triggers, with OneLake and Microsoft Purview as foundations.
+nodes:
+- {id: sub-fabric-platform, type: azure.subscription, name: fabric-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-fabric-lakehouse, type: azure.resource_group, name: rg-fabric-lakehouse, parent: sub-fabric-platform, props: {location: westeurope}}
+- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-fabric-lakehouse}
+- {id: grp-fabric-capacity, type: common.group, name: Fabric capacity, parent: rg-rg-fabric-lakehouse}
+- {id: grp-governance, type: common.group, name: Governance, parent: rg-rg-fabric-lakehouse}
+- {id: database, type: common.database, name: database}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: evhns-iot-events, type: azure.res.azurerm_eventhub_namespace, name: evhns-iot-events, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: stlanding-files, type: azure.storage_account, name: stlanding-files, parent: grp-ingest}
+- {id: adf-batch-orchestration, type: azure.res.azurerm_data_factory, name: adf-batch-orchestration, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: fabric-lakehouse-f64
+  type: azure.res.azurerm_fabric_capacity
+  name: fabric-lakehouse-f64
+  parent: grp-fabric-capacity
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: pview-lakehouse
+  type: azure.res.azurerm_purview_account
+  name: pview-lakehouse
+  parent: grp-governance
+  props: {identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: kv-fabric-connections, type: azure.key_vault, name: kv-fabric-connections, parent: grp-governance}
+edges:
+- {from: database, to: adf-batch-orchestration, label: relational and file sources, step: '1'}
+- {from: adf-batch-orchestration, to: stlanding-files, label: stage semi-structured files, step: '1'}
+- {from: adf-batch-orchestration, to: fabric-lakehouse-f64, label: pipelines into bronze lakehouse, step: '2'}
+- {from: device, to: evhns-iot-events, label: sensor streams, step: '3'}
+- {from: evhns-iot-events, to: fabric-lakehouse-f64, label: eventstream to eventhouse and bronze, step: '4'}
+- {from: fabric-lakehouse-f64, to: users, label: Power BI Direct Lake and RTI dashboards, step: '5'}
+- {from: pview-lakehouse, to: fabric-lakehouse-f64, label: catalog}
+- {from: fabric-lakehouse-f64, to: kv-fabric-connections, label: connection credentials}
+steps:
+- {n: '1', text: 'database → adf-batch-orchestration: relational and file sources'}
+- {n: '2', text: 'adf-batch-orchestration → fabric-lakehouse-f64: pipelines into bronze lakehouse'}
+- {n: '3', text: 'device → evhns-iot-events: sensor streams'}
+- {n: '4', text: 'evhns-iot-events → fabric-lakehouse-f64: eventstream to eventhouse and bronze'}
+- {n: '5', text: 'fabric-lakehouse-f64 → users: Power BI Direct Lake and RTI dashboards'}

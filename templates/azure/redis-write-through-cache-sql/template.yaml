@@ -1,0 +1,74 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/databases/architecture/write-through-caching-azure-sql-managed-redis); edit freely.
+title: Write-through caching with Azure Managed Redis and Azure SQL Database
+category: database
+tags:
+- redis
+- write-through
+- cache-aside
+- azure-sql
+- functions
+- app-service
+- outbox
+- private-endpoint
+source: https://learn.microsoft.com/en-us/azure/architecture/databases/architecture/write-through-caching-azure-sql-managed-redis
+description: App Service serves reads from Azure Managed Redis and falls back to Azure SQL Database on a cache miss, while every write goes through an HTTP-triggered Azure Function that validates idempotency,
+  commits to SQL with a durable outbox row, then updates the versioned Redis key before returning. A repair function replays pending outbox entries when Redis updates fail, SQL and Redis are reached only
+  through private endpoints, and Azure Monitor tracks hit ratio and outbox depth.
+nodes:
+- {id: sub-web-platform, type: azure.subscription, name: web-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-redis-write-through, type: azure.resource_group, name: rg-redis-write-through, parent: sub-web-platform, props: {location: westeurope}}
+- {id: vpc-vnet-app, type: azure.vnet, name: vnet-app, parent: rg-rg-redis-write-through, props: {cidr: 10.70.0.0/16}}
+- {id: sub-snet-app-integration, type: azure.subnet, name: snet-app-integration, parent: vpc-vnet-app, props: {cidr: 10.70.1.0/24}}
+- {id: sub-snet-functions, type: azure.subnet, name: snet-functions, parent: vpc-vnet-app, props: {cidr: 10.70.2.0/24}}
+- {id: sub-snet-private-endpoints, type: azure.subnet, name: snet-private-endpoints, parent: vpc-vnet-app, props: {cidr: 10.70.3.0/24}}
+- {id: client, type: common.client, name: client}
+- id: app-catalog-web
+  type: azure.res.azurerm_linux_web_app
+  name: app-catalog-web
+  parent: sub-snet-app-integration
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: func-write-through
+  type: azure.res.azurerm_linux_function_app
+  name: func-write-through
+  parent: sub-snet-functions
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: func-outbox-repair
+  type: azure.res.azurerm_linux_function_app
+  name: func-outbox-repair
+  parent: sub-snet-functions
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: redis-read-cache, type: azure.res.azurerm_redis_cache, name: redis-read-cache, parent: rg-rg-redis-write-through, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: sql-system-of-record, type: azure.res.azurerm_mssql_server, name: sql-system-of-record, parent: rg-rg-redis-write-through, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    version: changeme}}
+- id: pe-redis
+  type: azure.res.azurerm_private_endpoint
+  name: pe-redis
+  parent: sub-snet-private-endpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-sql
+  type: azure.res.azurerm_private_endpoint
+  name: pe-sql
+  parent: sub-snet-private-endpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: appi-cache-telemetry, type: azure.res.azurerm_application_insights, name: appi-cache-telemetry, parent: rg-rg-redis-write-through, props: {application_type: changeme, location: westeurope, name: changeme,
+    resource_group_name: changeme}}
+edges:
+- {from: client, to: app-catalog-web, label: HTTPS read / write, step: '1'}
+- {from: app-catalog-web, to: pe-redis, label: cache lookup (deterministic key), step: '2'}
+- {from: pe-redis, to: redis-read-cache, label: Private Link}
+- {from: app-catalog-web, to: pe-sql, label: cache-miss read, step: '3'}
+- {from: pe-sql, to: sql-system-of-record, label: Private Link}
+- {from: app-catalog-web, to: func-write-through, label: write request (idempotency key), step: '4'}
+- {from: func-write-through, to: pe-sql, label: commit + outbox row, step: '5'}
+- {from: func-write-through, to: pe-redis, label: set versioned key with TTL, step: '6'}
+- {from: func-outbox-repair, to: pe-sql, label: read pending outbox entries}
+- {from: func-outbox-repair, to: pe-redis, label: idempotent repair}
+- {from: func-write-through, to: appi-cache-telemetry, label: traces}
+steps:
+- {n: '1', text: 'client → app-catalog-web: HTTPS read / write'}
+- {n: '2', text: 'app-catalog-web → pe-redis: cache lookup (deterministic key)'}
+- {n: '3', text: 'app-catalog-web → pe-sql: cache-miss read'}
+- {n: '4', text: 'app-catalog-web → func-write-through: write request (idempotency key)'}
+- {n: '5', text: 'func-write-through → pe-sql: commit + outbox row'}
+- {n: '6', text: 'func-write-through → pe-redis: set versioned key with TTL'}

@@ -18,6 +18,13 @@ nodes:
 - {id: sub-batch-sub, type: gcp.subnetwork, name: batch-sub, parent: vpc-batch-vpc, props: {cidr: 10.130.0.0/20, region: europe-west1}}
 - {id: users, type: common.users, name: users}
 - {id: internet, type: common.internet, name: internet}
+- id: batch-vm-template
+  type: gcp.res.google_compute_instance_template
+  name: batch-vm-template
+  parent: prj-batch-prj
+  props:
+    disk: []
+    machine_type: changeme
 - {id: batch-task-vm-0, type: gcp.compute_instance, name: batch-task-vm-0, parent: sub-batch-sub}
 - {id: batch-task-vm-1, type: gcp.compute_instance, name: batch-task-vm-1, parent: sub-batch-sub}
 - {id: batch-job-sa, type: gcp.res.google_service_account, name: batch-job-sa, parent: prj-batch-prj, props: {account_id: changeme}}
@@ -26,6 +33,9 @@ nodes:
 - {id: batch-nat, type: gcp.res.google_compute_router_nat, name: batch-nat, parent: vpc-batch-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
 - {id: batch-logs, type: gcp.res.google_logging_project_sink, name: batch-logs, parent: prj-batch-prj, props: {destination: changeme, name: changeme}}
 edges:
+- {from: users, to: batch-vm-template, label: submit job spec with storage volume, step: '1'}
+- {from: batch-vm-template, to: batch-task-vm-0, label: Batch provisions VMs, step: '2'}
+- {from: batch-vm-template, to: batch-task-vm-1}
 - {from: batch-job-sa, to: batch-task-vm-0, label: VM service account}
 - {from: batch-task-vm-0, to: batch-io-bucket, label: Cloud Storage FUSE mount /mnt/disks, step: '3'}
 - {from: batch-task-vm-1, to: batch-io-bucket, label: write task output}
@@ -34,4 +44,6 @@ edges:
 - {from: batch-nat, to: internet}
 - {from: batch-task-vm-0, to: batch-logs, label: task stdout/stderr}
 steps:
+- {n: '1', text: 'users → batch-vm-template: submit job spec with storage volume'}
+- {n: '2', text: 'batch-vm-template → batch-task-vm-0: Batch provisions VMs'}
 - {n: '3', text: 'batch-task-vm-0 → batch-io-bucket: Cloud Storage FUSE mount /mnt/disks'}

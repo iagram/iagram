@@ -16,19 +16,25 @@ nodes:
 - {id: server, type: common.server, name: server}
 - {id: users, type: common.users, name: users}
 - {id: appliance-key-ring, type: gcp.res.google_kms_key_ring, name: appliance-key-ring, parent: prj-appliance-migration, props: {location: westeurope, name: changeme}}
+- {id: appliance-cmek, type: gcp.res.google_kms_crypto_key, name: appliance-cmek, parent: prj-appliance-migration, props: {key_ring: changeme, name: changeme}}
 - {id: appliance-landing-bucket, type: gcp.storage_bucket, name: appliance-landing-bucket, parent: prj-appliance-migration}
 - {id: processed-bucket, type: gcp.storage_bucket, name: processed-bucket, parent: prj-appliance-migration}
 - {id: archive-processing-cluster, type: gcp.res.google_dataproc_cluster, name: archive-processing-cluster, parent: prj-appliance-migration, props: {name: changeme}}
 - {id: archive-dataset, type: gcp.bigquery_dataset, name: archive-dataset, parent: prj-appliance-migration}
+- {id: archive-records-table, type: gcp.res.google_bigquery_table, name: archive-records-table, parent: prj-appliance-migration, props: {dataset_id: changeme, table_id: changeme}}
 edges:
 - {from: server, to: dc-on-premises, label: copy to appliance via NFS/SCP, step: '1'}
 - {from: dc-on-premises, to: appliance-landing-bucket, label: ship appliance, step: '2'}
+- {from: appliance-cmek, to: appliance-landing-bucket, label: decrypt with CMEK, step: '3'}
 - {from: archive-processing-cluster, to: appliance-landing-bucket, label: read archive, step: '4'}
 - {from: archive-processing-cluster, to: processed-bucket, label: write Parquet, step: '5'}
+- {from: processed-bucket, to: archive-records-table, label: BigQuery load, step: '6'}
 - {from: users, to: archive-dataset, label: query, step: '7'}
 steps:
 - {n: '1', text: 'server → datacenter: copy to appliance via NFS/SCP'}
 - {n: '2', text: 'datacenter → appliance-landing-bucket: ship appliance'}
+- {n: '3', text: 'appliance-cmek → appliance-landing-bucket: decrypt with CMEK'}
 - {n: '4', text: 'archive-processing-cluster → appliance-landing-bucket: read archive'}
 - {n: '5', text: 'archive-processing-cluster → processed-bucket: write Parquet'}
+- {n: '6', text: 'processed-bucket → archive-records-table: BigQuery load'}
 - {n: '7', text: 'users → archive-dataset: query'}

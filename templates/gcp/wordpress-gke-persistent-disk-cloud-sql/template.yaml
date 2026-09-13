@@ -18,6 +18,7 @@ nodes:
 - {id: sub-wp-gke-sub, type: gcp.subnetwork, name: wp-gke-sub, parent: vpc-wp-vpc, props: {cidr: 10.150.0.0/20, region: europe-west1}}
 - {id: users, type: common.users, name: users}
 - {id: wp-cluster, type: gcp.gke_cluster, name: wp-cluster, parent: sub-wp-gke-sub}
+- {id: wordpress-volume, type: gcp.res.google_compute_disk, name: wordpress-volume, parent: prj-wp-prj, props: {name: changeme}}
 - {id: vpc-prj-wp-prj, type: gcp.vpc, name: main, parent: prj-wp-prj}
 - {id: wp-mysql, type: gcp.cloud_sql_instance, name: wp-mysql, parent: vpc-prj-wp-prj}
 - {id: cloudsql-proxy-sa, type: gcp.res.google_service_account, name: cloudsql-proxy-sa, parent: prj-wp-prj, props: {account_id: changeme}}
@@ -27,9 +28,11 @@ edges:
 - {from: users, to: wp-lb, label: HTTP to external IP, step: '1'}
 - {from: wp-lb-ip, to: wp-lb}
 - {from: wp-lb, to: wp-cluster, label: LoadBalancer Service to WordPress pod, step: '2'}
+- {from: wp-cluster, to: wordpress-volume, label: PVC bound to Persistent Disk, step: '3'}
 - {from: wp-cluster, to: wp-mysql, label: Cloud SQL Auth Proxy sidecar on localhost 3306, step: '4'}
 - {from: cloudsql-proxy-sa, to: wp-cluster, label: key in Kubernetes Secret}
 steps:
 - {n: '1', text: 'users → wp-lb: HTTP to external IP'}
 - {n: '2', text: 'wp-lb → wp-cluster: LoadBalancer Service to WordPress pod'}
+- {n: '3', text: 'wp-cluster → wordpress-volume: PVC bound to Persistent Disk'}
 - {n: '4', text: 'wp-cluster → wp-mysql: Cloud SQL Auth Proxy sidecar on localhost 3306'}

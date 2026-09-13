@@ -1,0 +1,74 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/cosmos-db/use-cases); edit freely.
+title: Gaming backend with Azure Cosmos DB
+category: industry
+tags:
+- gaming
+- cosmos db
+- leaderboards
+- player profiles
+- app service
+- functions
+- notification hubs
+- event hubs
+source: https://learn.microsoft.com/en-us/azure/cosmos-db/use-cases
+description: Game clients call a stateless API tier that stores player profiles, in-game stats, guild membership and leaderboards in Azure Cosmos DB, whose automatic indexing supports lookups by player
+  ID or social identities and whose throughput scales elastically for launches and feature updates. Telemetry and match events are ingested through Event Hubs and Azure Functions, notifications reach players
+  through Notification Hubs, and Traffic Manager routes clients to the closest region of a multi-region Cosmos DB account.
+nodes:
+- {id: sub-gaming, type: azure.subscription, name: gaming, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-game-backend, type: azure.resource_group, name: rg-game-backend, parent: sub-gaming, props: {location: westeurope}}
+- {id: grp-api-tier, type: common.group, name: API tier, parent: rg-rg-game-backend}
+- {id: grp-data-and-events, type: common.group, name: Data and events, parent: rg-rg-game-backend}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: users, type: common.users, name: users}
+- id: tm-game-api
+  type: azure.res.azurerm_traffic_manager_profile
+  name: tm-game-api
+  parent: rg-rg-game-backend
+  props: {dns_config: {}, monitor_config: {}, name: changeme, resource_group_name: changeme, traffic_routing_method: changeme}
+- {id: plan-game-api, type: azure.res.azurerm_service_plan, name: plan-game-api, parent: grp-api-tier, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-game-api
+  type: azure.res.azurerm_linux_web_app
+  name: app-game-api
+  parent: grp-api-tier
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: redis-leaderboard-cache, type: azure.res.azurerm_redis_cache, name: redis-leaderboard-cache, parent: grp-api-tier, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: cosmos-players
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-players
+  parent: grp-data-and-events
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: evhns-game-telemetry, type: azure.res.azurerm_eventhub_namespace, name: evhns-game-telemetry, parent: grp-data-and-events, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}}
+- {id: evh-match-events, type: azure.res.azurerm_eventhub, name: evh-match-events, parent: grp-data-and-events, props: {name: changeme, partition_count: 1}}
+- id: func-event-processor
+  type: azure.res.azurerm_linux_function_app
+  name: func-event-processor
+  parent: grp-data-and-events
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: nhns-game, type: azure.res.azurerm_notification_hub_namespace, name: nhns-game, parent: grp-data-and-events, props: {location: westeurope, name: changeme, namespace_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: stgameassets, type: azure.storage_account, name: stgameassets, parent: grp-data-and-events}
+edges:
+- {from: mobile, to: tm-game-api, label: nearest region, step: '1'}
+- {from: tm-game-api, to: app-game-api, label: route to API tier, step: '2'}
+- {from: app-game-api, to: cosmos-players, label: profiles, step: '3'}
+- {from: app-game-api, to: redis-leaderboard-cache, label: hot leaderboard cache}
+- {from: app-game-api, to: evh-match-events, label: in-game events, step: '4'}
+- {from: evh-match-events, to: func-event-processor, label: Event Hubs trigger, step: '5'}
+- {from: func-event-processor, to: cosmos-players, label: update stats / high scores}
+- {from: cosmos-players, to: func-event-processor, label: change feed}
+- {from: users, to: stgameassets, label: static game content}
+steps:
+- {n: '1', text: 'mobile → tm-game-api: nearest region'}
+- {n: '2', text: 'tm-game-api → app-game-api: route to API tier'}
+- {n: '3', text: 'app-game-api → cosmos-players: profiles'}
+- {n: '4', text: 'app-game-api → evh-match-events: in-game events'}
+- {n: '5', text: 'evh-match-events → func-event-processor: Event Hubs trigger'}

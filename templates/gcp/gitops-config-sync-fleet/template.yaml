@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.cloud.google.com/kubernetes-engine/enterprise/config-sync/docs/overview); edit freely.
+title: GitOps for GKE fleets with Config Sync and Policy Controller
+category: devops
+tags:
+- gitops
+- config sync
+- policy controller
+- fleet
+- gke
+- oci
+- git
+source: https://docs.cloud.google.com/kubernetes-engine/enterprise/config-sync/docs/overview
+description: Platform teams keep cluster-scoped and namespace-scoped Kubernetes configuration in a Git repository (or OCI image in Artifact Registry) that acts as the single source of truth for every cluster
+  registered in the fleet. Config Sync, enabled as the Config Management fleet feature, continuously reconciles each cluster against that source and Policy Controller enforces constraints, preventing configuration
+  drift across environments.
+nodes:
+- {id: prj-fleet-host-prj, type: gcp.project, name: fleet-host-prj, props: {project_id: fleet-host-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-fleet-vpc, type: gcp.vpc, name: fleet-vpc, parent: prj-fleet-host-prj, props: {cidr: 10.120.0.0/16}}
+- {id: sub-cluster-a-sub, type: gcp.subnetwork, name: cluster-a-sub, parent: vpc-fleet-vpc, props: {cidr: 10.120.1.0/24, region: europe-west1}}
+- {id: sub-cluster-b-sub, type: gcp.subnetwork, name: cluster-b-sub, parent: vpc-fleet-vpc, props: {cidr: 10.120.2.0/24, region: europe-west1}}
+- {id: user, type: common.user, name: user}
+- {id: cluster-config-repo, type: gcp.res.google_sourcerepo_repository, name: cluster-config-repo, parent: prj-fleet-host-prj, props: {name: changeme}}
+- {id: oci-config-repo, type: gcp.res.google_artifact_registry_repository, name: oci-config-repo, parent: prj-fleet-host-prj, props: {format: changeme, repository_id: changeme}}
+- {id: config-management-feature, type: gcp.res.google_gke_hub_feature, name: config-management-feature, parent: prj-fleet-host-prj, props: {location: westeurope}}
+- {id: fleet-cluster-a, type: gcp.gke_cluster, name: fleet-cluster-a, parent: sub-cluster-a-sub}
+- {id: fleet-cluster-b, type: gcp.gke_cluster, name: fleet-cluster-b, parent: sub-cluster-b-sub}
+- {id: membership-a, type: gcp.res.google_gke_hub_membership, name: membership-a, parent: prj-fleet-host-prj, props: {membership_id: changeme}}
+- {id: membership-b, type: gcp.res.google_gke_hub_membership, name: membership-b, parent: prj-fleet-host-prj, props: {membership_id: changeme}}
+- {id: config-validation-trigger, type: gcp.res.google_cloudbuild_trigger, name: config-validation-trigger, parent: prj-fleet-host-prj}
+edges:
+- {from: user, to: cluster-config-repo, label: pull request with config change, step: '1'}
+- {from: cluster-config-repo, to: config-validation-trigger, label: nomos vet / kpt validate, step: '2'}
+- {from: config-validation-trigger, to: oci-config-repo, label: publish config OCI image, step: '3'}
+- {from: fleet-cluster-a, to: membership-a, label: fleet registration}
+- {from: fleet-cluster-b, to: membership-b, label: fleet registration}
+- {from: config-management-feature, to: fleet-cluster-a, label: gke hub feature membership}
+- {from: config-management-feature, to: fleet-cluster-b, label: gke hub feature membership}
+- {from: fleet-cluster-a, to: cluster-config-repo, label: Config Sync pull and reconcile, step: '4'}
+- {from: fleet-cluster-b, to: oci-config-repo, label: Config Sync pull OCI source, step: '4'}
+steps:
+- {n: '1', text: 'user → cluster-config-repo: pull request with config change'}
+- {n: '2', text: 'cluster-config-repo → config-validation-trigger: nomos vet / kpt validate'}
+- {n: '3', text: 'config-validation-trigger → oci-config-repo: publish config OCI image'}
+- {n: '4', text: 'fleet-cluster-a → cluster-config-repo: Config Sync pull and reconcile'}

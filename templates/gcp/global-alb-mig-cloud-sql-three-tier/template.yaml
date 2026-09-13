@@ -26,6 +26,13 @@ nodes:
 - {id: web-url-map, type: gcp.res.google_compute_url_map, name: web-url-map, parent: prj-web-tier-prj, props: {name: changeme}}
 - {id: web-backend, type: gcp.res.google_compute_backend_service, name: web-backend, parent: prj-web-tier-prj, props: {name: changeme}}
 - {id: web-hc, type: gcp.res.google_compute_health_check, name: web-hc, parent: prj-web-tier-prj, props: {name: changeme}}
+- id: web-template
+  type: gcp.res.google_compute_instance_template
+  name: web-template
+  parent: prj-web-tier-prj
+  props:
+    disk: []
+    machine_type: changeme
 - id: web-mig
   type: gcp.res.google_compute_region_instance_group_manager
   name: web-mig
@@ -46,6 +53,7 @@ edges:
 - {from: web-url-map, to: web-backend, step: '4'}
 - {from: web-backend, to: web-mig, label: HTTP to healthy instances, step: '5'}
 - {from: web-hc, to: web-mig, label: health checks}
+- {from: web-template, to: web-mig, label: instance template}
 - {from: web-mig, to: session-cache, label: Redis sessions, step: '6'}
 - {from: web-mig, to: app-db, label: private IP SQL, step: '7'}
 - {from: web-mig, to: web-nat, label: outbound updates}

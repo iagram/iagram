@@ -1,0 +1,60 @@
+# Generated from the official reference (https://docs.cloud.google.com/stackdriver/docs/solutions/slo-monitoring); edit freely.
+title: SLO monitoring with Cloud Monitoring services, SLIs and burn-rate alerts
+category: observability
+tags:
+- slo
+- sli
+- error budget
+- burn rate
+- cloud monitoring
+- alerting
+source: https://docs.cloud.google.com/stackdriver/docs/solutions/slo-monitoring
+description: A Cloud Run API behind a global load balancer is modelled as a Cloud Monitoring service with request-based availability and latency SLIs, each attached to an SLO with a rolling compliance period
+  that defines an error budget. Fast-burn and slow-burn alerting policies watch error-budget consumption and page on-call through PagerDuty and email notification channels.
+nodes:
+- {id: prj-slo-prj, type: gcp.project, name: slo-prj, props: {project_id: slo-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: checkout-glb, type: gcp.res.google_compute_global_forwarding_rule, name: checkout-glb, parent: prj-slo-prj, props: {name: changeme, target: changeme}}
+- {id: checkout-api, type: gcp.cloud_run_service, name: checkout-api, parent: prj-slo-prj}
+- {id: vpc-prj-slo-prj, type: gcp.vpc, name: main, parent: prj-slo-prj}
+- {id: checkout-db, type: gcp.cloud_sql_instance, name: checkout-db, parent: vpc-prj-slo-prj}
+- {id: checkout-service, type: gcp.res.google_monitoring_custom_service, name: checkout-service, parent: prj-slo-prj}
+- {id: availability-slo, type: gcp.res.google_monitoring_slo, name: availability-slo, parent: prj-slo-prj, props: {goal: 1, service: changeme}}
+- {id: latency-slo, type: gcp.res.google_monitoring_slo, name: latency-slo, parent: prj-slo-prj, props: {goal: 1, service: changeme}}
+- id: fast-burn-alert
+  type: gcp.res.google_monitoring_alert_policy
+  name: fast-burn-alert
+  parent: prj-slo-prj
+  props:
+    combiner: changeme
+    conditions: []
+    display_name: changeme
+- id: slow-burn-alert
+  type: gcp.res.google_monitoring_alert_policy
+  name: slow-burn-alert
+  parent: prj-slo-prj
+  props:
+    combiner: changeme
+    conditions: []
+    display_name: changeme
+- {id: pagerduty-channel, type: gcp.res.google_monitoring_notification_channel, name: pagerduty-channel, parent: prj-slo-prj, props: {type: changeme}}
+- {id: email-channel, type: gcp.res.google_monitoring_notification_channel, name: email-channel, parent: prj-slo-prj, props: {type: changeme}}
+edges:
+- {from: users, to: checkout-glb, label: HTTPS, step: '1'}
+- {from: checkout-glb, to: checkout-api, label: serverless NEG, step: '2'}
+- {from: checkout-api, to: checkout-db, label: SQL, step: '3'}
+- {from: checkout-api, to: checkout-service, label: request count and latency metrics, step: '4'}
+- {from: checkout-service, to: availability-slo, label: good / total requests SLI}
+- {from: checkout-service, to: latency-slo, label: latency threshold SLI}
+- {from: availability-slo, to: fast-burn-alert, label: 1h burn rate, step: '5'}
+- {from: availability-slo, to: slow-burn-alert, label: 24h burn rate, step: '5'}
+- {from: latency-slo, to: slow-burn-alert, label: 24h burn rate, step: '5'}
+- {from: fast-burn-alert, to: pagerduty-channel, label: page on-call, step: '6'}
+- {from: slow-burn-alert, to: email-channel, label: ticket / email, step: '6'}
+steps:
+- {n: '1', text: 'users → checkout-glb: HTTPS'}
+- {n: '2', text: 'checkout-glb → checkout-api: serverless NEG'}
+- {n: '3', text: 'checkout-api → checkout-db: SQL'}
+- {n: '4', text: 'checkout-api → checkout-service: request count and latency metrics'}
+- {n: '5', text: 'availability-slo → fast-burn-alert: 1h burn rate'}
+- {n: '6', text: 'fast-burn-alert → pagerduty-channel: page on-call'}

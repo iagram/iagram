@@ -18,6 +18,8 @@ nodes:
 - {id: rg-rg-conversational-bot, type: azure.resource_group, name: rg-conversational-bot, parent: sub-bots-prod, props: {location: westeurope}}
 - {id: users, type: common.users, name: users}
 - {id: saas, type: common.saas, name: saas}
+- {id: bot-enterprise-assistant, type: azure.res.azurerm_bot_service_azure_bot, name: bot-enterprise-assistant, parent: rg-rg-conversational-bot, props: {location: westeurope, microsoft_app_id: changeme,
+    name: changeme, resource_group_name: changeme, sku: changeme}}
 - {id: asp-bot, type: azure.res.azurerm_service_plan, name: asp-bot, parent: rg-rg-conversational-bot, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
 - id: app-bot-messaging
   type: azure.res.azurerm_linux_web_app
@@ -44,13 +46,19 @@ nodes:
 - {id: appi-bot, type: azure.res.azurerm_application_insights, name: appi-bot, parent: rg-rg-conversational-bot, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
 edges:
 - {from: users, to: saas, label: Teams / web chat channel, step: '1'}
+- {from: saas, to: bot-enterprise-assistant, label: channel activity, step: '2'}
+- {from: bot-enterprise-assistant, to: app-bot-messaging, label: HTTPS POST /api/messages, step: '3'}
 - {from: app-bot-messaging, to: language-clu-qna, label: CLU intents and custom question answering, step: '4'}
 - {from: language-clu-qna, to: srch-qna-knowledge, label: knowledge base index}
 - {from: app-bot-messaging, to: cosmos-bot-state, label: conversation and user state, step: '5'}
 - {from: app-bot-messaging, to: stbottranscripts, label: transcript logging}
+- {from: app-bot-messaging, to: bot-enterprise-assistant, label: reply activity, step: '6'}
 - {from: app-bot-messaging, to: kv-bot, label: app ID and secrets}
 - {from: app-bot-messaging, to: appi-bot, label: telemetry}
 steps:
 - {n: '1', text: 'users → saas: Teams / web chat channel'}
+- {n: '2', text: 'saas → bot-enterprise-assistant: channel activity'}
+- {n: '3', text: 'bot-enterprise-assistant → app-bot-messaging: HTTPS POST /api/messages'}
 - {n: '4', text: 'app-bot-messaging → language-clu-qna: CLU intents and custom question answering'}
 - {n: '5', text: 'app-bot-messaging → cosmos-bot-state: conversation and user state'}
+- {n: '6', text: 'app-bot-messaging → bot-enterprise-assistant: reply activity'}

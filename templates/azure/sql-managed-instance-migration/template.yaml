@@ -1,0 +1,59 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/data-migration/sql-server/managed-instance/overview); edit freely.
+title: Migrate SQL Server to Azure SQL Managed Instance
+category: migration
+tags:
+- sql-managed-instance
+- managed-instance-link
+- log-replay-service
+- native-backup-restore
+- azure-migrate
+- database-migration-service
+- expressroute
+source: https://learn.microsoft.com/en-us/data-migration/sql-server/managed-instance/overview
+description: Azure Migrate assesses the on-premises SQL Server estate and recommends a service tier; databases then move to a SQL Managed Instance in a dedicated subnet via the Managed Instance link (distributed
+  availability group replication for minimal downtime), the Log Replay Service restoring backups from Blob Storage, or native backup and restore. Azure Database Migration Service handles logins, SQL Agent
+  jobs and SSIS packages, and Key Vault holds migrated TDE certificates.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-data-migration, type: azure.subscription, name: data-migration, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-sqlmi-migration, type: azure.resource_group, name: rg-sqlmi-migration, parent: sub-data-migration, props: {location: westeurope}}
+- {id: vpc-vnet-sqlmi, type: azure.vnet, name: vnet-sqlmi, parent: rg-rg-sqlmi-migration, props: {cidr: 10.50.0.0/16}}
+- {id: sub-snet-managed-instance, type: azure.subnet, name: snet-managed-instance, parent: vpc-vnet-sqlmi, props: {cidr: 10.50.1.0/24}}
+- {id: sub-snet-dms, type: azure.subnet, name: snet-dms, parent: vpc-vnet-sqlmi, props: {cidr: 10.50.2.0/24}}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-sqlmi, props: {cidr: 10.50.255.0/27}}
+- {id: users, type: common.users, name: users}
+- id: vpngw-hybrid
+  type: azure.res.azurerm_virtual_network_gateway
+  name: vpngw-hybrid
+  parent: sub-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- {id: sqlmi-prod-bc, type: azure.res.azurerm_mssql_managed_instance, name: sqlmi-prod-bc, parent: sub-snet-managed-instance, props: {license_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme, storage_size_in_gb: 1, subnet_id: changeme, vcores: 1}}
+- {id: dms-sqlserver, type: azure.res.azurerm_database_migration_service, name: dms-sqlserver, parent: sub-snet-dms, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme,
+    subnet_id: changeme}}
+- {id: stbackups-lrs, type: azure.storage_account, name: stbackups-lrs, parent: rg-rg-sqlmi-migration}
+- {id: kv-tde-certificates, type: azure.key_vault, name: kv-tde-certificates, parent: rg-rg-sqlmi-migration}
+- {id: law-sql-insights, type: azure.res.azurerm_log_analytics_workspace, name: law-sql-insights, parent: rg-rg-sqlmi-migration, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: adf-data-copy, type: azure.res.azurerm_data_factory, name: adf-data-copy, parent: rg-rg-sqlmi-migration, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: dc-on-premises, to: vpngw-hybrid, label: ExpressRoute / site-to-site VPN, step: '1'}
+- {from: dc-on-premises, to: sqlmi-prod-bc, label: Managed Instance link (distributed AG), step: '2'}
+- {from: dc-on-premises, to: stbackups-lrs, label: full, step: '2'}
+- {from: stbackups-lrs, to: sqlmi-prod-bc, label: Log Replay Service / native restore, step: '3'}
+- {from: dms-sqlserver, to: sqlmi-prod-bc, label: logins, step: '4'}
+- {from: adf-data-copy, to: sqlmi-prod-bc, label: copy activity (optional table migration)}
+- {from: kv-tde-certificates, to: sqlmi-prod-bc, label: TDE certificate}
+- {from: sqlmi-prod-bc, to: law-sql-insights, label: Azure SQL Analytics}
+- {from: users, to: sqlmi-prod-bc, label: application cutover (TDS 1433), step: '5'}
+steps:
+- {n: '1', text: 'datacenter → vpngw-hybrid: ExpressRoute / site-to-site VPN'}
+- {n: '2', text: 'datacenter → sqlmi-prod-bc: Managed Instance link (distributed AG)'}
+- {n: '3', text: 'stbackups-lrs → sqlmi-prod-bc: Log Replay Service / native restore'}
+- {n: '4', text: 'dms-sqlserver → sqlmi-prod-bc: logins'}
+- {n: '5', text: 'users → sqlmi-prod-bc: application cutover (TDS 1433)'}

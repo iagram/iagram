@@ -39,6 +39,7 @@ nodes:
     version: []
 - {id: app-health-check, type: gcp.res.google_compute_health_check, name: app-health-check, parent: prj-prj-p-global-app, props: {name: changeme}}
 - {id: orders-spanner-nam3, type: gcp.res.google_spanner_instance, name: orders-spanner-nam3, parent: prj-prj-p-global-app, props: {config: changeme, display_name: changeme}}
+- {id: orders-db, type: gcp.res.google_spanner_database, name: orders-db, parent: prj-prj-p-global-app, props: {instance: changeme, name: changeme}}
 - {id: assets-dual-region, type: gcp.storage_bucket, name: assets-dual-region, parent: prj-prj-p-global-app}
 edges:
 - {from: users, to: global-https-rule, label: HTTPS anycast, step: '1'}
@@ -47,6 +48,9 @@ edges:
 - {from: app-global-backend, to: web-mig-use4, label: nearest region, step: '4'}
 - {from: app-global-backend, to: web-mig-use1, label: nearest region / failover, step: '4'}
 - {from: app-health-check, to: web-mig-use4, label: health, step: '5'}
+- {from: web-mig-use4, to: orders-db, label: strongly consistent reads and writes, step: '6'}
+- {from: web-mig-use1, to: orders-db, label: strongly consistent reads and writes, step: '6'}
+- {from: orders-spanner-nam3, to: orders-db, label: nam3 read-write replicas plus witness, step: '7'}
 - {from: web-mig-use1, to: assets-dual-region, label: static assets, step: '8'}
 steps:
 - {n: '1', text: 'users → global-https-rule: HTTPS anycast'}
@@ -54,4 +58,6 @@ steps:
 - {n: '3', text: 'app-armor-policy → app-global-backend: allowed'}
 - {n: '4', text: 'app-global-backend → web-mig-use4: nearest region'}
 - {n: '5', text: 'app-health-check → web-mig-use4: health'}
+- {n: '6', text: 'web-mig-use4 → orders-db: strongly consistent reads and writes'}
+- {n: '7', text: 'orders-spanner-nam3 → orders-db: nam3 read-write replicas plus witness'}
 - {n: '8', text: 'web-mig-use1 → assets-dual-region: static assets'}

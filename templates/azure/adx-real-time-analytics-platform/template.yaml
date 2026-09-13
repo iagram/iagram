@@ -1,0 +1,56 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/data-explorer/data-explorer-overview); edit freely.
+title: Real-time analytics with Azure Data Explorer
+category: data
+tags:
+- azure-data-explorer
+- kusto
+- kql
+- event-hubs
+- event-grid
+- streaming-ingestion
+- power-bi
+- grafana
+source: https://learn.microsoft.com/en-us/azure/data-explorer/data-explorer-overview
+description: An Azure Data Explorer cluster hosts databases and tables of automatically indexed, partitioned extents; events arrive by queued or streaming ingestion through Event Hubs and blob-arrival Event
+  Grid notifications, while Data Factory copies historical batches. Analysts run KQL time series, anomaly detection and geospatial queries in the web UI, dashboards, Power BI and Grafana, and continuous
+  export writes Parquet back to Data Lake Storage.
+nodes:
+- {id: sub-analytics, type: azure.subscription, name: analytics, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-adx-realtime, type: azure.resource_group, name: rg-adx-realtime, parent: sub-analytics, props: {location: westeurope}}
+- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-adx-realtime}
+- {id: grp-analytics-engine, type: common.group, name: Analytics engine, parent: rg-rg-adx-realtime}
+- {id: grp-consume, type: common.group, name: Consume, parent: rg-rg-adx-realtime}
+- {id: device, type: common.device, name: device}
+- {id: server, type: common.server, name: server}
+- {id: users, type: common.users, name: users}
+- {id: evhns-app-telemetry, type: azure.res.azurerm_eventhub_namespace, name: evhns-app-telemetry, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: stlanding-blobs, type: azure.storage_account, name: stlanding-blobs, parent: grp-ingest}
+- {id: egst-blob-created, type: azure.res.azurerm_eventgrid_system_topic, name: egst-blob-created, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, topic_type: changeme}}
+- {id: adf-historical-load, type: azure.res.azurerm_data_factory, name: adf-historical-load, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: adx-analytics
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-analytics
+  parent: grp-analytics-engine
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: adxdb-telemetry, type: azure.res.azurerm_kusto_database, name: adxdb-telemetry, parent: grp-analytics-engine, props: {cluster_name: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stcontinuous-export, type: azure.storage_account, name: stcontinuous-export, parent: grp-consume}
+- id: app-grafana-dashboards
+  type: azure.res.azurerm_linux_web_app
+  name: app-grafana-dashboards
+  parent: grp-consume
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+edges:
+- {from: device, to: evhns-app-telemetry, label: events and logs, step: '1'}
+- {from: evhns-app-telemetry, to: adxdb-telemetry, label: streaming / queued ingestion, step: '2'}
+- {from: server, to: stlanding-blobs, label: batch files, step: '1'}
+- {from: stlanding-blobs, to: egst-blob-created, label: BlobCreated event}
+- {from: egst-blob-created, to: adxdb-telemetry, label: Event Grid ingestion, step: '2'}
+- {from: adf-historical-load, to: adxdb-telemetry, label: copy activity (historical), step: '2'}
+- {from: adxdb-telemetry, to: stcontinuous-export, label: continuous export (Parquet), step: '3'}
+- {from: users, to: adx-analytics, label: KQL in web UI / Power BI, step: '4'}
+- {from: app-grafana-dashboards, to: adx-analytics, label: Grafana ADX plugin}
+steps:
+- {n: '1', text: 'device → evhns-app-telemetry: events and logs'}
+- {n: '2', text: 'evhns-app-telemetry → adxdb-telemetry: streaming / queued ingestion'}
+- {n: '3', text: 'adxdb-telemetry → stcontinuous-export: continuous export (Parquet)'}
+- {n: '4', text: 'users → adx-analytics: KQL in web UI / Power BI'}

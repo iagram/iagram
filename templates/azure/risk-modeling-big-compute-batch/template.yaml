@@ -1,0 +1,51 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/big-compute); edit freely.
+title: Financial risk modeling with the big compute architecture style on Azure Batch
+category: industry
+tags:
+- financial services
+- risk modeling
+- monte carlo
+- big compute
+- azure batch
+- hpc
+- infiniband
+- burst
+source: https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/big-compute
+description: Big compute workloads such as financial risk modeling and Monte Carlo simulations split into thousands of finite tasks that a scheduler distributes across a burst-provisioned pool of compute-intensive
+  VMs, which scale back to zero when the run finishes. Azure Batch provisions the pool, assigns tasks, monitors progress and autoscales, with input data and results in Azure Storage; tightly coupled tasks
+  use RDMA-capable H-series VMs, and an on-premises HPC Pack head node can burst into Azure over ExpressRoute or VPN.
+nodes:
+- {id: dc-on-premises-hpc, type: common.datacenter, name: on-premises-hpc}
+- {id: sub-risk, type: azure.subscription, name: risk, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-risk-grid, type: azure.resource_group, name: rg-risk-grid, parent: sub-risk, props: {location: westeurope}}
+- {id: vpc-vnet-hpc, type: azure.vnet, name: vnet-hpc, parent: rg-rg-risk-grid, props: {cidr: 10.90.0.0/16}}
+- {id: sub-snet-batch-pool, type: azure.subnet, name: snet-batch-pool, parent: vpc-vnet-hpc, props: {cidr: 10.90.0.0/22}}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-hpc, props: {cidr: 10.90.255.0/27}}
+- {id: user, type: common.user, name: user}
+- {id: batch-risk, type: azure.res.azurerm_batch_account, name: batch-risk, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: striskdata, type: azure.storage_account, name: striskdata, parent: rg-rg-risk-grid}
+- {id: kv-batch, type: azure.key_vault, name: kv-batch, parent: rg-rg-risk-grid}
+- id: vpngw-hpc
+  type: azure.res.azurerm_virtual_network_gateway
+  name: vpngw-hpc
+  parent: sub-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- {id: vpc-rg-rg-risk-grid, type: azure.vnet, name: main, parent: rg-rg-risk-grid, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-risk-grid, type: azure.subnet, name: main, parent: vpc-rg-rg-risk-grid, props: {cidr: 10.200.0.0/24}}
+- {id: vm-hpc-head-node, type: azure.virtual_machine, name: vm-hpc-head-node, parent: sub-rg-rg-risk-grid}
+- {id: law-batch, type: azure.res.azurerm_log_analytics_workspace, name: law-batch, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: striskdata, label: upload market data and application packages, step: '1'}
+- {from: user, to: batch-risk, label: submit job with Monte Carlo tasks, step: '2'}
+- {from: batch-risk, to: kv-batch, label: customer-managed keys}
+- {from: dc-on-premises-hpc, to: vpngw-hpc, label: ExpressRoute / VPN}
+- {from: batch-risk, to: law-batch, label: job and pool metrics}
+steps:
+- {n: '1', text: 'user → striskdata: upload market data and application packages'}
+- {n: '2', text: 'user → batch-risk: submit job with Monte Carlo tasks'}

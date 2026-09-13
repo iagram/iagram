@@ -1,0 +1,49 @@
+# Generated from the official reference (https://docs.cloud.google.com/transcoder/docs/concepts/overview); edit freely.
+title: Media transcoding pipeline with Cloud Storage, Transcoder API, Pub/Sub and Cloud CDN
+category: media
+tags:
+- transcoder api
+- cloud storage
+- pub/sub
+- cloud functions
+- cloud cdn
+- hls
+- dash
+source: https://docs.cloud.google.com/transcoder/docs/concepts/overview
+description: Source assets are uploaded to a Cloud Storage bucket, and an Eventarc-triggered function submits a Transcoder API job from a reusable job template (such as preset/web-hd) that produces HLS,
+  MPEG-DASH and MP4 renditions into an output bucket. Job status changes are published to a Pub/Sub topic consumed by a catalog service, and viewers fetch the renditions through a global load balancer with
+  Cloud CDN in front of the output bucket.
+nodes:
+- {id: prj-media-prj, type: gcp.project, name: media-prj, props: {project_id: media-prj-123456, project: changeme, region: europe-west1}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: media-input, type: gcp.storage_bucket, name: media-input, parent: prj-media-prj}
+- {id: submit-transcode-fn, type: gcp.res.google_cloudfunctions2_function, name: submit-transcode-fn, parent: prj-media-prj, props: {location: westeurope, name: changeme}}
+- {id: web-hd-template, type: gcp.res.google_transcoder_job_template, name: web-hd-template, parent: prj-media-prj, props: {job_template_id: changeme, location: westeurope}}
+- {id: media-output, type: gcp.storage_bucket, name: media-output, parent: prj-media-prj}
+- {id: transcode-status, type: gcp.pubsub_topic, name: transcode-status, parent: prj-media-prj}
+- {id: media-catalog-svc, type: gcp.cloud_run_service, name: media-catalog-svc, parent: prj-media-prj}
+- {id: vpc-prj-media-prj, type: gcp.vpc, name: main, parent: prj-media-prj}
+- {id: catalog-db, type: gcp.cloud_sql_instance, name: catalog-db, parent: vpc-prj-media-prj}
+- {id: media-cdn-backend, type: gcp.res.google_compute_backend_bucket, name: media-cdn-backend, parent: prj-media-prj, props: {bucket_name: changeme, name: changeme}}
+- {id: media-cdn-glb, type: gcp.res.google_compute_global_forwarding_rule, name: media-cdn-glb, parent: prj-media-prj, props: {name: changeme, target: changeme}}
+edges:
+- {from: user, to: media-input, label: upload source asset, step: '1'}
+- {from: media-input, to: submit-transcode-fn, label: eventarc trigger}
+- {from: submit-transcode-fn, to: web-hd-template, label: create job from template, step: '2'}
+- {from: web-hd-template, to: media-output, label: HLS / DASH / MP4 renditions, step: '3'}
+- {from: web-hd-template, to: transcode-status, label: job state notification, step: '4'}
+- {from: transcode-status, to: media-catalog-svc, label: pubsub subscription}
+- {from: media-catalog-svc, to: catalog-db, label: update asset record, step: '5'}
+- {from: users, to: media-cdn-glb, label: playback HTTPS, step: '6'}
+- {from: media-cdn-glb, to: media-cdn-backend, label: Cloud CDN cache, step: '7'}
+- {from: media-cdn-backend, to: media-output, label: origin fetch, step: '8'}
+steps:
+- {n: '1', text: 'user → media-input: upload source asset'}
+- {n: '2', text: 'submit-transcode-fn → web-hd-template: create job from template'}
+- {n: '3', text: 'web-hd-template → media-output: HLS / DASH / MP4 renditions'}
+- {n: '4', text: 'web-hd-template → transcode-status: job state notification'}
+- {n: '5', text: 'media-catalog-svc → catalog-db: update asset record'}
+- {n: '6', text: 'users → media-cdn-glb: playback HTTPS'}
+- {n: '7', text: 'media-cdn-glb → media-cdn-backend: Cloud CDN cache'}
+- {n: '8', text: 'media-cdn-backend → media-output: origin fetch'}

@@ -23,6 +23,7 @@ nodes:
 - {id: build-sign-trigger, type: gcp.res.google_cloudbuild_trigger, name: build-sign-trigger, parent: prj-prj-p-platform}
 - {id: app-images, type: gcp.res.google_artifact_registry_repository, name: app-images, parent: prj-prj-p-platform, props: {format: changeme, repository_id: changeme}}
 - {id: binauthz-key-ring, type: gcp.res.google_kms_key_ring, name: binauthz-key-ring, parent: prj-prj-p-platform, props: {location: westeurope, name: changeme}}
+- {id: attestor-signing-key, type: gcp.res.google_kms_crypto_key, name: attestor-signing-key, parent: prj-prj-p-platform, props: {key_ring: changeme, name: changeme}}
 - id: build-verified-note
   type: gcp.res.google_container_analysis_note
   name: build-verified-note
@@ -44,6 +45,7 @@ edges:
 - {from: users, to: app-source-repo, label: git push, step: '1'}
 - {from: app-source-repo, to: build-sign-trigger, label: trigger build, step: '2'}
 - {from: build-sign-trigger, to: app-images, label: push image and vulnerability scan, step: '3'}
+- {from: build-sign-trigger, to: attestor-signing-key, label: sign digest, step: '4'}
 - {from: build-sign-trigger, to: build-verified-note, label: create attestation occurrence, step: '5'}
 - {from: build-verified-attestor, to: build-verified-note, label: trusts note and public key, step: '6'}
 - {from: require-attestation-policy, to: build-verified-attestor, label: required attestor, step: '7'}
@@ -54,6 +56,7 @@ steps:
 - {n: '1', text: 'users → app-source-repo: git push'}
 - {n: '2', text: 'app-source-repo → build-sign-trigger: trigger build'}
 - {n: '3', text: 'build-sign-trigger → app-images: push image and vulnerability scan'}
+- {n: '4', text: 'build-sign-trigger → attestor-signing-key: sign digest'}
 - {n: '5', text: 'build-sign-trigger → build-verified-note: create attestation occurrence'}
 - {n: '6', text: 'build-verified-attestor → build-verified-note: trusts note and public key'}
 - {n: '7', text: 'require-attestation-policy → build-verified-attestor: required attestor'}

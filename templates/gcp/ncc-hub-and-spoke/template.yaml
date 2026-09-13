@@ -24,6 +24,8 @@ nodes:
 - {id: ncc-hub, type: gcp.res.google_network_connectivity_hub, name: ncc-hub, parent: prj-net-hub}
 - {id: hub-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: hub-vpn-gw, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}}
 - {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}}
+- {id: hub-tunnel-0, type: gcp.res.google_compute_vpn_tunnel, name: hub-tunnel-0, parent: vpc-hub-vpc, props: {name: changeme, shared_secret: changeme}}
+- {id: hub-tunnel-1, type: gcp.res.google_compute_vpn_tunnel, name: hub-tunnel-1, parent: vpc-hub-vpc, props: {name: changeme, shared_secret: changeme}}
 - {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub}
 - {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
 - {id: onprem-vpn-peer, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-vpn-peer, parent: sub-prj-net-hub, props: {name: changeme}}
@@ -33,6 +35,7 @@ nodes:
 edges:
 - {from: ncc-hub, to: vpc-spoke-a, link: google_network_connectivity_spoke}
 - {from: ncc-hub, to: vpc-spoke-b, link: google_network_connectivity_spoke}
+- {from: ncc-hub, to: hub-tunnel-0, label: network connectivity spoke}
 - {from: onprem-vpn-peer, to: hub-vpn-gw, label: IPsec tunnels, step: '1'}
 - {from: hub-router, to: onprem-vpn-peer, label: BGP route exchange, step: '2'}
 - {from: app-a, to: app-b, label: inter-spoke traffic via NCC, step: '3'}

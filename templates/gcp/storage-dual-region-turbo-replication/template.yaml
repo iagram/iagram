@@ -24,6 +24,7 @@ nodes:
 - {id: media-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: media-https-rule, parent: prj-prj-p-media, props: {name: changeme, target: changeme}}
 - {id: media-api-eun1, type: gcp.cloud_run_service, name: media-api-eun1, parent: prj-prj-p-media}
 - {id: media-api-euw4, type: gcp.cloud_run_service, name: media-api-euw4, parent: prj-prj-p-media}
+- {id: media-cmek-key, type: gcp.res.google_kms_crypto_key, name: media-cmek-key, parent: prj-prj-p-media, props: {key_ring: changeme, name: changeme}}
 - id: replication-rpo-alert
   type: gcp.res.google_monitoring_alert_policy
   name: replication-rpo-alert
@@ -41,6 +42,7 @@ edges:
 - {from: media-https-rule, to: media-api-euw4, label: nearest region / failover, step: '2'}
 - {from: media-api-eun1, to: media-eur4-bucket, label: read/write objects, step: '3'}
 - {from: media-api-euw4, to: media-eur4-bucket, label: same bucket path, step: '3'}
+- {from: media-eur4-bucket, to: media-cmek-key, label: CMEK, step: '4'}
 - {from: backup-server, to: onprem-backup-transfer, label: agent-based transfer, step: '5'}
 - {from: onprem-backup-transfer, to: media-eur4-bucket, label: scheduled sync, step: '6'}
 - {from: replication-rpo-alert, to: media-eur4-bucket, label: turbo replication RPO metric, step: '7'}
@@ -48,6 +50,7 @@ steps:
 - {n: '1', text: 'users → media-https-rule: HTTPS'}
 - {n: '2', text: 'media-https-rule → media-api-eun1: nearest region'}
 - {n: '3', text: 'media-api-eun1 → media-eur4-bucket: read/write objects'}
+- {n: '4', text: 'media-eur4-bucket → media-cmek-key: CMEK'}
 - {n: '5', text: 'backup-server → onprem-backup-transfer: agent-based transfer'}
 - {n: '6', text: 'onprem-backup-transfer → media-eur4-bucket: scheduled sync'}
 - {n: '7', text: 'replication-rpo-alert → media-eur4-bucket: turbo replication RPO metric'}

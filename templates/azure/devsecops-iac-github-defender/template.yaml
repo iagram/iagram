@@ -1,0 +1,55 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/devsecops-infrastructure-as-code); edit freely.
+title: DevSecOps for infrastructure as code with GitHub and Defender for Cloud
+category: devops
+tags:
+- devsecops
+- infrastructure as code
+- bicep
+- azure verified modules
+- deployment stacks
+- github advanced security
+- defender for devops
+source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/devsecops-infrastructure-as-code
+description: Infrastructure definitions, tests and policy-as-code checks live in GitHub; pull requests run GitHub Actions workflows that generate deployment previews, GitHub Advanced Security scans secrets
+  and dependencies, and the Microsoft Security DevOps action reports IaC misconfigurations to Defender for Cloud. The pipeline deploys Azure Verified Modules through Azure Resource Manager deployment stacks
+  with deny settings, and Azure Policy, Defender for Cloud, Microsoft Sentinel and Azure Monitor detect drift or threats and open GitHub Issues through a Logic Apps workflow.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-iac-target, type: azure.resource_group, name: rg-iac-target, parent: sub-workload, props: {location: westeurope}}
+- {id: sub-security, type: azure.subscription, name: security, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-secops, type: azure.resource_group, name: rg-secops, parent: sub-security, props: {location: westeurope}}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- {id: kv-iac, type: azure.key_vault, name: kv-iac, parent: rg-rg-iac-target}
+- {id: stiacstate, type: azure.storage_account, name: stiacstate, parent: rg-rg-iac-target}
+- id: app-provisioned
+  type: azure.res.azurerm_linux_web_app
+  name: app-provisioned
+  parent: rg-rg-iac-target
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: plan-provisioned, type: azure.res.azurerm_service_plan, name: plan-provisioned, parent: rg-rg-iac-target, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: law-sentinel, type: azure.res.azurerm_log_analytics_workspace, name: law-sentinel, parent: rg-rg-secops, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: sentinel-onboarding, type: azure.res.azurerm_sentinel_log_analytics_workspace_onboarding, name: sentinel-onboarding, parent: rg-rg-secops, props: {workspace_id: changeme}}
+- {id: defender-cspm, type: azure.res.azurerm_security_center_subscription_pricing, name: defender-cspm, parent: rg-rg-secops, props: {tier: changeme}}
+- {id: ag-drift, type: azure.res.azurerm_monitor_action_group, name: ag-drift, parent: rg-rg-secops, props: {name: changeme, resource_group_name: changeme, short_name: changeme}}
+- {id: logic-create-github-issue, type: azure.res.azurerm_logic_app_workflow, name: logic-create-github-issue, parent: rg-rg-secops, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: saas, label: IaC + tests + policy as code (GitHub Copilot assisted), step: '1'}
+- {from: saas, to: saas, label: 'PR: GitHub Actions preview, Advanced Security, MSDO scan', step: '2'}
+- {from: saas, to: defender-cspm, label: IaC findings to DevOps security in Defender, step: '3'}
+- {from: saas, to: app-provisioned, label: deployment stack (AVM, step: '4'}
+- {from: saas, to: kv-iac, label: provision}
+- {from: saas, to: stiacstate, label: provision}
+- {from: app-provisioned, to: law-sentinel, label: diagnostics}
+- {from: defender-cspm, to: sentinel-onboarding, label: alerts correlated in Sentinel, step: '5'}
+- {from: sentinel-onboarding, to: ag-drift, label: automation rule / alert}
+- {from: ag-drift, to: logic-create-github-issue, label: action group}
+- {from: logic-create-github-issue, to: saas, label: GitHub Issue for drift reconciliation, step: '6'}
+steps:
+- {n: '1', text: 'user → saas: IaC + tests + policy as code (GitHub Copilot assisted)'}
+- {n: '2', text: 'saas → saas: PR: GitHub Actions preview, Advanced Security, MSDO scan'}
+- {n: '3', text: 'saas → defender-cspm: IaC findings to DevOps security in Defender'}
+- {n: '4', text: 'saas → app-provisioned: deployment stack (AVM'}
+- {n: '5', text: 'defender-cspm → sentinel-onboarding: alerts correlated in Sentinel'}
+- {n: '6', text: 'logic-create-github-issue → saas: GitHub Issue for drift reconciliation'}

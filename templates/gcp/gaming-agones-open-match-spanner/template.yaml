@@ -1,0 +1,52 @@
+# Generated from the official reference (https://github.com/googleforgames/global-multiplayer-demo); edit freely.
+title: Global multiplayer game backend with Agones on GKE, Open Match, Spanner and Memorystore
+category: industry
+tags:
+- gaming
+- agones
+- open match
+- gke
+- spanner
+- memorystore
+- cloud deploy
+source: https://github.com/googleforgames/global-multiplayer-demo
+description: Dedicated game servers run as Agones fleets on GKE clusters while backend microservices (frontend, profile, ping discovery, Open Match director and match function) run on GKE Autopilot with
+  Memorystore for Redis backing Open Match state. Player profiles and in-game data live in Spanner, and Cloud Build builds images into Artifact Registry that Cloud Deploy rolls out to the clusters.
+nodes:
+- {id: prj-game-prj, type: gcp.project, name: game-prj, props: {project_id: game-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-game-vpc, type: gcp.vpc, name: game-vpc, parent: prj-game-prj, props: {cidr: 10.80.0.0/16}}
+- {id: sub-gameservers-sub, type: gcp.subnetwork, name: gameservers-sub, parent: vpc-game-vpc, props: {cidr: 10.80.1.0/24, region: europe-west1}}
+- {id: sub-backend-sub, type: gcp.subnetwork, name: backend-sub, parent: vpc-game-vpc, props: {cidr: 10.80.2.0/24, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: game-frontend-glb, type: gcp.res.google_compute_global_forwarding_rule, name: game-frontend-glb, parent: prj-game-prj, props: {name: changeme, target: changeme}}
+- {id: agones-gameservers-gke, type: gcp.gke_cluster, name: agones-gameservers-gke, parent: sub-gameservers-sub}
+- {id: backend-autopilot-gke, type: gcp.gke_cluster, name: backend-autopilot-gke, parent: sub-backend-sub}
+- {id: open-match-redis, type: gcp.res.google_redis_instance, name: open-match-redis, parent: vpc-game-vpc, props: {memory_size_gb: 1, name: changeme}}
+- {id: player-spanner, type: gcp.res.google_spanner_instance, name: player-spanner, parent: prj-game-prj, props: {config: changeme, display_name: changeme}}
+- {id: game-images, type: gcp.res.google_artifact_registry_repository, name: game-images, parent: prj-game-prj, props: {format: changeme, repository_id: changeme}}
+- {id: game-build-trigger, type: gcp.res.google_cloudbuild_trigger, name: game-build-trigger, parent: prj-game-prj}
+- {id: game-delivery-pipeline, type: gcp.res.google_clouddeploy_delivery_pipeline, name: game-delivery-pipeline, parent: prj-game-prj, props: {location: westeurope, name: changeme}}
+edges:
+- {from: users, to: game-frontend-glb, label: login and matchmaking HTTPS, step: '1'}
+- {from: game-frontend-glb, to: backend-autopilot-gke, label: frontend service, step: '2'}
+- {from: backend-autopilot-gke, to: player-spanner, label: player profile read/write, step: '3'}
+- {from: backend-autopilot-gke, to: open-match-redis, label: Open Match tickets, step: '4'}
+- {from: backend-autopilot-gke, to: agones-gameservers-gke, label: allocate game server, step: '5'}
+- {from: users, to: agones-gameservers-gke, label: UDP game traffic, step: '6'}
+- {from: agones-gameservers-gke, to: player-spanner, label: in-game state, step: '7'}
+- {from: user, to: game-build-trigger, label: developer git push, step: '8'}
+- {from: game-build-trigger, to: game-images, label: push image, step: '9'}
+- {from: game-delivery-pipeline, to: agones-gameservers-gke, label: rollout, step: '10'}
+- {from: game-delivery-pipeline, to: backend-autopilot-gke, label: rollout, step: '10'}
+steps:
+- {n: '1', text: 'users → game-frontend-glb: login and matchmaking HTTPS'}
+- {n: '2', text: 'game-frontend-glb → backend-autopilot-gke: frontend service'}
+- {n: '3', text: 'backend-autopilot-gke → player-spanner: player profile read/write'}
+- {n: '4', text: 'backend-autopilot-gke → open-match-redis: Open Match tickets'}
+- {n: '5', text: 'backend-autopilot-gke → agones-gameservers-gke: allocate game server'}
+- {n: '6', text: 'users → agones-gameservers-gke: UDP game traffic'}
+- {n: '7', text: 'agones-gameservers-gke → player-spanner: in-game state'}
+- {n: '8', text: 'user → game-build-trigger: developer git push'}
+- {n: '9', text: 'game-build-trigger → game-images: push image'}
+- {n: '10', text: 'game-delivery-pipeline → agones-gameservers-gke: rollout'}

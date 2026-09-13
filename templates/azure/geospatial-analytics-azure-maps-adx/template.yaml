@@ -1,0 +1,71 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-maps/about-azure-maps); edit freely.
+title: Geospatial analytics with Azure Maps and Azure Data Explorer
+category: data
+tags:
+- azure-maps
+- geospatial
+- geofencing
+- event-hubs
+- azure-data-explorer
+- kql-geo
+- power-bi-azure-maps-visual
+- fabric-maps
+source: https://learn.microsoft.com/en-us/azure/azure-maps/about-azure-maps
+description: Azure Maps provides render, search, geocoding, routing, geofencing, traffic and weather REST APIs and a WebGL Web SDK, while Azure Data Explorer evaluates geospatial KQL functions over high-volume
+  location telemetry ingested from Event Hubs and IoT Hub. Functions enrich positions with Maps geocoding and geofence checks, results are visualised in the Azure Maps Power BI visual and Maps in Fabric
+  Real-Time Intelligence, and GeoJSON reference data is kept in Data Lake Storage.
+nodes:
+- {id: sub-location-intelligence, type: azure.subscription, name: location-intelligence, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-geospatial, type: azure.resource_group, name: rg-geospatial, parent: sub-location-intelligence, props: {location: westeurope}}
+- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-geospatial}
+- {id: grp-enrich, type: common.group, name: Enrich, parent: rg-rg-geospatial}
+- {id: grp-analyze, type: common.group, name: Analyze, parent: rg-rg-geospatial}
+- {id: grp-visualize, type: common.group, name: Visualize, parent: rg-rg-geospatial}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- id: iot-vehicle-positions
+  type: azure.res.azurerm_iothub
+  name: iot-vehicle-positions
+  parent: grp-ingest
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: evhns-location-events, type: azure.res.azurerm_eventhub_namespace, name: evhns-location-events, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: maps-location-services, type: azure.res.azurerm_maps_account, name: maps-location-services, parent: grp-enrich, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: func-geocode-geofence
+  type: azure.res.azurerm_linux_function_app
+  name: func-geocode-geofence
+  parent: grp-enrich
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: adx-geo
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-geo
+  parent: grp-analyze
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: adxdb-positions, type: azure.res.azurerm_kusto_database, name: adxdb-positions, parent: grp-analyze, props: {cluster_name: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stgeojson-reference, type: azure.storage_account, name: stgeojson-reference, parent: grp-analyze}
+- id: fabric-rti-maps
+  type: azure.res.azurerm_fabric_capacity
+  name: fabric-rti-maps
+  parent: grp-visualize
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: app-maps-web-sdk
+  type: azure.res.azurerm_linux_web_app
+  name: app-maps-web-sdk
+  parent: grp-visualize
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+edges:
+- {from: device, to: iot-vehicle-positions, label: GPS positions, step: '1'}
+- {from: iot-vehicle-positions, to: evhns-location-events, label: message routing, step: '2'}
+- {from: evhns-location-events, to: func-geocode-geofence, label: trigger, step: '3'}
+- {from: func-geocode-geofence, to: maps-location-services, label: reverse geocode, step: '3'}
+- {from: evhns-location-events, to: adxdb-positions, label: telemetry ingestion, step: '4'}
+- {from: stgeojson-reference, to: adxdb-positions, label: GeoJSON polygons (external table)}
+- {from: adxdb-positions, to: fabric-rti-maps, label: KQL geo queries to Maps in Fabric / Power BI visual, step: '5'}
+- {from: app-maps-web-sdk, to: maps-location-services, label: Web SDK tiles and search}
+- {from: users, to: app-maps-web-sdk, label: interactive map, step: '6'}
+steps:
+- {n: '1', text: 'device → iot-vehicle-positions: GPS positions'}
+- {n: '2', text: 'iot-vehicle-positions → evhns-location-events: message routing'}
+- {n: '3', text: 'evhns-location-events → func-geocode-geofence: trigger'}
+- {n: '4', text: 'evhns-location-events → adxdb-positions: telemetry ingestion'}
+- {n: '5', text: 'adxdb-positions → fabric-rti-maps: KQL geo queries to Maps in Fabric / Power BI visual'}
+- {n: '6', text: 'users → app-maps-web-sdk: interactive map'}

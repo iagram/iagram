@@ -1,0 +1,55 @@
+# Generated from the official reference (https://docs.cloud.google.com/telecom-network-automation/docs/overview); edit freely.
+title: Telecom network automation with Nephio on GKE, Config Sync and Distributed Cloud edge
+category: industry
+tags:
+- telecom
+- nephio
+- network functions
+- gke
+- config sync
+- distributed cloud edge
+- audit logs
+source: https://docs.cloud.google.com/telecom-network-automation/docs/overview
+description: Telecom Network Automation is a managed Nephio deployment where a GKE orchestration cluster runs Kubernetes operators that apply Configuration as Data from a Git repository to network function
+  clusters on Google Distributed Cloud edge sites through GitOps reconciliation and zero-touch provisioning. Administrative and data-access audit logs are routed to BigQuery for compliance reporting, and
+  edge sites keep running if the management plane is disconnected.
+nodes:
+- {id: dc-cell-site, type: common.datacenter, name: cell-site}
+- {id: prj-tna-prj, type: gcp.project, name: tna-prj, props: {project_id: tna-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-tna-vpc, type: gcp.vpc, name: tna-vpc, parent: prj-tna-prj, props: {cidr: 10.90.0.0/16}}
+- {id: sub-orchestration-sub, type: gcp.subnetwork, name: orchestration-sub, parent: vpc-tna-vpc, props: {cidr: 10.90.1.0/24, region: europe-west1}}
+- {id: user, type: common.user, name: user}
+- {id: nephio-orchestration-gke, type: gcp.gke_cluster, name: nephio-orchestration-gke, parent: sub-orchestration-sub}
+- {id: network-config-repo, type: gcp.res.google_sourcerepo_repository, name: network-config-repo, parent: prj-tna-prj, props: {name: changeme}}
+- {id: config-management-feature, type: gcp.res.google_gke_hub_feature, name: config-management-feature, parent: prj-tna-prj, props: {location: westeurope}}
+- {id: edge-nf-membership, type: gcp.res.google_gke_hub_membership, name: edge-nf-membership, parent: prj-tna-prj, props: {membership_id: changeme}}
+- {id: network-function-images, type: gcp.res.google_artifact_registry_repository, name: network-function-images, parent: prj-tna-prj, props: {format: changeme, repository_id: changeme}}
+- {id: vpc-prj-tna-prj, type: gcp.vpc, name: main, parent: prj-tna-prj}
+- {id: sub-prj-tna-prj, type: gcp.subnetwork, name: main, parent: vpc-prj-tna-prj, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- id: ran-edge-cluster
+  type: gcp.res.google_edgecontainer_cluster
+  name: ran-edge-cluster
+  parent: sub-prj-tna-prj
+  props: {authorization: {}, fleet: {}, location: westeurope, name: changeme, networking: {}}
+- {id: tna-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: tna-vpn-gw, parent: vpc-tna-vpc, props: {name: changeme, network: changeme}}
+- {id: audit-to-bq-sink, type: gcp.res.google_logging_project_sink, name: audit-to-bq-sink, parent: prj-tna-prj, props: {destination: changeme, name: changeme}}
+- {id: network-audit-ds, type: gcp.bigquery_dataset, name: network-audit-ds, parent: prj-tna-prj}
+edges:
+- {from: user, to: network-config-repo, label: network engineer commits intent, step: '1'}
+- {from: network-config-repo, to: nephio-orchestration-gke, label: Configuration as Data, step: '2'}
+- {from: nephio-orchestration-gke, to: config-management-feature, label: rendered packages, step: '3'}
+- {from: ran-edge-cluster, to: tna-vpn-gw, label: edgecontainer vpn connection}
+- {from: ran-edge-cluster, to: edge-nf-membership, label: fleet registration, step: '4'}
+- {from: config-management-feature, to: ran-edge-cluster, label: Config Sync reconciliation, step: '5'}
+- {from: network-function-images, to: ran-edge-cluster, label: network function images, step: '6'}
+- {from: nephio-orchestration-gke, to: audit-to-bq-sink, label: admin and data-access audit logs, step: '7'}
+- {from: audit-to-bq-sink, to: network-audit-ds, label: routed logs, step: '8'}
+steps:
+- {n: '1', text: 'user → network-config-repo: network engineer commits intent'}
+- {n: '2', text: 'network-config-repo → nephio-orchestration-gke: Configuration as Data'}
+- {n: '3', text: 'nephio-orchestration-gke → config-management-feature: rendered packages'}
+- {n: '4', text: 'ran-edge-cluster → edge-nf-membership: fleet registration'}
+- {n: '5', text: 'config-management-feature → ran-edge-cluster: Config Sync reconciliation'}
+- {n: '6', text: 'network-function-images → ran-edge-cluster: network function images'}
+- {n: '7', text: 'nephio-orchestration-gke → audit-to-bq-sink: admin and data-access audit logs'}
+- {n: '8', text: 'audit-to-bq-sink → network-audit-ds: routed logs'}

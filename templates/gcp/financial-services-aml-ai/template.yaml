@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.cloud.google.com/financial-services/anti-money-laundering/docs/concepts/overview); edit freely.
+title: Anti Money Laundering AI on BigQuery banking data
+category: industry
+tags:
+- financial services
+- aml
+- bigquery
+- machine learning
+- risk scoring
+source: https://docs.cloud.google.com/financial-services/anti-money-laundering/docs/concepts/overview
+description: Core banking transactions, customer records and historical suspicious activity reports are landed in BigQuery datasets that follow the AML AI schema, and an AML AI instance with an engine configuration
+  trains a model on that data. Monthly prediction runs write customer risk scores and explainability results back to BigQuery, where investigation tooling consumes them.
+nodes:
+- {id: prj-aml-prj, type: gcp.project, name: aml-prj, props: {project_id: aml-prj-123456, project: changeme, region: europe-west1}}
+- {id: server, type: common.server, name: server}
+- {id: users, type: common.users, name: users}
+- {id: core-banking-landing, type: gcp.storage_bucket, name: core-banking-landing, parent: prj-aml-prj}
+- {id: banking-load-job, type: gcp.res.google_dataflow_job, name: banking-load-job, parent: prj-aml-prj, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: aml-input-ds, type: gcp.bigquery_dataset, name: aml-input-ds, parent: prj-aml-prj}
+- {id: party-transactions, type: gcp.res.google_bigquery_table, name: party-transactions, parent: prj-aml-prj, props: {dataset_id: changeme, table_id: changeme}}
+- {id: aml-results-ds, type: gcp.bigquery_dataset, name: aml-results-ds, parent: prj-aml-prj}
+- {id: aml-prediction-workflow, type: gcp.res.google_workflows_workflow, name: aml-prediction-workflow, parent: prj-aml-prj}
+- {id: monthly-prediction-schedule, type: gcp.res.google_cloud_scheduler_job, name: monthly-prediction-schedule, parent: prj-aml-prj, props: {name: changeme}}
+- {id: investigation-ui, type: gcp.cloud_run_service, name: investigation-ui, parent: prj-aml-prj}
+- {id: aml-cmek-ring, type: gcp.res.google_kms_key_ring, name: aml-cmek-ring, parent: prj-aml-prj, props: {location: westeurope, name: changeme}}
+edges:
+- {from: server, to: core-banking-landing, label: nightly core banking extracts, step: '1'}
+- {from: core-banking-landing, to: banking-load-job, label: batch load, step: '2'}
+- {from: banking-load-job, to: party-transactions, label: AML AI schema tables, step: '3'}
+- {from: monthly-prediction-schedule, to: aml-prediction-workflow, label: monthly trigger, step: '4'}
+- {from: aml-prediction-workflow, to: aml-input-ds, label: AML AI training and prediction read, step: '5'}
+- {from: aml-prediction-workflow, to: aml-results-ds, label: risk scores written, step: '6'}
+- {from: aml-cmek-ring, to: aml-input-ds, label: CMEK}
+- {from: users, to: investigation-ui, label: investigators, step: '7'}
+- {from: investigation-ui, to: aml-results-ds, label: query risk scores, step: '8'}
+steps:
+- {n: '1', text: 'server → core-banking-landing: nightly core banking extracts'}
+- {n: '2', text: 'core-banking-landing → banking-load-job: batch load'}
+- {n: '3', text: 'banking-load-job → party-transactions: AML AI schema tables'}
+- {n: '4', text: 'monthly-prediction-schedule → aml-prediction-workflow: monthly trigger'}
+- {n: '5', text: 'aml-prediction-workflow → aml-input-ds: AML AI training and prediction read'}
+- {n: '6', text: 'aml-prediction-workflow → aml-results-ds: risk scores written'}
+- {n: '7', text: 'users → investigation-ui: investigators'}
+- {n: '8', text: 'investigation-ui → aml-results-ds: query risk scores'}

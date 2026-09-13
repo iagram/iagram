@@ -34,6 +34,7 @@ nodes:
     location: westeurope
     resource_type: changeme
 - {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-app-sub}
+- {id: app-data-disk, type: gcp.res.google_compute_disk, name: app-data-disk, parent: sub-app-sub, props: {name: changeme}}
 - {id: app-mysql, type: gcp.cloud_sql_instance, name: app-mysql, parent: vpc-workload-vpc}
 - {id: vpc-prj-prj-c-backup, type: gcp.vpc, name: main, parent: prj-prj-c-backup}
 - {id: sub-prj-prj-c-backup, type: gcp.subnetwork, name: main, parent: vpc-prj-prj-c-backup, props: {cidr: 10.200.0.0/24, region: europe-west1}}
@@ -42,6 +43,7 @@ nodes:
 edges:
 - {from: users, to: backup-mgmt-server, label: define plans and restores, step: '1'}
 - {from: app-vm, to: prod-backup-vault, label: incremental-forever backups, step: '3'}
+- {from: app-data-disk, to: prod-backup-vault, label: disk backups, step: '3'}
 - {from: app-mysql, to: prod-backup-vault, label: Cloud SQL backups, step: '4'}
 - {from: vmware-db-vm, to: backup-recovery-appliance, label: VMware snapshot capture, step: '5'}
 - {from: backup-recovery-appliance, to: prod-backup-vault, label: OnVault to Google Cloud, step: '6'}

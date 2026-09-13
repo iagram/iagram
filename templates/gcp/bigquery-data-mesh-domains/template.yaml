@@ -23,6 +23,16 @@ nodes:
 - {id: marketing-raw-bucket, type: gcp.storage_bucket, name: marketing-raw-bucket, parent: prj-marketing-domain}
 - {id: marketing-product-dataset, type: gcp.bigquery_dataset, name: marketing-product-dataset, parent: prj-marketing-domain}
 - {id: mesh-catalog-lake, type: gcp.res.google_dataplex_lake, name: mesh-catalog-lake, parent: prj-central-governance, props: {location: westeurope, name: changeme}}
+- id: sales-product-asset
+  type: gcp.res.google_dataplex_asset
+  name: sales-product-asset
+  parent: prj-central-governance
+  props: {dataplex_zone: changeme, discovery_spec: {}, lake: changeme, location: westeurope, name: changeme, resource_spec: {}}
+- id: marketing-product-asset
+  type: gcp.res.google_dataplex_asset
+  name: marketing-product-asset
+  parent: prj-central-governance
+  props: {dataplex_zone: changeme, discovery_spec: {}, lake: changeme, location: westeurope, name: changeme, resource_spec: {}}
 - {id: consumer-views-dataset, type: gcp.bigquery_dataset, name: consumer-views-dataset, parent: prj-consumer-analytics}
 - id: consumer-looker
   type: gcp.res.google_looker_instance
@@ -34,6 +44,8 @@ edges:
 - {from: sales-events-topic, to: sales-ingest-job, label: stream, step: '2'}
 - {from: sales-ingest-job, to: sales-product-dataset, label: write product tables, step: '3'}
 - {from: marketing-raw-bucket, to: marketing-product-dataset, label: load, step: '4'}
+- {from: sales-product-asset, to: sales-product-dataset, label: catalog, step: '5'}
+- {from: marketing-product-asset, to: marketing-product-dataset, label: catalog, step: '6'}
 - {from: consumer-views-dataset, to: sales-product-dataset, label: authorized views, step: '7'}
 - {from: consumer-views-dataset, to: marketing-product-dataset, label: authorized views, step: '8'}
 - {from: consumer-looker, to: consumer-views-dataset, label: query, step: '9'}
@@ -43,6 +55,8 @@ steps:
 - {n: '2', text: 'sales-events-topic → sales-ingest-job: stream'}
 - {n: '3', text: 'sales-ingest-job → sales-product-dataset: write product tables'}
 - {n: '4', text: 'marketing-raw-bucket → marketing-product-dataset: load'}
+- {n: '5', text: 'sales-product-asset → sales-product-dataset: catalog'}
+- {n: '6', text: 'marketing-product-asset → marketing-product-dataset: catalog'}
 - {n: '7', text: 'consumer-views-dataset → sales-product-dataset: authorized views'}
 - {n: '8', text: 'consumer-views-dataset → marketing-product-dataset: authorized views'}
 - {n: '9', text: 'consumer-looker → consumer-views-dataset: query'}

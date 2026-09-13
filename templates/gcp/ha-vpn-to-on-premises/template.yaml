@@ -18,14 +18,19 @@ nodes:
 - {id: sub-hybrid-ew2, type: gcp.subnetwork, name: hybrid-ew2, parent: vpc-hybrid-vpc, props: {cidr: 10.60.0.0/24, region: europe-west2}}
 - {id: ha-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: ha-vpn-gw, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}}
 - {id: vpn-router, type: gcp.res.google_compute_router, name: vpn-router, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}}
+- {id: tunnel-if0, type: gcp.res.google_compute_vpn_tunnel, name: tunnel-if0, parent: vpc-hybrid-vpc, props: {name: changeme, shared_secret: changeme}}
+- {id: tunnel-if1, type: gcp.res.google_compute_vpn_tunnel, name: tunnel-if1, parent: vpc-hybrid-vpc, props: {name: changeme, shared_secret: changeme}}
 - {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub}
 - {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
 - {id: onprem-peer-gw, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-peer-gw, parent: sub-prj-net-hub, props: {name: changeme}}
 - {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-hybrid-ew2}
 - {id: allow-onprem, type: gcp.firewall_rule, name: allow-onprem, parent: vpc-hybrid-vpc}
 edges:
+- {from: onprem-peer-gw, to: tunnel-if0, label: IPsec tunnel 0, step: '1'}
+- {from: onprem-peer-gw, to: tunnel-if1, label: IPsec tunnel 1, step: '1'}
 - {from: vpn-router, to: onprem-peer-gw, label: BGP over both tunnels, step: '2'}
 - {from: app-vm, to: onprem-peer-gw, label: private traffic ECMP, step: '3'}
 steps:
+- {n: '1', text: 'onprem-peer-gw → tunnel-if0: IPsec tunnel 0'}
 - {n: '2', text: 'vpn-router → onprem-peer-gw: BGP over both tunnels'}
 - {n: '3', text: 'app-vm → onprem-peer-gw: private traffic ECMP'}

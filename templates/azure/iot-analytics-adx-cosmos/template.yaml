@@ -1,0 +1,81 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/iot-azure-data-explorer); edit freely.
+title: IoT analytics with Azure Data Explorer and IoT Hub
+category: iot
+tags:
+- iot-hub
+- event-hubs
+- azure-data-explorer
+- cosmos-db
+- stream-analytics
+- functions
+- digital-twins
+- time-series
+source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/iot-azure-data-explorer
+description: IoT Hub, Event Hubs or Kafka ingest device telemetry; Azure Functions or Stream Analytics process it and Azure Cosmos DB serves an operational app while Azure Data Explorer ingests the same
+  streams through native connectors for near real-time analytics. Cosmos DB change feed triggers Functions that push events back to Event Hubs or Azure Digital Twins, and ADX feeds dashboards, Power BI,
+  Grafana, Logic Apps alerts and Databricks or Machine Learning scoring.
+nodes:
+- {id: sub-iot-platform, type: azure.subscription, name: iot-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-iot-analytics, type: azure.resource_group, name: rg-iot-analytics, parent: sub-iot-platform, props: {location: westeurope}}
+- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-iot-analytics}
+- {id: grp-operational-path, type: common.group, name: Operational path, parent: rg-rg-iot-analytics}
+- {id: grp-analytical-path, type: common.group, name: Analytical path, parent: rg-rg-iot-analytics}
+- {id: grp-serve, type: common.group, name: Serve, parent: rg-rg-iot-analytics}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: mobile, type: common.mobile, name: mobile}
+- id: iot-fleet-hub
+  type: azure.res.azurerm_iothub
+  name: iot-fleet-hub
+  parent: grp-ingest
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: evhns-business-events, type: azure.res.azurerm_eventhub_namespace, name: evhns-business-events, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: asa-hot-path, type: azure.res.azurerm_stream_analytics_job, name: asa-hot-path, parent: grp-operational-path, props: {location: westeurope, name: changeme, resource_group_name: changeme, transformation_query: changeme}}
+- id: func-change-feed
+  type: azure.res.azurerm_linux_function_app
+  name: func-change-feed
+  parent: grp-operational-path
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: cosmos-operational
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-operational
+  parent: grp-operational-path
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: dt-fleet-model, type: azure.res.azurerm_digital_twins_instance, name: dt-fleet-model, parent: grp-operational-path, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: adx-iot
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-iot
+  parent: grp-analytical-path
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: adxdb-telemetry, type: azure.res.azurerm_kusto_database, name: adxdb-telemetry, parent: grp-analytical-path, props: {cluster_name: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stiot-lake, type: azure.storage_account, name: stiot-lake, parent: grp-analytical-path}
+- {id: dbw-iot-ml, type: azure.res.azurerm_databricks_workspace, name: dbw-iot-ml, parent: grp-serve, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: logic-anomaly-alerts, type: azure.res.azurerm_logic_app_workflow, name: logic-anomaly-alerts, parent: grp-serve, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: device, to: iot-fleet-hub, label: device telemetry (MQTT/AMQP), step: '1'}
+- {from: device, to: evhns-business-events, label: business events, step: '1'}
+- {from: iot-fleet-hub, to: asa-hot-path, label: near real-time processing, step: '2'}
+- {from: asa-hot-path, to: cosmos-operational, label: JSON documents, step: '3'}
+- {from: cosmos-operational, to: mobile, label: operational app}
+- {from: cosmos-operational, to: func-change-feed, label: change feed trigger, step: '5'}
+- {from: func-change-feed, to: dt-fleet-model, label: update twins via API, step: '5'}
+- {from: func-change-feed, to: evhns-business-events, label: re-publish for analytics, step: '5'}
+- {from: iot-fleet-hub, to: adxdb-telemetry, label: IoT Hub data connection, step: '4'}
+- {from: evhns-business-events, to: adxdb-telemetry, label: Event Hubs data connection, step: '4'}
+- {from: adxdb-telemetry, to: stiot-lake, label: continuous export (Parquet)}
+- {from: adx-iot, to: dbw-iot-ml, label: Spark connector for ML}
+- {from: adx-iot, to: logic-anomaly-alerts, label: alerts and notifications, step: '6'}
+- {from: users, to: adx-iot, label: ADX dashboards / Power BI / Grafana, step: '6'}
+steps:
+- {n: '1', text: 'device → iot-fleet-hub: device telemetry (MQTT/AMQP)'}
+- {n: '2', text: 'iot-fleet-hub → asa-hot-path: near real-time processing'}
+- {n: '3', text: 'asa-hot-path → cosmos-operational: JSON documents'}
+- {n: '4', text: 'iot-fleet-hub → adxdb-telemetry: IoT Hub data connection'}
+- {n: '5', text: 'cosmos-operational → func-change-feed: change feed trigger'}
+- {n: '6', text: 'adx-iot → logic-anomaly-alerts: alerts and notifications'}

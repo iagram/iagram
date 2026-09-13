@@ -1,0 +1,84 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/industry/mobility/architecture/automotive-connected-fleets-content); edit freely.
+title: Automotive connected fleets reference architecture
+category: industry
+tags:
+- connected vehicles
+- telematics
+- event grid mqtt
+- iot hub
+- event hubs
+- azure data explorer
+- cosmos db
+- synapse
+- fleet management
+source: https://learn.microsoft.com/en-us/industry/mobility/architecture/automotive-connected-fleets-content
+description: Vehicles publish protobuf or JSON telemetry over MQTT to Azure Event Grid (or IoT Hub); Azure Functions validate metadata, decode, enrich and route messages using configuration and vehicle
+  registrations stored in Cosmos DB, and archive raw, decoded and failed messages in a data lake. The fleet integration layer receives standardized payloads on Event Hubs, ingests status, events and trips
+  into Azure Data Explorer, exposes vehicle APIs through API Management, and Synapse pipelines build bronze/silver/gold tables for Power BI and Dynamics 365 business processes.
+nodes:
+- {id: sub-mobility, type: azure.subscription, name: mobility, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-connected-fleets, type: azure.resource_group, name: rg-connected-fleets, parent: sub-mobility, props: {location: westeurope}}
+- {id: grp-telematics, type: common.group, name: Telematics, parent: rg-rg-connected-fleets}
+- {id: grp-fleet-integration, type: common.group, name: Fleet integration, parent: rg-rg-connected-fleets}
+- {id: grp-analytics, type: common.group, name: Analytics, parent: rg-rg-connected-fleets}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: egns-vehicle-mqtt, type: azure.res.azurerm_eventgrid_namespace, name: egns-vehicle-mqtt, parent: grp-telematics, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: func-message-processing
+  type: azure.res.azurerm_linux_function_app
+  name: func-message-processing
+  parent: grp-telematics
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: cosmos-vehicles-config
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-vehicles-config
+  parent: grp-telematics
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: apim-fleet, type: azure.res.azurerm_api_management, name: apim-fleet, parent: grp-telematics, props: {location: westeurope, name: changeme, publisher_email: changeme, publisher_name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: evhns-fleet-integration, type: azure.res.azurerm_eventhub_namespace, name: evhns-fleet-integration, parent: grp-fleet-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}}
+- {id: evh-vehicle-status, type: azure.res.azurerm_eventhub, name: evh-vehicle-status, parent: grp-fleet-integration, props: {name: changeme, partition_count: 1}}
+- {id: evh-vehicle-events, type: azure.res.azurerm_eventhub, name: evh-vehicle-events, parent: grp-fleet-integration, props: {name: changeme, partition_count: 1}}
+- id: adx-fleet
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-fleet
+  parent: grp-analytics
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: stfleetlake, type: azure.storage_account, name: stfleetlake, parent: grp-analytics}
+- {id: synw-fleet, type: azure.res.azurerm_synapse_workspace, name: synw-fleet, parent: grp-analytics, props: {location: westeurope, name: changeme, resource_group_name: changeme, storage_data_lake_gen2_filesystem_id: changeme}}
+- id: app-fleet-portal
+  type: azure.res.azurerm_linux_web_app
+  name: app-fleet-portal
+  parent: grp-fleet-integration
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: maps-fleet, type: azure.res.azurerm_maps_account, name: maps-fleet, parent: grp-fleet-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+edges:
+- {from: device, to: egns-vehicle-mqtt, label: MQTT telemetry (protobuf / JSON, step: '1'}
+- {from: egns-vehicle-mqtt, to: func-message-processing, label: validate, step: '2'}
+- {from: func-message-processing, to: cosmos-vehicles-config, label: message types, step: '3'}
+- {from: func-message-processing, to: stfleetlake, label: raw, step: '4'}
+- {from: func-message-processing, to: evh-vehicle-status, label: routed by message type, step: '5'}
+- {from: func-message-processing, to: evh-vehicle-events, label: alerts}
+- {from: evh-vehicle-status, to: adx-fleet, label: native ingestion, step: '6'}
+- {from: evh-vehicle-events, to: adx-fleet, label: events and trips tables}
+- {from: apim-fleet, to: cosmos-vehicles-config, label: vehicle and device management API}
+- {from: saas, to: apim-fleet, label: Power Platform connector triggers and actions}
+- {from: stfleetlake, to: synw-fleet, label: bronze / silver / gold pipelines, step: '7'}
+- {from: users, to: app-fleet-portal, label: fleet operations portal}
+- {from: app-fleet-portal, to: maps-fleet, label: geospatial services}
+steps:
+- {n: '1', text: 'device → egns-vehicle-mqtt: MQTT telemetry (protobuf / JSON'}
+- {n: '2', text: 'egns-vehicle-mqtt → func-message-processing: validate'}
+- {n: '3', text: 'func-message-processing → cosmos-vehicles-config: message types'}
+- {n: '4', text: 'func-message-processing → stfleetlake: raw'}
+- {n: '5', text: 'func-message-processing → evh-vehicle-status: routed by message type'}
+- {n: '6', text: 'evh-vehicle-status → adx-fleet: native ingestion'}
+- {n: '7', text: 'stfleetlake → synw-fleet: bronze / silver / gold pipelines'}

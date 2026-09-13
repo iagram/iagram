@@ -1,0 +1,811 @@
+# Azure reference architectures: DevOps & observability, IoT & edge, industry.
+# Sources verified on learn.microsoft.com (2026-09). One official page per item.
+
+- slug: pipelines-cicd-baseline
+  title: CI/CD baseline architecture with Azure Pipelines
+  category: devops
+  tags: [azure pipelines, ci/cd, pull request, staging, artifacts, key vault]
+  source: https://learn.microsoft.com/en-us/azure/devops/pipelines/architectures/devops-pipelines-baseline-architecture
+  description: A pull request pipeline runs lint, build and unit tests on Azure Repos Git; a merge triggers a CI pipeline that adds integration tests, pulls secrets from Key Vault and publishes build artifacts to Azure Artifacts feeds. The published artifact triggers a CD pipeline that deploys to staging, runs acceptance tests, waits for a manual validation and releases to production, while Azure Monitor, Application Insights and a Log Analytics workspace observe both environments.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-cicd-baseline, location: westeurope}
+      groups:
+        - {label: Staging}
+        - {label: Production}
+  elements:
+    - {tf: azurerm_key_vault, name: kv-pipeline-secrets, in: resource_group:rg-cicd-baseline}
+    - {tf: azurerm_service_plan, name: plan-staging, in: group:Staging}
+    - {tf: azurerm_linux_web_app, name: app-staging, in: group:Staging}
+    - {tf: azurerm_service_plan, name: plan-prod, in: group:Production}
+    - {tf: azurerm_linux_web_app, name: app-prod, in: group:Production}
+    - {tf: azurerm_log_analytics_workspace, name: law-cicd, in: resource_group:rg-cicd-baseline}
+    - {tf: azurerm_application_insights, name: appi-cicd, in: resource_group:rg-cicd-baseline}
+  actors: [user, saas]
+  flows:
+    - {from: user, to: saas, label: git push / pull request, step: 1}
+    - {from: saas, to: kv-pipeline-secrets, label: CI pipeline gets secrets, step: 2}
+    - {from: saas, to: app-staging, label: CD deploy + acceptance tests, step: 3}
+    - {from: saas, to: app-prod, label: release after manual validation, step: 4}
+    - {from: app-staging, to: appi-cicd, label: telemetry}
+    - {from: app-prod, to: appi-cicd, label: telemetry}
+    - {from: appi-cicd, to: law-cicd, label: workspace-based storage}
+
+- slug: app-service-pipelines-slot-swap
+  title: CI/CD for Azure Web Apps with deployment slot swap
+  category: devops
+  tags: [azure pipelines, app service, deployment slots, web deploy, slot swap, rollback]
+  source: https://learn.microsoft.com/en-us/azure/devops/pipelines/architectures/devops-pipelines-azure-web-apps-architecture
+  description: A variant of the Azure Pipelines baseline where the CI pipeline produces a Web Deploy package and the CD pipeline deploys it to a staging slot of an App Service web app. Release to production is a swap of the staging and production slots, and rollback swaps them back; Azure Monitor, Application Insights and Log Analytics provide observability.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-webapp-cicd, location: westeurope}
+  elements:
+    - {tf: azurerm_key_vault, name: kv-webapp-cicd, in: resource_group:rg-webapp-cicd}
+    - {tf: azurerm_service_plan, name: plan-webapp, in: resource_group:rg-webapp-cicd}
+    - {tf: azurerm_linux_web_app, name: app-production-slot, in: resource_group:rg-webapp-cicd}
+    - {tf: azurerm_linux_web_app_slot, name: app-staging-slot, in: resource_group:rg-webapp-cicd}
+    - {tf: azurerm_application_insights, name: appi-webapp, in: resource_group:rg-webapp-cicd}
+    - {tf: azurerm_log_analytics_workspace, name: law-webapp, in: resource_group:rg-webapp-cicd}
+  actors: [user, saas, users]
+  flows:
+    - {from: user, to: saas, label: commit to Azure Repos, step: 1}
+    - {from: saas, to: kv-webapp-cicd, label: CI gets secrets, step: 2}
+    - {from: saas, to: app-staging-slot, label: deploy Web Deploy package, step: 3}
+    - {from: app-staging-slot, to: app-production-slot, label: slot swap = release, step: 4}
+    - {from: users, to: app-production-slot, label: HTTPS, step: 5}
+    - {from: app-production-slot, to: appi-webapp, label: telemetry}
+    - {from: appi-webapp, to: law-webapp, label: logs and metrics}
+
+- slug: functions-github-actions-oidc
+  title: Deploy to Azure Functions with GitHub Actions and OIDC
+  category: devops
+  tags: [github actions, azure functions, oidc, workload identity federation, flex consumption, zip deploy]
+  source: https://learn.microsoft.com/en-us/azure/azure-functions/functions-how-to-github-actions
+  description: A GitHub Actions workflow builds the function project on push and authenticates to Azure with OpenID Connect through a Microsoft Entra workload identity federation, so no publish profile or long-lived secret is stored in GitHub. The Azure Functions action deploys the package to the function app, whose runtime state and deployment package live in a storage account and whose telemetry flows to Application Insights.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-functions-gha, location: westeurope}
+  elements:
+    - {tf: azurerm_service_plan, name: plan-flex-consumption, in: resource_group:rg-functions-gha}
+    - {tf: azurerm_linux_function_app, name: func-api, in: resource_group:rg-functions-gha}
+    - {tf: azurerm_storage_account, name: stfuncdeploy, in: resource_group:rg-functions-gha}
+    - {tf: azurerm_application_insights, name: appi-func, in: resource_group:rg-functions-gha}
+    - {tf: azurerm_log_analytics_workspace, name: law-func, in: resource_group:rg-functions-gha}
+    - {tf: azurerm_key_vault, name: kv-func-settings, in: resource_group:rg-functions-gha}
+  actors: [user, saas, idp, client]
+  flows:
+    - {from: user, to: saas, label: push to GitHub, step: 1}
+    - {from: saas, to: idp, label: OIDC token exchange (federated credential), step: 2}
+    - {from: saas, to: func-api, label: functions-action deploy, step: 3}
+    - {from: func-api, to: stfuncdeploy, label: deployment package + runtime state}
+    - {from: func-api, to: kv-func-settings, label: Key Vault references}
+    - {from: client, to: func-api, label: HTTPS trigger, step: 4}
+    - {from: func-api, to: appi-func, label: telemetry}
+    - {from: appi-func, to: law-func, label: workspace}
+
+- slug: aks-blue-green-clusters
+  title: Blue-green deployment of AKS clusters
+  category: devops
+  tags: [aks, blue-green, front door, application gateway, dns switch, cluster upgrade]
+  source: https://learn.microsoft.com/en-us/azure/architecture/guide/aks/blue-green-deployment-for-aks
+  description: A new (green) AKS cluster is deployed next to the live (blue) cluster, its Kubernetes state is synced by CI/CD or GitOps, and it is validated with Azure Monitor metrics before traffic is switched. Each cluster sits behind its own Application Gateway; Azure Front Door and Azure DNS A/CNAME record changes perform the switch, after which the blue cluster is destroyed.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-aks-bluegreen, location: westeurope}
+      groups:
+        - {label: Global edge}
+      vnets:
+        - name: vnet-aks
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: snet-appgw-blue, cidr: 10.20.0.0/24}
+            - {name: snet-appgw-green, cidr: 10.20.1.0/24}
+            - {name: snet-aks-blue, cidr: 10.20.16.0/20}
+            - {name: snet-aks-green, cidr: 10.20.32.0/20}
+  elements:
+    - {tf: azurerm_cdn_frontdoor_profile, name: afd-official-host, in: group:Global edge}
+    - {tf: azurerm_dns_zone, name: dns-contoso, in: group:Global edge}
+    - {tf: azurerm_application_gateway, name: agw-blue, in: subnet:snet-appgw-blue}
+    - {tf: azurerm_application_gateway, name: agw-green, in: subnet:snet-appgw-green}
+    - {tf: azurerm_kubernetes_cluster, name: aks-blue, in: subnet:snet-aks-blue}
+    - {tf: azurerm_kubernetes_cluster, name: aks-green, in: subnet:snet-aks-green}
+    - {tf: azurerm_container_registry, name: acr-shared, in: resource_group:rg-aks-bluegreen}
+    - {tf: azurerm_key_vault, name: kv-aks-shared, in: resource_group:rg-aks-bluegreen}
+    - {tf: azurerm_log_analytics_workspace, name: law-aks, in: resource_group:rg-aks-bluegreen}
+  actors: [users, saas]
+  flows:
+    - {from: users, to: afd-official-host, label: HTTPS official-aks.contoso.com, step: 1}
+    - {from: afd-official-host, to: dns-contoso, label: origin resolves aks.contoso.com, step: 2}
+    - {from: dns-contoso, to: agw-blue, label: "A record: live (T0)", step: 3}
+    - {from: dns-contoso, to: agw-green, label: "A record: after switch (T3)", step: 5}
+    - {from: agw-blue, to: aks-blue, label: ingress}
+    - {from: agw-green, to: aks-green, label: ingress}
+    - {from: saas, to: aks-green, label: "T2: sync Kubernetes state (CI/CD or GitOps)", step: 4}
+    - {from: acr-shared, to: aks-green, label: images + Helm charts}
+    - {from: aks-green, to: kv-aks-shared, label: secrets + certificates}
+    - {from: aks-blue, to: law-aks, label: Container insights}
+    - {from: aks-green, to: law-aks, label: "T1 validation: Azure Monitor metrics"}
+
+- slug: container-apps-blue-green-revisions
+  title: Blue-green deployment in Azure Container Apps
+  category: devops
+  tags: [container apps, revisions, traffic weights, revision labels, blue-green, rollback]
+  source: https://learn.microsoft.com/en-us/azure/container-apps/blue-green-deployment
+  description: A container app runs in multiple-active-revisions mode; the current release is a revision labelled blue that receives 100% of the traffic weight, and a new image is deployed as a second revision labelled green with 0% weight but reachable on its own label FQDN for testing. Switching production is a traffic-weight update to green=100, rollback reverses the weights, and a GitHub workflow or Bicep template drives the cycle.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-aca-bluegreen, location: westeurope}
+  elements:
+    - {tf: azurerm_container_registry, name: acr-aca, in: resource_group:rg-aca-bluegreen}
+    - {tf: azurerm_log_analytics_workspace, name: law-aca, in: resource_group:rg-aca-bluegreen}
+    - {tf: azurerm_container_app_environment, name: cae-prod, in: resource_group:rg-aca-bluegreen}
+    - {tf: azurerm_container_app, name: ca-app-blue-green, in: resource_group:rg-aca-bluegreen}
+    - {tf: azurerm_key_vault, name: kv-aca, in: resource_group:rg-aca-bluegreen}
+    - {tf: azurerm_application_insights, name: appi-aca, in: resource_group:rg-aca-bluegreen}
+  actors: [saas, users, user]
+  flows:
+    - {from: saas, to: acr-aca, label: GitHub workflow pushes image tag = commit, step: 1}
+    - {from: saas, to: ca-app-blue-green, label: az containerapp update (green revision, weight 0), step: 2}
+    - {from: acr-aca, to: ca-app-blue-green, label: pull image}
+    - {from: user, to: ca-app-blue-green, label: test app---green FQDN, step: 3}
+    - {from: saas, to: ca-app-blue-green, label: "traffic set blue=0 green=100", step: 4}
+    - {from: users, to: ca-app-blue-green, label: production FQDN, step: 5}
+    - {from: ca-app-blue-green, to: kv-aca, label: secrets}
+    - {from: cae-prod, to: law-aca, label: console + system logs}
+    - {from: ca-app-blue-green, to: appi-aca, label: telemetry}
+
+- slug: aks-canary-pipelines-manifest
+  title: Canary deployment strategy for Kubernetes with Azure Pipelines
+  category: devops
+  tags: [aks, canary, kubernetes manifest task, azure pipelines, promote, reject, load test]
+  source: https://learn.microsoft.com/en-us/azure/devops/pipelines/ecosystems/kubernetes/canary-demo
+  description: A build stage pushes the image to Azure Container Registry and publishes manifests; a deploy stage uses the KubernetesManifest task with the canary strategy to run baseline and canary pods next to the stable deployment at a 25% share and deploys Fortio to generate load. An approval-gated environment then promotes the canary to stable or rejects it, which rolls the workload back.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-aks-canary, location: westeurope}
+      vnets:
+        - name: vnet-canary
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: snet-aks, cidr: 10.30.0.0/20}
+  elements:
+    - {tf: azurerm_container_registry, name: acr-canary, in: resource_group:rg-aks-canary}
+    - {tf: azurerm_kubernetes_cluster, name: aks-canary, in: subnet:snet-aks}
+    - {tf: azurerm_log_analytics_workspace, name: law-canary, in: resource_group:rg-aks-canary}
+    - {tf: azurerm_monitor_workspace, name: amw-canary, in: resource_group:rg-aks-canary}
+    - {tf: azurerm_dashboard_grafana, name: grafana-canary, in: resource_group:rg-aks-canary}
+    - {tf: azurerm_key_vault, name: kv-canary, in: resource_group:rg-aks-canary}
+  actors: [user, saas]
+  flows:
+    - {from: user, to: saas, label: push to GitHub fork, step: 1}
+    - {from: saas, to: acr-canary, label: "Build stage: Docker@2 buildAndPush", step: 2}
+    - {from: saas, to: aks-canary, label: "DeployCanary: strategy canary, percentage 25", step: 3}
+    - {from: acr-canary, to: aks-canary, label: imagePullSecret pull}
+    - {from: aks-canary, to: amw-canary, label: baseline vs canary metrics (Fortio load)}
+    - {from: amw-canary, to: grafana-canary, label: compare success rates, step: 4}
+    - {from: saas, to: aks-canary, label: "PromoteRejectCanary: promote or reject after approval", step: 5}
+    - {from: aks-canary, to: law-canary, label: container logs}
+    - {from: aks-canary, to: kv-canary, label: secrets}
+
+- slug: aks-gitops-flux
+  title: GitOps application deployments with Flux v2 on AKS and Arc-enabled Kubernetes
+  category: devops
+  tags: [gitops, flux, aks, azure arc, kustomize, helm, pull-based deployment]
+  source: https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2
+  description: The microsoft.flux cluster extension installs the Flux source, kustomize, helm and notification controllers in the cluster, and fluxConfigurations resources created through Azure Resource Manager tell them which Git repository, Bucket or Azure Blob source and kustomizations to reconcile. Reconciliation is pull-based from inside the cluster so no external CI system needs cluster credentials, and Azure Policy can assign the same configuration to fleets of AKS and Arc-enabled clusters.
+  containers:
+    - datacenter: factory-edge
+    - subscription: platform
+      resource_group: {name: rg-gitops, location: westeurope}
+      vnets:
+        - name: vnet-gitops
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: snet-aks, cidr: 10.40.0.0/20}
+  elements:
+    - {tf: azurerm_kubernetes_cluster, name: aks-gitops, in: subnet:snet-aks}
+    - {tf: azurerm_kubernetes_cluster_extension, name: ext-microsoft-flux, in: subnet:snet-aks}
+    - {tf: azurerm_kubernetes_flux_configuration, name: fluxcfg-apps, in: subnet:snet-aks}
+    - {tf: azurerm_arc_kubernetes_cluster, name: arc-k8s-factory, in: datacenter}
+    - {tf: azurerm_container_registry, name: acr-gitops, in: resource_group:rg-gitops}
+    - {tf: azurerm_storage_account, name: stfluxbucket, in: resource_group:rg-gitops}
+    - {tf: azurerm_log_analytics_workspace, name: law-gitops, in: resource_group:rg-gitops}
+  actors: [user, saas]
+  flows:
+    - {from: user, to: saas, label: commit manifests / Helm / Kustomize to Git, step: 1}
+    - {from: user, to: fluxcfg-apps, label: az k8s-configuration flux create, step: 2}
+    - {from: fluxcfg-apps, to: ext-microsoft-flux, label: fluxconfig-agent applies GitRepository + Kustomization, step: 3}
+    - {from: ext-microsoft-flux, to: saas, label: source controller pulls Git (pull-based), step: 4}
+    - {from: ext-microsoft-flux, to: stfluxbucket, label: alternative source (Azure Blob / Bucket)}
+    - {from: ext-microsoft-flux, to: aks-gitops, label: kustomize + helm controllers apply desired state, step: 5}
+    - {from: acr-gitops, to: aks-gitops, label: pull images / OCI Helm charts}
+    - {from: fluxcfg-apps, to: arc-k8s-factory, label: same configuration via Azure Policy at scale}
+    - {from: aks-gitops, to: law-gitops, label: Flux status + reconciliation logs}
+
+- slug: devsecops-iac-github-defender
+  title: DevSecOps for infrastructure as code with GitHub and Defender for Cloud
+  category: devops
+  tags: [devsecops, infrastructure as code, bicep, azure verified modules, deployment stacks, github advanced security, defender for devops]
+  source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/devsecops-infrastructure-as-code
+  description: Infrastructure definitions, tests and policy-as-code checks live in GitHub; pull requests run GitHub Actions workflows that generate deployment previews, GitHub Advanced Security scans secrets and dependencies, and the Microsoft Security DevOps action reports IaC misconfigurations to Defender for Cloud. The pipeline deploys Azure Verified Modules through Azure Resource Manager deployment stacks with deny settings, and Azure Policy, Defender for Cloud, Microsoft Sentinel and Azure Monitor detect drift or threats and open GitHub Issues through a Logic Apps workflow.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-iac-target, location: westeurope}
+    - subscription: security
+      resource_group: {name: rg-secops, location: westeurope}
+  elements:
+    - {tf: azurerm_key_vault, name: kv-iac, in: resource_group:rg-iac-target}
+    - {tf: azurerm_storage_account, name: stiacstate, in: resource_group:rg-iac-target}
+    - {tf: azurerm_linux_web_app, name: app-provisioned, in: resource_group:rg-iac-target}
+    - {tf: azurerm_service_plan, name: plan-provisioned, in: resource_group:rg-iac-target}
+    - {tf: azurerm_log_analytics_workspace, name: law-sentinel, in: resource_group:rg-secops}
+    - {tf: azurerm_sentinel_log_analytics_workspace_onboarding, name: sentinel-onboarding, in: resource_group:rg-secops}
+    - {tf: azurerm_security_center_subscription_pricing, name: defender-cspm, in: resource_group:rg-secops}
+    - {tf: azurerm_monitor_action_group, name: ag-drift, in: resource_group:rg-secops}
+    - {tf: azurerm_logic_app_workflow, name: logic-create-github-issue, in: resource_group:rg-secops}
+  actors: [user, saas]
+  flows:
+    - {from: user, to: saas, label: IaC + tests + policy as code (GitHub Copilot assisted), step: 1}
+    - {from: saas, to: saas, label: "PR: GitHub Actions preview, Advanced Security, MSDO scan", step: 2}
+    - {from: saas, to: defender-cspm, label: IaC findings to DevOps security in Defender, step: 3}
+    - {from: saas, to: app-provisioned, label: deployment stack (AVM, deny settings) via ARM, step: 4}
+    - {from: saas, to: kv-iac, label: provision}
+    - {from: saas, to: stiacstate, label: provision}
+    - {from: app-provisioned, to: law-sentinel, label: diagnostics}
+    - {from: defender-cspm, to: sentinel-onboarding, label: alerts correlated in Sentinel, step: 5}
+    - {from: sentinel-onboarding, to: ag-drift, label: automation rule / alert}
+    - {from: ag-drift, to: logic-create-github-issue, label: action group}
+    - {from: logic-create-github-issue, to: saas, label: GitHub Issue for drift reconciliation, step: 6}
+
+- slug: devsecops-aks-github
+  title: DevSecOps on Azure Kubernetes Service
+  category: security
+  tags: [devsecops, aks, github actions, github advanced security, defender for containers, azure policy, key vault, sentinel]
+  source: https://learn.microsoft.com/en-us/azure/architecture/guide/devsecops/devsecops-on-aks
+  description: Developers authenticate to GitHub through Microsoft Entra ID and commit to a governed repository where GitHub Advanced Security runs code, secret and dependency scanning; GitHub Actions builds the container image, pushes it to Azure Container Registry and deploys to AKS after environment approvals. Defender for Containers scans the registry and cluster, Azure Policy enforces admission rules through Gatekeeper, Key Vault injects secrets at runtime, and Azure Monitor with Managed Prometheus, Log Analytics and Microsoft Sentinel provide monitoring and SIEM.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-devsecops-aks, location: westeurope}
+      vnets:
+        - name: vnet-devsecops
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: snet-aks, cidr: 10.50.0.0/20}
+  elements:
+    - {tf: azurerm_container_registry, name: acr-secure, in: resource_group:rg-devsecops-aks}
+    - {tf: azurerm_kubernetes_cluster, name: aks-secure, in: subnet:snet-aks}
+    - {tf: azurerm_key_vault, name: kv-runtime-secrets, in: resource_group:rg-devsecops-aks}
+    - {tf: azurerm_security_center_subscription_pricing, name: defender-containers, in: resource_group:rg-devsecops-aks}
+    - {tf: azurerm_monitor_workspace, name: amw-prometheus, in: resource_group:rg-devsecops-aks}
+    - {tf: azurerm_dashboard_grafana, name: grafana-aks, in: resource_group:rg-devsecops-aks}
+    - {tf: azurerm_log_analytics_workspace, name: law-aks-secure, in: resource_group:rg-devsecops-aks}
+    - {tf: azurerm_sentinel_log_analytics_workspace_onboarding, name: sentinel-aks, in: resource_group:rg-devsecops-aks}
+  actors: [user, idp, saas]
+  flows:
+    - {from: user, to: idp, label: Entra ID sign-in with MFA, step: 1}
+    - {from: user, to: saas, label: commit to GitHub Enterprise (Advanced Security scans), step: 2}
+    - {from: saas, to: acr-secure, label: GitHub Actions CI builds and pushes image, step: 3}
+    - {from: defender-containers, to: acr-secure, label: image vulnerability scan, step: 4}
+    - {from: saas, to: aks-secure, label: CD after environment approval (OIDC), step: 5}
+    - {from: acr-secure, to: aks-secure, label: pull only trusted registries (Azure Policy)}
+    - {from: aks-secure, to: kv-runtime-secrets, label: secrets injected at runtime}
+    - {from: defender-containers, to: aks-secure, label: runtime threat protection}
+    - {from: aks-secure, to: amw-prometheus, label: Managed Prometheus metrics}
+    - {from: amw-prometheus, to: grafana-aks, label: dashboards}
+    - {from: aks-secure, to: law-aks-secure, label: container logs + audit}
+    - {from: law-aks-secure, to: sentinel-aks, label: SIEM correlation}
+
+- slug: azure-monitor-observability-platform
+  title: Azure Monitor observability platform
+  category: observability
+  tags: [azure monitor, log analytics, azure monitor workspace, application insights, opentelemetry, prometheus, alerts, action groups, grafana]
+  source: https://learn.microsoft.com/en-us/azure/azure-monitor/fundamentals/overview
+  description: Azure Monitor collects metrics, logs, traces and events from Azure resources, VMs, Kubernetes clusters and applications into two workspace types, a Log Analytics workspace for logs and traces queried with KQL and an Azure Monitor workspace for Prometheus and OpenTelemetry metrics queried with PromQL. Application Insights provides OpenTelemetry-based APM, workbooks and Grafana dashboards visualize the data, and alerts drive action groups that run Logic Apps or Automation runbooks and autoscale.
+  containers:
+    - subscription: platform
+      resource_group: {name: rg-monitoring, location: westeurope}
+      groups:
+        - {label: Data sources}
+        - {label: Data platform}
+        - {label: Consume and respond}
+  elements:
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-server, in: group:Data sources}
+    - {tf: azurerm_kubernetes_cluster, name: aks-workload, in: group:Data sources}
+    - {tf: azurerm_linux_web_app, name: app-web, in: group:Data sources}
+    - {tf: azurerm_application_insights, name: appi-web, in: group:Data platform}
+    - {tf: azurerm_log_analytics_workspace, name: law-central, in: group:Data platform}
+    - {tf: azurerm_monitor_workspace, name: amw-metrics, in: group:Data platform}
+    - {tf: azurerm_dashboard_grafana, name: grafana-central, in: group:Consume and respond}
+    - {tf: azurerm_monitor_action_group, name: ag-oncall, in: group:Consume and respond}
+    - {tf: azurerm_logic_app_workflow, name: logic-remediate, in: group:Consume and respond}
+    - {tf: azurerm_automation_account, name: aa-runbooks, in: group:Consume and respond}
+  actors: [user]
+  flows:
+    - {from: vm-app-server, to: law-central, label: Azure Monitor Agent + data collection rules, step: 1}
+    - {from: aks-workload, to: amw-metrics, label: Managed Prometheus metrics, step: 1}
+    - {from: aks-workload, to: law-central, label: container logs}
+    - {from: app-web, to: appi-web, label: OpenTelemetry traces and requests, step: 1}
+    - {from: appi-web, to: law-central, label: workspace-based Application Insights}
+    - {from: law-central, to: grafana-central, label: KQL data source, step: 2}
+    - {from: amw-metrics, to: grafana-central, label: PromQL data source, step: 2}
+    - {from: law-central, to: ag-oncall, label: log and metric alerts, step: 3}
+    - {from: ag-oncall, to: logic-remediate, label: no-code workflow}
+    - {from: ag-oncall, to: aa-runbooks, label: low-code runbook}
+    - {from: ag-oncall, to: user, label: email / SMS / push}
+    - {from: user, to: grafana-central, label: dashboards and workbooks}
+
+- slug: aks-managed-prometheus-grafana
+  title: Monitor AKS with Managed Prometheus, Container insights and Managed Grafana
+  category: observability
+  tags: [aks, managed prometheus, azure monitor workspace, container insights, managed grafana, log analytics, alerts]
+  source: https://learn.microsoft.com/en-us/azure/aks/monitor-aks
+  description: The Azure Monitor agent add-on scrapes Prometheus metrics from the AKS cluster into an Azure Monitor workspace and Container insights sends stdout/stderr and Kubernetes events to a Log Analytics workspace, while control-plane diagnostic settings export API server and audit logs. Azure Managed Grafana visualizes both stores with prebuilt Kubernetes dashboards, and Prometheus recommended alert rules notify an action group.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-aks-monitoring, location: westeurope}
+      vnets:
+        - name: vnet-aks-mon
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: snet-aks, cidr: 10.60.0.0/20}
+  elements:
+    - {tf: azurerm_kubernetes_cluster, name: aks-monitored, in: subnet:snet-aks}
+    - {tf: azurerm_monitor_workspace, name: amw-aks, in: resource_group:rg-aks-monitoring}
+    - {tf: azurerm_log_analytics_workspace, name: law-aks-mon, in: resource_group:rg-aks-monitoring}
+    - {tf: azurerm_dashboard_grafana, name: grafana-aks-mon, in: resource_group:rg-aks-monitoring}
+    - {tf: azurerm_monitor_action_group, name: ag-platform-team, in: resource_group:rg-aks-monitoring}
+    - {tf: azurerm_monitor_alert_prometheus_rule_group, name: prom-recommended-alerts, in: resource_group:rg-aks-monitoring}
+    - {tf: azurerm_storage_account, name: staksdiag, in: resource_group:rg-aks-monitoring}
+  actors: [user]
+  flows:
+    - {from: aks-monitored, to: amw-aks, label: ama-metrics scrapes Prometheus metrics, step: 1}
+    - {from: aks-monitored, to: law-aks-mon, label: Container insights logs + Kubernetes events, step: 2}
+    - {from: aks-monitored, to: law-aks-mon, label: control plane diagnostics (kube-apiserver, kube-audit)}
+    - {from: aks-monitored, to: staksdiag, label: diagnostic archive}
+    - {from: amw-aks, to: grafana-aks-mon, label: PromQL dashboards, step: 3}
+    - {from: law-aks-mon, to: grafana-aks-mon, label: KQL panels}
+    - {from: amw-aks, to: prom-recommended-alerts, label: evaluate rules}
+    - {from: prom-recommended-alerts, to: ag-platform-team, label: fire alert, step: 4}
+    - {from: ag-platform-team, to: user, label: notify}
+    - {from: user, to: grafana-aks-mon, label: view cluster health}
+
+- slug: chaos-studio-resilience-testing
+  title: Resilience testing with Azure Chaos Studio
+  category: resilience
+  tags: [chaos studio, chaos engineering, fault injection, service-direct faults, agent-based faults, game day, ci/cd gate]
+  source: https://learn.microsoft.com/en-us/azure/chaos-studio/chaos-studio-overview
+  description: Chaos Studio Workspaces discover the resources in a subscription or resource group scope and run Scenarios such as Compute Zone Down or DNS Outage against onboarded targets; the classic Experiments model composes service-direct faults (VM shutdown, SQL failover, Redis flush) and agent-based in-guest faults into steps and branches. Results are paired with Azure Monitor telemetry to assess recovery, and experiments can run as deployment gates in CI/CD pipelines or in game days.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-chaos-target, location: westeurope}
+      vnets:
+        - name: vnet-target
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: snet-web, cidr: 10.70.0.0/24}
+            - {name: snet-aks, cidr: 10.70.16.0/20}
+  elements:
+    - {tf: azurerm_chaos_studio_experiment, name: chaos-zone-down, in: resource_group:rg-chaos-target}
+    - {tf: azurerm_chaos_studio_target, name: chaos-target-vmss, in: resource_group:rg-chaos-target}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-web, in: subnet:snet-web}
+    - {tf: azurerm_kubernetes_cluster, name: aks-target, in: subnet:snet-aks}
+    - {tf: azurerm_mssql_server, name: sql-target, in: resource_group:rg-chaos-target}
+    - {tf: azurerm_redis_cache, name: redis-target, in: resource_group:rg-chaos-target}
+    - {tf: azurerm_log_analytics_workspace, name: law-chaos, in: resource_group:rg-chaos-target}
+    - {tf: azurerm_application_insights, name: appi-chaos, in: resource_group:rg-chaos-target}
+    - {tf: azurerm_load_test, name: alt-baseline, in: resource_group:rg-chaos-target}
+  actors: [user, saas]
+  flows:
+    - {from: saas, to: chaos-zone-down, label: pipeline stage starts experiment (deployment gate), step: 1}
+    - {from: user, to: chaos-zone-down, label: game day run}
+    - {from: chaos-zone-down, to: chaos-target-vmss, label: agent-based fault (CPU pressure, process kill), step: 2}
+    - {from: chaos-target-vmss, to: vmss-web, label: onboarded target}
+    - {from: chaos-zone-down, to: aks-target, label: service-direct fault (Chaos Mesh pod faults), step: 2}
+    - {from: chaos-zone-down, to: sql-target, label: service-direct fault (failover), step: 2}
+    - {from: chaos-zone-down, to: redis-target, label: service-direct fault (cache flush), step: 2}
+    - {from: alt-baseline, to: vmss-web, label: load during experiment, step: 3}
+    - {from: vmss-web, to: appi-chaos, label: application telemetry}
+    - {from: aks-target, to: law-chaos, label: platform metrics and logs}
+    - {from: appi-chaos, to: user, label: assess recovery with Scenario report, step: 4}
+
+- slug: iot-hub-cloud-connected
+  title: Cloud-connected IoT solution with IoT Hub, DPS and Digital Twins
+  category: iot
+  tags: [iot hub, device provisioning service, digital twins, device registry, fabric, mqtt, cloud-connected]
+  source: https://learn.microsoft.com/en-us/azure/iot/iot-introduction
+  description: In the cloud-connected pattern devices speak MQTT, AMQP or HTTPS directly to IoT Hub, are provisioned zero-touch by the Device Provisioning Service and are represented as Azure resources through Azure Device Registry. IoT Hub routes telemetry to Event Hubs and downstream analytics and storage, Azure Digital Twins models the environment, and commands flow back from the cloud to devices.
+  containers:
+    - subscription: iot
+      resource_group: {name: rg-iot-cloud, location: westeurope}
+      groups:
+        - {label: Device connectivity}
+        - {label: Data and insights}
+  elements:
+    - {tf: azurerm_iothub_dps, name: dps-fleet, in: group:Device connectivity}
+    - {tf: azurerm_iothub, name: iothub-fleet, in: group:Device connectivity}
+    - {tf: azurerm_eventhub_namespace, name: evhns-telemetry, in: group:Data and insights}
+    - {tf: azurerm_eventhub, name: evh-telemetry, in: group:Data and insights}
+    - {tf: azurerm_stream_analytics_job, name: asa-hot-path, in: group:Data and insights}
+    - {tf: azurerm_digital_twins_instance, name: adt-fleet, in: group:Data and insights}
+    - {tf: azurerm_storage_account, name: stiotcold, in: group:Data and insights}
+    - {tf: azurerm_kusto_cluster, name: adx-iot, in: group:Data and insights}
+    - {tf: azurerm_linux_function_app, name: func-twin-updater, in: group:Data and insights}
+  actors: [device, user]
+  flows:
+    - {from: device, to: dps-fleet, label: enrollment (X.509 / TPM), step: 1}
+    - {from: dps-fleet, to: iothub-fleet, label: assign device to hub, step: 2}
+    - {from: device, to: iothub-fleet, label: MQTT / AMQP telemetry, step: 3}
+    - {from: iothub-fleet, to: device, label: cloud-to-device commands, direct methods}
+    - {from: iothub-fleet, to: evh-telemetry, link: azurerm_iothub_endpoint_eventhub, label: message routing, step: 4}
+    - {from: evh-telemetry, to: asa-hot-path, label: hot path, step: 5}
+    - {from: iothub-fleet, to: stiotcold, link: azurerm_iothub_endpoint_storage_container, label: cold path archive}
+    - {from: evh-telemetry, to: func-twin-updater, label: Event Hubs trigger}
+    - {from: func-twin-updater, to: adt-fleet, label: update twin properties, step: 6}
+    - {from: asa-hot-path, to: adx-iot, label: analytics store}
+    - {from: user, to: adx-iot, label: KQL dashboards}
+
+- slug: iot-edge-stream-analytics-module
+  title: Stream Analytics as an IoT Edge module
+  category: edge
+  tags: [iot edge, stream analytics, edge hub, deployment manifest, local processing, iot hub]
+  source: https://learn.microsoft.com/en-us/azure/iot-edge/tutorial-deploy-stream-analytics
+  description: A Stream Analytics job with the Edge hosting environment is exported as a container definition to a storage account and deployed to an IoT Edge device through an IoT Hub deployment manifest, alongside a simulated temperature sensor module. Edge hub routes sensor telemetry into the job, which computes a 30-second tumbling-window average and sends a reset command back to the sensor module when the threshold is exceeded, while telemetry and alerts also flow upstream to IoT Hub.
+  containers:
+    - datacenter: factory-floor
+    - subscription: iot
+      resource_group: {name: rg-iot-edge, location: westeurope}
+  elements:
+    - {tf: azurerm_iothub, name: iothub-edge, in: resource_group:rg-iot-edge}
+    - {tf: azurerm_stream_analytics_job, name: asa-edge-job, in: resource_group:rg-iot-edge}
+    - {tf: azurerm_storage_account, name: stasajobdef, in: resource_group:rg-iot-edge}
+    - {tf: azurerm_container_registry, name: acr-edge-modules, in: resource_group:rg-iot-edge}
+    - {tf: azurerm_linux_virtual_machine, name: vm-iot-edge-device, in: datacenter}
+    - {tf: azurerm_log_analytics_workspace, name: law-edge, in: resource_group:rg-iot-edge}
+  actors: [device, user]
+  flows:
+    - {from: user, to: asa-edge-job, label: define input/output (Edge Hub) and query, step: 1}
+    - {from: asa-edge-job, to: stasajobdef, label: publish job definition to blob container, step: 2}
+    - {from: user, to: iothub-edge, label: Set modules deployment manifest, step: 3}
+    - {from: iothub-edge, to: vm-iot-edge-device, label: deployment manifest to edgeAgent, step: 4}
+    - {from: acr-edge-modules, to: vm-iot-edge-device, label: pull module images}
+    - {from: stasajobdef, to: vm-iot-edge-device, label: ASAJobInfo fetches job definition}
+    - {from: device, to: vm-iot-edge-device, label: temperature telemetry to edgeHub, step: 5}
+    - {from: vm-iot-edge-device, to: device, label: reset command when avg > 70 (alertsToReset), step: 6}
+    - {from: vm-iot-edge-device, to: iothub-edge, label: telemetryToCloud + alertsToCloud ($upstream), step: 7}
+    - {from: iothub-edge, to: law-edge, label: diagnostics}
+
+- slug: iot-operations-arc-industrial-edge
+  title: Industrial IoT with Azure IoT Operations on Arc-enabled Kubernetes
+  category: edge
+  tags: [azure iot operations, azure arc, opc ua, mqtt broker, data flows, device registry, fabric, event hubs, industrial iot]
+  source: https://learn.microsoft.com/en-us/azure/iot-operations/overview-iot-operations
+  description: Azure IoT Operations runs an edge-native MQTT broker, Akri connectors (including the connector for OPC UA) and data flows on an Azure Arc-enabled Kubernetes cluster at the plant, normalizing and contextualizing OT data locally and tolerating up to 72 hours offline. Assets are registered in Azure Device Registry as ARM resources, and data flows forward processed messages to Event Hubs, Event Grid MQTT, Data Lake Storage, Azure Data Explorer or Microsoft Fabric OneLake for cloud analytics.
+  containers:
+    - datacenter: plant-site
+    - subscription: manufacturing
+      resource_group: {name: rg-iot-ops, location: westeurope}
+      groups:
+        - {label: Cloud data plane}
+  elements:
+    - {tf: azurerm_arc_kubernetes_cluster, name: arc-plant-cluster, in: datacenter}
+    - {tf: azurerm_arc_kubernetes_cluster_extension, name: ext-iot-operations, in: datacenter}
+    - {tf: azurerm_eventhub_namespace, name: evhns-plant, in: group:Cloud data plane}
+    - {tf: azurerm_eventhub, name: evh-plant-telemetry, in: group:Cloud data plane}
+    - {tf: azurerm_eventgrid_namespace, name: egns-mqtt-broker, in: group:Cloud data plane}
+    - {tf: azurerm_storage_account, name: stplantlake, in: group:Cloud data plane}
+    - {tf: azurerm_kusto_cluster, name: adx-plant, in: group:Cloud data plane}
+    - {tf: azurerm_key_vault, name: kv-iot-ops-secrets, in: resource_group:rg-iot-ops}
+    - {tf: azurerm_log_analytics_workspace, name: law-iot-ops, in: resource_group:rg-iot-ops}
+  actors: [device, user]
+  flows:
+    - {from: device, to: ext-iot-operations, label: OPC UA server via connector for OPC UA (Akri), step: 1}
+    - {from: device, to: ext-iot-operations, label: MQTT v3.1.1 / v5 to edge broker, step: 1}
+    - {from: ext-iot-operations, to: arc-plant-cluster, label: MQTT broker, connectors, data flows run on cluster}
+    - {from: user, to: ext-iot-operations, label: operations experience web UI defines assets and data flows, step: 2}
+    - {from: arc-plant-cluster, to: kv-iot-ops-secrets, label: secret sync (Arc secret store)}
+    - {from: ext-iot-operations, to: evh-plant-telemetry, label: data flow endpoint (Kafka protocol), step: 3}
+    - {from: ext-iot-operations, to: egns-mqtt-broker, label: data flow endpoint (MQTT bridge)}
+    - {from: ext-iot-operations, to: stplantlake, label: data flow endpoint (ADLS Gen2 / OneLake)}
+    - {from: ext-iot-operations, to: adx-plant, label: data flow endpoint (Azure Data Explorer)}
+    - {from: evh-plant-telemetry, to: adx-plant, label: streaming ingestion, step: 4}
+    - {from: arc-plant-cluster, to: law-iot-ops, label: Arc-enabled monitoring}
+
+- slug: iot-data-explorer-analytics
+  title: IoT analytics with Azure Data Explorer and IoT Hub
+  category: iot
+  tags: [iot hub, event hubs, azure data explorer, cosmos db, digital twins, stream analytics, time series, anomaly detection]
+  source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/iot-azure-data-explorer
+  description: IoT Hub, Event Hubs or Kafka ingest high-volume device streams; Stream Analytics or Azure Functions process them in near real time and Cosmos DB stores JSON messages for the operational application. Azure Data Explorer ingests the same streams through its IoT Hub and Event Hubs connectors for time-series analytics, anomaly detection and forecasting, exposes results to dashboards, Power BI and Grafana, and integrates with Azure Digital Twins, Databricks and Machine Learning.
+  containers:
+    - subscription: iot
+      resource_group: {name: rg-iot-adx, location: westeurope}
+      groups:
+        - {label: Ingestion}
+        - {label: Operational}
+        - {label: Analytical}
+  elements:
+    - {tf: azurerm_iothub, name: iothub-devices, in: group:Ingestion}
+    - {tf: azurerm_eventhub_namespace, name: evhns-iot, in: group:Ingestion}
+    - {tf: azurerm_eventhub, name: evh-events, in: group:Ingestion}
+    - {tf: azurerm_stream_analytics_job, name: asa-realtime, in: group:Operational}
+    - {tf: azurerm_linux_function_app, name: func-change-feed, in: group:Operational}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-operational, in: group:Operational}
+    - {tf: azurerm_kusto_cluster, name: adx-analytics, in: group:Analytical}
+    - {tf: azurerm_digital_twins_instance, name: adt-assets, in: group:Analytical}
+    - {tf: azurerm_storage_account, name: stdatalake, in: group:Analytical}
+    - {tf: azurerm_databricks_workspace, name: dbw-ml, in: group:Analytical}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-scoring, in: group:Analytical}
+    - {tf: azurerm_dashboard_grafana, name: grafana-iot, in: group:Analytical}
+  actors: [device, users]
+  flows:
+    - {from: device, to: iothub-devices, label: vehicles, plants, sensors, step: 1}
+    - {from: device, to: evh-events, label: logs and business events, step: 1}
+    - {from: iothub-devices, to: asa-realtime, label: built-in endpoint, step: 2}
+    - {from: asa-realtime, to: cosmos-operational, label: JSON messages for operational app, step: 3}
+    - {from: iothub-devices, to: adx-analytics, link: azurerm_kusto_iothub_data_connection, label: IoT Hub data connection, step: 4}
+    - {from: evh-events, to: adx-analytics, link: azurerm_kusto_eventhub_data_connection, label: Event Hubs data connection, step: 4}
+    - {from: cosmos-operational, to: func-change-feed, label: change feed trigger, step: 5}
+    - {from: func-change-feed, to: adt-assets, label: update twins via API}
+    - {from: adt-assets, to: evh-events, label: twin events to Event Hubs}
+    - {from: adx-analytics, to: stdatalake, label: continuous export (Parquet)}
+    - {from: adx-analytics, to: dbw-ml, label: Spark connector}
+    - {from: mlw-scoring, to: adx-analytics, label: export models for scoring}
+    - {from: adx-analytics, to: grafana-iot, label: near real-time dashboards, step: 6}
+    - {from: users, to: cosmos-operational, label: operational web / mobile app}
+
+- slug: digital-twins-building-end-to-end
+  title: End-to-end Azure Digital Twins solution driven by IoT Hub device data
+  category: iot
+  tags: [digital twins, dtdl, iot hub, azure functions, event grid, twin graph, smart building]
+  source: https://learn.microsoft.com/en-us/azure/digital-twins/tutorial-end-to-end
+  description: A twin graph (floor contains room contains thermostat) is created in an Azure Digital Twins instance; an Event Grid subscription on IoT Hub device telemetry triggers a function that updates the thermostat twin's Temperature property. Twin property-change events are routed through an Azure Digital Twins endpoint to an Event Grid topic, where a second function propagates the change to the parent room twin.
+  containers:
+    - subscription: iot
+      resource_group: {name: rg-adt-building, location: westeurope}
+  elements:
+    - {tf: azurerm_iothub, name: iothub-building, in: resource_group:rg-adt-building}
+    - {tf: azurerm_linux_function_app, name: func-hub-to-dt, in: resource_group:rg-adt-building}
+    - {tf: azurerm_linux_function_app, name: func-dt-routed-data, in: resource_group:rg-adt-building}
+    - {tf: azurerm_storage_account, name: stfuncapp, in: resource_group:rg-adt-building}
+    - {tf: azurerm_digital_twins_instance, name: adt-building, in: resource_group:rg-adt-building}
+    - {tf: azurerm_eventgrid_topic, name: egt-twin-changes, in: resource_group:rg-adt-building}
+    - {tf: azurerm_application_insights, name: appi-adt, in: resource_group:rg-adt-building}
+  actors: [device, user]
+  flows:
+    - {from: user, to: adt-building, label: SetupBuildingScenario (DTDL models + twins), step: 1}
+    - {from: device, to: iothub-building, label: thermostat67 telemetry, step: 2}
+    - {from: iothub-building, to: func-hub-to-dt, link: azurerm_eventgrid_event_subscription, label: DeviceTelemetry event subscription, step: 3}
+    - {from: func-hub-to-dt, to: adt-building, label: update thermostat67.Temperature, step: 4}
+    - {from: adt-building, to: egt-twin-changes, link: azurerm_digital_twins_endpoint_eventgrid, label: endpoint + route (property change events), step: 5}
+    - {from: egt-twin-changes, to: func-dt-routed-data, link: azurerm_eventgrid_event_subscription, label: topic subscription, step: 6}
+    - {from: func-dt-routed-data, to: adt-building, label: update room21.Temperature, step: 7}
+    - {from: func-hub-to-dt, to: stfuncapp, label: function app storage}
+    - {from: func-dt-routed-data, to: appi-adt, label: telemetry}
+    - {from: user, to: adt-building, label: ObserveProperties query, step: 8}
+
+- slug: connected-fleets-telematics
+  title: Automotive connected fleets reference architecture
+  category: industry
+  tags: [connected vehicles, telematics, event grid mqtt, iot hub, event hubs, azure data explorer, cosmos db, synapse, fleet management]
+  source: https://learn.microsoft.com/en-us/industry/mobility/architecture/automotive-connected-fleets-content
+  description: Vehicles publish protobuf or JSON telemetry over MQTT to Azure Event Grid (or IoT Hub); Azure Functions validate metadata, decode, enrich and route messages using configuration and vehicle registrations stored in Cosmos DB, and archive raw, decoded and failed messages in a data lake. The fleet integration layer receives standardized payloads on Event Hubs, ingests status, events and trips into Azure Data Explorer, exposes vehicle APIs through API Management, and Synapse pipelines build bronze/silver/gold tables for Power BI and Dynamics 365 business processes.
+  containers:
+    - subscription: mobility
+      resource_group: {name: rg-connected-fleets, location: westeurope}
+      groups:
+        - {label: Telematics}
+        - {label: Fleet integration}
+        - {label: Analytics}
+  elements:
+    - {tf: azurerm_eventgrid_namespace, name: egns-vehicle-mqtt, in: group:Telematics}
+    - {tf: azurerm_iothub_dps, name: dps-vehicles, in: group:Telematics}
+    - {tf: azurerm_linux_function_app, name: func-message-processing, in: group:Telematics}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-vehicles-config, in: group:Telematics}
+    - {tf: azurerm_api_management, name: apim-fleet, in: group:Telematics}
+    - {tf: azurerm_eventhub_namespace, name: evhns-fleet-integration, in: group:Fleet integration}
+    - {tf: azurerm_eventhub, name: evh-vehicle-status, in: group:Fleet integration}
+    - {tf: azurerm_eventhub, name: evh-vehicle-events, in: group:Fleet integration}
+    - {tf: azurerm_kusto_cluster, name: adx-fleet, in: group:Analytics}
+    - {tf: azurerm_storage_account, name: stfleetlake, in: group:Analytics}
+    - {tf: azurerm_synapse_workspace, name: synw-fleet, in: group:Analytics}
+    - {tf: azurerm_linux_web_app, name: app-fleet-portal, in: group:Fleet integration}
+    - {tf: azurerm_maps_account, name: maps-fleet, in: group:Fleet integration}
+  actors: [device, users, saas]
+  flows:
+    - {from: device, to: dps-vehicles, label: zero-touch provisioning}
+    - {from: device, to: egns-vehicle-mqtt, label: MQTT telemetry (protobuf / JSON, headers), step: 1}
+    - {from: egns-vehicle-mqtt, to: func-message-processing, label: validate, decode, enrich, route, step: 2}
+    - {from: func-message-processing, to: cosmos-vehicles-config, label: message types, claims, vehicle registry, step: 3}
+    - {from: func-message-processing, to: stfleetlake, label: raw, decoded and failed messages, step: 4}
+    - {from: func-message-processing, to: evh-vehicle-status, label: routed by message type, step: 5}
+    - {from: func-message-processing, to: evh-vehicle-events, label: alerts, notifications, trips}
+    - {from: evh-vehicle-status, to: adx-fleet, link: azurerm_kusto_eventhub_data_connection, label: native ingestion, step: 6}
+    - {from: evh-vehicle-events, to: adx-fleet, link: azurerm_kusto_eventhub_data_connection, label: events and trips tables}
+    - {from: apim-fleet, to: cosmos-vehicles-config, label: vehicle and device management API}
+    - {from: saas, to: apim-fleet, label: Power Platform connector triggers and actions}
+    - {from: stfleetlake, to: synw-fleet, label: bronze / silver / gold pipelines, step: 7}
+    - {from: users, to: app-fleet-portal, label: fleet operations portal}
+    - {from: app-fleet-portal, to: maps-fleet, label: geospatial services}
+
+- slug: banking-saga-eft-processing
+  title: Banking cloud transformation with a serverless saga and KEDA-scaled EFT processing
+  category: industry
+  tags: [financial services, payments, saga, durable functions, event hubs, cosmos db, keda, aks, load testing]
+  source: https://learn.microsoft.com/en-us/industry/financial-services/architecture/patterns-and-implementations-content
+  description: Distributed financial transactions are coordinated with an orchestration-based saga implemented in Azure Durable Functions, with saga participants as Azure Functions, Event Hubs as the streaming platform and Cosmos DB as the state store. An electronic funds transfer processor on AKS scales with KEDA using the Kafka topic trigger against Event Hubs, and Azure Load Testing with JMeter scripts validates performance in the CI/CD pipeline.
+  containers:
+    - subscription: banking
+      resource_group: {name: rg-banking-core, location: westeurope}
+      groups:
+        - {label: Saga orchestration}
+        - {label: EFT processing}
+      vnets:
+        - name: vnet-banking
+          cidr: 10.80.0.0/16
+          subnets:
+            - {name: snet-aks, cidr: 10.80.0.0/20}
+  elements:
+    - {tf: azurerm_eventhub_namespace, name: evhns-transactions, in: group:Saga orchestration}
+    - {tf: azurerm_eventhub, name: evh-eft-requests, in: group:Saga orchestration}
+    - {tf: azurerm_linux_function_app, name: func-saga-orchestrator, in: group:Saga orchestration}
+    - {tf: azurerm_linux_function_app, name: func-saga-participants, in: group:Saga orchestration}
+    - {tf: azurerm_storage_account, name: stdurablestate, in: group:Saga orchestration}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-ledger, in: group:Saga orchestration}
+    - {tf: azurerm_kubernetes_cluster, name: aks-eft-processor, in: subnet:snet-aks}
+    - {tf: azurerm_container_registry, name: acr-banking, in: group:EFT processing}
+    - {tf: azurerm_load_test, name: alt-jmeter, in: group:EFT processing}
+    - {tf: azurerm_application_insights, name: appi-banking, in: group:EFT processing}
+  actors: [client, saas]
+  flows:
+    - {from: client, to: func-saga-orchestrator, label: transfer request, step: 1}
+    - {from: func-saga-orchestrator, to: stdurablestate, label: Durable Functions state + timeouts}
+    - {from: func-saga-orchestrator, to: evh-eft-requests, label: publish saga commands, step: 2}
+    - {from: evh-eft-requests, to: func-saga-participants, label: participant triggers, step: 3}
+    - {from: func-saga-participants, to: cosmos-ledger, label: local transactions / compensations, step: 4}
+    - {from: func-saga-participants, to: evh-eft-requests, label: reply events}
+    - {from: evh-eft-requests, to: aks-eft-processor, label: KEDA Kafka topic trigger scales EFT pods, step: 5}
+    - {from: acr-banking, to: aks-eft-processor, label: EFT processor image}
+    - {from: aks-eft-processor, to: cosmos-ledger, label: settle transfers}
+    - {from: saas, to: alt-jmeter, label: CI/CD pipeline runs load test, step: 6}
+    - {from: alt-jmeter, to: func-saga-orchestrator, label: JMeter traffic}
+    - {from: aks-eft-processor, to: appi-banking, label: saga workflow observability}
+
+- slug: fraud-detection-stream-analytics
+  title: Real-time fraud detection with Stream Analytics
+  category: industry
+  tags: [financial services, fraud detection, event hubs, stream analytics, power bi, self-join, tumbling window]
+  source: https://learn.microsoft.com/en-us/azure/stream-analytics/stream-analytics-real-time-fraud-detection
+  description: A generator sends call detail records to an Event Hubs namespace; a Stream Analytics job reads the stream with a dedicated consumer group and uses a self-join with DATEDIFF to flag calls from the same subscriber identity in different regions within five seconds, aggregated over tumbling windows. Flagged records are written to a Power BI streaming dataset for a live dashboard, and the same technique applies to credit card fraud and identity theft.
+  containers:
+    - subscription: fraud-analytics
+      resource_group: {name: rg-fraud-detection, location: westeurope}
+  elements:
+    - {tf: azurerm_eventhub_namespace, name: evhns-calls, in: resource_group:rg-fraud-detection}
+    - {tf: azurerm_eventhub, name: evh-call-stream, in: resource_group:rg-fraud-detection}
+    - {tf: azurerm_stream_analytics_job, name: asa-fraud, in: resource_group:rg-fraud-detection}
+    - {tf: azurerm_powerbi_embedded, name: pbi-fraud-dashboard, in: resource_group:rg-fraud-detection}
+    - {tf: azurerm_storage_account, name: stfraudarchive, in: resource_group:rg-fraud-detection}
+    - {tf: azurerm_linux_web_app, name: app-embedded-dashboard, in: resource_group:rg-fraud-detection}
+  actors: [client, users]
+  flows:
+    - {from: client, to: evh-call-stream, label: TelcoGenerator call records (AMQP), step: 1}
+    - {from: evh-call-stream, to: asa-fraud, label: CallStream input, consumer group, step: 2}
+    - {from: asa-fraud, to: asa-fraud, label: "self-join: same IMSI, different switch within 5 s", step: 3}
+    - {from: asa-fraud, to: pbi-fraud-dashboard, label: Power BI streaming dataset output, step: 4}
+    - {from: evh-call-stream, to: stfraudarchive, label: Event Hubs Capture archive}
+    - {from: pbi-fraud-dashboard, to: app-embedded-dashboard, label: embedded dashboard}
+    - {from: users, to: app-embedded-dashboard, label: fraudulent calls dashboard, step: 5}
+
+- slug: risk-modeling-big-compute-batch
+  title: Financial risk modeling with the big compute architecture style on Azure Batch
+  category: industry
+  tags: [financial services, risk modeling, monte carlo, big compute, azure batch, hpc, infiniband, burst]
+  source: https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/big-compute
+  description: Big compute workloads such as financial risk modeling and Monte Carlo simulations split into thousands of finite tasks that a scheduler distributes across a burst-provisioned pool of compute-intensive VMs, which scale back to zero when the run finishes. Azure Batch provisions the pool, assigns tasks, monitors progress and autoscales, with input data and results in Azure Storage; tightly coupled tasks use RDMA-capable H-series VMs, and an on-premises HPC Pack head node can burst into Azure over ExpressRoute or VPN.
+  containers:
+    - datacenter: on-premises-hpc
+    - subscription: risk
+      resource_group: {name: rg-risk-grid, location: westeurope}
+      vnets:
+        - name: vnet-hpc
+          cidr: 10.90.0.0/16
+          subnets:
+            - {name: snet-batch-pool, cidr: 10.90.0.0/22}
+            - {name: GatewaySubnet, cidr: 10.90.255.0/27}
+  elements:
+    - {tf: azurerm_batch_account, name: batch-risk, in: resource_group:rg-risk-grid}
+    - {tf: azurerm_batch_pool, name: pool-hb-rdma, in: subnet:snet-batch-pool}
+    - {tf: azurerm_storage_account, name: striskdata, in: resource_group:rg-risk-grid}
+    - {tf: azurerm_key_vault, name: kv-batch, in: resource_group:rg-risk-grid}
+    - {tf: azurerm_virtual_network_gateway, name: vpngw-hpc, in: subnet:GatewaySubnet}
+    - {tf: azurerm_linux_virtual_machine, name: vm-hpc-head-node, in: datacenter}
+    - {tf: azurerm_log_analytics_workspace, name: law-batch, in: resource_group:rg-risk-grid}
+  actors: [user, datacenter]
+  flows:
+    - {from: user, to: striskdata, label: upload market data and application packages, step: 1}
+    - {from: user, to: batch-risk, label: submit job with Monte Carlo tasks, step: 2}
+    - {from: batch-risk, to: pool-hb-rdma, label: provision VMs, schedule tasks, autoscale, step: 3}
+    - {from: pool-hb-rdma, to: striskdata, label: read inputs, write results, step: 4}
+    - {from: batch-risk, to: kv-batch, label: customer-managed keys}
+    - {from: datacenter, to: vpngw-hpc, label: ExpressRoute / VPN}
+    - {from: vm-hpc-head-node, to: pool-hb-rdma, label: HPC Pack burst to Azure nodes}
+    - {from: batch-risk, to: law-batch, label: job and pool metrics}
+
+- slug: health-data-fhir-dicom
+  title: Health data platform with Azure Health Data Services (FHIR and DICOM)
+  category: industry
+  tags: [healthcare, fhir, dicom, medical imaging, health data services, smart on fhir, data lake, de-identification]
+  source: https://learn.microsoft.com/en-us/azure/healthcare-apis/healthcare-apis-overview
+  description: An Azure Health Data Services workspace hosts a managed FHIR service for clinical records and a DICOM service for medical imaging, with Microsoft Entra RBAC, private link, customer-managed keys and per-instance data isolation. EHR systems and SMART on FHIR apps exchange data through the FHIR API, DICOMweb clients store and query imaging studies whose metadata can be projected into FHIR ImagingStudy resources, and exports feed a data lake for de-identification, analytics and machine learning.
+  containers:
+    - datacenter: hospital
+    - subscription: healthcare
+      resource_group: {name: rg-health-data, location: westeurope}
+      vnets:
+        - name: vnet-health
+          cidr: 10.100.0.0/16
+          subnets:
+            - {name: snet-private-endpoints, cidr: 10.100.1.0/24}
+  elements:
+    - {tf: azurerm_healthcare_workspace, name: ahds-workspace, in: resource_group:rg-health-data}
+    - {tf: azurerm_healthcare_fhir_service, name: fhir-clinical, in: resource_group:rg-health-data}
+    - {tf: azurerm_healthcare_dicom_service, name: dicom-imaging, in: resource_group:rg-health-data}
+    - {tf: azurerm_private_endpoint, name: pe-ahds, in: subnet:snet-private-endpoints}
+    - {tf: azurerm_storage_account, name: sthealthlake, in: resource_group:rg-health-data}
+    - {tf: azurerm_synapse_workspace, name: synw-health, in: resource_group:rg-health-data}
+    - {tf: azurerm_key_vault, name: kv-health-cmk, in: resource_group:rg-health-data}
+    - {tf: azurerm_linux_web_app, name: app-smart-on-fhir, in: resource_group:rg-health-data}
+    - {tf: azurerm_log_analytics_workspace, name: law-health-audit, in: resource_group:rg-health-data}
+  actors: [datacenter, users, idp]
+  flows:
+    - {from: datacenter, to: fhir-clinical, label: EHR sends FHIR bundles (RESTful API), step: 1}
+    - {from: datacenter, to: dicom-imaging, label: modalities / PACS store via DICOMweb STOW-RS, step: 2}
+    - {from: users, to: app-smart-on-fhir, label: patient / provider app}
+    - {from: app-smart-on-fhir, to: idp, label: SMART on FHIR authorization (Entra ID), step: 3}
+    - {from: app-smart-on-fhir, to: fhir-clinical, label: FHIR queries with bearer token, step: 4}
+    - {from: dicom-imaging, to: fhir-clinical, label: DICOMcast projects ImagingStudy metadata}
+    - {from: pe-ahds, to: ahds-workspace, label: private link}
+    - {from: fhir-clinical, to: sthealthlake, label: $export to data lake, step: 5}
+    - {from: dicom-imaging, to: sthealthlake, label: export DICOM files}
+    - {from: sthealthlake, to: synw-health, label: de-identified analytics and ML, step: 6}
+    - {from: ahds-workspace, to: kv-health-cmk, label: customer-managed keys}
+    - {from: ahds-workspace, to: law-health-audit, label: audit logs}
+
+- slug: gaming-backend-cosmos-db
+  title: Gaming backend with Azure Cosmos DB
+  category: industry
+  tags: [gaming, cosmos db, leaderboards, player profiles, app service, functions, notification hubs, event hubs]
+  source: https://learn.microsoft.com/en-us/azure/cosmos-db/use-cases
+  description: Game clients call a stateless API tier that stores player profiles, in-game stats, guild membership and leaderboards in Azure Cosmos DB, whose automatic indexing supports lookups by player ID or social identities and whose throughput scales elastically for launches and feature updates. Telemetry and match events are ingested through Event Hubs and Azure Functions, notifications reach players through Notification Hubs, and Traffic Manager routes clients to the closest region of a multi-region Cosmos DB account.
+  containers:
+    - subscription: gaming
+      resource_group: {name: rg-game-backend, location: westeurope}
+      groups:
+        - {label: API tier}
+        - {label: Data and events}
+  elements:
+    - {tf: azurerm_traffic_manager_profile, name: tm-game-api, in: resource_group:rg-game-backend}
+    - {tf: azurerm_service_plan, name: plan-game-api, in: group:API tier}
+    - {tf: azurerm_linux_web_app, name: app-game-api, in: group:API tier}
+    - {tf: azurerm_redis_cache, name: redis-leaderboard-cache, in: group:API tier}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-players, in: group:Data and events}
+    - {tf: azurerm_eventhub_namespace, name: evhns-game-telemetry, in: group:Data and events}
+    - {tf: azurerm_eventhub, name: evh-match-events, in: group:Data and events}
+    - {tf: azurerm_linux_function_app, name: func-event-processor, in: group:Data and events}
+    - {tf: azurerm_notification_hub_namespace, name: nhns-game, in: group:Data and events}
+    - {tf: azurerm_notification_hub, name: nh-player-push, in: group:Data and events}
+    - {tf: azurerm_storage_account, name: stgameassets, in: group:Data and events}
+  actors: [mobile, users]
+  flows:
+    - {from: mobile, to: tm-game-api, label: nearest region, step: 1}
+    - {from: tm-game-api, to: app-game-api, label: route to API tier, step: 2}
+    - {from: app-game-api, to: cosmos-players, label: profiles, stats, guilds, leaderboards (ms latency), step: 3}
+    - {from: app-game-api, to: redis-leaderboard-cache, label: hot leaderboard cache}
+    - {from: app-game-api, to: evh-match-events, label: in-game events, step: 4}
+    - {from: evh-match-events, to: func-event-processor, label: Event Hubs trigger, step: 5}
+    - {from: func-event-processor, to: cosmos-players, label: update stats / high scores}
+    - {from: cosmos-players, to: func-event-processor, label: change feed}
+    - {from: func-event-processor, to: nh-player-push, label: achievements, challenges, step: 6}
+    - {from: nh-player-push, to: mobile, label: push notifications}
+    - {from: users, to: stgameassets, label: static game content}

@@ -33,6 +33,7 @@ nodes:
     name: changeme
     version: []
 - {id: allow-iap-and-hc, type: gcp.firewall_rule, name: allow-iap-and-hc, parent: vpc-iap-vpc}
+- {id: iap-oauth-client, type: gcp.res.google_iap_client, name: iap-oauth-client, parent: prj-iap-prj, props: {brand: changeme, display_name: changeme}}
 edges:
 - {from: users, to: app-zone, label: DNS lookup}
 - {from: users, to: app-https-rule, label: HTTPS, step: '1'}
@@ -41,6 +42,7 @@ edges:
 - {from: app-https-proxy, to: app-url-map, step: '3'}
 - {from: app-url-map, to: iap-backend, label: IAP enabled, step: '4'}
 - {from: iap-backend, to: idp, label: Google sign-in and IAM check, step: '5'}
+- {from: iap-oauth-client, to: iap-backend, label: OAuth client}
 - {from: iap-backend, to: app-mig, label: request with X-Goog-IAP-JWT-Assertion, step: '6'}
 - {from: allow-iap-and-hc, to: app-mig, label: allow 35.235.240.0/20 and health checks}
 steps:

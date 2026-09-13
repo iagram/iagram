@@ -1,0 +1,56 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/app-development-and-delivery-with-cloud-code-gcb-cd-and-gke); edit freely.
+title: CI/CD with Cloud Build, Artifact Registry and Cloud Deploy to staging and production GKE
+category: devops
+tags:
+- ci/cd
+- cloud build
+- cloud deploy
+- artifact registry
+- gke
+- skaffold
+- cloud code
+source: https://docs.cloud.google.com/architecture/app-development-and-delivery-with-cloud-code-gcb-cd-and-gke
+description: Developers iterate with Cloud Code, and each commit to the source repository triggers Cloud Build to build and test the container and push it to Artifact Registry. Cloud Deploy then creates
+  a release from the shared Skaffold configuration and promotes it through a delivery pipeline from the staging GKE cluster to production after a manual approval.
+nodes:
+- {id: prj-cicd-prj, type: gcp.project, name: cicd-prj, props: {project_id: cicd-prj-123456, project: changeme, region: europe-west1}}
+- {id: prj-app-staging-prj, type: gcp.project, name: app-staging-prj, props: {project_id: app-staging-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-staging-vpc, type: gcp.vpc, name: staging-vpc, parent: prj-app-staging-prj, props: {cidr: 10.100.0.0/16}}
+- {id: sub-staging-sub, type: gcp.subnetwork, name: staging-sub, parent: vpc-staging-vpc, props: {cidr: 10.100.1.0/24, region: europe-west1}}
+- {id: prj-app-prod-prj, type: gcp.project, name: app-prod-prj, props: {project_id: app-prod-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-prod-vpc, type: gcp.vpc, name: prod-vpc, parent: prj-app-prod-prj, props: {cidr: 10.110.0.0/16}}
+- {id: sub-prod-sub, type: gcp.subnetwork, name: prod-sub, parent: vpc-prod-vpc, props: {cidr: 10.110.1.0/24, region: europe-west1}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: app-source-repo, type: gcp.res.google_sourcerepo_repository, name: app-source-repo, parent: prj-cicd-prj, props: {name: changeme}}
+- {id: app-ci-trigger, type: gcp.res.google_cloudbuild_trigger, name: app-ci-trigger, parent: prj-cicd-prj}
+- {id: app-images, type: gcp.res.google_artifact_registry_repository, name: app-images, parent: prj-cicd-prj, props: {format: changeme, repository_id: changeme}}
+- {id: app-delivery-pipeline, type: gcp.res.google_clouddeploy_delivery_pipeline, name: app-delivery-pipeline, parent: prj-cicd-prj, props: {location: westeurope, name: changeme}}
+- {id: staging-target, type: gcp.res.google_clouddeploy_target, name: staging-target, parent: prj-cicd-prj, props: {location: westeurope, name: changeme}}
+- {id: prod-target, type: gcp.res.google_clouddeploy_target, name: prod-target, parent: prj-cicd-prj, props: {location: westeurope, name: changeme}}
+- {id: staging-gke, type: gcp.gke_cluster, name: staging-gke, parent: sub-staging-sub}
+- {id: prod-gke, type: gcp.gke_cluster, name: prod-gke, parent: sub-prod-sub}
+- {id: deploy-artifacts-bucket, type: gcp.storage_bucket, name: deploy-artifacts-bucket, parent: prj-cicd-prj}
+edges:
+- {from: user, to: app-source-repo, label: git push, step: '1'}
+- {from: app-source-repo, to: app-ci-trigger, label: commit event, step: '2'}
+- {from: app-ci-trigger, to: app-images, label: build, step: '3'}
+- {from: app-ci-trigger, to: app-delivery-pipeline, label: create release (Skaffold), step: '4'}
+- {from: app-delivery-pipeline, to: deploy-artifacts-bucket, label: rendered manifests}
+- {from: app-delivery-pipeline, to: staging-target, label: rollout, step: '5'}
+- {from: staging-target, to: staging-gke, label: kubectl apply, step: '6'}
+- {from: app-delivery-pipeline, to: prod-target, label: promote after approval, step: '7'}
+- {from: prod-target, to: prod-gke, label: kubectl apply, step: '8'}
+- {from: app-images, to: prod-gke, label: image pull, step: '9'}
+- {from: users, to: prod-gke, label: HTTPS, step: '10'}
+steps:
+- {n: '1', text: 'user → app-source-repo: git push'}
+- {n: '2', text: 'app-source-repo → app-ci-trigger: commit event'}
+- {n: '3', text: 'app-ci-trigger → app-images: build'}
+- {n: '4', text: 'app-ci-trigger → app-delivery-pipeline: create release (Skaffold)'}
+- {n: '5', text: 'app-delivery-pipeline → staging-target: rollout'}
+- {n: '6', text: 'staging-target → staging-gke: kubectl apply'}
+- {n: '7', text: 'app-delivery-pipeline → prod-target: promote after approval'}
+- {n: '8', text: 'prod-target → prod-gke: kubectl apply'}
+- {n: '9', text: 'app-images → prod-gke: image pull'}
+- {n: '10', text: 'users → prod-gke: HTTPS'}

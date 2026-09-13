@@ -1,0 +1,47 @@
+# Generated from the official reference (https://docs.cloud.google.com/logging/docs/export/aggregated_sinks); edit freely.
+title: Centralised log routing with aggregated sinks to BigQuery, Cloud Storage and Pub/Sub
+category: observability
+tags:
+- cloud logging
+- aggregated sink
+- log bucket
+- bigquery
+- cloud storage
+- pub/sub
+- siem
+source: https://docs.cloud.google.com/logging/docs/export/aggregated_sinks
+description: An organization-level aggregated sink with an inclusion filter routes audit and workload logs from every project to a central logging project, where they land in a Cloud Logging bucket for
+  search, a BigQuery dataset for analysis, a Cloud Storage bucket for long-term retention and a Pub/Sub topic for an external SIEM such as Splunk. The sink's service account is granted write access on each
+  destination.
+nodes:
+- {id: prj-central-logging-prj, type: gcp.project, name: central-logging-prj, props: {project_id: central-logging-prj-123456, project: changeme, region: europe-west1}}
+- {id: prj-workload-prj, type: gcp.project, name: workload-prj, props: {project_id: workload-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-workload-vpc, type: gcp.vpc, name: workload-vpc, parent: prj-workload-prj, props: {cidr: 10.140.0.0/16}}
+- {id: sub-workload-sub, type: gcp.subnetwork, name: workload-sub, parent: vpc-workload-vpc, props: {cidr: 10.140.1.0/24, region: europe-west1}}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: org-aggregated-sink, type: gcp.res.google_logging_organization_sink, name: org-aggregated-sink, parent: prj-central-logging-prj, props: {destination: changeme, name: changeme, org_id: changeme}}
+- {id: central-log-bucket, type: gcp.res.google_logging_project_bucket_config, name: central-log-bucket, parent: prj-central-logging-prj, props: {bucket_id: changeme, location: westeurope, project: changeme}}
+- {id: logs-analytics-ds, type: gcp.bigquery_dataset, name: logs-analytics-ds, parent: prj-central-logging-prj}
+- {id: logs-archive-bucket, type: gcp.storage_bucket, name: logs-archive-bucket, parent: prj-central-logging-prj}
+- {id: logs-to-siem, type: gcp.pubsub_topic, name: logs-to-siem, parent: prj-central-logging-prj}
+- {id: siem-project-sink, type: gcp.res.google_logging_project_sink, name: siem-project-sink, parent: prj-central-logging-prj, props: {destination: changeme, name: changeme}}
+- {id: workload-svc, type: gcp.cloud_run_service, name: workload-svc, parent: prj-workload-prj}
+- {id: workload-vm, type: gcp.compute_instance, name: workload-vm, parent: sub-workload-sub}
+- {id: vpc-prj-workload-prj, type: gcp.vpc, name: main, parent: prj-workload-prj}
+- {id: workload-db, type: gcp.cloud_sql_instance, name: workload-db, parent: vpc-prj-workload-prj}
+edges:
+- {from: workload-svc, to: org-aggregated-sink, label: request and audit logs, step: '1'}
+- {from: workload-vm, to: org-aggregated-sink, label: Ops Agent logs, step: '1'}
+- {from: workload-db, to: org-aggregated-sink, label: data-access audit logs, step: '1'}
+- {from: org-aggregated-sink, to: central-log-bucket, label: route to log bucket, step: '2'}
+- {from: org-aggregated-sink, to: logs-analytics-ds, label: route to BigQuery, step: '2'}
+- {from: org-aggregated-sink, to: logs-archive-bucket, label: route to Cloud Storage, step: '2'}
+- {from: siem-project-sink, to: logs-to-siem, label: security logs to Pub/Sub, step: '3'}
+- {from: logs-to-siem, to: saas, label: pubsub subscription}
+- {from: users, to: logs-analytics-ds, label: security analysts SQL, step: '4'}
+steps:
+- {n: '1', text: 'workload-svc → org-aggregated-sink: request and audit logs'}
+- {n: '2', text: 'org-aggregated-sink → central-log-bucket: route to log bucket'}
+- {n: '3', text: 'siem-project-sink → logs-to-siem: security logs to Pub/Sub'}
+- {n: '4', text: 'users → logs-analytics-ds: security analysts SQL'}

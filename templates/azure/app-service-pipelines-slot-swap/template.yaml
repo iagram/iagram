@@ -1,0 +1,38 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/devops/pipelines/architectures/devops-pipelines-azure-web-apps-architecture); edit freely.
+title: CI/CD for Azure Web Apps with deployment slot swap
+category: devops
+tags:
+- azure pipelines
+- app service
+- deployment slots
+- web deploy
+- slot swap
+- rollback
+source: https://learn.microsoft.com/en-us/azure/devops/pipelines/architectures/devops-pipelines-azure-web-apps-architecture
+description: A variant of the Azure Pipelines baseline where the CI pipeline produces a Web Deploy package and the CD pipeline deploys it to a staging slot of an App Service web app. Release to production
+  is a swap of the staging and production slots, and rollback swaps them back; Azure Monitor, Application Insights and Log Analytics provide observability.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-webapp-cicd, type: azure.resource_group, name: rg-webapp-cicd, parent: sub-workload, props: {location: westeurope}}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: kv-webapp-cicd, type: azure.key_vault, name: kv-webapp-cicd, parent: rg-rg-webapp-cicd}
+- {id: plan-webapp, type: azure.res.azurerm_service_plan, name: plan-webapp, parent: rg-rg-webapp-cicd, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-production-slot
+  type: azure.res.azurerm_linux_web_app
+  name: app-production-slot
+  parent: rg-rg-webapp-cicd
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: appi-webapp, type: azure.res.azurerm_application_insights, name: appi-webapp, parent: rg-rg-webapp-cicd, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-webapp, type: azure.res.azurerm_log_analytics_workspace, name: law-webapp, parent: rg-rg-webapp-cicd, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: saas, label: commit to Azure Repos, step: '1'}
+- {from: saas, to: kv-webapp-cicd, label: CI gets secrets, step: '2'}
+- {from: users, to: app-production-slot, label: HTTPS, step: '5'}
+- {from: app-production-slot, to: appi-webapp, label: telemetry}
+- {from: appi-webapp, to: law-webapp, label: logs and metrics}
+steps:
+- {n: '1', text: 'user → saas: commit to Azure Repos'}
+- {n: '2', text: 'saas → kv-webapp-cicd: CI gets secrets'}
+- {n: '5', text: 'users → app-production-slot: HTTPS'}

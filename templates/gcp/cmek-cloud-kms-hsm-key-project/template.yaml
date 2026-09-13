@@ -19,15 +19,27 @@ nodes:
 - {id: sub-app-sub, type: gcp.subnetwork, name: app-sub, parent: vpc-workload-vpc, props: {cidr: 10.50.0.0/24, region: us-central1}}
 - {id: users, type: common.users, name: users}
 - {id: us-central1-key-ring, type: gcp.res.google_kms_key_ring, name: us-central1-key-ring, parent: prj-prj-c-kms, props: {location: westeurope, name: changeme}}
+- {id: storage-hsm-key, type: gcp.res.google_kms_crypto_key, name: storage-hsm-key, parent: prj-prj-c-kms, props: {key_ring: changeme, name: changeme}}
+- {id: database-hsm-key, type: gcp.res.google_kms_crypto_key, name: database-hsm-key, parent: prj-prj-c-kms, props: {key_ring: changeme, name: changeme}}
+- {id: disk-software-key, type: gcp.res.google_kms_crypto_key, name: disk-software-key, parent: prj-prj-c-kms, props: {key_ring: changeme, name: changeme}}
 - {id: cmek-bucket, type: gcp.storage_bucket, name: cmek-bucket, parent: prj-prj-p-workload}
 - {id: cmek-postgres, type: gcp.cloud_sql_instance, name: cmek-postgres, parent: vpc-workload-vpc}
+- {id: cmek-data-disk, type: gcp.res.google_compute_disk, name: cmek-data-disk, parent: sub-app-sub, props: {name: changeme}}
 - {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-app-sub}
 - {id: cmek-dataset, type: gcp.bigquery_dataset, name: cmek-dataset, parent: prj-prj-p-workload}
 edges:
 - {from: users, to: us-central1-key-ring, label: key admin rotates keys, step: '1'}
+- {from: cmek-bucket, to: storage-hsm-key, label: CMEK wrap/unwrap, step: '2'}
+- {from: cmek-postgres, to: database-hsm-key, label: CMEK, step: '3'}
+- {from: cmek-data-disk, to: disk-software-key, label: CMEK, step: '4'}
+- {from: cmek-dataset, to: storage-hsm-key, label: CMEK, step: '5'}
 - {from: app-vm, to: cmek-bucket, label: read/write objects, step: '6'}
 - {from: app-vm, to: cmek-postgres, label: SQL, step: '7'}
 steps:
 - {n: '1', text: 'users → us-central1-key-ring: key admin rotates keys'}
+- {n: '2', text: 'cmek-bucket → storage-hsm-key: CMEK wrap/unwrap'}
+- {n: '3', text: 'cmek-postgres → database-hsm-key: CMEK'}
+- {n: '4', text: 'cmek-data-disk → disk-software-key: CMEK'}
+- {n: '5', text: 'cmek-dataset → storage-hsm-key: CMEK'}
 - {n: '6', text: 'app-vm → cmek-bucket: read/write objects'}
 - {n: '7', text: 'app-vm → cmek-postgres: SQL'}

@@ -1,0 +1,55 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-data-export); edit freely.
+title: Log Analytics data export to Event Hubs and Azure Data Explorer
+category: observability
+tags:
+- azure-monitor
+- log-analytics
+- data-export
+- event-hubs
+- azure-data-explorer
+- long-term-retention
+- kql
+source: https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-data-export
+description: Log Analytics data export rules continuously copy selected workspace tables to a storage account and an Event Hubs namespace as records arrive, decoupling long-term retention and downstream
+  analytics from Azure Monitor pricing tiers. An Azure Data Explorer cluster consumes the event hubs for cross-source KQL analysis over years of logs, and the storage account keeps immutable archives for
+  compliance.
+nodes:
+- {id: sub-platform-observability, type: azure.subscription, name: platform-observability, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-log-export, type: azure.resource_group, name: rg-log-export, parent: sub-platform-observability, props: {location: westeurope}}
+- {id: grp-sources, type: common.group, name: Sources, parent: rg-rg-log-export}
+- {id: grp-azure-monitor, type: common.group, name: Azure Monitor, parent: rg-rg-log-export}
+- {id: grp-export-destinations, type: common.group, name: Export destinations, parent: rg-rg-log-export}
+- {id: grp-analytics, type: common.group, name: Analytics, parent: rg-rg-log-export}
+- {id: users, type: common.users, name: users}
+- {id: vpc-rg-rg-log-export, type: azure.vnet, name: main, parent: rg-rg-log-export, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-log-export, type: azure.subnet, name: main, parent: vpc-rg-rg-log-export, props: {cidr: 10.200.0.0/24}}
+- {id: aks-workload, type: azure.aks_cluster, name: aks-workload, parent: sub-rg-rg-log-export}
+- id: func-api
+  type: azure.res.azurerm_linux_function_app
+  name: func-api
+  parent: grp-sources
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: grp-azure-monitor, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stlogarchive, type: azure.storage_account, name: stlogarchive, parent: grp-export-destinations}
+- {id: evhns-log-export, type: azure.res.azurerm_eventhub_namespace, name: evhns-log-export, parent: grp-export-destinations, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}}
+- {id: evh-am-containerlog, type: azure.res.azurerm_eventhub, name: evh-am-containerlog, parent: grp-export-destinations, props: {name: changeme, partition_count: 1}}
+- id: adx-log-analytics
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-log-analytics
+  parent: grp-analytics
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: adxdb-logs, type: azure.res.azurerm_kusto_database, name: adxdb-logs, parent: grp-analytics, props: {cluster_name: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: aks-workload, to: law-central, label: container insights / diagnostics, step: '1'}
+- {from: func-api, to: law-central, label: application logs, step: '1'}
+- {from: law-central, to: stlogarchive, label: export selected tables (hourly blobs), step: '2'}
+- {from: law-central, to: evh-am-containerlog, label: export selected tables (near real time), step: '2'}
+- {from: evh-am-containerlog, to: adxdb-logs, label: Event Hubs data connection, step: '3'}
+- {from: stlogarchive, to: adxdb-logs, label: historical ingestion (LightIngest)}
+- {from: users, to: adx-log-analytics, label: KQL over long-term logs, step: '4'}
+steps:
+- {n: '1', text: 'aks-workload → law-central: container insights / diagnostics'}
+- {n: '2', text: 'law-central → stlogarchive: export selected tables (hourly blobs)'}
+- {n: '3', text: 'evh-am-containerlog → adxdb-logs: Event Hubs data connection'}
+- {n: '4', text: 'users → adx-log-analytics: KQL over long-term logs'}

@@ -1,0 +1,49 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-kafka-connect-debezium); edit freely.
+title: Change data capture with Debezium, Kafka Connect and Event Hubs
+category: data
+tags:
+- cdc
+- debezium
+- kafka-connect
+- event-hubs
+- postgresql
+- logical-decoding
+- kafka-api
+source: https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-kafka-connect-debezium
+description: A Kafka Connect worker running the Debezium PostgreSQL connector uses logical decoding on Azure Database for PostgreSQL to capture row-level create, update and delete operations and publishes
+  them as change events to Kafka topics hosted on an Event Hubs namespace over SASL_SSL. Connect stores its config, offset and status topics in Event Hubs, one event hub is auto-created per captured table,
+  and sink connectors or consumers read the change stream downstream.
+nodes:
+- {id: sub-integration, type: azure.subscription, name: integration, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-cdc-debezium, type: azure.resource_group, name: rg-cdc-debezium, parent: sub-integration, props: {location: westeurope}}
+- {id: vpc-vnet-cdc, type: azure.vnet, name: vnet-cdc, parent: rg-rg-cdc-debezium, props: {cidr: 10.30.0.0/16}}
+- {id: sub-snet-connect, type: azure.subnet, name: snet-connect, parent: vpc-vnet-cdc, props: {cidr: 10.30.1.0/24}}
+- {id: sub-snet-postgres, type: azure.subnet, name: snet-postgres, parent: vpc-vnet-cdc, props: {cidr: 10.30.2.0/24}}
+- {id: client, type: common.client, name: client}
+- {id: users, type: common.users, name: users}
+- {id: psql-source-orders, type: azure.postgres_flexible_server, name: psql-source-orders, parent: rg-rg-cdc-debezium}
+- {id: vm-kafka-connect, type: azure.virtual_machine, name: vm-kafka-connect, parent: sub-snet-connect}
+- {id: evhns-kafka-cdc, type: azure.res.azurerm_eventhub_namespace, name: evhns-kafka-cdc, parent: rg-rg-cdc-debezium, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-public-todos, type: azure.res.azurerm_eventhub, name: evh-public-todos, parent: rg-rg-cdc-debezium, props: {name: changeme, partition_count: 1}}
+- {id: evh-connect-offsets, type: azure.res.azurerm_eventhub, name: evh-connect-offsets, parent: rg-rg-cdc-debezium, props: {name: changeme, partition_count: 1}}
+- {id: stcdc-sink, type: azure.storage_account, name: stcdc-sink, parent: rg-rg-cdc-debezium}
+- id: func-cdc-consumer
+  type: azure.res.azurerm_linux_function_app
+  name: func-cdc-consumer
+  parent: rg-rg-cdc-debezium
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: kv-connect-secrets, type: azure.key_vault, name: kv-connect-secrets, parent: rg-rg-cdc-debezium}
+edges:
+- {from: client, to: psql-source-orders, label: INSERT / UPDATE / DELETE, step: '1'}
+- {from: psql-source-orders, to: vm-kafka-connect, label: logical decoding (wal2json), step: '2'}
+- {from: vm-kafka-connect, to: evh-public-todos, label: change events over Kafka API (SASL_SSL), step: '3'}
+- {from: vm-kafka-connect, to: evh-connect-offsets, label: connect config / offset / status topics}
+- {from: evh-public-todos, to: func-cdc-consumer, label: consume change stream, step: '4'}
+- {from: evh-public-todos, to: stcdc-sink, label: Event Hubs Capture (Avro), step: '4'}
+- {from: vm-kafka-connect, to: kv-connect-secrets, label: connection strings}
+- {from: users, to: vm-kafka-connect, label: Connect REST API (connector config)}
+steps:
+- {n: '1', text: 'client → psql-source-orders: INSERT / UPDATE / DELETE'}
+- {n: '2', text: 'psql-source-orders → vm-kafka-connect: logical decoding (wal2json)'}
+- {n: '3', text: 'vm-kafka-connect → evh-public-todos: change events over Kafka API (SASL_SSL)'}
+- {n: '4', text: 'evh-public-todos → func-cdc-consumer: consume change stream'}

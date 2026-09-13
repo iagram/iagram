@@ -1,0 +1,43 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/devops/pipelines/ecosystems/kubernetes/canary-demo); edit freely.
+title: Canary deployment strategy for Kubernetes with Azure Pipelines
+category: devops
+tags:
+- aks
+- canary
+- kubernetes manifest task
+- azure pipelines
+- promote
+- reject
+- load test
+source: https://learn.microsoft.com/en-us/azure/devops/pipelines/ecosystems/kubernetes/canary-demo
+description: A build stage pushes the image to Azure Container Registry and publishes manifests; a deploy stage uses the KubernetesManifest task with the canary strategy to run baseline and canary pods
+  next to the stable deployment at a 25% share and deploys Fortio to generate load. An approval-gated environment then promotes the canary to stable or rejects it, which rolls the workload back.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-aks-canary, type: azure.resource_group, name: rg-aks-canary, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-canary, type: azure.vnet, name: vnet-canary, parent: rg-rg-aks-canary, props: {cidr: 10.30.0.0/16}}
+- {id: sub-snet-aks, type: azure.subnet, name: snet-aks, parent: vpc-vnet-canary, props: {cidr: 10.30.0.0/20}}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- {id: acr-canary, type: azure.container_registry, name: acr-canary, parent: rg-rg-aks-canary}
+- {id: aks-canary, type: azure.aks_cluster, name: aks-canary, parent: sub-snet-aks}
+- {id: law-canary, type: azure.res.azurerm_log_analytics_workspace, name: law-canary, parent: rg-rg-aks-canary, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: amw-canary, type: azure.res.azurerm_monitor_workspace, name: amw-canary, parent: rg-rg-aks-canary, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: grafana-canary, type: azure.res.azurerm_dashboard_grafana, name: grafana-canary, parent: rg-rg-aks-canary, props: {grafana_major_version: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: kv-canary, type: azure.key_vault, name: kv-canary, parent: rg-rg-aks-canary}
+edges:
+- {from: user, to: saas, label: push to GitHub fork, step: '1'}
+- {from: saas, to: acr-canary, label: 'Build stage: Docker@2 buildAndPush', step: '2'}
+- {from: saas, to: aks-canary, label: 'DeployCanary: strategy canary, percentage 25', step: '3'}
+- {from: acr-canary, to: aks-canary, label: imagePullSecret pull}
+- {from: aks-canary, to: amw-canary, label: baseline vs canary metrics (Fortio load)}
+- {from: amw-canary, to: grafana-canary, label: compare success rates, step: '4'}
+- {from: saas, to: aks-canary, label: 'PromoteRejectCanary: promote or reject after approval', step: '5'}
+- {from: aks-canary, to: law-canary, label: container logs}
+- {from: aks-canary, to: kv-canary, label: secrets}
+steps:
+- {n: '1', text: 'user → saas: push to GitHub fork'}
+- {n: '2', text: 'saas → acr-canary: Build stage: Docker@2 buildAndPush'}
+- {n: '3', text: 'saas → aks-canary: DeployCanary: strategy canary, percentage 25'}
+- {n: '4', text: 'amw-canary → grafana-canary: compare success rates'}
+- {n: '5', text: 'saas → aks-canary: PromoteRejectCanary: promote or reject after approval'}

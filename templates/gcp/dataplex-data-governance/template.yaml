@@ -18,13 +18,44 @@ nodes:
 - {id: users, type: common.users, name: users}
 - {id: raw-zone-bucket, type: gcp.storage_bucket, name: raw-zone-bucket, parent: grp-raw-zone}
 - {id: curated-zone-dataset, type: gcp.bigquery_dataset, name: curated-zone-dataset, parent: grp-curated-zone}
+- {id: customers-curated-table, type: gcp.res.google_bigquery_table, name: customers-curated-table, parent: grp-curated-zone, props: {dataset_id: changeme, table_id: changeme}}
 - {id: enterprise-lake, type: gcp.res.google_dataplex_lake, name: enterprise-lake, parent: grp-governance, props: {location: westeurope, name: changeme}}
+- id: raw-dataplex-zone
+  type: gcp.res.google_dataplex_zone
+  name: raw-dataplex-zone
+  parent: grp-governance
+  props: {discovery_spec: {}, lake: changeme, location: westeurope, name: changeme, resource_spec: {}, type: changeme}
+- id: curated-dataplex-zone
+  type: gcp.res.google_dataplex_zone
+  name: curated-dataplex-zone
+  parent: grp-governance
+  props: {discovery_spec: {}, lake: changeme, location: westeurope, name: changeme, resource_spec: {}, type: changeme}
+- id: raw-bucket-asset
+  type: gcp.res.google_dataplex_asset
+  name: raw-bucket-asset
+  parent: grp-governance
+  props: {dataplex_zone: changeme, discovery_spec: {}, lake: changeme, location: westeurope, name: changeme, resource_spec: {}}
+- id: curated-dataset-asset
+  type: gcp.res.google_dataplex_asset
+  name: curated-dataset-asset
+  parent: grp-governance
+  props: {dataplex_zone: changeme, discovery_spec: {}, lake: changeme, location: westeurope, name: changeme, resource_spec: {}}
 - id: customers-quality-scan
   type: gcp.res.google_dataplex_datascan
   name: customers-quality-scan
   parent: grp-governance
   props: {data: {}, data_scan_id: changeme, execution_spec: {}, location: westeurope}
 edges:
+- {from: raw-bucket-asset, to: raw-zone-bucket, label: attach asset, step: '1'}
+- {from: curated-dataset-asset, to: curated-zone-dataset, label: attach asset, step: '2'}
+- {from: enterprise-lake, to: raw-dataplex-zone, label: discovery, step: '3'}
+- {from: enterprise-lake, to: curated-dataplex-zone, label: discovery, step: '4'}
+- {from: customers-quality-scan, to: customers-curated-table, label: scheduled data quality rules, step: '5'}
 - {from: users, to: enterprise-lake, label: search catalog, step: '7'}
 steps:
+- {n: '1', text: 'raw-bucket-asset → raw-zone-bucket: attach asset'}
+- {n: '2', text: 'curated-dataset-asset → curated-zone-dataset: attach asset'}
+- {n: '3', text: 'enterprise-lake → raw-dataplex-zone: discovery'}
+- {n: '4', text: 'enterprise-lake → curated-dataplex-zone: discovery'}
+- {n: '5', text: 'customers-quality-scan → customers-curated-table: scheduled data quality rules'}
 - {n: '7', text: 'users → enterprise-lake: search catalog'}

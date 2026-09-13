@@ -1,0 +1,64 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/azure-databricks-modern-analytics-architecture); edit freely.
+title: Modern analytics architecture with Azure Databricks (medallion)
+category: data
+tags:
+- databricks
+- delta-lake
+- medallion
+- data-lake-storage
+- event-hubs
+- mlflow
+- unity-catalog
+- power-bi
+source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/azure-databricks-modern-analytics-architecture
+description: Azure Databricks ingests streaming data from Event Hubs with Lakeflow declarative pipelines while Data Factory lands batch data in Data Lake Storage, then organises Delta Lake tables into Bronze,
+  Silver and Gold layers. MLflow tracks models served through Azure Machine Learning, Databricks SQL warehouses feed Power BI, and Unity Catalog, Microsoft Purview, Key Vault and Azure Monitor provide governance
+  and operations.
+nodes:
+- {id: sub-data-platform, type: azure.subscription, name: data-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-databricks-analytics, type: azure.resource_group, name: rg-databricks-analytics, parent: sub-data-platform, props: {location: westeurope}}
+- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-databricks-analytics}
+- {id: grp-lakehouse, type: common.group, name: Lakehouse, parent: rg-rg-databricks-analytics}
+- {id: grp-serve, type: common.group, name: Serve, parent: rg-rg-databricks-analytics}
+- {id: grp-platform, type: common.group, name: Platform, parent: rg-rg-databricks-analytics}
+- {id: device, type: common.device, name: device}
+- {id: database, type: common.database, name: database}
+- {id: users, type: common.users, name: users}
+- {id: evhns-stream-ingest, type: azure.res.azurerm_eventhub_namespace, name: evhns-stream-ingest, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: adf-batch-ingest, type: azure.res.azurerm_data_factory, name: adf-batch-ingest, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stdatalake, type: azure.storage_account, name: stdatalake, parent: grp-lakehouse}
+- {id: dbw-medallion, type: azure.res.azurerm_databricks_workspace, name: dbw-medallion, parent: grp-lakehouse, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- id: mlw-model-serving
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-model-serving
+  parent: grp-serve
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- {id: vpc-rg-rg-databricks-analytics, type: azure.vnet, name: main, parent: rg-rg-databricks-analytics, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-databricks-analytics, type: azure.subnet, name: main, parent: vpc-rg-rg-databricks-analytics, props: {cidr: 10.200.0.0/24}}
+- {id: aks-inference, type: azure.aks_cluster, name: aks-inference, parent: sub-rg-rg-databricks-analytics}
+- id: pview-catalog
+  type: azure.res.azurerm_purview_account
+  name: pview-catalog
+  parent: grp-platform
+  props: {identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: kv-secrets, type: azure.key_vault, name: kv-secrets, parent: grp-platform}
+- {id: law-platform, type: azure.res.azurerm_log_analytics_workspace, name: law-platform, parent: grp-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: device, to: evhns-stream-ingest, label: raw events, step: '1'}
+- {from: evhns-stream-ingest, to: dbw-medallion, label: Lakeflow streaming pipeline, step: '2'}
+- {from: database, to: adf-batch-ingest, label: batch extract, step: '1'}
+- {from: adf-batch-ingest, to: stdatalake, label: raw batch load, step: '2'}
+- {from: dbw-medallion, to: stdatalake, label: 'Delta Lake: bronze / silver / gold', step: '3'}
+- {from: dbw-medallion, to: mlw-model-serving, label: MLflow model registry, step: '4'}
+- {from: mlw-model-serving, to: aks-inference, label: Kubernetes online endpoint, step: '5'}
+- {from: dbw-medallion, to: users, label: SQL warehouse to Power BI (Direct Lake), step: '6'}
+- {from: pview-catalog, to: stdatalake, label: scan}
+- {from: dbw-medallion, to: kv-secrets, label: Key Vault-backed secret scope}
+- {from: dbw-medallion, to: law-platform, label: diagnostics}
+steps:
+- {n: '1', text: 'device → evhns-stream-ingest: raw events'}
+- {n: '2', text: 'evhns-stream-ingest → dbw-medallion: Lakeflow streaming pipeline'}
+- {n: '3', text: 'dbw-medallion → stdatalake: Delta Lake: bronze / silver / gold'}
+- {n: '4', text: 'dbw-medallion → mlw-model-serving: MLflow model registry'}
+- {n: '5', text: 'mlw-model-serving → aks-inference: Kubernetes online endpoint'}
+- {n: '6', text: 'dbw-medallion → users: SQL warehouse to Power BI (Direct Lake)'}

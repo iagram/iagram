@@ -1,0 +1,54 @@
+# Generated from the official reference (https://cloud.google.com/solutions/automotive); edit freely.
+title: Connected vehicle telemetry platform with Pub/Sub, Dataflow, Bigtable and BigQuery
+category: iot
+tags:
+- connected vehicles
+- automotive
+- pub/sub
+- dataflow
+- bigtable
+- bigquery
+- fleet
+source: https://cloud.google.com/solutions/automotive
+description: Vehicles stream telemetry through a global load balancer to a connectivity gateway on GKE that publishes normalised events to Pub/Sub, where Dataflow enriches them, writes the latest vehicle
+  state to Bigtable for low-latency lookups and lands history in BigQuery and Cloud Storage. Fleet operators and driver apps query vehicle state through a Cloud Run API, and remote commands travel back
+  through a dedicated topic.
+nodes:
+- {id: prj-vehicle-prj, type: gcp.project, name: vehicle-prj, props: {project_id: vehicle-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-vehicle-vpc, type: gcp.vpc, name: vehicle-vpc, parent: prj-vehicle-prj, props: {cidr: 10.60.0.0/16}}
+- {id: sub-gateway-sub, type: gcp.subnetwork, name: gateway-sub, parent: vpc-vehicle-vpc, props: {cidr: 10.60.1.0/24, region: europe-west1}}
+- {id: device, type: common.device, name: device}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: users, type: common.users, name: users}
+- {id: vehicle-ingest-glb, type: gcp.res.google_compute_global_forwarding_rule, name: vehicle-ingest-glb, parent: prj-vehicle-prj, props: {name: changeme, target: changeme}}
+- {id: vehicle-gateway-gke, type: gcp.gke_cluster, name: vehicle-gateway-gke, parent: sub-gateway-sub}
+- {id: vehicle-telemetry, type: gcp.pubsub_topic, name: vehicle-telemetry, parent: prj-vehicle-prj}
+- {id: vehicle-commands, type: gcp.pubsub_topic, name: vehicle-commands, parent: prj-vehicle-prj}
+- {id: telemetry-enrich-job, type: gcp.res.google_dataflow_job, name: telemetry-enrich-job, parent: prj-vehicle-prj, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: vehicle-state-bt, type: gcp.res.google_bigtable_instance, name: vehicle-state-bt, parent: prj-vehicle-prj, props: {name: changeme}}
+- {id: fleet-analytics, type: gcp.bigquery_dataset, name: fleet-analytics, parent: prj-vehicle-prj}
+- {id: raw-telemetry-lake, type: gcp.storage_bucket, name: raw-telemetry-lake, parent: prj-vehicle-prj}
+- {id: fleet-api, type: gcp.cloud_run_service, name: fleet-api, parent: prj-vehicle-prj}
+edges:
+- {from: device, to: vehicle-ingest-glb, label: telemetry over TLS, step: '1'}
+- {from: vehicle-ingest-glb, to: vehicle-gateway-gke, label: MQTT / gRPC gateway, step: '2'}
+- {from: vehicle-gateway-gke, to: vehicle-telemetry, label: publish events, step: '3'}
+- {from: vehicle-telemetry, to: telemetry-enrich-job, label: pubsub subscription}
+- {from: telemetry-enrich-job, to: vehicle-state-bt, label: latest vehicle state, step: '4'}
+- {from: telemetry-enrich-job, to: fleet-analytics, label: trip history, step: '5'}
+- {from: telemetry-enrich-job, to: raw-telemetry-lake, label: raw archive, step: '6'}
+- {from: mobile, to: fleet-api, label: driver app, step: '7'}
+- {from: users, to: fleet-api, label: fleet operator console, step: '7'}
+- {from: fleet-api, to: vehicle-state-bt, label: point lookup, step: '8'}
+- {from: fleet-api, to: vehicle-commands, label: remote command, step: '9'}
+- {from: vehicle-commands, to: vehicle-gateway-gke, label: pubsub subscription}
+steps:
+- {n: '1', text: 'device → vehicle-ingest-glb: telemetry over TLS'}
+- {n: '2', text: 'vehicle-ingest-glb → vehicle-gateway-gke: MQTT / gRPC gateway'}
+- {n: '3', text: 'vehicle-gateway-gke → vehicle-telemetry: publish events'}
+- {n: '4', text: 'telemetry-enrich-job → vehicle-state-bt: latest vehicle state'}
+- {n: '5', text: 'telemetry-enrich-job → fleet-analytics: trip history'}
+- {n: '6', text: 'telemetry-enrich-job → raw-telemetry-lake: raw archive'}
+- {n: '7', text: 'mobile → fleet-api: driver app'}
+- {n: '8', text: 'fleet-api → vehicle-state-bt: point lookup'}
+- {n: '9', text: 'fleet-api → vehicle-commands: remote command'}

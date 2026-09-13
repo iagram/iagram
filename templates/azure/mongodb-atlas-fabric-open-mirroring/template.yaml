@@ -1,0 +1,52 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/analytics/sync-mongodb-atlas-fabric-analytics); edit freely.
+title: Real-time sync of MongoDB Atlas changes to Microsoft Fabric
+category: data
+tags:
+- fabric
+- open-mirroring
+- mongodb-atlas
+- change-streams
+- onelake
+- app-service
+- delta-lake
+- power-bi
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/analytics/sync-mongodb-atlas-fabric-analytics
+description: A Python mirroring accelerator hosted on Azure App Service performs an initial load and then subscribes to MongoDB Atlas change streams, writing insert, update and delete events as Parquet
+  files into the landing zone of an open mirrored database in Fabric. Fabric converts the files to Delta tables in OneLake, keeps them synchronised, generates a default semantic model and exposes the data
+  to lakehouses, warehouses and Power BI Direct Lake reports.
+nodes:
+- {id: sub-analytics, type: azure.subscription, name: analytics, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-mongodb-fabric, type: azure.resource_group, name: rg-mongodb-fabric, parent: sub-analytics, props: {location: westeurope}}
+- {id: grp-mirroring-app, type: common.group, name: Mirroring app, parent: rg-rg-mongodb-fabric}
+- {id: grp-fabric, type: common.group, name: Fabric, parent: rg-rg-mongodb-fabric}
+- {id: grp-security-and-ops, type: common.group, name: Security and ops, parent: rg-rg-mongodb-fabric}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: asp-mirroring, type: azure.res.azurerm_service_plan, name: asp-mirroring, parent: grp-mirroring-app, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: app-mongo-mirroring
+  type: azure.res.azurerm_linux_web_app
+  name: app-mongo-mirroring
+  parent: grp-mirroring-app
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: fabric-mirrored-db
+  type: azure.res.azurerm_fabric_capacity
+  name: fabric-mirrored-db
+  parent: grp-fabric
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: stlanding-zone-staging, type: azure.storage_account, name: stlanding-zone-staging, parent: grp-fabric}
+- {id: kv-atlas-credentials, type: azure.key_vault, name: kv-atlas-credentials, parent: grp-security-and-ops}
+- {id: law-mirroring, type: azure.res.azurerm_log_analytics_workspace, name: law-mirroring, parent: grp-security-and-ops, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: saas, to: app-mongo-mirroring, label: MongoDB Atlas change streams, step: '1'}
+- {from: app-mongo-mirroring, to: fabric-mirrored-db, label: Parquet to open mirroring landing zone, step: '2'}
+- {from: fabric-mirrored-db, to: fabric-mirrored-db, label: convert to Delta tables in OneLake, step: '3'}
+- {from: fabric-mirrored-db, to: users, label: Power BI Direct Lake / SQL endpoint, step: '4'}
+- {from: app-mongo-mirroring, to: kv-atlas-credentials, label: Atlas connection secret}
+- {from: app-mongo-mirroring, to: law-mirroring, label: app logs}
+- {from: asp-mirroring, to: app-mongo-mirroring, label: hosts}
+steps:
+- {n: '1', text: 'saas → app-mongo-mirroring: MongoDB Atlas change streams'}
+- {n: '2', text: 'app-mongo-mirroring → fabric-mirrored-db: Parquet to open mirroring landing zone'}
+- {n: '3', text: 'fabric-mirrored-db → fabric-mirrored-db: convert to Delta tables in OneLake'}
+- {n: '4', text: 'fabric-mirrored-db → users: Power BI Direct Lake / SQL endpoint'}

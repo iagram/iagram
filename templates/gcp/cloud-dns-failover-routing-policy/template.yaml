@@ -20,6 +20,7 @@ nodes:
 - {id: sub-client-sub-usc1, type: gcp.subnetwork, name: client-sub-usc1, parent: vpc-internal-vpc, props: {cidr: 10.180.10.0/24, region: us-central1}}
 - {id: client, type: common.client, name: client}
 - {id: internal-private-zone, type: gcp.cloud_dns_zone, name: internal-private-zone, parent: prj-prj-p-internal-api, props: {domain: example.com}}
+- {id: api-failover-record, type: gcp.res.google_dns_record_set, name: api-failover-record, parent: vpc-internal-vpc, props: {managed_zone: changeme, name: changeme, type: changeme}}
 - {id: api-ilb-usc1, type: gcp.res.google_compute_forwarding_rule, name: api-ilb-usc1, parent: sub-api-sub-usc1, props: {name: changeme}}
 - {id: api-ilb-use1, type: gcp.res.google_compute_forwarding_rule, name: api-ilb-use1, parent: sub-api-sub-use1, props: {name: changeme}}
 - {id: api-backend-usc1, type: gcp.res.google_compute_region_backend_service, name: api-backend-usc1, parent: sub-api-sub-usc1, props: {name: changeme}}
@@ -43,6 +44,9 @@ nodes:
 - {id: api-health-check, type: gcp.res.google_compute_health_check, name: api-health-check, parent: prj-prj-p-internal-api, props: {name: changeme}}
 - {id: internal-client-vm, type: gcp.compute_instance, name: internal-client-vm, parent: sub-client-sub-usc1}
 edges:
+- {from: internal-client-vm, to: api-failover-record, label: resolve api.internal, step: '1'}
+- {from: api-failover-record, to: api-ilb-usc1, label: primary target, step: '2'}
+- {from: api-failover-record, to: api-ilb-use1, label: backup geolocation target, step: '3'}
 - {from: api-health-check, to: api-ilb-usc1, label: Cloud DNS health check, step: '4'}
 - {from: api-ilb-usc1, to: api-backend-usc1, label: regional internal ALB, step: '5'}
 - {from: api-backend-usc1, to: api-mig-usc1, label: HTTP, step: '6'}
@@ -50,6 +54,9 @@ edges:
 - {from: api-backend-use1, to: api-mig-use1, label: HTTP, step: '8'}
 - {from: client, to: internal-client-vm, label: internal consumers, step: '9'}
 steps:
+- {n: '1', text: 'internal-client-vm → api-failover-record: resolve api.internal'}
+- {n: '2', text: 'api-failover-record → api-ilb-usc1: primary target'}
+- {n: '3', text: 'api-failover-record → api-ilb-use1: backup geolocation target'}
 - {n: '4', text: 'api-health-check → api-ilb-usc1: Cloud DNS health check'}
 - {n: '5', text: 'api-ilb-usc1 → api-backend-usc1: regional internal ALB'}
 - {n: '6', text: 'api-backend-usc1 → api-mig-usc1: HTTP'}

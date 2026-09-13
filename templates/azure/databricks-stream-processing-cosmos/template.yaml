@@ -1,0 +1,62 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/data/stream-processing-databricks); edit freely.
+title: Stream processing with Azure Databricks
+category: data
+tags:
+- databricks
+- event-hubs
+- structured-streaming
+- cosmos-db
+- fabric-mirroring
+- log-analytics
+source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/data/stream-processing-databricks
+description: Two real-time streams (taxi rides and fares) are published to separate event hubs; an Azure Databricks Spark Structured Streaming job joins and enriches them with neighbourhood lookup data
+  and computes windowed averages. Results are written to Azure Cosmos DB for NoSQL, mirrored into Microsoft Fabric for analytics, and Spark metrics and logs land in a Log Analytics workspace.
+nodes:
+- {id: sub-streaming, type: azure.subscription, name: streaming, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-stream-databricks, type: azure.resource_group, name: rg-stream-databricks, parent: sub-streaming, props: {location: westeurope}}
+- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-stream-databricks}
+- {id: grp-process, type: common.group, name: Process, parent: rg-rg-stream-databricks}
+- {id: grp-store-and-analyze, type: common.group, name: Store and analyze, parent: rg-rg-stream-databricks}
+- {id: grp-monitor, type: common.group, name: Monitor, parent: rg-rg-stream-databricks}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: evhns-taxi, type: azure.res.azurerm_eventhub_namespace, name: evhns-taxi, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-taxi-ride, type: azure.res.azurerm_eventhub, name: evh-taxi-ride, parent: grp-ingest, props: {name: changeme, partition_count: 1}}
+- {id: evh-taxi-fare, type: azure.res.azurerm_eventhub, name: evh-taxi-fare, parent: grp-ingest, props: {name: changeme, partition_count: 1}}
+- {id: dbw-stream-job, type: azure.res.azurerm_databricks_workspace, name: dbw-stream-job, parent: grp-process, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: stdbfsroot, type: azure.storage_account, name: stdbfsroot, parent: grp-process}
+- id: cosmos-taxi-results
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-taxi-results
+  parent: grp-store-and-analyze
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- id: fabric-mirroring
+  type: azure.res.azurerm_fabric_capacity
+  name: fabric-mirroring
+  parent: grp-store-and-analyze
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: kv-databricks-scope, type: azure.key_vault, name: kv-databricks-scope, parent: grp-monitor}
+- {id: law-spark-metrics, type: azure.res.azurerm_log_analytics_workspace, name: law-spark-metrics, parent: grp-monitor, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: device, to: evh-taxi-ride, label: ride events (JSON), step: '1'}
+- {from: device, to: evh-taxi-fare, label: fare events (CSV), step: '1'}
+- {from: evh-taxi-ride, to: dbw-stream-job, label: readStream (eventhubs), step: '2'}
+- {from: evh-taxi-fare, to: dbw-stream-job, label: readStream (eventhubs), step: '2'}
+- {from: stdbfsroot, to: dbw-stream-job, label: neighbourhood shapefile lookup}
+- {from: dbw-stream-job, to: cosmos-taxi-results, label: writeStream cosmos.oltp, step: '3'}
+- {from: cosmos-taxi-results, to: fabric-mirroring, label: Fabric mirroring (no ETL), step: '4'}
+- {from: fabric-mirroring, to: users, label: SQL endpoint / KQL / Power BI, step: '5'}
+- {from: dbw-stream-job, to: kv-databricks-scope, label: secret scope}
+- {from: dbw-stream-job, to: law-spark-metrics, label: Dropwizard sink logs and metrics}
+steps:
+- {n: '1', text: 'device → evh-taxi-ride: ride events (JSON)'}
+- {n: '2', text: 'evh-taxi-ride → dbw-stream-job: readStream (eventhubs)'}
+- {n: '3', text: 'dbw-stream-job → cosmos-taxi-results: writeStream cosmos.oltp'}
+- {n: '4', text: 'cosmos-taxi-results → fabric-mirroring: Fabric mirroring (no ETL)'}
+- {n: '5', text: 'fabric-mirroring → users: SQL endpoint / KQL / Power BI'}

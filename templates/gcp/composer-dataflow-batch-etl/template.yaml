@@ -21,15 +21,21 @@ nodes:
 - {id: gcs-text-to-bq-job, type: gcp.res.google_dataflow_job, name: gcs-text-to-bq-job, parent: sub-composer-subnet, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
 - {id: dataflow-staging-bucket, type: gcp.storage_bucket, name: dataflow-staging-bucket, parent: prj-batch-etl}
 - {id: etl-dataset, type: gcp.bigquery_dataset, name: etl-dataset, parent: prj-batch-etl}
+- {id: transformed-table, type: gcp.res.google_bigquery_table, name: transformed-table, parent: prj-batch-etl, props: {dataset_id: changeme, table_id: changeme}}
+- {id: daily-aggregate-table, type: gcp.res.google_bigquery_table, name: daily-aggregate-table, parent: prj-batch-etl, props: {dataset_id: changeme, table_id: changeme}}
 edges:
 - {from: server, to: input-files-bucket, label: nightly file drop, step: '1'}
 - {from: etl-composer-env, to: input-files-bucket, label: GCS sensor, step: '2'}
 - {from: etl-composer-env, to: gcs-text-to-bq-job, label: DataflowTemplatedJobStartOperator, step: '3'}
 - {from: gcs-text-to-bq-job, to: udf-schema-bucket, label: read UDF and schema, step: '4'}
 - {from: gcs-text-to-bq-job, to: dataflow-staging-bucket, label: staging, step: '5'}
+- {from: gcs-text-to-bq-job, to: transformed-table, label: load rows, step: '6'}
+- {from: etl-composer-env, to: daily-aggregate-table, label: BigQueryInsertJobOperator, step: '7'}
 steps:
 - {n: '1', text: 'server → input-files-bucket: nightly file drop'}
 - {n: '2', text: 'etl-composer-env → input-files-bucket: GCS sensor'}
 - {n: '3', text: 'etl-composer-env → gcs-text-to-bq-job: DataflowTemplatedJobStartOperator'}
 - {n: '4', text: 'gcs-text-to-bq-job → udf-schema-bucket: read UDF and schema'}
 - {n: '5', text: 'gcs-text-to-bq-job → dataflow-staging-bucket: staging'}
+- {n: '6', text: 'gcs-text-to-bq-job → transformed-table: load rows'}
+- {n: '7', text: 'etl-composer-env → daily-aggregate-table: BigQueryInsertJobOperator'}

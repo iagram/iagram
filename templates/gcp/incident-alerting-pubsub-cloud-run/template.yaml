@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.cloud.google.com/monitoring/support/notification-options); edit freely.
+title: Incident automation with alerting policies, a Pub/Sub notification channel and Cloud Run handlers
+category: observability
+tags:
+- alerting
+- notification channel
+- pub/sub
+- cloud run
+- workflows
+- incident automation
+source: https://docs.cloud.google.com/monitoring/support/notification-options
+description: Cloud Monitoring alerting policies send incident notifications to a Pub/Sub notification channel in addition to Slack for redundancy, and a push subscription delivers each JSON notification
+  to a Cloud Run handler. The handler enriches the incident and starts a Workflows remediation run, while a BigQuery subscription on the same topic keeps a queryable history of every alert.
+nodes:
+- {id: prj-ops-prj, type: gcp.project, name: ops-prj, props: {project_id: ops-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: monitored-api, type: gcp.cloud_run_service, name: monitored-api, parent: prj-ops-prj}
+- id: error-rate-alert
+  type: gcp.res.google_monitoring_alert_policy
+  name: error-rate-alert
+  parent: prj-ops-prj
+  props:
+    combiner: changeme
+    conditions: []
+    display_name: changeme
+- {id: pubsub-channel, type: gcp.res.google_monitoring_notification_channel, name: pubsub-channel, parent: prj-ops-prj, props: {type: changeme}}
+- {id: slack-channel, type: gcp.res.google_monitoring_notification_channel, name: slack-channel, parent: prj-ops-prj, props: {type: changeme}}
+- {id: alert-notifications, type: gcp.pubsub_topic, name: alert-notifications, parent: prj-ops-prj}
+- {id: incident-handler, type: gcp.cloud_run_service, name: incident-handler, parent: prj-ops-prj}
+- {id: remediation-workflow, type: gcp.res.google_workflows_workflow, name: remediation-workflow, parent: prj-ops-prj}
+- {id: alert-history-ds, type: gcp.bigquery_dataset, name: alert-history-ds, parent: prj-ops-prj}
+- {id: rollback-fn, type: gcp.res.google_cloudfunctions2_function, name: rollback-fn, parent: prj-ops-prj, props: {location: westeurope, name: changeme}}
+edges:
+- {from: users, to: monitored-api, label: HTTPS, step: '1'}
+- {from: monitored-api, to: error-rate-alert, label: 5xx ratio metric, step: '2'}
+- {from: error-rate-alert, to: pubsub-channel, label: incident opened, step: '3'}
+- {from: error-rate-alert, to: slack-channel, label: redundant notification, step: '3'}
+- {from: slack-channel, to: saas, label: Slack, step: '4'}
+- {from: pubsub-channel, to: alert-notifications, label: publish notification JSON, step: '4'}
+- {from: alert-notifications, to: incident-handler, label: pubsub subscription}
+- {from: alert-notifications, to: alert-history-ds, label: pubsub subscription}
+- {from: incident-handler, to: remediation-workflow, label: start execution, step: '5'}
+- {from: remediation-workflow, to: rollback-fn, label: rollback step, step: '6'}
+- {from: rollback-fn, to: monitored-api, label: redeploy previous revision, step: '7'}
+steps:
+- {n: '1', text: 'users → monitored-api: HTTPS'}
+- {n: '2', text: 'monitored-api → error-rate-alert: 5xx ratio metric'}
+- {n: '3', text: 'error-rate-alert → pubsub-channel: incident opened'}
+- {n: '4', text: 'slack-channel → saas: Slack'}
+- {n: '5', text: 'incident-handler → remediation-workflow: start execution'}
+- {n: '6', text: 'remediation-workflow → rollback-fn: rollback step'}
+- {n: '7', text: 'rollback-fn → monitored-api: redeploy previous revision'}

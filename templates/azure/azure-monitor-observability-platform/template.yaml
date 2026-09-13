@@ -1,0 +1,58 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-monitor/fundamentals/overview); edit freely.
+title: Azure Monitor observability platform
+category: observability
+tags:
+- azure monitor
+- log analytics
+- azure monitor workspace
+- application insights
+- opentelemetry
+- prometheus
+- alerts
+- action groups
+- grafana
+source: https://learn.microsoft.com/en-us/azure/azure-monitor/fundamentals/overview
+description: Azure Monitor collects metrics, logs, traces and events from Azure resources, VMs, Kubernetes clusters and applications into two workspace types, a Log Analytics workspace for logs and traces
+  queried with KQL and an Azure Monitor workspace for Prometheus and OpenTelemetry metrics queried with PromQL. Application Insights provides OpenTelemetry-based APM, workbooks and Grafana dashboards visualize
+  the data, and alerts drive action groups that run Logic Apps or Automation runbooks and autoscale.
+nodes:
+- {id: sub-platform, type: azure.subscription, name: platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-monitoring, type: azure.resource_group, name: rg-monitoring, parent: sub-platform, props: {location: westeurope}}
+- {id: grp-data-sources, type: common.group, name: Data sources, parent: rg-rg-monitoring}
+- {id: grp-data-platform, type: common.group, name: Data platform, parent: rg-rg-monitoring}
+- {id: grp-consume-and-respond, type: common.group, name: Consume and respond, parent: rg-rg-monitoring}
+- {id: user, type: common.user, name: user}
+- {id: vpc-rg-rg-monitoring, type: azure.vnet, name: main, parent: rg-rg-monitoring, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-monitoring, type: azure.subnet, name: main, parent: vpc-rg-rg-monitoring, props: {cidr: 10.200.0.0/24}}
+- {id: vm-app-server, type: azure.virtual_machine, name: vm-app-server, parent: sub-rg-rg-monitoring}
+- {id: aks-workload, type: azure.aks_cluster, name: aks-workload, parent: sub-rg-rg-monitoring}
+- id: app-web
+  type: azure.res.azurerm_linux_web_app
+  name: app-web
+  parent: grp-data-sources
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: appi-web, type: azure.res.azurerm_application_insights, name: appi-web, parent: grp-data-platform, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: grp-data-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: amw-metrics, type: azure.res.azurerm_monitor_workspace, name: amw-metrics, parent: grp-data-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: grafana-central, type: azure.res.azurerm_dashboard_grafana, name: grafana-central, parent: grp-consume-and-respond, props: {grafana_major_version: changeme, location: westeurope, name: changeme,
+    resource_group_name: changeme}}
+- {id: ag-oncall, type: azure.res.azurerm_monitor_action_group, name: ag-oncall, parent: grp-consume-and-respond, props: {name: changeme, resource_group_name: changeme, short_name: changeme}}
+- {id: logic-remediate, type: azure.res.azurerm_logic_app_workflow, name: logic-remediate, parent: grp-consume-and-respond, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: aa-runbooks, type: azure.res.azurerm_automation_account, name: aa-runbooks, parent: grp-consume-and-respond, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+edges:
+- {from: vm-app-server, to: law-central, label: Azure Monitor Agent + data collection rules, step: '1'}
+- {from: aks-workload, to: amw-metrics, label: Managed Prometheus metrics, step: '1'}
+- {from: aks-workload, to: law-central, label: container logs}
+- {from: app-web, to: appi-web, label: OpenTelemetry traces and requests, step: '1'}
+- {from: appi-web, to: law-central, label: workspace-based Application Insights}
+- {from: law-central, to: grafana-central, label: KQL data source, step: '2'}
+- {from: amw-metrics, to: grafana-central, label: PromQL data source, step: '2'}
+- {from: law-central, to: ag-oncall, label: log and metric alerts, step: '3'}
+- {from: ag-oncall, to: logic-remediate, label: no-code workflow}
+- {from: ag-oncall, to: aa-runbooks, label: low-code runbook}
+- {from: ag-oncall, to: user, label: email / SMS / push}
+- {from: user, to: grafana-central, label: dashboards and workbooks}
+steps:
+- {n: '1', text: 'vm-app-server → law-central: Azure Monitor Agent + data collection rules'}
+- {n: '2', text: 'law-central → grafana-central: KQL data source'}
+- {n: '3', text: 'law-central → ag-oncall: log and metric alerts'}

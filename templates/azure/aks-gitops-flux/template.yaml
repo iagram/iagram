@@ -1,0 +1,40 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2); edit freely.
+title: GitOps application deployments with Flux v2 on AKS and Arc-enabled Kubernetes
+category: devops
+tags:
+- gitops
+- flux
+- aks
+- azure arc
+- kustomize
+- helm
+- pull-based deployment
+source: https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2
+description: The microsoft.flux cluster extension installs the Flux source, kustomize, helm and notification controllers in the cluster, and fluxConfigurations resources created through Azure Resource Manager
+  tell them which Git repository, Bucket or Azure Blob source and kustomizations to reconcile. Reconciliation is pull-based from inside the cluster so no external CI system needs cluster credentials, and
+  Azure Policy can assign the same configuration to fleets of AKS and Arc-enabled clusters.
+nodes:
+- {id: dc-factory-edge, type: common.datacenter, name: factory-edge}
+- {id: sub-platform, type: azure.subscription, name: platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-gitops, type: azure.resource_group, name: rg-gitops, parent: sub-platform, props: {location: westeurope}}
+- {id: vpc-vnet-gitops, type: azure.vnet, name: vnet-gitops, parent: rg-rg-gitops, props: {cidr: 10.40.0.0/16}}
+- {id: sub-snet-aks, type: azure.subnet, name: snet-aks, parent: vpc-vnet-gitops, props: {cidr: 10.40.0.0/20}}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- {id: aks-gitops, type: azure.aks_cluster, name: aks-gitops, parent: sub-snet-aks}
+- {id: vpc-rg-rg-gitops, type: azure.vnet, name: main, parent: rg-rg-gitops, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-gitops, type: azure.subnet, name: main, parent: vpc-rg-rg-gitops, props: {cidr: 10.200.0.0/24}}
+- id: arc-k8s-factory
+  type: azure.res.azurerm_arc_kubernetes_cluster
+  name: arc-k8s-factory
+  parent: sub-rg-rg-gitops
+  props: {agent_public_key_certificate: changeme, identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: acr-gitops, type: azure.container_registry, name: acr-gitops, parent: rg-rg-gitops}
+- {id: stfluxbucket, type: azure.storage_account, name: stfluxbucket, parent: rg-rg-gitops}
+- {id: law-gitops, type: azure.res.azurerm_log_analytics_workspace, name: law-gitops, parent: rg-rg-gitops, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: saas, label: commit manifests / Helm / Kustomize to Git, step: '1'}
+- {from: acr-gitops, to: aks-gitops, label: pull images / OCI Helm charts}
+- {from: aks-gitops, to: law-gitops, label: Flux status + reconciliation logs}
+steps:
+- {n: '1', text: 'user → saas: commit manifests / Helm / Kustomize to Git'}

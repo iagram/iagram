@@ -1,0 +1,75 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/real-time-lakehouse-data-processing); edit freely.
+title: Near real-time lakehouse processing with Azure Synapse Analytics
+category: data
+tags:
+- synapse
+- spark-pool
+- event-hubs
+- debezium
+- cdc
+- delta-lake
+- cosmos-db
+- ai-search
+- machine-learning
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/real-time-lakehouse-data-processing
+description: Debezium connectors capture row-level changes from OLTP databases and publish them to Event Hubs, which streams into Azure Synapse Spark pools or lands raw data in Data Lake Storage. Spark
+  validates and writes Delta Lake tables, loads curated data into a dedicated SQL pool for Power BI, and denormalised documents into Azure Cosmos DB and Azure AI Search for low-latency APIs, while serverless
+  SQL pools and Azure Machine Learning consume the validated zone.
+nodes:
+- {id: sub-analytics, type: azure.subscription, name: analytics, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-synapse-realtime, type: azure.resource_group, name: rg-synapse-realtime, parent: sub-analytics, props: {location: westeurope}}
+- {id: grp-change-capture, type: common.group, name: Change capture, parent: rg-rg-synapse-realtime}
+- {id: grp-lake-and-processing, type: common.group, name: Lake and processing, parent: rg-rg-synapse-realtime}
+- {id: grp-serve, type: common.group, name: Serve, parent: rg-rg-synapse-realtime}
+- {id: client, type: common.client, name: client}
+- {id: users, type: common.users, name: users}
+- {id: sql-oltp-source, type: azure.res.azurerm_mssql_server, name: sql-oltp-source, parent: grp-change-capture, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- id: ca-debezium-connect
+  type: azure.res.azurerm_container_app
+  name: ca-debezium-connect
+  parent: grp-change-capture
+  props: {container_app_environment_id: changeme, name: changeme, resource_group_name: changeme, revision_mode: changeme, template: {}}
+- {id: evhns-cdc, type: azure.res.azurerm_eventhub_namespace, name: evhns-cdc, parent: grp-change-capture, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: stlakehouse, type: azure.storage_account, name: stlakehouse, parent: grp-lake-and-processing}
+- {id: synw-realtime, type: azure.res.azurerm_synapse_workspace, name: synw-realtime, parent: grp-lake-and-processing, props: {location: westeurope, name: changeme, resource_group_name: changeme, storage_data_lake_gen2_filesystem_id: changeme}}
+- {id: synsp-streaming, type: azure.res.azurerm_synapse_spark_pool, name: synsp-streaming, parent: grp-lake-and-processing, props: {name: changeme, node_size: changeme, node_size_family: changeme, spark_version: changeme,
+    synapse_workspace_id: changeme}}
+- {id: syndp-serving, type: azure.res.azurerm_synapse_sql_pool, name: syndp-serving, parent: grp-serve, props: {name: changeme, sku_name: changeme, storage_account_type: changeme, synapse_workspace_id: changeme}}
+- id: cosmos-api-store
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-api-store
+  parent: grp-serve
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: srch-api-index, type: azure.res.azurerm_search_service, name: srch-api-index, parent: grp-serve, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- id: mlw-training
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-training
+  parent: grp-serve
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+edges:
+- {from: sql-oltp-source, to: ca-debezium-connect, label: CDC log read, step: '1'}
+- {from: ca-debezium-connect, to: evhns-cdc, label: change events (Kafka API), step: '2'}
+- {from: evhns-cdc, to: synsp-streaming, label: structured streaming, step: '3'}
+- {from: evhns-cdc, to: stlakehouse, label: Event Hubs Capture (raw zone), step: '3'}
+- {from: synsp-streaming, to: stlakehouse, label: validated Delta Lake zone, step: '4'}
+- {from: synsp-streaming, to: syndp-serving, label: curated load, step: '5'}
+- {from: syndp-serving, to: users, label: Power BI dashboards, step: '6'}
+- {from: synsp-streaming, to: cosmos-api-store, label: denormalised documents, step: '7'}
+- {from: cosmos-api-store, to: srch-api-index, label: index for full-text search, step: '8'}
+- {from: srch-api-index, to: client, label: low-latency API responses}
+- {from: stlakehouse, to: mlw-training, label: model training on validated data}
+steps:
+- {n: '1', text: 'sql-oltp-source → ca-debezium-connect: CDC log read'}
+- {n: '2', text: 'ca-debezium-connect → evhns-cdc: change events (Kafka API)'}
+- {n: '3', text: 'evhns-cdc → synsp-streaming: structured streaming'}
+- {n: '4', text: 'synsp-streaming → stlakehouse: validated Delta Lake zone'}
+- {n: '5', text: 'synsp-streaming → syndp-serving: curated load'}
+- {n: '6', text: 'syndp-serving → users: Power BI dashboards'}
+- {n: '7', text: 'synsp-streaming → cosmos-api-store: denormalised documents'}
+- {n: '8', text: 'cosmos-api-store → srch-api-index: index for full-text search'}

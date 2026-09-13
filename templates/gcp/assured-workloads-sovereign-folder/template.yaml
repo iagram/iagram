@@ -22,7 +22,10 @@ nodes:
 - {id: vpc-prj-prj-eu-kms, type: gcp.vpc, name: main, parent: prj-prj-eu-kms}
 - {id: sub-prj-prj-eu-kms, type: gcp.subnetwork, name: main, parent: vpc-prj-prj-eu-kms, props: {cidr: 10.200.0.0/24, region: europe-west1}}
 - {id: eu-regulated-folder, type: gcp.res.google_folder, name: eu-regulated-folder, parent: sub-prj-prj-eu-kms, props: {display_name: changeme, parent: changeme}}
+- {id: eu-resource-locations-policy, type: gcp.res.google_org_policy_policy, name: eu-resource-locations-policy, parent: sub-prj-prj-eu-kms, props: {name: changeme, parent: changeme}}
+- {id: restrict-service-usage-policy, type: gcp.res.google_org_policy_policy, name: restrict-service-usage-policy, parent: sub-prj-prj-eu-kms, props: {name: changeme, parent: changeme}}
 - {id: eu-key-ring, type: gcp.res.google_kms_key_ring, name: eu-key-ring, parent: prj-prj-eu-kms, props: {location: westeurope, name: changeme}}
+- {id: eu-hsm-key, type: gcp.res.google_kms_crypto_key, name: eu-hsm-key, parent: prj-prj-eu-kms, props: {key_ring: changeme, name: changeme}}
 - {id: eu-records-bucket, type: gcp.storage_bucket, name: eu-records-bucket, parent: prj-prj-eu-workload}
 - {id: eu-postgres, type: gcp.cloud_sql_instance, name: eu-postgres, parent: vpc-eu-vpc}
 - {id: eu-app-vm, type: gcp.compute_instance, name: eu-app-vm, parent: sub-eu-app-sub}
@@ -35,6 +38,12 @@ nodes:
     conditions: []
     display_name: changeme
 edges:
+- {from: eu-resource-locations-policy, to: eu-app-vm, label: EU regions only, step: '3'}
+- {from: restrict-service-usage-policy, to: prj-prj-eu-workload, label: allowed services only, step: '3'}
+- {from: eu-records-bucket, to: eu-hsm-key, label: CMEK, step: '4'}
+- {from: eu-postgres, to: eu-hsm-key, label: CMEK, step: '4'}
 - {from: eu-app-vm, to: eu-postgres, label: SQL, step: '5'}
 steps:
+- {n: '3', text: 'eu-resource-locations-policy → eu-app-vm: EU regions only'}
+- {n: '4', text: 'eu-records-bucket → eu-hsm-key: CMEK'}
 - {n: '5', text: 'eu-app-vm → eu-postgres: SQL'}

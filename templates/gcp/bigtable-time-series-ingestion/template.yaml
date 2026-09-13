@@ -22,6 +22,7 @@ nodes:
 - {id: sensor-readings-sub, type: gcp.res.google_pubsub_subscription, name: sensor-readings-sub, parent: grp-ingest, props: {name: changeme, topic: changeme}}
 - {id: readings-to-bigtable-job, type: gcp.res.google_dataflow_job, name: readings-to-bigtable-job, parent: grp-ingest, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
 - {id: timeseries-bigtable, type: gcp.res.google_bigtable_instance, name: timeseries-bigtable, parent: grp-store, props: {name: changeme}}
+- {id: readings-table, type: gcp.res.google_bigtable_table, name: readings-table, parent: grp-store, props: {instance_name: changeme, name: changeme}}
 - {id: readings-api-service, type: gcp.cloud_run_service, name: readings-api-service, parent: grp-store}
 - {id: bigtable-to-bq-export-job, type: gcp.res.google_dataflow_job, name: bigtable-to-bq-export-job, parent: grp-analyze, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
 - {id: readings-history-dataset, type: gcp.bigquery_dataset, name: readings-history-dataset, parent: grp-analyze}
@@ -30,13 +31,19 @@ edges:
 - {from: device, to: sensor-readings-topic, label: publish readings, step: '1'}
 - {from: sensor-readings-topic, to: sensor-readings-sub, label: fan out, step: '2'}
 - {from: sensor-readings-sub, to: readings-to-bigtable-job, label: pull, step: '3'}
+- {from: readings-to-bigtable-job, to: readings-table, label: write time-bucketed rows, step: '4'}
+- {from: readings-api-service, to: readings-table, label: read latest rows, step: '5'}
 - {from: users, to: readings-api-service, label: HTTPS, step: '6'}
 - {from: nightly-export-schedule, to: bigtable-to-bq-export-job, label: launch batch, step: '7'}
+- {from: bigtable-to-bq-export-job, to: readings-table, label: scan, step: '8'}
 - {from: bigtable-to-bq-export-job, to: readings-history-dataset, label: load history, step: '9'}
 steps:
 - {n: '1', text: 'device → sensor-readings-topic: publish readings'}
 - {n: '2', text: 'sensor-readings-topic → sensor-readings-sub: fan out'}
 - {n: '3', text: 'sensor-readings-sub → readings-to-bigtable-job: pull'}
+- {n: '4', text: 'readings-to-bigtable-job → readings-table: write time-bucketed rows'}
+- {n: '5', text: 'readings-api-service → readings-table: read latest rows'}
 - {n: '6', text: 'users → readings-api-service: HTTPS'}
 - {n: '7', text: 'nightly-export-schedule → bigtable-to-bq-export-job: launch batch'}
+- {n: '8', text: 'bigtable-to-bq-export-job → readings-table: scan'}
 - {n: '9', text: 'bigtable-to-bq-export-job → readings-history-dataset: load history'}

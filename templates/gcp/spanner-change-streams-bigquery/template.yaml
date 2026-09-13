@@ -19,9 +19,12 @@ nodes:
 - {id: client, type: common.client, name: client}
 - {id: users, type: common.users, name: users}
 - {id: orders-spanner-instance, type: gcp.res.google_spanner_instance, name: orders-spanner-instance, parent: grp-oltp, props: {config: changeme, display_name: changeme}}
+- {id: orders-spanner-db, type: gcp.res.google_spanner_database, name: orders-spanner-db, parent: grp-oltp, props: {instance: changeme, name: changeme}}
+- {id: changestream-metadata-db, type: gcp.res.google_spanner_database, name: changestream-metadata-db, parent: grp-oltp, props: {instance: changeme, name: changeme}}
 - {id: orders-api-service, type: gcp.cloud_run_service, name: orders-api-service, parent: grp-oltp}
 - {id: cdc-deadletter-bucket, type: gcp.storage_bucket, name: cdc-deadletter-bucket, parent: grp-pipeline}
 - {id: orders-changelog-dataset, type: gcp.bigquery_dataset, name: orders-changelog-dataset, parent: grp-analytics}
+- {id: orders-changelog-table, type: gcp.res.google_bigquery_table, name: orders-changelog-table, parent: grp-analytics, props: {dataset_id: changeme, table_id: changeme}}
 - id: ops-looker
   type: gcp.res.google_looker_instance
   name: ops-looker
@@ -29,9 +32,11 @@ nodes:
   props: {name: changeme, oauth_config: {}}
 edges:
 - {from: client, to: orders-api-service, label: HTTPS, step: '1'}
+- {from: orders-api-service, to: orders-spanner-db, label: transactions, step: '2'}
 - {from: ops-looker, to: orders-changelog-dataset, label: query, step: '7'}
 - {from: users, to: ops-looker, label: operational dashboards, step: '8'}
 steps:
 - {n: '1', text: 'client → orders-api-service: HTTPS'}
+- {n: '2', text: 'orders-api-service → orders-spanner-db: transactions'}
 - {n: '7', text: 'ops-looker → orders-changelog-dataset: query'}
 - {n: '8', text: 'users → ops-looker: operational dashboards'}

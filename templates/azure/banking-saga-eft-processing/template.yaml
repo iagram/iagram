@@ -1,0 +1,75 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/industry/financial-services/architecture/patterns-and-implementations-content); edit freely.
+title: Banking cloud transformation with a serverless saga and KEDA-scaled EFT processing
+category: industry
+tags:
+- financial services
+- payments
+- saga
+- durable functions
+- event hubs
+- cosmos db
+- keda
+- aks
+- load testing
+source: https://learn.microsoft.com/en-us/industry/financial-services/architecture/patterns-and-implementations-content
+description: Distributed financial transactions are coordinated with an orchestration-based saga implemented in Azure Durable Functions, with saga participants as Azure Functions, Event Hubs as the streaming
+  platform and Cosmos DB as the state store. An electronic funds transfer processor on AKS scales with KEDA using the Kafka topic trigger against Event Hubs, and Azure Load Testing with JMeter scripts validates
+  performance in the CI/CD pipeline.
+nodes:
+- {id: sub-banking, type: azure.subscription, name: banking, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-banking-core, type: azure.resource_group, name: rg-banking-core, parent: sub-banking, props: {location: westeurope}}
+- {id: grp-saga-orchestration, type: common.group, name: Saga orchestration, parent: rg-rg-banking-core}
+- {id: grp-eft-processing, type: common.group, name: EFT processing, parent: rg-rg-banking-core}
+- {id: vpc-vnet-banking, type: azure.vnet, name: vnet-banking, parent: rg-rg-banking-core, props: {cidr: 10.80.0.0/16}}
+- {id: sub-snet-aks, type: azure.subnet, name: snet-aks, parent: vpc-vnet-banking, props: {cidr: 10.80.0.0/20}}
+- {id: client, type: common.client, name: client}
+- {id: saas, type: common.saas, name: saas}
+- {id: evhns-transactions, type: azure.res.azurerm_eventhub_namespace, name: evhns-transactions, parent: grp-saga-orchestration, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}}
+- {id: evh-eft-requests, type: azure.res.azurerm_eventhub, name: evh-eft-requests, parent: grp-saga-orchestration, props: {name: changeme, partition_count: 1}}
+- id: func-saga-orchestrator
+  type: azure.res.azurerm_linux_function_app
+  name: func-saga-orchestrator
+  parent: grp-saga-orchestration
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: func-saga-participants
+  type: azure.res.azurerm_linux_function_app
+  name: func-saga-participants
+  parent: grp-saga-orchestration
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: stdurablestate, type: azure.storage_account, name: stdurablestate, parent: grp-saga-orchestration}
+- id: cosmos-ledger
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-ledger
+  parent: grp-saga-orchestration
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: aks-eft-processor, type: azure.aks_cluster, name: aks-eft-processor, parent: sub-snet-aks}
+- {id: acr-banking, type: azure.container_registry, name: acr-banking, parent: grp-eft-processing}
+- {id: alt-jmeter, type: azure.res.azurerm_load_test, name: alt-jmeter, parent: grp-eft-processing, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: appi-banking, type: azure.res.azurerm_application_insights, name: appi-banking, parent: grp-eft-processing, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: client, to: func-saga-orchestrator, label: transfer request, step: '1'}
+- {from: func-saga-orchestrator, to: stdurablestate, label: Durable Functions state + timeouts}
+- {from: func-saga-orchestrator, to: evh-eft-requests, label: publish saga commands, step: '2'}
+- {from: evh-eft-requests, to: func-saga-participants, label: participant triggers, step: '3'}
+- {from: func-saga-participants, to: cosmos-ledger, label: local transactions / compensations, step: '4'}
+- {from: func-saga-participants, to: evh-eft-requests, label: reply events}
+- {from: evh-eft-requests, to: aks-eft-processor, label: KEDA Kafka topic trigger scales EFT pods, step: '5'}
+- {from: acr-banking, to: aks-eft-processor, label: EFT processor image}
+- {from: aks-eft-processor, to: cosmos-ledger, label: settle transfers}
+- {from: saas, to: alt-jmeter, label: CI/CD pipeline runs load test, step: '6'}
+- {from: alt-jmeter, to: func-saga-orchestrator, label: JMeter traffic}
+- {from: aks-eft-processor, to: appi-banking, label: saga workflow observability}
+steps:
+- {n: '1', text: 'client → func-saga-orchestrator: transfer request'}
+- {n: '2', text: 'func-saga-orchestrator → evh-eft-requests: publish saga commands'}
+- {n: '3', text: 'evh-eft-requests → func-saga-participants: participant triggers'}
+- {n: '4', text: 'func-saga-participants → cosmos-ledger: local transactions / compensations'}
+- {n: '5', text: 'evh-eft-requests → aks-eft-processor: KEDA Kafka topic trigger scales EFT pods'}
+- {n: '6', text: 'saas → alt-jmeter: CI/CD pipeline runs load test'}

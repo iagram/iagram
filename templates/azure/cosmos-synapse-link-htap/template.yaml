@@ -1,0 +1,66 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/cosmos-db/synapse-link); edit freely.
+title: HTAP with Azure Cosmos DB analytical store and Azure Synapse Link
+category: data
+tags:
+- cosmos-db
+- analytical-store
+- synapse-link
+- htap
+- synapse-spark
+- serverless-sql
+- private-endpoint
+- customer-managed-keys
+source: https://learn.microsoft.com/en-us/azure/cosmos-db/synapse-link
+description: Enabling Synapse Link on an Azure Cosmos DB account creates a fully isolated column-oriented analytical store that auto-syncs inserts, updates and deletes from the transactional store with
+  no ETL and no request-unit consumption. Azure Synapse Spark pools and serverless SQL pools query the analytical store directly for near real-time BI, data science and Power BI, with separate managed private
+  endpoints per store and customer-managed keys from Key Vault. Microsoft now steers new projects to Cosmos DB mirroring in Fabric.
+nodes:
+- {id: sub-apps-and-analytics, type: azure.subscription, name: apps-and-analytics, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-cosmos-htap, type: azure.resource_group, name: rg-cosmos-htap, parent: sub-apps-and-analytics, props: {location: westeurope}}
+- {id: grp-operational, type: common.group, name: Operational, parent: rg-rg-cosmos-htap}
+- {id: grp-analytical, type: common.group, name: Analytical, parent: rg-rg-cosmos-htap}
+- {id: grp-security, type: common.group, name: Security, parent: rg-rg-cosmos-htap}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- id: app-orders-api
+  type: azure.res.azurerm_linux_web_app
+  name: app-orders-api
+  parent: grp-operational
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: cosmos-orders-htap
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-orders-htap
+  parent: grp-operational
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: synw-link, type: azure.res.azurerm_synapse_workspace, name: synw-link, parent: grp-analytical, props: {location: westeurope, name: changeme, resource_group_name: changeme, storage_data_lake_gen2_filesystem_id: changeme}}
+- {id: synsp-analytics, type: azure.res.azurerm_synapse_spark_pool, name: synsp-analytics, parent: grp-analytical, props: {name: changeme, node_size: changeme, node_size_family: changeme, spark_version: changeme,
+    synapse_workspace_id: changeme}}
+- {id: stsynapse-primary, type: azure.storage_account, name: stsynapse-primary, parent: grp-analytical}
+- id: pe-analytical-store
+  type: azure.res.azurerm_private_endpoint
+  name: pe-analytical-store
+  parent: grp-security
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: kv-cmk, type: azure.key_vault, name: kv-cmk, parent: grp-security}
+edges:
+- {from: client, to: app-orders-api, label: HTTPS, step: '1'}
+- {from: app-orders-api, to: cosmos-orders-htap, label: transactional writes (row store), step: '2'}
+- {from: cosmos-orders-htap, to: cosmos-orders-htap, label: auto-sync to analytical column store, step: '3'}
+- {from: synsp-analytics, to: pe-analytical-store, label: Spark reads analytical store, step: '4'}
+- {from: pe-analytical-store, to: cosmos-orders-htap, label: managed private endpoint}
+- {from: synw-link, to: cosmos-orders-htap, label: serverless SQL OPENROWSET, step: '4'}
+- {from: synsp-analytics, to: stsynapse-primary, label: curated outputs}
+- {from: synw-link, to: users, label: Power BI near real-time reports, step: '5'}
+- {from: kv-cmk, to: cosmos-orders-htap, label: customer-managed key (managed identity)}
+steps:
+- {n: '1', text: 'client → app-orders-api: HTTPS'}
+- {n: '2', text: 'app-orders-api → cosmos-orders-htap: transactional writes (row store)'}
+- {n: '3', text: 'cosmos-orders-htap → cosmos-orders-htap: auto-sync to analytical column store'}
+- {n: '4', text: 'synsp-analytics → pe-analytical-store: Spark reads analytical store'}
+- {n: '5', text: 'synw-link → users: Power BI near real-time reports'}

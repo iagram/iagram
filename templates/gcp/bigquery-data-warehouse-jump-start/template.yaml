@@ -21,6 +21,8 @@ nodes:
 - {id: dw-refresh-schedule, type: gcp.res.google_cloud_scheduler_job, name: dw-refresh-schedule, parent: grp-ingest, props: {name: changeme}}
 - {id: dw-raw-dataset, type: gcp.bigquery_dataset, name: dw-raw-dataset, parent: grp-warehouse}
 - {id: dw-curated-dataset, type: gcp.bigquery_dataset, name: dw-curated-dataset, parent: grp-warehouse}
+- {id: orders-fact-table, type: gcp.res.google_bigquery_table, name: orders-fact-table, parent: grp-warehouse, props: {dataset_id: changeme, table_id: changeme}}
+- {id: build-views-procedure, type: gcp.res.google_bigquery_routine, name: build-views-procedure, parent: grp-warehouse, props: {dataset_id: changeme, definition_body: changeme, routine_id: changeme, routine_type: changeme}}
 - id: warehouse-looker
   type: gcp.res.google_looker_instance
   name: warehouse-looker
@@ -30,9 +32,15 @@ edges:
 - {from: dw-refresh-schedule, to: dw-load-workflow, label: cron trigger, step: '1'}
 - {from: dw-load-workflow, to: staging-bucket, label: list source files, step: '2'}
 - {from: dw-load-workflow, to: dw-raw-dataset, label: BigQuery load jobs, step: '3'}
+- {from: dw-load-workflow, to: build-views-procedure, label: CALL procedure, step: '4'}
+- {from: build-views-procedure, to: dw-curated-dataset, label: create tables and ML model, step: '5'}
+- {from: warehouse-looker, to: orders-fact-table, label: query, step: '6'}
 - {from: users, to: warehouse-looker, label: dashboards, step: '7'}
 steps:
 - {n: '1', text: 'dw-refresh-schedule → dw-load-workflow: cron trigger'}
 - {n: '2', text: 'dw-load-workflow → staging-bucket: list source files'}
 - {n: '3', text: 'dw-load-workflow → dw-raw-dataset: BigQuery load jobs'}
+- {n: '4', text: 'dw-load-workflow → build-views-procedure: CALL procedure'}
+- {n: '5', text: 'build-views-procedure → dw-curated-dataset: create tables and ML model'}
+- {n: '6', text: 'warehouse-looker → orders-fact-table: query'}
 - {n: '7', text: 'users → warehouse-looker: dashboards'}

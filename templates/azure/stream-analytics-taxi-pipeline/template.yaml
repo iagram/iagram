@@ -1,0 +1,54 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/data/stream-processing-stream-analytics); edit freely.
+title: Stream processing with Azure Stream Analytics
+category: data
+tags:
+- stream-analytics
+- event-hubs
+- cosmos-db
+- hopping-window
+- temporal-join
+- power-bi
+- azure-monitor
+source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/data/stream-processing-stream-analytics
+description: Two event hubs ingest taxi ride and fare streams partitioned by the same key so a Stream Analytics job can correlate them with a temporal join and compute average tip per mile over a five-minute
+  hopping window. Results are written as JSON documents to Azure Cosmos DB for Power BI analysis, Azure Monitor tracks streaming units and throttling, and a network security perimeter restricts access to
+  Event Hubs.
+nodes:
+- {id: sub-streaming, type: azure.subscription, name: streaming, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-stream-analytics, type: azure.resource_group, name: rg-stream-analytics, parent: sub-streaming, props: {location: westeurope}}
+- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-stream-analytics}
+- {id: grp-process, type: common.group, name: Process, parent: rg-rg-stream-analytics}
+- {id: grp-store-and-report, type: common.group, name: Store and report, parent: rg-rg-stream-analytics}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: evhns-taxi-streams, type: azure.res.azurerm_eventhub_namespace, name: evhns-taxi-streams, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-taxi-ride, type: azure.res.azurerm_eventhub, name: evh-taxi-ride, parent: grp-ingest, props: {name: changeme, partition_count: 1}}
+- {id: evh-taxi-fare, type: azure.res.azurerm_eventhub, name: evh-taxi-fare, parent: grp-ingest, props: {name: changeme, partition_count: 1}}
+- {id: asa-tip-per-mile, type: azure.res.azurerm_stream_analytics_job, name: asa-tip-per-mile, parent: grp-process, props: {location: westeurope, name: changeme, resource_group_name: changeme, transformation_query: changeme}}
+- id: cosmos-taxi-drain
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-taxi-drain
+  parent: grp-store-and-report
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: law-streaming, type: azure.res.azurerm_log_analytics_workspace, name: law-streaming, parent: grp-store-and-report, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: ag-streaming-alerts, type: azure.res.azurerm_monitor_action_group, name: ag-streaming-alerts, parent: grp-store-and-report, props: {name: changeme, resource_group_name: changeme, short_name: changeme}}
+edges:
+- {from: device, to: evh-taxi-ride, label: ride data (partition key medallion), step: '1'}
+- {from: device, to: evh-taxi-fare, label: fare data (same partition key), step: '1'}
+- {from: evh-taxi-ride, to: asa-tip-per-mile, label: input TaxiRide, step: '2'}
+- {from: evh-taxi-fare, to: asa-tip-per-mile, label: input TaxiFare, step: '2'}
+- {from: asa-tip-per-mile, to: cosmos-taxi-drain, label: hopping-window output (JSON), step: '3'}
+- {from: cosmos-taxi-drain, to: users, label: Power BI historical analysis, step: '4'}
+- {from: asa-tip-per-mile, to: law-streaming, label: SU utilisation and throttling metrics}
+- {from: law-streaming, to: ag-streaming-alerts, label: scale-out alerts}
+steps:
+- {n: '1', text: 'device → evh-taxi-ride: ride data (partition key medallion)'}
+- {n: '2', text: 'evh-taxi-ride → asa-tip-per-mile: input TaxiRide'}
+- {n: '3', text: 'asa-tip-per-mile → cosmos-taxi-drain: hopping-window output (JSON)'}
+- {n: '4', text: 'cosmos-taxi-drain → users: Power BI historical analysis'}

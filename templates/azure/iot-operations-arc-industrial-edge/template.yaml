@@ -1,0 +1,48 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/iot-operations/overview-iot-operations); edit freely.
+title: Industrial IoT with Azure IoT Operations on Arc-enabled Kubernetes
+category: edge
+tags:
+- azure iot operations
+- azure arc
+- opc ua
+- mqtt broker
+- data flows
+- device registry
+- fabric
+- event hubs
+- industrial iot
+source: https://learn.microsoft.com/en-us/azure/iot-operations/overview-iot-operations
+description: Azure IoT Operations runs an edge-native MQTT broker, Akri connectors (including the connector for OPC UA) and data flows on an Azure Arc-enabled Kubernetes cluster at the plant, normalizing
+  and contextualizing OT data locally and tolerating up to 72 hours offline. Assets are registered in Azure Device Registry as ARM resources, and data flows forward processed messages to Event Hubs, Event
+  Grid MQTT, Data Lake Storage, Azure Data Explorer or Microsoft Fabric OneLake for cloud analytics.
+nodes:
+- {id: dc-plant-site, type: common.datacenter, name: plant-site}
+- {id: sub-manufacturing, type: azure.subscription, name: manufacturing, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-iot-ops, type: azure.resource_group, name: rg-iot-ops, parent: sub-manufacturing, props: {location: westeurope}}
+- {id: grp-cloud-data-plane, type: common.group, name: Cloud data plane, parent: rg-rg-iot-ops}
+- {id: device, type: common.device, name: device}
+- {id: user, type: common.user, name: user}
+- {id: vpc-rg-rg-iot-ops, type: azure.vnet, name: main, parent: rg-rg-iot-ops, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-iot-ops, type: azure.subnet, name: main, parent: vpc-rg-rg-iot-ops, props: {cidr: 10.200.0.0/24}}
+- id: arc-plant-cluster
+  type: azure.res.azurerm_arc_kubernetes_cluster
+  name: arc-plant-cluster
+  parent: sub-rg-rg-iot-ops
+  props: {agent_public_key_certificate: changeme, identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: evhns-plant, type: azure.res.azurerm_eventhub_namespace, name: evhns-plant, parent: grp-cloud-data-plane, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-plant-telemetry, type: azure.res.azurerm_eventhub, name: evh-plant-telemetry, parent: grp-cloud-data-plane, props: {name: changeme, partition_count: 1}}
+- {id: egns-mqtt-broker, type: azure.res.azurerm_eventgrid_namespace, name: egns-mqtt-broker, parent: grp-cloud-data-plane, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stplantlake, type: azure.storage_account, name: stplantlake, parent: grp-cloud-data-plane}
+- id: adx-plant
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-plant
+  parent: grp-cloud-data-plane
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: kv-iot-ops-secrets, type: azure.key_vault, name: kv-iot-ops-secrets, parent: rg-rg-iot-ops}
+- {id: law-iot-ops, type: azure.res.azurerm_log_analytics_workspace, name: law-iot-ops, parent: rg-rg-iot-ops, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: arc-plant-cluster, to: kv-iot-ops-secrets, label: secret sync (Arc secret store)}
+- {from: evh-plant-telemetry, to: adx-plant, label: streaming ingestion, step: '4'}
+- {from: arc-plant-cluster, to: law-iot-ops, label: Arc-enabled monitoring}
+steps:
+- {n: '4', text: 'evh-plant-telemetry → adx-plant: streaming ingestion'}

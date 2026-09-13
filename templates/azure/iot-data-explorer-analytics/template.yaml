@@ -1,0 +1,84 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/iot-azure-data-explorer); edit freely.
+title: IoT analytics with Azure Data Explorer and IoT Hub
+category: iot
+tags:
+- iot hub
+- event hubs
+- azure data explorer
+- cosmos db
+- digital twins
+- stream analytics
+- time series
+- anomaly detection
+source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/iot-azure-data-explorer
+description: IoT Hub, Event Hubs or Kafka ingest high-volume device streams; Stream Analytics or Azure Functions process them in near real time and Cosmos DB stores JSON messages for the operational application.
+  Azure Data Explorer ingests the same streams through its IoT Hub and Event Hubs connectors for time-series analytics, anomaly detection and forecasting, exposes results to dashboards, Power BI and Grafana,
+  and integrates with Azure Digital Twins, Databricks and Machine Learning.
+nodes:
+- {id: sub-iot, type: azure.subscription, name: iot, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-iot-adx, type: azure.resource_group, name: rg-iot-adx, parent: sub-iot, props: {location: westeurope}}
+- {id: grp-ingestion, type: common.group, name: Ingestion, parent: rg-rg-iot-adx}
+- {id: grp-operational, type: common.group, name: Operational, parent: rg-rg-iot-adx}
+- {id: grp-analytical, type: common.group, name: Analytical, parent: rg-rg-iot-adx}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- id: iothub-devices
+  type: azure.res.azurerm_iothub
+  name: iothub-devices
+  parent: grp-ingestion
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: evhns-iot, type: azure.res.azurerm_eventhub_namespace, name: evhns-iot, parent: grp-ingestion, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-events, type: azure.res.azurerm_eventhub, name: evh-events, parent: grp-ingestion, props: {name: changeme, partition_count: 1}}
+- {id: asa-realtime, type: azure.res.azurerm_stream_analytics_job, name: asa-realtime, parent: grp-operational, props: {location: westeurope, name: changeme, resource_group_name: changeme, transformation_query: changeme}}
+- id: func-change-feed
+  type: azure.res.azurerm_linux_function_app
+  name: func-change-feed
+  parent: grp-operational
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: cosmos-operational
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-operational
+  parent: grp-operational
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- id: adx-analytics
+  type: azure.res.azurerm_kusto_cluster
+  name: adx-analytics
+  parent: grp-analytical
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: adt-assets, type: azure.res.azurerm_digital_twins_instance, name: adt-assets, parent: grp-analytical, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stdatalake, type: azure.storage_account, name: stdatalake, parent: grp-analytical}
+- {id: dbw-ml, type: azure.res.azurerm_databricks_workspace, name: dbw-ml, parent: grp-analytical, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- id: mlw-scoring
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-scoring
+  parent: grp-analytical
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- {id: grafana-iot, type: azure.res.azurerm_dashboard_grafana, name: grafana-iot, parent: grp-analytical, props: {grafana_major_version: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: device, to: iothub-devices, label: vehicles, step: '1'}
+- {from: device, to: evh-events, label: logs and business events, step: '1'}
+- {from: iothub-devices, to: asa-realtime, label: built-in endpoint, step: '2'}
+- {from: asa-realtime, to: cosmos-operational, label: JSON messages for operational app, step: '3'}
+- {from: iothub-devices, to: adx-analytics, label: IoT Hub data connection, step: '4'}
+- {from: evh-events, to: adx-analytics, label: Event Hubs data connection, step: '4'}
+- {from: cosmos-operational, to: func-change-feed, label: change feed trigger, step: '5'}
+- {from: func-change-feed, to: adt-assets, label: update twins via API}
+- {from: adt-assets, to: evh-events, label: twin events to Event Hubs}
+- {from: adx-analytics, to: stdatalake, label: continuous export (Parquet)}
+- {from: adx-analytics, to: dbw-ml, label: Spark connector}
+- {from: mlw-scoring, to: adx-analytics, label: export models for scoring}
+- {from: adx-analytics, to: grafana-iot, label: near real-time dashboards, step: '6'}
+- {from: users, to: cosmos-operational, label: operational web / mobile app}
+steps:
+- {n: '1', text: 'device → iothub-devices: vehicles'}
+- {n: '2', text: 'iothub-devices → asa-realtime: built-in endpoint'}
+- {n: '3', text: 'asa-realtime → cosmos-operational: JSON messages for operational app'}
+- {n: '4', text: 'iothub-devices → adx-analytics: IoT Hub data connection'}
+- {n: '5', text: 'cosmos-operational → func-change-feed: change feed trigger'}
+- {n: '6', text: 'adx-analytics → grafana-iot: near real-time dashboards'}

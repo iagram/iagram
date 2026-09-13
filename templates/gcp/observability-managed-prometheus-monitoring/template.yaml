@@ -1,0 +1,58 @@
+# Generated from the official reference (https://docs.cloud.google.com/stackdriver/docs/managed-prometheus); edit freely.
+title: Observability with Cloud Monitoring, Cloud Logging, Cloud Trace and Managed Service for Prometheus
+category: observability
+tags:
+- managed prometheus
+- cloud monitoring
+- cloud logging
+- cloud trace
+- ops agent
+- grafana
+- promql
+source: https://docs.cloud.google.com/stackdriver/docs/managed-prometheus
+description: Managed collection on GKE and the Ops Agent on Compute Engine scrape Prometheus and OpenTelemetry metrics into Managed Service for Prometheus, which stores them for 24 months in Monarch alongside
+  Cloud Monitoring system metrics, while logs and traces are collected by Cloud Logging and Cloud Trace. Teams query with PromQL from Cloud Monitoring dashboards or Grafana, and PromQL-based alerting policies
+  notify on-call channels.
+nodes:
+- {id: prj-obs-prj, type: gcp.project, name: obs-prj, props: {project_id: obs-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-obs-prj, props: {cidr: 10.130.0.0/16}}
+- {id: sub-app-sub, type: gcp.subnetwork, name: app-sub, parent: vpc-app-vpc, props: {cidr: 10.130.1.0/24, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: app-gke, type: gcp.gke_cluster, name: app-gke, parent: sub-app-sub}
+- {id: legacy-app-vm, type: gcp.compute_instance, name: legacy-app-vm, parent: sub-app-sub}
+- {id: grafana-vm, type: gcp.compute_instance, name: grafana-vm, parent: sub-app-sub}
+- {id: golden-signals-dashboard, type: gcp.res.google_monitoring_dashboard, name: golden-signals-dashboard, parent: prj-obs-prj, props: {dashboard_json: changeme}}
+- id: promql-error-rate-alert
+  type: gcp.res.google_monitoring_alert_policy
+  name: promql-error-rate-alert
+  parent: prj-obs-prj
+  props:
+    combiner: changeme
+    conditions: []
+    display_name: changeme
+- {id: oncall-channel, type: gcp.res.google_monitoring_notification_channel, name: oncall-channel, parent: prj-obs-prj, props: {type: changeme}}
+- {id: app-log-bucket, type: gcp.res.google_logging_project_bucket_config, name: app-log-bucket, parent: prj-obs-prj, props: {bucket_id: changeme, location: westeurope, project: changeme}}
+- {id: app-uptime-check, type: gcp.res.google_monitoring_uptime_check_config, name: app-uptime-check, parent: prj-obs-prj, props: {display_name: changeme, timeout: changeme}}
+- {id: app-glb, type: gcp.res.google_compute_global_forwarding_rule, name: app-glb, parent: prj-obs-prj, props: {name: changeme, target: changeme}}
+edges:
+- {from: users, to: app-glb, label: HTTPS, step: '1'}
+- {from: app-glb, to: app-gke, label: traffic, step: '2'}
+- {from: app-gke, to: golden-signals-dashboard, label: managed collection scrape to Monarch, step: '3'}
+- {from: legacy-app-vm, to: golden-signals-dashboard, label: Ops Agent Prometheus receiver, step: '3'}
+- {from: app-gke, to: app-log-bucket, label: container logs and traces, step: '4'}
+- {from: grafana-vm, to: golden-signals-dashboard, label: PromQL via Prometheus API, step: '5'}
+- {from: promql-error-rate-alert, to: app-gke, label: PromQL alert condition, step: '6'}
+- {from: promql-error-rate-alert, to: oncall-channel, label: notify, step: '7'}
+- {from: app-uptime-check, to: app-glb, label: synthetic probe, step: '8'}
+- {from: user, to: grafana-vm, label: SRE dashboards, step: '9'}
+steps:
+- {n: '1', text: 'users → app-glb: HTTPS'}
+- {n: '2', text: 'app-glb → app-gke: traffic'}
+- {n: '3', text: 'app-gke → golden-signals-dashboard: managed collection scrape to Monarch'}
+- {n: '4', text: 'app-gke → app-log-bucket: container logs and traces'}
+- {n: '5', text: 'grafana-vm → golden-signals-dashboard: PromQL via Prometheus API'}
+- {n: '6', text: 'promql-error-rate-alert → app-gke: PromQL alert condition'}
+- {n: '7', text: 'promql-error-rate-alert → oncall-channel: notify'}
+- {n: '8', text: 'app-uptime-check → app-glb: synthetic probe'}
+- {n: '9', text: 'user → grafana-vm: SRE dashboards'}

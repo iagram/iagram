@@ -1,0 +1,49 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/devops/pipelines/architectures/devops-pipelines-baseline-architecture); edit freely.
+title: CI/CD baseline architecture with Azure Pipelines
+category: devops
+tags:
+- azure pipelines
+- ci/cd
+- pull request
+- staging
+- artifacts
+- key vault
+source: https://learn.microsoft.com/en-us/azure/devops/pipelines/architectures/devops-pipelines-baseline-architecture
+description: A pull request pipeline runs lint, build and unit tests on Azure Repos Git; a merge triggers a CI pipeline that adds integration tests, pulls secrets from Key Vault and publishes build artifacts
+  to Azure Artifacts feeds. The published artifact triggers a CD pipeline that deploys to staging, runs acceptance tests, waits for a manual validation and releases to production, while Azure Monitor, Application
+  Insights and a Log Analytics workspace observe both environments.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-cicd-baseline, type: azure.resource_group, name: rg-cicd-baseline, parent: sub-workload, props: {location: westeurope}}
+- {id: grp-staging, type: common.group, name: Staging, parent: rg-rg-cicd-baseline}
+- {id: grp-production, type: common.group, name: Production, parent: rg-rg-cicd-baseline}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- {id: kv-pipeline-secrets, type: azure.key_vault, name: kv-pipeline-secrets, parent: rg-rg-cicd-baseline}
+- {id: plan-staging, type: azure.res.azurerm_service_plan, name: plan-staging, parent: grp-staging, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-staging
+  type: azure.res.azurerm_linux_web_app
+  name: app-staging
+  parent: grp-staging
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: plan-prod, type: azure.res.azurerm_service_plan, name: plan-prod, parent: grp-production, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-prod
+  type: azure.res.azurerm_linux_web_app
+  name: app-prod
+  parent: grp-production
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: law-cicd, type: azure.res.azurerm_log_analytics_workspace, name: law-cicd, parent: rg-rg-cicd-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: appi-cicd, type: azure.res.azurerm_application_insights, name: appi-cicd, parent: rg-rg-cicd-baseline, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: saas, label: git push / pull request, step: '1'}
+- {from: saas, to: kv-pipeline-secrets, label: CI pipeline gets secrets, step: '2'}
+- {from: saas, to: app-staging, label: CD deploy + acceptance tests, step: '3'}
+- {from: saas, to: app-prod, label: release after manual validation, step: '4'}
+- {from: app-staging, to: appi-cicd, label: telemetry}
+- {from: app-prod, to: appi-cicd, label: telemetry}
+- {from: appi-cicd, to: law-cicd, label: workspace-based storage}
+steps:
+- {n: '1', text: 'user → saas: git push / pull request'}
+- {n: '2', text: 'saas → kv-pipeline-secrets: CI pipeline gets secrets'}
+- {n: '3', text: 'saas → app-staging: CD deploy + acceptance tests'}
+- {n: '4', text: 'saas → app-prod: release after manual validation'}

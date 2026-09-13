@@ -1,0 +1,46 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-functions/functions-how-to-github-actions); edit freely.
+title: Deploy to Azure Functions with GitHub Actions and OIDC
+category: devops
+tags:
+- github actions
+- azure functions
+- oidc
+- workload identity federation
+- flex consumption
+- zip deploy
+source: https://learn.microsoft.com/en-us/azure/azure-functions/functions-how-to-github-actions
+description: A GitHub Actions workflow builds the function project on push and authenticates to Azure with OpenID Connect through a Microsoft Entra workload identity federation, so no publish profile or
+  long-lived secret is stored in GitHub. The Azure Functions action deploys the package to the function app, whose runtime state and deployment package live in a storage account and whose telemetry flows
+  to Application Insights.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-functions-gha, type: azure.resource_group, name: rg-functions-gha, parent: sub-workload, props: {location: westeurope}}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- {id: idp, type: common.idp, name: idp}
+- {id: client, type: common.client, name: client}
+- {id: plan-flex-consumption, type: azure.res.azurerm_service_plan, name: plan-flex-consumption, parent: rg-rg-functions-gha, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: func-api
+  type: azure.res.azurerm_linux_function_app
+  name: func-api
+  parent: rg-rg-functions-gha
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: stfuncdeploy, type: azure.storage_account, name: stfuncdeploy, parent: rg-rg-functions-gha}
+- {id: appi-func, type: azure.res.azurerm_application_insights, name: appi-func, parent: rg-rg-functions-gha, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-func, type: azure.res.azurerm_log_analytics_workspace, name: law-func, parent: rg-rg-functions-gha, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: kv-func-settings, type: azure.key_vault, name: kv-func-settings, parent: rg-rg-functions-gha}
+edges:
+- {from: user, to: saas, label: push to GitHub, step: '1'}
+- {from: saas, to: idp, label: OIDC token exchange (federated credential), step: '2'}
+- {from: saas, to: func-api, label: functions-action deploy, step: '3'}
+- {from: func-api, to: stfuncdeploy, label: deployment package + runtime state}
+- {from: func-api, to: kv-func-settings, label: Key Vault references}
+- {from: client, to: func-api, label: HTTPS trigger, step: '4'}
+- {from: func-api, to: appi-func, label: telemetry}
+- {from: appi-func, to: law-func, label: workspace}
+steps:
+- {n: '1', text: 'user → saas: push to GitHub'}
+- {n: '2', text: 'saas → idp: OIDC token exchange (federated credential)'}
+- {n: '3', text: 'saas → func-api: functions-action deploy'}
+- {n: '4', text: 'client → func-api: HTTPS trigger'}

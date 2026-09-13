@@ -27,12 +27,14 @@ nodes:
   parent: prj-cdc
   props: {destination_config: {}, display_name: changeme, location: westeurope, source_config: {}, stream_id: changeme}
 - {id: orders-replica-dataset, type: gcp.bigquery_dataset, name: orders-replica-dataset, parent: prj-cdc}
+- {id: orders-replica-table, type: gcp.res.google_bigquery_table, name: orders-replica-table, parent: prj-cdc, props: {dataset_id: changeme, table_id: changeme}}
 edges:
 - {from: client, to: orders-postgres, label: OLTP writes, step: '1'}
 - {from: orders-cdc-stream, to: postgres-source-profile, label: source, step: '2'}
 - {from: postgres-source-profile, to: datastream-private-conn, label: VPC peering, step: '3'}
 - {from: datastream-private-conn, to: orders-postgres, label: read replication slot, step: '4'}
 - {from: orders-cdc-stream, to: bigquery-dest-profile, label: destination, step: '5'}
+- {from: bigquery-dest-profile, to: orders-replica-table, label: merge CDC events, step: '6'}
 - {from: users, to: orders-replica-dataset, label: analytics queries, step: '7'}
 steps:
 - {n: '1', text: 'client → orders-postgres: OLTP writes'}
@@ -40,4 +42,5 @@ steps:
 - {n: '3', text: 'postgres-source-profile → datastream-private-conn: VPC peering'}
 - {n: '4', text: 'datastream-private-conn → orders-postgres: read replication slot'}
 - {n: '5', text: 'orders-cdc-stream → bigquery-dest-profile: destination'}
+- {n: '6', text: 'bigquery-dest-profile → orders-replica-table: merge CDC events'}
 - {n: '7', text: 'users → orders-replica-dataset: analytics queries'}

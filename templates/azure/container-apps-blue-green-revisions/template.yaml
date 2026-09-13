@@ -1,0 +1,46 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/container-apps/blue-green-deployment); edit freely.
+title: Blue-green deployment in Azure Container Apps
+category: devops
+tags:
+- container apps
+- revisions
+- traffic weights
+- revision labels
+- blue-green
+- rollback
+source: https://learn.microsoft.com/en-us/azure/container-apps/blue-green-deployment
+description: A container app runs in multiple-active-revisions mode; the current release is a revision labelled blue that receives 100% of the traffic weight, and a new image is deployed as a second revision
+  labelled green with 0% weight but reachable on its own label FQDN for testing. Switching production is a traffic-weight update to green=100, rollback reverses the weights, and a GitHub workflow or Bicep
+  template drives the cycle.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-aca-bluegreen, type: azure.resource_group, name: rg-aca-bluegreen, parent: sub-workload, props: {location: westeurope}}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: acr-aca, type: azure.container_registry, name: acr-aca, parent: rg-rg-aca-bluegreen}
+- {id: law-aca, type: azure.res.azurerm_log_analytics_workspace, name: law-aca, parent: rg-rg-aca-bluegreen, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: cae-prod, type: azure.res.azurerm_container_app_environment, name: cae-prod, parent: rg-rg-aca-bluegreen, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: ca-app-blue-green
+  type: azure.res.azurerm_container_app
+  name: ca-app-blue-green
+  parent: rg-rg-aca-bluegreen
+  props: {container_app_environment_id: changeme, name: changeme, resource_group_name: changeme, revision_mode: changeme, template: {}}
+- {id: kv-aca, type: azure.key_vault, name: kv-aca, parent: rg-rg-aca-bluegreen}
+- {id: appi-aca, type: azure.res.azurerm_application_insights, name: appi-aca, parent: rg-rg-aca-bluegreen, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: saas, to: acr-aca, label: GitHub workflow pushes image tag = commit, step: '1'}
+- {from: saas, to: ca-app-blue-green, label: az containerapp update (green revision, step: '2'}
+- {from: acr-aca, to: ca-app-blue-green, label: pull image}
+- {from: user, to: ca-app-blue-green, label: test app---green FQDN, step: '3'}
+- {from: saas, to: ca-app-blue-green, label: traffic set blue=0 green=100, step: '4'}
+- {from: users, to: ca-app-blue-green, label: production FQDN, step: '5'}
+- {from: ca-app-blue-green, to: kv-aca, label: secrets}
+- {from: cae-prod, to: law-aca, label: console + system logs}
+- {from: ca-app-blue-green, to: appi-aca, label: telemetry}
+steps:
+- {n: '1', text: 'saas → acr-aca: GitHub workflow pushes image tag = commit'}
+- {n: '2', text: 'saas → ca-app-blue-green: az containerapp update (green revision'}
+- {n: '3', text: 'user → ca-app-blue-green: test app---green FQDN'}
+- {n: '4', text: 'saas → ca-app-blue-green: traffic set blue=0 green=100'}
+- {n: '5', text: 'users → ca-app-blue-green: production FQDN'}

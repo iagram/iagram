@@ -1,0 +1,53 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/aks/monitor-aks); edit freely.
+title: Monitor AKS with Managed Prometheus, Container insights and Managed Grafana
+category: observability
+tags:
+- aks
+- managed prometheus
+- azure monitor workspace
+- container insights
+- managed grafana
+- log analytics
+- alerts
+source: https://learn.microsoft.com/en-us/azure/aks/monitor-aks
+description: The Azure Monitor agent add-on scrapes Prometheus metrics from the AKS cluster into an Azure Monitor workspace and Container insights sends stdout/stderr and Kubernetes events to a Log Analytics
+  workspace, while control-plane diagnostic settings export API server and audit logs. Azure Managed Grafana visualizes both stores with prebuilt Kubernetes dashboards, and Prometheus recommended alert
+  rules notify an action group.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-aks-monitoring, type: azure.resource_group, name: rg-aks-monitoring, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-aks-mon, type: azure.vnet, name: vnet-aks-mon, parent: rg-rg-aks-monitoring, props: {cidr: 10.60.0.0/16}}
+- {id: sub-snet-aks, type: azure.subnet, name: snet-aks, parent: vpc-vnet-aks-mon, props: {cidr: 10.60.0.0/20}}
+- {id: user, type: common.user, name: user}
+- {id: aks-monitored, type: azure.aks_cluster, name: aks-monitored, parent: sub-snet-aks}
+- {id: amw-aks, type: azure.res.azurerm_monitor_workspace, name: amw-aks, parent: rg-rg-aks-monitoring, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-aks-mon, type: azure.res.azurerm_log_analytics_workspace, name: law-aks-mon, parent: rg-rg-aks-monitoring, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: grafana-aks-mon, type: azure.res.azurerm_dashboard_grafana, name: grafana-aks-mon, parent: rg-rg-aks-monitoring, props: {grafana_major_version: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: ag-platform-team, type: azure.res.azurerm_monitor_action_group, name: ag-platform-team, parent: rg-rg-aks-monitoring, props: {name: changeme, resource_group_name: changeme, short_name: changeme}}
+- id: prom-recommended-alerts
+  type: azure.res.azurerm_monitor_alert_prometheus_rule_group
+  name: prom-recommended-alerts
+  parent: rg-rg-aks-monitoring
+  props:
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    rule: []
+    scopes: []
+- {id: staksdiag, type: azure.storage_account, name: staksdiag, parent: rg-rg-aks-monitoring}
+edges:
+- {from: aks-monitored, to: amw-aks, label: ama-metrics scrapes Prometheus metrics, step: '1'}
+- {from: aks-monitored, to: law-aks-mon, label: Container insights logs + Kubernetes events, step: '2'}
+- {from: aks-monitored, to: law-aks-mon, label: control plane diagnostics (kube-apiserver}
+- {from: aks-monitored, to: staksdiag, label: diagnostic archive}
+- {from: amw-aks, to: grafana-aks-mon, label: PromQL dashboards, step: '3'}
+- {from: law-aks-mon, to: grafana-aks-mon, label: KQL panels}
+- {from: amw-aks, to: prom-recommended-alerts, label: evaluate rules}
+- {from: prom-recommended-alerts, to: ag-platform-team, label: fire alert, step: '4'}
+- {from: ag-platform-team, to: user, label: notify}
+- {from: user, to: grafana-aks-mon, label: view cluster health}
+steps:
+- {n: '1', text: 'aks-monitored → amw-aks: ama-metrics scrapes Prometheus metrics'}
+- {n: '2', text: 'aks-monitored → law-aks-mon: Container insights logs + Kubernetes events'}
+- {n: '3', text: 'amw-aks → grafana-aks-mon: PromQL dashboards'}
+- {n: '4', text: 'prom-recommended-alerts → ag-platform-team: fire alert'}

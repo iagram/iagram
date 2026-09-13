@@ -29,6 +29,7 @@ nodes:
   name: api-key-secret
   parent: prj-prj-c-secrets
   props: {replication: {}, secret_id: changeme}
+- {id: secrets-cmek-key, type: gcp.res.google_kms_crypto_key, name: secrets-cmek-key, parent: prj-prj-c-secrets, props: {key_ring: changeme, name: changeme}}
 - {id: secret-rotation-topic, type: gcp.pubsub_topic, name: secret-rotation-topic, parent: prj-prj-c-secrets}
 - {id: rotate-db-password-fn, type: gcp.res.google_cloudfunctions2_function, name: rotate-db-password-fn, parent: prj-prj-c-secrets, props: {location: westeurope, name: changeme}}
 - {id: app-runtime-sa, type: gcp.res.google_service_account, name: app-runtime-sa, parent: prj-prj-p-app, props: {account_id: changeme}}
@@ -36,6 +37,7 @@ nodes:
 - {id: app-gke, type: gcp.gke_cluster, name: app-gke, parent: sub-gke-sub}
 - {id: app-postgres, type: gcp.cloud_sql_instance, name: app-postgres, parent: vpc-app-vpc}
 edges:
+- {from: db-password-secret, to: secrets-cmek-key, label: CMEK, step: '1'}
 - {from: api-service, to: db-password-secret, label: accessVersion as app-runtime-sa, step: '2'}
 - {from: app-gke, to: api-key-secret, label: mounted via Secret Manager add-on, step: '3'}
 - {from: api-service, to: app-postgres, label: SQL with fetched password, step: '4'}
@@ -45,6 +47,7 @@ edges:
 - {from: rotate-db-password-fn, to: db-password-secret, label: add new version, step: '7'}
 - {from: users, to: db-password-secret, label: secret admin IAM, step: '8'}
 steps:
+- {n: '1', text: 'db-password-secret → secrets-cmek-key: CMEK'}
 - {n: '2', text: 'api-service → db-password-secret: accessVersion as app-runtime-sa'}
 - {n: '3', text: 'app-gke → api-key-secret: mounted via Secret Manager add-on'}
 - {n: '4', text: 'api-service → app-postgres: SQL with fetched password'}

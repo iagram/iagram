@@ -1,0 +1,54 @@
+# Generated from the official reference (https://docs.cloud.google.com/manufacturing-data-engine/docs/overview); edit freely.
+title: Manufacturing Data Engine with Manufacturing Connect edge, Pub/Sub, Bigtable and BigQuery
+category: industry
+tags:
+- manufacturing
+- opc ua
+- mqtt
+- pub/sub
+- dataflow
+- bigtable
+- bigquery
+- looker
+source: https://docs.cloud.google.com/manufacturing-data-engine/docs/overview
+description: Manufacturing Connect edge gateways on the factory floor translate industrial protocols (OPC UA, MQTT) into standardised messages on the input-messages Pub/Sub topic, where the Message Mapper
+  and Metadata Manager transform them with Whistle mappings and enrich them with asset metadata. Processed records are written to BigQuery, Bigtable and Cloud Storage sinks, republished on an output topic,
+  and exposed through a Federation API and Looker for analytics.
+nodes:
+- {id: dc-factory-floor, type: common.datacenter, name: factory-floor}
+- {id: prj-mde-prj, type: gcp.project, name: mde-prj, props: {project_id: mde-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-mde-vpc, type: gcp.vpc, name: mde-vpc, parent: prj-mde-prj, props: {cidr: 10.70.0.0/16}}
+- {id: sub-mde-sub, type: gcp.subnetwork, name: mde-sub, parent: vpc-mde-vpc, props: {cidr: 10.70.1.0/24, region: europe-west1}}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: vpc-prj-mde-prj, type: gcp.vpc, name: main, parent: prj-mde-prj}
+- {id: sub-prj-mde-prj, type: gcp.subnetwork, name: main, parent: vpc-prj-mde-prj, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: mc-edge-gateway, type: gcp.compute_instance, name: mc-edge-gateway, parent: sub-prj-mde-prj}
+- {id: input-messages, type: gcp.pubsub_topic, name: input-messages, parent: prj-mde-prj}
+- {id: mde-processing-gke, type: gcp.gke_cluster, name: mde-processing-gke, parent: sub-mde-sub}
+- {id: mde-stream-job, type: gcp.res.google_dataflow_job, name: mde-stream-job, parent: prj-mde-prj, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: mde-warehouse, type: gcp.bigquery_dataset, name: mde-warehouse, parent: prj-mde-prj}
+- {id: mde-timeseries, type: gcp.res.google_bigtable_instance, name: mde-timeseries, parent: prj-mde-prj, props: {name: changeme}}
+- {id: mde-archive, type: gcp.storage_bucket, name: mde-archive, parent: prj-mde-prj}
+- {id: output-messages, type: gcp.pubsub_topic, name: output-messages, parent: prj-mde-prj}
+- {id: federation-api, type: gcp.cloud_run_service, name: federation-api, parent: prj-mde-prj}
+edges:
+- {from: device, to: mc-edge-gateway, label: OPC UA / MQTT from PLCs, step: '1'}
+- {from: mc-edge-gateway, to: input-messages, label: standardised messages, step: '2'}
+- {from: input-messages, to: mde-processing-gke, label: pubsub subscription}
+- {from: mde-processing-gke, to: mde-stream-job, label: mapped and enriched records, step: '3'}
+- {from: mde-stream-job, to: mde-warehouse, label: BigQuery sink, step: '4'}
+- {from: mde-stream-job, to: mde-timeseries, label: Bigtable sink, step: '4'}
+- {from: mde-stream-job, to: mde-archive, label: archive sink, step: '4'}
+- {from: mde-stream-job, to: output-messages, label: republish, step: '5'}
+- {from: federation-api, to: mde-warehouse, label: federated query, step: '6'}
+- {from: federation-api, to: mde-timeseries, label: point lookup, step: '6'}
+- {from: users, to: federation-api, label: Looker and apps, step: '7'}
+steps:
+- {n: '1', text: 'device → mc-edge-gateway: OPC UA / MQTT from PLCs'}
+- {n: '2', text: 'mc-edge-gateway → input-messages: standardised messages'}
+- {n: '3', text: 'mde-processing-gke → mde-stream-job: mapped and enriched records'}
+- {n: '4', text: 'mde-stream-job → mde-warehouse: BigQuery sink'}
+- {n: '5', text: 'mde-stream-job → output-messages: republish'}
+- {n: '6', text: 'federation-api → mde-warehouse: federated query'}
+- {n: '7', text: 'users → federation-api: Looker and apps'}

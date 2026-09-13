@@ -1,0 +1,72 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/hdinsight/hadoop/apache-hadoop-etl-at-scale); edit freely.
+title: Extract, transform and load at scale with Azure HDInsight
+category: data
+tags:
+- hdinsight
+- hadoop
+- hive
+- spark
+- kafka
+- oozie
+- data-factory
+- data-lake-storage
+- synapse
+- hbase
+source: https://learn.microsoft.com/en-us/azure/hdinsight/hadoop/apache-hadoop-etl-at-scale
+description: Source files land in Azure Storage or Data Lake Storage (through Data Factory, DistCp or Sqoop) and HDInsight Hadoop, Spark and Kafka clusters clean and transform them with Hive, Pig and Spark
+  SQL, coordinated by Apache Oozie inside the cluster or Data Factory as PaaS orchestration. Prepared results load into Azure Synapse Analytics, Azure SQL Database or HBase and are modelled in Azure Analysis
+  Services for Power BI.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-big-data, type: azure.subscription, name: big-data, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-hdinsight-etl, type: azure.resource_group, name: rg-hdinsight-etl, parent: sub-big-data, props: {location: westeurope}}
+- {id: vpc-vnet-hdinsight, type: azure.vnet, name: vnet-hdinsight, parent: rg-rg-hdinsight-etl, props: {cidr: 10.40.0.0/16}}
+- {id: sub-snet-clusters, type: azure.subnet, name: snet-clusters, parent: vpc-vnet-hdinsight, props: {cidr: 10.40.1.0/24}}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: adf-etl-orchestrator, type: azure.res.azurerm_data_factory, name: adf-etl-orchestrator, parent: rg-rg-hdinsight-etl, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stadls-ingest, type: azure.storage_account, name: stadls-ingest, parent: rg-rg-hdinsight-etl}
+- id: hdi-kafka-ingest
+  type: azure.res.azurerm_hdinsight_kafka_cluster
+  name: hdi-kafka-ingest
+  parent: sub-snet-clusters
+  props: {cluster_version: changeme, component_version: {}, gateway: {}, location: westeurope, name: changeme, resource_group_name: changeme, roles: {}, tier: changeme}
+- id: hdi-hive-transform
+  type: azure.res.azurerm_hdinsight_hadoop_cluster
+  name: hdi-hive-transform
+  parent: sub-snet-clusters
+  props: {cluster_version: changeme, component_version: {}, gateway: {}, location: westeurope, name: changeme, resource_group_name: changeme, roles: {}, tier: changeme}
+- id: hdi-spark-transform
+  type: azure.res.azurerm_hdinsight_spark_cluster
+  name: hdi-spark-transform
+  parent: sub-snet-clusters
+  props: {cluster_version: changeme, component_version: {}, gateway: {}, location: westeurope, name: changeme, resource_group_name: changeme, roles: {}, tier: changeme}
+- id: hdi-hbase-serving
+  type: azure.res.azurerm_hdinsight_hbase_cluster
+  name: hdi-hbase-serving
+  parent: sub-snet-clusters
+  props: {cluster_version: changeme, component_version: {}, gateway: {}, location: westeurope, name: changeme, resource_group_name: changeme, roles: {}, tier: changeme}
+- {id: sql-hive-metastore, type: azure.res.azurerm_mssql_server, name: sql-hive-metastore, parent: rg-rg-hdinsight-etl, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: synw-results, type: azure.res.azurerm_synapse_workspace, name: synw-results, parent: rg-rg-hdinsight-etl, props: {location: westeurope, name: changeme, resource_group_name: changeme, storage_data_lake_gen2_filesystem_id: changeme}}
+- {id: syndp-results, type: azure.res.azurerm_synapse_sql_pool, name: syndp-results, parent: rg-rg-hdinsight-etl, props: {name: changeme, sku_name: changeme, storage_account_type: changeme, synapse_workspace_id: changeme}}
+- {id: asazure-cubes, type: azure.res.azurerm_analysis_services_server, name: asazure-cubes, parent: rg-rg-hdinsight-etl, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+edges:
+- {from: dc-on-premises, to: stadls-ingest, label: ExpressRoute / DistCp / Sqoop, step: '1'}
+- {from: device, to: hdi-kafka-ingest, label: streaming events, step: '1'}
+- {from: hdi-kafka-ingest, to: stadls-ingest, label: land raw events}
+- {from: adf-etl-orchestrator, to: hdi-hive-transform, label: Hive activity, step: '2'}
+- {from: adf-etl-orchestrator, to: hdi-spark-transform, label: Spark activity, step: '2'}
+- {from: hdi-hive-transform, to: stadls-ingest, label: read and write via WASB/ABFS, step: '3'}
+- {from: hdi-spark-transform, to: stadls-ingest, label: read and write via ABFS, step: '3'}
+- {from: hdi-hive-transform, to: sql-hive-metastore, label: external Hive metastore}
+- {from: adf-etl-orchestrator, to: syndp-results, label: load prepared results, step: '4'}
+- {from: hdi-spark-transform, to: hdi-hbase-serving, label: sensor and log serving store}
+- {from: syndp-results, to: asazure-cubes, label: tabular model, step: '5'}
+- {from: asazure-cubes, to: users, label: Power BI / Excel, step: '6'}
+steps:
+- {n: '1', text: 'datacenter → stadls-ingest: ExpressRoute / DistCp / Sqoop'}
+- {n: '2', text: 'adf-etl-orchestrator → hdi-hive-transform: Hive activity'}
+- {n: '3', text: 'hdi-hive-transform → stadls-ingest: read and write via WASB/ABFS'}
+- {n: '4', text: 'adf-etl-orchestrator → syndp-results: load prepared results'}
+- {n: '5', text: 'syndp-results → asazure-cubes: tabular model'}
+- {n: '6', text: 'asazure-cubes → users: Power BI / Excel'}

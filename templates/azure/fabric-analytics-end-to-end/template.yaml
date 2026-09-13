@@ -1,0 +1,64 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/dataplate2e/data-platform-end-to-end); edit freely.
+title: Analytics end-to-end with Microsoft Fabric
+category: data
+tags:
+- fabric
+- onelake
+- mirroring
+- eventstream
+- eventhouse
+- data-warehouse
+- purview
+- machine-learning
+- power-bi
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/dataplate2e/data-platform-end-to-end
+description: OneLake is the single store for a Fabric platform that mirrors Azure SQL Database, Azure Databricks and Snowflake sources, ingests files with Data Factory pipelines and streams events into
+  eventhouses through eventstreams. Lakehouses, warehouses and KQL databases serve Power BI, Fabric data agents and GraphQL APIs, while Azure Machine Learning shares the same Data Lake Storage via shortcuts
+  and Microsoft Purview, Key Vault, Entra ID and Azure Policy govern the estate.
+nodes:
+- {id: sub-data-platform, type: azure.subscription, name: data-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-fabric-e2e, type: azure.resource_group, name: rg-fabric-e2e, parent: sub-data-platform, props: {location: westeurope}}
+- {id: grp-sources, type: common.group, name: Sources, parent: rg-rg-fabric-e2e}
+- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-fabric-e2e}
+- {id: grp-fabric, type: common.group, name: Fabric, parent: rg-rg-fabric-e2e}
+- {id: grp-enrich-and-govern, type: common.group, name: Enrich and govern, parent: rg-rg-fabric-e2e}
+- {id: saas, type: common.saas, name: saas}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: sql-operational-db, type: azure.res.azurerm_mssql_server, name: sql-operational-db, parent: grp-sources, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: dbw-unity-catalog, type: azure.res.azurerm_databricks_workspace, name: dbw-unity-catalog, parent: grp-sources, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: stadls-shortcuts, type: azure.storage_account, name: stadls-shortcuts, parent: grp-sources}
+- {id: evhns-realtime, type: azure.res.azurerm_eventhub_namespace, name: evhns-realtime, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- id: fabric-onelake
+  type: azure.res.azurerm_fabric_capacity
+  name: fabric-onelake
+  parent: grp-fabric
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: mlw-batch-endpoints
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-batch-endpoints
+  parent: grp-enrich-and-govern
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- id: pview-unified-catalog
+  type: azure.res.azurerm_purview_account
+  name: pview-unified-catalog
+  parent: grp-enrich-and-govern
+  props: {identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: kv-gateway-credentials, type: azure.key_vault, name: kv-gateway-credentials, parent: grp-enrich-and-govern}
+edges:
+- {from: sql-operational-db, to: fabric-onelake, label: mirroring (CDC to Delta), step: '1'}
+- {from: dbw-unity-catalog, to: fabric-onelake, label: Databricks mirroring / shortcuts, step: '1'}
+- {from: saas, to: fabric-onelake, label: Data Factory pipelines and Dataflow Gen2, step: '2'}
+- {from: stadls-shortcuts, to: fabric-onelake, label: OneLake shortcuts (zero copy), step: '2'}
+- {from: device, to: evhns-realtime, label: telemetry, step: '3'}
+- {from: evhns-realtime, to: fabric-onelake, label: eventstream to eventhouse, step: '4'}
+- {from: fabric-onelake, to: mlw-batch-endpoints, label: shared Data Lake Storage for training}
+- {from: fabric-onelake, to: users, label: Power BI, step: '5'}
+- {from: pview-unified-catalog, to: fabric-onelake, label: scan}
+- {from: fabric-onelake, to: kv-gateway-credentials, label: Key Vault references}
+steps:
+- {n: '1', text: 'sql-operational-db → fabric-onelake: mirroring (CDC to Delta)'}
+- {n: '2', text: 'saas → fabric-onelake: Data Factory pipelines and Dataflow Gen2'}
+- {n: '3', text: 'device → evhns-realtime: telemetry'}
+- {n: '4', text: 'evhns-realtime → fabric-onelake: eventstream to eventhouse'}
+- {n: '5', text: 'fabric-onelake → users: Power BI'}
