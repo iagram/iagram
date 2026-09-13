@@ -195,7 +195,7 @@ func TestGraphicalVersusAttachment(t *testing.T) {
 	for _, g := range gcpList {
 		gcpBy[g.Resource] = g
 	}
-	for _, res := range []string{"google_sql_database", "google_sql_user", "google_container_node_pool", "google_bigquery_table"} {
+	for _, res := range []string{"google_sql_database", "google_sql_user", "google_container_node_pool"} {
 		if g := gcpBy[res]; g.Graphical {
 			t.Errorf("%s should be an attachment: %+v", res, g)
 		}

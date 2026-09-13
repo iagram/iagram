@@ -1,0 +1,1018 @@
+# Azure reference architectures: networking and hybrid connectivity.
+# Format: scripts/refarch/FORMAT.md. Sources verified 2026-09-13 on learn.microsoft.com.
+
+- slug: hub-spoke-ha-nva
+  title: Hub-spoke with highly available NVAs behind Standard Load Balancer
+  category: networking
+  tags: [hub-spoke, nva, load balancer, ha ports, snat, nat gateway, udr]
+  source: https://learn.microsoft.com/en-us/azure/architecture/networking/guide/network-virtual-appliance-high-availability
+  description: A cluster of third-party firewall NVAs in the hub is fronted by an internal Standard Load Balancer with HA-ports rules for east-west and on-premises traffic and by a public Standard Load Balancer for internet ingress. Spoke subnets carry a 0.0.0.0/0 user-defined route to the internal load balancer, the NVAs SNAT inbound flows to keep traffic symmetric, and a NAT gateway on the NVA subnet provides scalable egress.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-hub-nva, location: westeurope}
+      vnets:
+        - name: hub-nva
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: GatewaySubnet, cidr: 10.0.0.0/27}
+            - {name: snet-nva, cidr: 10.0.1.0/24}
+    - subscription: landing-zone
+      resource_group: {name: rg-spokes-nva, location: westeurope}
+      vnets:
+        - name: spoke-1
+          cidr: 10.1.0.0/16
+          subnets: [{name: snet-app-1, cidr: 10.1.1.0/24}]
+        - name: spoke-2
+          cidr: 10.2.0.0/16
+          subnets: [{name: snet-app-2, cidr: 10.2.1.0/24}]
+  elements:
+    - {tf: azurerm_virtual_network_gateway, name: hub-gw, in: subnet:GatewaySubnet}
+    - {tf: azurerm_lb, name: nva-ilb, in: subnet:snet-nva}
+    - {tf: azurerm_lb, name: nva-plb, in: subnet:snet-nva}
+    - {tf: azurerm_linux_virtual_machine, name: nva-1, in: subnet:snet-nva}
+    - {tf: azurerm_linux_virtual_machine, name: nva-2, in: subnet:snet-nva}
+    - {tf: azurerm_nat_gateway, name: nva-natgw, in: subnet:snet-nva}
+    - {tf: azurerm_linux_virtual_machine, name: app-1, in: subnet:snet-app-1}
+    - {tf: azurerm_linux_virtual_machine, name: app-2, in: subnet:snet-app-2}
+    - {tf: azurerm_log_analytics_workspace, name: law-nva, in: resource_group:rg-hub-nva}
+  actors: [internet, datacenter]
+  flows:
+    - {from: vnet:hub-nva, to: vnet:spoke-1, link: azurerm_virtual_network_peering, label: "peering (gateway transit)"}
+    - {from: vnet:hub-nva, to: vnet:spoke-2, link: azurerm_virtual_network_peering, label: "peering (gateway transit)"}
+    - {from: internet, to: nva-plb, label: "inbound (per-port LB rules)", step: 1}
+    - {from: nva-plb, to: nva-1, label: "health-probed backend", step: 2}
+    - {from: nva-1, to: app-2, label: "SNAT for symmetry", step: 3}
+    - {from: app-1, to: nva-ilb, label: "UDR 0.0.0.0/0 next hop ILB", step: 4}
+    - {from: nva-ilb, to: nva-2, label: "HA ports rule", step: 5}
+    - {from: nva-2, to: nva-natgw, label: "egress", step: 6}
+    - {from: nva-natgw, to: internet, label: "SNAT public IP", step: 7}
+    - {from: datacenter, to: hub-gw, label: "VPN / ExpressRoute"}
+    - {from: hub-gw, to: nva-ilb, label: "on-prem to Azure via NVA"}
+    - {from: nva-1, to: law-nva, label: "diagnostics"}
+
+- slug: hub-spoke-multi-region-global-peering
+  title: Multi-region hub-spoke with global virtual network peering
+  category: networking
+  tags: [hub-spoke, global peering, multi-region, firewall, expressroute, gateway transit]
+  source: https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-peering-overview
+  description: Two regional hubs each host an Azure Firewall and a virtual network gateway, with local spokes attached by regional peering using gateway transit. The hubs are joined by global virtual network peering so spoke-to-spoke traffic between regions stays on the Microsoft backbone and is inspected by the firewall in each hub.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-hub-weu, location: westeurope}
+      vnets:
+        - name: hub-weu
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: weu-AzureFirewallSubnet, cidr: 10.0.0.0/26}
+            - {name: weu-GatewaySubnet, cidr: 10.0.1.0/27}
+    - subscription: connectivity
+      resource_group: {name: rg-hub-neu, location: northeurope}
+      vnets:
+        - name: hub-neu
+          cidr: 10.10.0.0/16
+          subnets:
+            - {name: neu-AzureFirewallSubnet, cidr: 10.10.0.0/26}
+            - {name: neu-GatewaySubnet, cidr: 10.10.1.0/27}
+    - subscription: landing-zone
+      resource_group: {name: rg-spoke-weu, location: westeurope}
+      vnets:
+        - name: spoke-weu
+          cidr: 10.1.0.0/16
+          subnets: [{name: snet-app-weu, cidr: 10.1.0.0/24}]
+    - subscription: landing-zone
+      resource_group: {name: rg-spoke-neu, location: northeurope}
+      vnets:
+        - name: spoke-neu
+          cidr: 10.11.0.0/16
+          subnets: [{name: snet-app-neu, cidr: 10.11.0.0/24}]
+  elements:
+    - {tf: azurerm_firewall, name: fw-weu, in: subnet:weu-AzureFirewallSubnet}
+    - {tf: azurerm_firewall, name: fw-neu, in: subnet:neu-AzureFirewallSubnet}
+    - {tf: azurerm_virtual_network_gateway, name: gw-weu, in: subnet:weu-GatewaySubnet}
+    - {tf: azurerm_virtual_network_gateway, name: gw-neu, in: subnet:neu-GatewaySubnet}
+    - {tf: azurerm_linux_virtual_machine, name: vm-weu, in: subnet:snet-app-weu}
+    - {tf: azurerm_linux_virtual_machine, name: vm-neu, in: subnet:snet-app-neu}
+    - {tf: azurerm_log_analytics_workspace, name: law-network, in: resource_group:rg-hub-weu}
+    - {tf: azurerm_network_watcher, name: nw-weu, in: resource_group:rg-hub-weu}
+  actors: [datacenter]
+  flows:
+    - {from: vnet:hub-weu, to: vnet:hub-neu, link: azurerm_virtual_network_peering, label: "global VNet peering (hub to hub)"}
+    - {from: vnet:hub-weu, to: vnet:spoke-weu, link: azurerm_virtual_network_peering, label: "regional peering (gateway transit)"}
+    - {from: vnet:hub-neu, to: vnet:spoke-neu, link: azurerm_virtual_network_peering, label: "regional peering (gateway transit)"}
+    - {from: vm-weu, to: fw-weu, label: "UDR to hub firewall", step: 1}
+    - {from: fw-weu, to: fw-neu, label: "cross-region over global peering", step: 2}
+    - {from: fw-neu, to: vm-neu, label: "inspected delivery", step: 3}
+    - {from: datacenter, to: gw-weu, label: "ExpressRoute (primary region)"}
+    - {from: datacenter, to: gw-neu, label: "ExpressRoute (secondary region)"}
+    - {from: fw-weu, to: law-network, label: "firewall logs"}
+    - {from: nw-weu, to: vm-weu, label: "connection troubleshoot / effective routes"}
+
+- slug: vwan-global-transit
+  title: Global transit network with Azure Virtual WAN
+  category: networking
+  tags: [virtual wan, global transit, branch vpn, expressroute, point-to-site, hub-to-hub, any-to-any]
+  source: https://learn.microsoft.com/en-us/azure/virtual-wan/virtual-wan-global-transit-network-architecture
+  description: Microsoft-managed Virtual WAN hubs in two regions provide any-to-any transit between spoke virtual networks, branch sites connected by site-to-site VPN or ExpressRoute, and remote users connected by User VPN (point-to-site). Hubs in the same Virtual WAN are automatically interconnected over the Microsoft global network, giving branch-to-VNet, branch-to-branch, user-to-VNet and VNet-to-VNet paths across regions without customer-managed transit.
+  containers:
+    - datacenter: branch-emea
+    - datacenter: branch-apac
+    - subscription: connectivity
+      resource_group: {name: rg-vwan-global, location: westeurope}
+    - subscription: landing-zone-emea
+      resource_group: {name: rg-lz-emea, location: westeurope}
+      vnets:
+        - name: vnet-emea
+          cidr: 10.1.0.0/16
+          subnets: [{name: snet-emea, cidr: 10.1.0.0/24}]
+    - subscription: landing-zone-apac
+      resource_group: {name: rg-lz-apac, location: southeastasia}
+      vnets:
+        - name: vnet-apac
+          cidr: 10.2.0.0/16
+          subnets: [{name: snet-apac, cidr: 10.2.0.0/24}]
+  elements:
+    - {tf: azurerm_virtual_wan, name: vwan-global, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_virtual_hub, name: vhub-weu, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_virtual_hub, name: vhub-sea, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_vpn_gateway, name: s2s-gw-weu, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_vpn_gateway, name: s2s-gw-sea, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_express_route_gateway, name: er-gw-weu, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_express_route_circuit, name: er-circuit-emea, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_point_to_site_vpn_gateway, name: p2s-gw-weu, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_vpn_site, name: vpn-site-emea, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_vpn_site, name: vpn-site-apac, in: resource_group:rg-vwan-global}
+    - {tf: azurerm_linux_virtual_machine, name: vm-emea, in: subnet:snet-emea}
+    - {tf: azurerm_linux_virtual_machine, name: vm-apac, in: subnet:snet-apac}
+  actors: [datacenter, users]
+  flows:
+    - {from: datacenter:branch-emea, to: er-circuit-emea, label: "ExpressRoute private peering", step: 1}
+    - {from: er-circuit-emea, to: er-gw-weu, label: "ExpressRoute connection to hub", step: 2}
+    - {from: datacenter:branch-emea, to: vpn-site-emea, label: "SD-WAN CPE / IPsec"}
+    - {from: vpn-site-emea, to: s2s-gw-weu, label: "site-to-site VPN connection"}
+    - {from: datacenter:branch-apac, to: vpn-site-apac, label: "IPsec"}
+    - {from: vpn-site-apac, to: s2s-gw-sea, label: "site-to-site VPN connection"}
+    - {from: vhub-weu, to: vnet:vnet-emea, link: azurerm_virtual_hub_connection, label: "VNet connection"}
+    - {from: vhub-sea, to: vnet:vnet-apac, link: azurerm_virtual_hub_connection, label: "VNet connection"}
+    - {from: vhub-weu, to: vhub-sea, label: "hub-to-hub (Microsoft global network)"}
+    - {from: users, to: p2s-gw-weu, label: "User VPN (point-to-site)", step: 3}
+    - {from: p2s-gw-weu, to: vm-emea, label: "remote user to VNet", step: 4}
+    - {from: vm-emea, to: vm-apac, label: "VNet to VNet cross-region via hubs", step: 5}
+    - {from: vwan-global, to: vhub-weu, label: "hub in WAN"}
+    - {from: vwan-global, to: vhub-sea, label: "hub in WAN"}
+
+- slug: vwan-secured-hub-routing-intent
+  title: Virtual WAN secured hub with Azure Firewall and routing intent
+  category: networking
+  tags: [virtual wan, secured hub, routing intent, azure firewall, firewall manager, routing policies]
+  source: https://learn.microsoft.com/en-us/azure/virtual-wan/how-to-routing-policies
+  description: Azure Firewall is deployed inside a Virtual WAN hub and routing intent applies an internet traffic routing policy and a private traffic routing policy, so all VNet-to-VNet, branch-to-VNet, branch-to-branch and internet-bound flows are steered through the firewall without user-defined routes in the spokes. Branches connect over site-to-site VPN and ExpressRoute, and Azure Firewall Manager governs the firewall policy.
+  containers:
+    - datacenter: branch
+    - subscription: connectivity
+      resource_group: {name: rg-vwan-secured, location: westeurope}
+    - subscription: landing-zone-prod
+      resource_group: {name: rg-spoke-a, location: westeurope}
+      vnets:
+        - name: spoke-a
+          cidr: 10.1.0.0/16
+          subnets: [{name: snet-a, cidr: 10.1.0.0/24}]
+    - subscription: landing-zone-prod
+      resource_group: {name: rg-spoke-b, location: westeurope}
+      vnets:
+        - name: spoke-b
+          cidr: 10.2.0.0/16
+          subnets: [{name: snet-b, cidr: 10.2.0.0/24}]
+  elements:
+    - {tf: azurerm_virtual_wan, name: vwan-secured, in: resource_group:rg-vwan-secured}
+    - {tf: azurerm_virtual_hub, name: vhub-secured, in: resource_group:rg-vwan-secured}
+    - {tf: azurerm_firewall, name: fw-vhub, in: resource_group:rg-vwan-secured}
+    - {tf: azurerm_firewall_policy, name: fwpol-global, in: resource_group:rg-vwan-secured}
+    - {tf: azurerm_vpn_gateway, name: s2s-gw, in: resource_group:rg-vwan-secured}
+    - {tf: azurerm_vpn_site, name: vpn-site-branch, in: resource_group:rg-vwan-secured}
+    - {tf: azurerm_express_route_gateway, name: er-gw, in: resource_group:rg-vwan-secured}
+    - {tf: azurerm_express_route_circuit, name: er-circuit-branch, in: resource_group:rg-vwan-secured}
+    - {tf: azurerm_linux_virtual_machine, name: vm-a, in: subnet:snet-a}
+    - {tf: azurerm_linux_virtual_machine, name: vm-b, in: subnet:snet-b}
+    - {tf: azurerm_log_analytics_workspace, name: law-fw, in: resource_group:rg-vwan-secured}
+  actors: [datacenter, internet]
+  flows:
+    - {from: vwan-secured, to: vhub-secured, label: "hub in WAN"}
+    - {from: vhub-secured, to: vnet:spoke-a, link: azurerm_virtual_hub_connection, label: "VNet connection"}
+    - {from: vhub-secured, to: vnet:spoke-b, link: azurerm_virtual_hub_connection, label: "VNet connection"}
+    - {from: datacenter, to: vpn-site-branch, label: "IPsec"}
+    - {from: vpn-site-branch, to: s2s-gw, label: "site-to-site VPN"}
+    - {from: datacenter, to: er-circuit-branch, label: "ExpressRoute private peering"}
+    - {from: er-circuit-branch, to: er-gw, label: "ExpressRoute connection"}
+    - {from: vm-a, to: fw-vhub, label: "private traffic routing policy", step: 1}
+    - {from: fw-vhub, to: vm-b, label: "inspected VNet-to-VNet", step: 2}
+    - {from: s2s-gw, to: fw-vhub, label: "branch-to-VNet via firewall", step: 3}
+    - {from: vm-b, to: fw-vhub, label: "internet traffic routing policy 0.0.0.0/0", step: 4}
+    - {from: fw-vhub, to: internet, label: "SNAT egress", step: 5}
+    - {from: fwpol-global, to: fw-vhub, label: "policy (Firewall Manager)"}
+    - {from: fw-vhub, to: law-fw, label: "firewall logs"}
+
+- slug: expressroute-private-peering
+  title: Connect an on-premises network to Azure using ExpressRoute private peering
+  category: networking
+  tags: [expressroute, private peering, msee, gateway subnet, hybrid]
+  source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/hybrid-networking/expressroute-private-peering-connectivity
+  description: An ExpressRoute circuit at a peering location provides two redundant links between the customer's local edge routers and Microsoft Enterprise Edge routers, with BGP sessions over Azure private peering. An ExpressRoute virtual network gateway in the GatewaySubnet terminates the ExpressRoute connection so on-premises hosts reach workloads in the virtual network over the Microsoft global network.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-expressroute, location: westeurope}
+      vnets:
+        - name: vnet-er
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: GatewaySubnet, cidr: 10.0.255.0/27}
+            - {name: snet-workload, cidr: 10.0.1.0/24}
+  elements:
+    - {tf: azurerm_express_route_circuit, name: er-circuit, in: resource_group:rg-expressroute}
+    - {tf: azurerm_virtual_network_gateway, name: er-gateway, in: subnet:GatewaySubnet}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-1, in: subnet:snet-workload}
+    - {tf: azurerm_windows_virtual_machine, name: vm-app-2, in: subnet:snet-workload}
+    - {tf: azurerm_network_security_group, name: nsg-workload, in: resource_group:rg-expressroute}
+    - {tf: azurerm_log_analytics_workspace, name: law-er, in: resource_group:rg-expressroute}
+    - {tf: azurerm_network_watcher, name: nw-connection-monitor, in: resource_group:rg-expressroute}
+  actors: [datacenter]
+  flows:
+    - {from: datacenter, to: er-circuit, label: "primary and secondary links to MSEEs (BGP)", step: 1}
+    - {from: er-circuit, to: er-gateway, link: azurerm_virtual_network_gateway_connection, label: "ExpressRoute connection", step: 2}
+    - {from: er-gateway, to: vm-app-1, label: "private IP routing into VNet", step: 3}
+    - {from: nsg-workload, to: subnet:snet-workload, link: azurerm_subnet_network_security_group_association, label: "filter on-prem sources"}
+    - {from: er-gateway, to: law-er, label: "gateway metrics (routes, throughput)"}
+    - {from: nw-connection-monitor, to: er-gateway, label: "end-to-end reachability checks"}
+
+- slug: expressroute-vpn-backup
+  title: Site-to-site VPN as failover for ExpressRoute
+  category: networking
+  tags: [expressroute, vpn gateway, failover, coexistence, bgp, hybrid]
+  source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/hybrid-networking/expressroute-vpn-failover
+  description: ExpressRoute private peering is the primary path from the on-premises network to the virtual network, and an IPsec site-to-site VPN over the internet terminates on a route-based VPN gateway that coexists with the ExpressRoute gateway in the same GatewaySubnet. The on-premises edge prefers ExpressRoute routes through BGP local preference, so traffic converges onto the VPN tunnel only when the circuit or peering location fails.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-hybrid, location: westeurope}
+      vnets:
+        - name: vnet-hybrid
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: GatewaySubnet, cidr: 10.0.255.0/27}
+            - {name: snet-app, cidr: 10.0.1.0/24}
+  elements:
+    - {tf: azurerm_express_route_circuit, name: er-circuit, in: resource_group:rg-hybrid}
+    - {tf: azurerm_virtual_network_gateway, name: er-gateway, in: subnet:GatewaySubnet}
+    - {tf: azurerm_virtual_network_gateway, name: vpn-gateway, in: subnet:GatewaySubnet}
+    - {tf: azurerm_local_network_gateway, name: lng-onprem, in: resource_group:rg-hybrid}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app, in: subnet:snet-app}
+    - {tf: azurerm_log_analytics_workspace, name: law-hybrid, in: resource_group:rg-hybrid}
+    - {tf: azurerm_network_watcher, name: nw-hybrid, in: resource_group:rg-hybrid}
+  actors: [datacenter, internet]
+  flows:
+    - {from: datacenter, to: er-circuit, label: "ExpressRoute private peering (primary)", step: 1}
+    - {from: er-circuit, to: er-gateway, link: azurerm_virtual_network_gateway_connection, label: "ExpressRoute connection"}
+    - {from: datacenter, to: lng-onprem, label: "IPsec S2S over internet (backup)", step: 2}
+    - {from: lng-onprem, to: vpn-gateway, link: azurerm_virtual_network_gateway_connection, label: "VPN connection (BGP)"}
+    - {from: er-gateway, to: vm-app, label: "normal path", step: 3}
+    - {from: vpn-gateway, to: vm-app, label: "failover path", step: 4}
+    - {from: nw-hybrid, to: vpn-gateway, label: "monitor tunnel and BGP state"}
+    - {from: er-gateway, to: law-hybrid, label: "circuit and gateway metrics"}
+
+- slug: expressroute-global-reach
+  title: ExpressRoute Global Reach linking on-premises sites
+  category: networking
+  tags: [expressroute, global reach, branch-to-branch, private wan, msee]
+  source: https://learn.microsoft.com/en-us/azure/expressroute/expressroute-global-reach
+  description: Two on-premises sites each have an ExpressRoute circuit at a different peering location that connects them to Azure virtual networks in their local region. ExpressRoute Global Reach links the two circuits so the sites exchange traffic directly across the Microsoft global network, bypassing the virtual network gateways.
+  containers:
+    - datacenter: san-francisco
+    - datacenter: london
+    - subscription: connectivity
+      resource_group: {name: rg-er-westus, location: westus}
+      vnets:
+        - name: vnet-westus
+          cidr: 10.0.3.0/24
+          subnets:
+            - {name: westus-GatewaySubnet, cidr: 10.0.3.0/27}
+            - {name: snet-westus, cidr: 10.0.3.128/25}
+    - subscription: connectivity
+      resource_group: {name: rg-er-uksouth, location: uksouth}
+      vnets:
+        - name: vnet-uksouth
+          cidr: 10.0.4.0/24
+          subnets:
+            - {name: uksouth-GatewaySubnet, cidr: 10.0.4.0/27}
+            - {name: snet-uksouth, cidr: 10.0.4.128/25}
+  elements:
+    - {tf: azurerm_express_route_circuit, name: er-silicon-valley, in: resource_group:rg-er-westus}
+    - {tf: azurerm_express_route_circuit, name: er-london, in: resource_group:rg-er-uksouth}
+    - {tf: azurerm_virtual_network_gateway, name: ergw-westus, in: subnet:westus-GatewaySubnet}
+    - {tf: azurerm_virtual_network_gateway, name: ergw-uksouth, in: subnet:uksouth-GatewaySubnet}
+    - {tf: azurerm_linux_virtual_machine, name: vm-westus, in: subnet:snet-westus}
+    - {tf: azurerm_linux_virtual_machine, name: vm-uksouth, in: subnet:snet-uksouth}
+    - {tf: azurerm_log_analytics_workspace, name: law-er-global, in: resource_group:rg-er-westus}
+  actors: [datacenter]
+  flows:
+    - {from: datacenter:san-francisco, to: er-silicon-valley, label: "10.0.1.0/24 to Silicon Valley peering location", step: 1}
+    - {from: er-silicon-valley, to: ergw-westus, link: azurerm_virtual_network_gateway_connection, label: "ExpressRoute connection"}
+    - {from: datacenter:london, to: er-london, label: "10.0.2.0/24 to London peering location", step: 2}
+    - {from: er-london, to: ergw-uksouth, link: azurerm_virtual_network_gateway_connection, label: "ExpressRoute connection"}
+    - {from: er-silicon-valley, to: er-london, link: azurerm_express_route_circuit_connection, label: "Global Reach over Microsoft global network", step: 3}
+    - {from: ergw-westus, to: vm-westus, label: "site to Azure"}
+    - {from: ergw-uksouth, to: vm-uksouth, label: "site to Azure"}
+    - {from: er-silicon-valley, to: law-er-global, label: "circuit metrics"}
+
+- slug: private-link-hub-spoke
+  title: Azure Private Link in a hub-and-spoke network
+  category: networking
+  tags: [private link, private endpoint, hub-spoke, private dns zone, firewall, expressroute]
+  source: https://learn.microsoft.com/en-us/azure/architecture/networking/guide/private-link-hub-spoke-network
+  description: Private endpoints give PaaS resources a private IP inside the hub or a spoke, with shared endpoints placed in a dedicated hub subnet so Azure Firewall can inspect and SNAT traffic from spokes and from on-premises over ExpressRoute. DNS forwarders in the hub and centralized private DNS zones linked to every virtual network resolve privatelink names to the endpoint addresses.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-hub-privatelink, location: westeurope}
+      vnets:
+        - name: hub-pl
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: pl-GatewaySubnet, cidr: 10.0.0.0/27}
+            - {name: AzureFirewallSubnet, cidr: 10.0.1.0/26}
+            - {name: snet-dns-forwarders, cidr: 10.0.2.0/24}
+            - {name: snet-pe-shared, cidr: 10.0.3.0/24}
+    - subscription: landing-zone
+      resource_group: {name: rg-lz-privatelink, location: westeurope}
+      vnets:
+        - name: lz-pl
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: snet-lz-app, cidr: 10.1.0.0/24}
+            - {name: snet-lz-pe, cidr: 10.1.1.0/24}
+  elements:
+    - {tf: azurerm_virtual_network_gateway, name: ergw-hub, in: subnet:pl-GatewaySubnet}
+    - {tf: azurerm_firewall, name: fw-hub, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_linux_virtual_machine, name: dns-forwarder-1, in: subnet:snet-dns-forwarders}
+    - {tf: azurerm_linux_virtual_machine, name: dns-forwarder-2, in: subnet:snet-dns-forwarders}
+    - {tf: azurerm_private_endpoint, name: pe-storage-shared, in: subnet:snet-pe-shared}
+    - {tf: azurerm_storage_account, name: st-shared, in: resource_group:rg-hub-privatelink}
+    - {tf: azurerm_private_dns_zone, name: pdz-blob, in: resource_group:rg-hub-privatelink}
+    - {tf: azurerm_private_dns_zone, name: pdz-sql, in: resource_group:rg-hub-privatelink}
+    - {tf: azurerm_network_security_group, name: nsg-pe-shared, in: resource_group:rg-hub-privatelink}
+    - {tf: azurerm_linux_virtual_machine, name: vm-lz, in: subnet:snet-lz-app}
+    - {tf: azurerm_private_endpoint, name: pe-sql-lz, in: subnet:snet-lz-pe}
+    - {tf: azurerm_mssql_server, name: sql-lz, in: resource_group:rg-lz-privatelink}
+  actors: [datacenter]
+  flows:
+    - {from: vnet:hub-pl, to: vnet:lz-pl, link: azurerm_virtual_network_peering, label: "peering (gateway transit)"}
+    - {from: pdz-blob, to: vnet:hub-pl, link: azurerm_private_dns_zone_virtual_network_link, label: "privatelink.blob.core.windows.net"}
+    - {from: pdz-blob, to: vnet:lz-pl, link: azurerm_private_dns_zone_virtual_network_link}
+    - {from: pdz-sql, to: vnet:lz-pl, link: azurerm_private_dns_zone_virtual_network_link, label: "privatelink.database.windows.net"}
+    - {from: nsg-pe-shared, to: subnet:snet-pe-shared, link: azurerm_subnet_network_security_group_association, label: "inbound rules on PE subnet"}
+    - {from: datacenter, to: dns-forwarder-1, label: "conditional forwarder", step: 1}
+    - {from: dns-forwarder-1, to: pdz-blob, label: "resolve via 168.63.129.16", step: 2}
+    - {from: datacenter, to: ergw-hub, label: "ExpressRoute", step: 3}
+    - {from: ergw-hub, to: fw-hub, label: "UDR to PE subnet via firewall", step: 4}
+    - {from: fw-hub, to: pe-storage-shared, label: "SNAT rule for PE subnet", step: 5}
+    - {from: pe-storage-shared, to: st-shared, label: "Private Link", step: 6}
+    - {from: vm-lz, to: pe-sql-lz, label: "/32 InterfaceEndpoint route"}
+    - {from: pe-sql-lz, to: sql-lz, label: "Private Link"}
+
+- slug: private-link-service-provider
+  title: Expose a service to consumers with Private Link service
+  category: networking
+  tags: [private link service, private endpoint, standard load balancer, nat ip, cross-tenant, saas]
+  source: https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview
+  description: A service provider runs an application behind a Standard internal Load Balancer and creates a Private Link service that references the load balancer frontend and a NAT subnet whose addresses appear as the source of all consumer traffic. Consumers in another subscription or tenant create a private endpoint that maps to the service alias, and the provider approves the connection request before traffic flows over the Azure backbone.
+  containers:
+    - subscription: saas-provider
+      resource_group: {name: rg-provider, location: westeurope}
+      vnets:
+        - name: vnet-provider
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: snet-backend, cidr: 10.20.1.0/24}
+            - {name: snet-pls-nat, cidr: 10.20.2.0/24}
+    - subscription: customer-a
+      resource_group: {name: rg-consumer-a, location: westeurope}
+      vnets:
+        - name: vnet-consumer-a
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: snet-consumer-pe, cidr: 10.30.1.0/24}
+            - {name: snet-consumer-app, cidr: 10.30.2.0/24}
+  elements:
+    - {tf: azurerm_lb, name: ilb-provider, in: subnet:snet-backend}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-service, in: subnet:snet-backend}
+    - {tf: azurerm_private_link_service, name: pls-service, in: subnet:snet-pls-nat}
+    - {tf: azurerm_log_analytics_workspace, name: law-provider, in: resource_group:rg-provider}
+    - {tf: azurerm_private_endpoint, name: pe-consumer, in: subnet:snet-consumer-pe}
+    - {tf: azurerm_private_dns_zone, name: pdz-consumer, in: resource_group:rg-consumer-a}
+    - {tf: azurerm_linux_virtual_machine, name: vm-consumer, in: subnet:snet-consumer-app}
+    - {tf: azurerm_network_security_group, name: nsg-consumer, in: resource_group:rg-consumer-a}
+  actors: [client]
+  flows:
+    - {from: vm-consumer, to: pe-consumer, label: "private IP in consumer VNet", step: 1}
+    - {from: pe-consumer, to: pls-service, label: "Private Link (alias, approved connection)", step: 2}
+    - {from: pls-service, to: ilb-provider, label: "destination NAT from NAT IP pool", step: 3}
+    - {from: ilb-provider, to: vmss-service, label: "load-balancing rule (TCP Proxy v2 optional)", step: 4}
+    - {from: pdz-consumer, to: vnet:vnet-consumer-a, link: azurerm_private_dns_zone_virtual_network_link, label: "service FQDN to PE IP"}
+    - {from: nsg-consumer, to: subnet:snet-consumer-pe, link: azurerm_subnet_network_security_group_association}
+    - {from: client, to: vm-consumer, label: "consumer application"}
+    - {from: ilb-provider, to: law-provider, label: "metrics"}
+
+- slug: dns-private-resolver-hybrid
+  title: Hybrid DNS with Azure DNS Private Resolver and private DNS zones
+  category: networking
+  tags: [dns private resolver, private dns zone, inbound endpoint, outbound endpoint, forwarding ruleset, hybrid dns]
+  source: https://learn.microsoft.com/en-us/azure/architecture/networking/architecture/azure-dns-private-resolver
+  description: DNS Private Resolver in the hub virtual network replaces DNS forwarder VMs, with an inbound endpoint that on-premises servers target through conditional forwarders and an outbound endpoint that forwards Azure queries for on-premises domains through a DNS forwarding ruleset. Private DNS zones for private endpoint services are linked to the hub and spoke virtual networks, and ExpressRoute or VPN with Azure Firewall provides the secured hybrid path.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-hub-dns, location: westeurope}
+      vnets:
+        - name: hub-dns
+          cidr: 10.0.0.0/24
+          subnets:
+            - {name: snet-dns-inbound, cidr: 10.0.0.0/28}
+            - {name: snet-dns-outbound, cidr: 10.0.0.16/28}
+            - {name: dns-GatewaySubnet, cidr: 10.0.0.64/27}
+            - {name: AzureFirewallSubnet, cidr: 10.0.0.128/26}
+    - subscription: landing-zone
+      resource_group: {name: rg-spokes-dns, location: westeurope}
+      vnets:
+        - name: spoke-1
+          cidr: 10.1.0.0/24
+          subnets: [{name: snet-spoke-1, cidr: 10.1.0.0/25}]
+        - name: spoke-2
+          cidr: 10.2.0.0/24
+          subnets: [{name: snet-spoke-2, cidr: 10.2.0.0/25}]
+  elements:
+    - {tf: azurerm_private_dns_resolver, name: dns-resolver, in: vnet:hub-dns}
+    - {tf: azurerm_private_dns_resolver_inbound_endpoint, name: inbound-endpoint, in: subnet:snet-dns-inbound}
+    - {tf: azurerm_private_dns_resolver_outbound_endpoint, name: outbound-endpoint, in: subnet:snet-dns-outbound}
+    - {tf: azurerm_private_dns_resolver_dns_forwarding_ruleset, name: ruleset-onprem, in: resource_group:rg-hub-dns}
+    - {tf: azurerm_virtual_network_gateway, name: ergw-dns, in: subnet:dns-GatewaySubnet}
+    - {tf: azurerm_firewall, name: fw-hub-dns, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_private_dns_zone, name: pdz-blob, in: resource_group:rg-hub-dns}
+    - {tf: azurerm_private_dns_zone, name: pdz-apim, in: resource_group:rg-hub-dns}
+    - {tf: azurerm_linux_virtual_machine, name: vm-1, in: subnet:snet-spoke-1}
+    - {tf: azurerm_linux_virtual_machine, name: vm-2, in: subnet:snet-spoke-2}
+    - {tf: azurerm_private_endpoint, name: pe-blob, in: subnet:snet-spoke-1}
+    - {tf: azurerm_storage_account, name: st-data, in: resource_group:rg-spokes-dns}
+  actors: [datacenter]
+  flows:
+    - {from: vnet:hub-dns, to: vnet:spoke-1, link: azurerm_virtual_network_peering}
+    - {from: vnet:hub-dns, to: vnet:spoke-2, link: azurerm_virtual_network_peering}
+    - {from: pdz-blob, to: vnet:hub-dns, link: azurerm_private_dns_zone_virtual_network_link, label: "privatelink.blob.core.windows.net"}
+    - {from: pdz-blob, to: vnet:spoke-1, link: azurerm_private_dns_zone_virtual_network_link}
+    - {from: pdz-apim, to: vnet:hub-dns, link: azurerm_private_dns_zone_virtual_network_link, label: "privatelink.azure-api.net"}
+    - {from: ruleset-onprem, to: vnet:spoke-1, link: azurerm_private_dns_resolver_virtual_network_link, label: "ruleset link (onpremises.company.com)"}
+    - {from: datacenter, to: ergw-dns, label: "ExpressRoute / S2S VPN", step: 1}
+    - {from: ergw-dns, to: inbound-endpoint, label: "conditional forwarder to 10.0.0.8", step: 2}
+    - {from: inbound-endpoint, to: pdz-blob, label: "resolve private zone record", step: 3}
+    - {from: vm-1, to: outbound-endpoint, label: "query App1.onpremises.company.com", step: 4}
+    - {from: outbound-endpoint, to: datacenter, label: "forward to 192.168.0.1 / .2", step: 5}
+    - {from: vm-1, to: pe-blob, label: "private IP 10.1.0.5"}
+    - {from: pe-blob, to: st-data, label: "Private Link"}
+    - {from: dns-resolver, to: inbound-endpoint, label: "resolver endpoint"}
+    - {from: dns-resolver, to: outbound-endpoint, label: "resolver endpoint"}
+    - {from: fw-hub-dns, to: vm-2, label: "spoke traffic through hub firewall"}
+
+- slug: front-door-application-gateway-ingress
+  title: Mission-critical global HTTP ingress with Front Door and Application Gateway
+  category: networking
+  tags: [front door, application gateway, traffic manager, waf, private link origin, global ingress, nested profiles]
+  source: https://learn.microsoft.com/en-us/azure/architecture/guide/networking/global-web-applications/mission-critical-global-http-ingress
+  description: A weighted Traffic Manager profile normally resolves clients to Azure Front Door Premium, which applies WAF and reaches regional origins over Private Link. If Front Door is unavailable the endpoint is disabled and a nested performance-routing Traffic Manager profile sends clients to a WAF-enabled Application Gateway in each region, so both paths are protected and terminate on the same origin servers.
+  containers:
+    - subscription: global-ingress
+      resource_group: {name: rg-global-ingress, location: westeurope}
+    - subscription: app-prod
+      resource_group: {name: rg-app-weu, location: westeurope}
+      vnets:
+        - name: vnet-weu
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: snet-agw-weu, cidr: 10.1.0.0/24}
+            - {name: snet-app-weu, cidr: 10.1.1.0/24}
+            - {name: snet-pls-weu, cidr: 10.1.2.0/24}
+    - subscription: app-prod
+      resource_group: {name: rg-app-eus, location: eastus}
+      vnets:
+        - name: vnet-eus
+          cidr: 10.2.0.0/16
+          subnets:
+            - {name: snet-agw-eus, cidr: 10.2.0.0/24}
+            - {name: snet-app-eus, cidr: 10.2.1.0/24}
+            - {name: snet-pls-eus, cidr: 10.2.2.0/24}
+  elements:
+    - {tf: azurerm_traffic_manager_profile, name: tm-weighted, in: resource_group:rg-global-ingress}
+    - {tf: azurerm_traffic_manager_profile, name: tm-performance, in: resource_group:rg-global-ingress}
+    - {tf: azurerm_cdn_frontdoor_profile, name: afd-premium, in: resource_group:rg-global-ingress}
+    - {tf: azurerm_cdn_frontdoor_firewall_policy, name: afd-waf, in: resource_group:rg-global-ingress}
+    - {tf: azurerm_application_gateway, name: agw-weu, in: subnet:snet-agw-weu}
+    - {tf: azurerm_application_gateway, name: agw-eus, in: subnet:snet-agw-eus}
+    - {tf: azurerm_web_application_firewall_policy, name: waf-agw, in: resource_group:rg-app-weu}
+    - {tf: azurerm_lb, name: ilb-weu, in: subnet:snet-app-weu}
+    - {tf: azurerm_lb, name: ilb-eus, in: subnet:snet-app-eus}
+    - {tf: azurerm_private_link_service, name: pls-weu, in: subnet:snet-pls-weu}
+    - {tf: azurerm_private_link_service, name: pls-eus, in: subnet:snet-pls-eus}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-weu, in: subnet:snet-app-weu}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-eus, in: subnet:snet-app-eus}
+  actors: [users]
+  flows:
+    - {from: users, to: tm-weighted, label: "DNS query (always serve)", step: 1}
+    - {from: tm-weighted, to: afd-premium, label: "weighted endpoint (normal operation)"}
+    - {from: tm-weighted, to: tm-performance, label: "nested profile (Front Door unavailable)"}
+    - {from: users, to: afd-premium, label: "HTTPS to nearest PoP", step: 2}
+    - {from: afd-waf, to: afd-premium, label: "WAF policy"}
+    - {from: afd-premium, to: pls-weu, label: "Private Link origin", step: 3}
+    - {from: pls-weu, to: ilb-weu, label: "NAT to ILB frontend", step: 4}
+    - {from: ilb-weu, to: vmss-weu, label: "origin servers", step: 5}
+    - {from: afd-premium, to: pls-eus, label: "Private Link origin"}
+    - {from: pls-eus, to: ilb-eus}
+    - {from: ilb-eus, to: vmss-eus}
+    - {from: tm-performance, to: agw-weu, label: "performance routing (alternate path)"}
+    - {from: tm-performance, to: agw-eus, label: "performance routing (alternate path)"}
+    - {from: waf-agw, to: agw-weu, label: "WAF policy (prevention)"}
+    - {from: agw-weu, to: vmss-weu, label: "same origins"}
+    - {from: agw-eus, to: vmss-eus, label: "same origins"}
+
+- slug: traffic-manager-priority-failover
+  title: Active-passive failover with Traffic Manager priority routing
+  category: networking
+  tags: [traffic manager, priority routing, dns load balancing, endpoint monitoring, application gateway, multi-region]
+  source: https://learn.microsoft.com/en-us/azure/traffic-manager/traffic-manager-routing-methods
+  description: A Traffic Manager profile with the Priority routing method returns the primary region's Application Gateway for every DNS query while endpoint monitoring reports it healthy, and returns the secondary region's endpoint when probes fail or the endpoint is disabled. Clients connect directly to the returned endpoint because Traffic Manager is DNS-based and never sits in the data path.
+  containers:
+    - subscription: web-prod
+      resource_group: {name: rg-traffic-manager, location: westeurope}
+    - subscription: web-prod
+      resource_group: {name: rg-web-primary, location: westeurope}
+      vnets:
+        - name: vnet-primary
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: snet-agw-primary, cidr: 10.1.0.0/24}
+            - {name: snet-web-primary, cidr: 10.1.1.0/24}
+    - subscription: web-prod
+      resource_group: {name: rg-web-secondary, location: northeurope}
+      vnets:
+        - name: vnet-secondary
+          cidr: 10.2.0.0/16
+          subnets:
+            - {name: snet-agw-secondary, cidr: 10.2.0.0/24}
+            - {name: snet-web-secondary, cidr: 10.2.1.0/24}
+  elements:
+    - {tf: azurerm_traffic_manager_profile, name: tm-priority, in: resource_group:rg-traffic-manager}
+    - {tf: azurerm_dns_zone, name: dns-contoso, in: resource_group:rg-traffic-manager}
+    - {tf: azurerm_web_application_firewall_policy, name: waf-web, in: resource_group:rg-traffic-manager}
+    - {tf: azurerm_log_analytics_workspace, name: law-tm, in: resource_group:rg-traffic-manager}
+    - {tf: azurerm_application_gateway, name: agw-primary, in: subnet:snet-agw-primary}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-primary, in: subnet:snet-web-primary}
+    - {tf: azurerm_application_gateway, name: agw-secondary, in: subnet:snet-agw-secondary}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-secondary, in: subnet:snet-web-secondary}
+  actors: [users]
+  flows:
+    - {from: users, to: dns-contoso, label: "resolve www.contoso.com", step: 1}
+    - {from: dns-contoso, to: tm-priority, label: "CNAME to trafficmanager.net", step: 2}
+    - {from: tm-priority, to: agw-primary, label: "priority 1 (healthy)", step: 3}
+    - {from: tm-priority, to: agw-secondary, label: "priority 2 (failover on probe failure)"}
+    - {from: users, to: agw-primary, label: "HTTPS to returned endpoint", step: 4}
+    - {from: agw-primary, to: vmss-primary, label: "backend pool", step: 5}
+    - {from: agw-secondary, to: vmss-secondary, label: "backend pool"}
+    - {from: waf-web, to: agw-primary, label: "WAF policy"}
+    - {from: waf-web, to: agw-secondary, label: "WAF policy"}
+    - {from: tm-priority, to: law-tm, label: "probe health logs"}
+
+- slug: bastion-hub-peering
+  title: Centralized Azure Bastion in a hub reaching peered spokes
+  category: networking
+  tags: [bastion, hub-spoke, vnet peering, global peering, rdp, ssh, no public ip]
+  source: https://learn.microsoft.com/en-us/azure/bastion/vnet-peering
+  description: A single Azure Bastion host in the AzureBastionSubnet of the hub virtual network provides browser-based RDP and SSH over TLS to virtual machines in every peered spoke, including spokes in other regions connected by global virtual network peering. Target VMs need no public IP, and a centralized network security group controls Bastion traffic.
+  containers:
+    - subscription: connectivity
+      resource_group: {name: rg-hub-bastion, location: westeurope}
+      vnets:
+        - name: hub-bastion
+          cidr: 10.0.0.0/16
+          subnets: [{name: AzureBastionSubnet, cidr: 10.0.1.0/26}]
+    - subscription: landing-zone-prod
+      resource_group: {name: rg-spoke-prod, location: westeurope}
+      vnets:
+        - name: spoke-prod
+          cidr: 10.1.0.0/16
+          subnets: [{name: snet-vm-prod, cidr: 10.1.0.0/24}]
+    - subscription: landing-zone-dr
+      resource_group: {name: rg-spoke-dr, location: northeurope}
+      vnets:
+        - name: spoke-dr
+          cidr: 10.2.0.0/16
+          subnets: [{name: snet-vm-dr, cidr: 10.2.0.0/24}]
+  elements:
+    - {tf: azurerm_bastion_host, name: bastion-hub, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_public_ip, name: pip-bastion, in: resource_group:rg-hub-bastion}
+    - {tf: azurerm_network_security_group, name: nsg-bastion, in: resource_group:rg-hub-bastion}
+    - {tf: azurerm_log_analytics_workspace, name: law-bastion, in: resource_group:rg-hub-bastion}
+    - {tf: azurerm_linux_virtual_machine, name: vm-linux-prod, in: subnet:snet-vm-prod}
+    - {tf: azurerm_windows_virtual_machine, name: vm-windows-prod, in: subnet:snet-vm-prod}
+    - {tf: azurerm_network_security_group, name: nsg-vm-prod, in: resource_group:rg-spoke-prod}
+    - {tf: azurerm_windows_virtual_machine, name: vm-windows-dr, in: subnet:snet-vm-dr}
+  actors: [user]
+  flows:
+    - {from: user, to: bastion-hub, label: "portal / native client over TLS 443", step: 1}
+    - {from: pip-bastion, to: bastion-hub, label: "public IP (Standard)"}
+    - {from: nsg-bastion, to: subnet:AzureBastionSubnet, link: azurerm_subnet_network_security_group_association, label: "Bastion NSG rules"}
+    - {from: vnet:hub-bastion, to: vnet:spoke-prod, link: azurerm_virtual_network_peering, label: "regional peering"}
+    - {from: vnet:hub-bastion, to: vnet:spoke-dr, link: azurerm_virtual_network_peering, label: "global peering"}
+    - {from: bastion-hub, to: vm-linux-prod, label: "SSH 22 to private IP", step: 2}
+    - {from: bastion-hub, to: vm-windows-prod, label: "RDP 3389 to private IP", step: 2}
+    - {from: bastion-hub, to: vm-windows-dr, label: "RDP over global peering", step: 3}
+    - {from: nsg-vm-prod, to: subnet:snet-vm-prod, link: azurerm_subnet_network_security_group_association, label: "allow from AzureBastionSubnet"}
+    - {from: bastion-hub, to: law-bastion, label: "session diagnostics"}
+
+- slug: nat-gateway-firewall-egress
+  title: NAT gateway with Azure Firewall for scalable outbound in hub-spoke
+  category: networking
+  tags: [nat gateway, azure firewall, snat, egress, hub-spoke, udr, bastion]
+  source: https://learn.microsoft.com/en-us/azure/nat-gateway/tutorial-hub-spoke-nat-firewall
+  description: A NAT gateway is associated with the AzureFirewallSubnet in the hub so all internet-bound traffic that spokes send to Azure Firewall through a 0.0.0.0/0 route egresses through the NAT gateway, which provides 64,512 SNAT ports per public IP instead of the firewall's 2,496. Spoke workloads have no public IP and are reached for administration through Azure Bastion in the hub.
+  containers:
+    - subscription: connectivity
+      resource_group: {name: rg-nat-hub, location: westus}
+      vnets:
+        - name: vnet-hub
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: subnet-1, cidr: 10.0.0.0/24}
+            - {name: AzureBastionSubnet, cidr: 10.0.1.0/26}
+            - {name: AzureFirewallSubnet, cidr: 10.0.1.64/26}
+    - subscription: workload
+      resource_group: {name: rg-nat-spoke, location: westus}
+      vnets:
+        - name: vnet-spoke
+          cidr: 10.1.0.0/16
+          subnets: [{name: subnet-private, cidr: 10.1.0.0/24}]
+  elements:
+    - {tf: azurerm_firewall, name: firewall, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_firewall_policy, name: firewall-policy, in: resource_group:rg-nat-hub}
+    - {tf: azurerm_nat_gateway, name: nat-gateway, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_public_ip, name: public-ip-nat, in: resource_group:rg-nat-hub}
+    - {tf: azurerm_bastion_host, name: bastion, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_log_analytics_workspace, name: law-hub, in: resource_group:rg-nat-hub}
+    - {tf: azurerm_linux_virtual_machine, name: vm-spoke, in: subnet:subnet-private}
+    - {tf: azurerm_network_security_group, name: nsg-1, in: resource_group:rg-nat-spoke}
+  actors: [internet, user]
+  flows:
+    - {from: vnet:vnet-hub, to: vnet:vnet-spoke, link: azurerm_virtual_network_peering, label: "allow forwarded traffic"}
+    - {from: vm-spoke, to: firewall, label: "route 0.0.0.0/0 next hop 10.0.1.68", step: 1}
+    - {from: firewall, to: nat-gateway, label: "network rule allow TCP 80/443", step: 2}
+    - {from: nat-gateway, to: subnet:AzureFirewallSubnet, link: azurerm_subnet_nat_gateway_association, label: "NAT on firewall subnet"}
+    - {from: public-ip-nat, to: nat-gateway, label: "Standard V2 public IP"}
+    - {from: nat-gateway, to: internet, label: "SNAT 64,512 ports per IP", step: 3}
+    - {from: firewall-policy, to: firewall, label: "spoke-to-internet rule collection"}
+    - {from: user, to: bastion, label: "SSH via Bastion"}
+    - {from: bastion, to: vm-spoke, label: "private IP"}
+    - {from: nsg-1, to: subnet:subnet-private, link: azurerm_subnet_network_security_group_association}
+    - {from: firewall, to: law-hub, label: "firewall logs"}
+
+- slug: ddos-protection-hub-spoke
+  title: DDoS Network Protection on a hub-spoke with Azure Firewall and Bastion
+  category: networking
+  tags: [ddos protection, network protection, hub-spoke, azure firewall, bastion, public ip]
+  source: https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-reference-architectures
+  description: A DDoS protection plan is enabled on the hub virtual network so every public IP in it, including the Azure Firewall and Azure Bastion frontends, receives Layer 3 and 4 mitigation with adaptive tuning and telemetry. Spokes are peered to the hub with no direct spoke-to-spoke path, the firewall controls ingress from the internet, and Bastion provides administrative access without public IPs on the workload VMs.
+  containers:
+    - subscription: connectivity
+      resource_group: {name: rg-ddos-hub, location: westeurope}
+      vnets:
+        - name: hub-ddos
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: AzureFirewallSubnet, cidr: 10.0.0.0/26}
+            - {name: AzureBastionSubnet, cidr: 10.0.1.0/26}
+    - subscription: landing-zone
+      resource_group: {name: rg-ddos-spokes, location: westeurope}
+      vnets:
+        - name: spoke-web
+          cidr: 10.1.0.0/16
+          subnets: [{name: snet-web, cidr: 10.1.0.0/24}]
+        - name: spoke-data
+          cidr: 10.2.0.0/16
+          subnets: [{name: snet-data, cidr: 10.2.0.0/24}]
+  elements:
+    - {tf: azurerm_network_ddos_protection_plan, name: ddos-plan, in: resource_group:rg-ddos-hub}
+    - {tf: azurerm_firewall, name: fw-hub, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_public_ip, name: pip-firewall, in: resource_group:rg-ddos-hub}
+    - {tf: azurerm_bastion_host, name: bastion-hub, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_public_ip, name: pip-bastion, in: resource_group:rg-ddos-hub}
+    - {tf: azurerm_log_analytics_workspace, name: law-ddos, in: resource_group:rg-ddos-hub}
+    - {tf: azurerm_linux_virtual_machine, name: vm-web, in: subnet:snet-web}
+    - {tf: azurerm_linux_virtual_machine, name: vm-data, in: subnet:snet-data}
+  actors: [internet, user]
+  flows:
+    - {from: ddos-plan, to: vnet:hub-ddos, label: "DDoS Network Protection on hub VNet (all public IPs)"}
+    - {from: vnet:hub-ddos, to: vnet:spoke-web, link: azurerm_virtual_network_peering}
+    - {from: vnet:hub-ddos, to: vnet:spoke-data, link: azurerm_virtual_network_peering}
+    - {from: internet, to: pip-firewall, label: "ingress (L3/L4 mitigation)", step: 1}
+    - {from: pip-firewall, to: fw-hub, label: "protected frontend"}
+    - {from: fw-hub, to: vm-web, label: "DNAT to web tier", step: 2}
+    - {from: vm-web, to: vm-data, label: "spoke-to-spoke via firewall route", step: 3}
+    - {from: user, to: pip-bastion, label: "RDP/SSH over TLS"}
+    - {from: pip-bastion, to: bastion-hub, label: "protected frontend"}
+    - {from: bastion-hub, to: vm-web, label: "private IP"}
+    - {from: ddos-plan, to: law-ddos, label: "mitigation metrics and alerts"}
+
+- slug: nsg-asg-segmentation
+  title: Tiered segmentation with network security groups and application security groups
+  category: networking
+  tags: [nsg, application security group, segmentation, micro-segmentation, flow logs, zero trust]
+  source: https://learn.microsoft.com/en-us/azure/virtual-network/application-security-groups
+  description: Virtual machine NICs are grouped into AsgWeb, AsgLogic and AsgDb application security groups, and a single network security group on both subnets allows HTTP from the internet only to AsgWeb, allows SQL from AsgLogic to AsgDb, and denies all other traffic to AsgDb ahead of the default AllowVNetInBound rule. Security policy follows the application structure without maintaining explicit IP addresses, and flow logs feed traffic analytics.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-segmentation, location: westeurope}
+      vnets:
+        - name: vnet1
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: subnet-web, cidr: 10.0.1.0/24}
+            - {name: subnet-data, cidr: 10.0.2.0/24}
+  elements:
+    - {tf: azurerm_network_security_group, name: nsg1, in: resource_group:rg-segmentation}
+    - {tf: azurerm_application_security_group, name: asg-web, in: resource_group:rg-segmentation}
+    - {tf: azurerm_application_security_group, name: asg-logic, in: resource_group:rg-segmentation}
+    - {tf: azurerm_application_security_group, name: asg-db, in: resource_group:rg-segmentation}
+    - {tf: azurerm_linux_virtual_machine, name: vm-web-1, in: subnet:subnet-web}
+    - {tf: azurerm_linux_virtual_machine, name: vm-web-2, in: subnet:subnet-web}
+    - {tf: azurerm_linux_virtual_machine, name: vm-logic, in: subnet:subnet-web}
+    - {tf: azurerm_linux_virtual_machine, name: vm-db, in: subnet:subnet-data}
+    - {tf: azurerm_network_watcher, name: nw-flow-logs, in: resource_group:rg-segmentation}
+    - {tf: azurerm_log_analytics_workspace, name: law-traffic, in: resource_group:rg-segmentation}
+  actors: [internet]
+  flows:
+    - {from: nsg1, to: subnet:subnet-web, link: azurerm_subnet_network_security_group_association}
+    - {from: nsg1, to: subnet:subnet-data, link: azurerm_subnet_network_security_group_association}
+    - {from: asg-web, to: vm-web-1, label: "NIC member"}
+    - {from: asg-web, to: vm-web-2, label: "NIC member"}
+    - {from: asg-logic, to: vm-logic, label: "NIC member"}
+    - {from: asg-db, to: vm-db, label: "NIC member"}
+    - {from: internet, to: vm-web-1, label: "Allow-HTTP-Inbound-Internet to AsgWeb 80", step: 1}
+    - {from: vm-web-1, to: vm-logic, label: "AllowVNetInBound default", step: 2}
+    - {from: vm-logic, to: vm-db, label: "Allow-Database-BusinessLogic AsgLogic to AsgDb 1433", step: 3}
+    - {from: vm-web-2, to: vm-db, label: "Deny-Database-All 1433 (denied)"}
+    - {from: nw-flow-logs, to: law-traffic, label: "VNet flow logs / traffic analytics"}
+
+- slug: firewall-forced-tunneling
+  title: Azure Firewall forced tunneling to an on-premises edge
+  category: networking
+  tags: [azure firewall, forced tunneling, management nic, default route, vpn gateway, bgp, egress]
+  source: https://learn.microsoft.com/en-us/azure/firewall/forced-tunneling
+  description: Azure Firewall is deployed with the management network interface enabled, so its own operational traffic uses a dedicated public IP while the tenant data path carries a 0.0.0.0/0 route toward the VPN or ExpressRoute gateway, either learned over BGP or set as a user-defined route on AzureFirewallSubnet. Internet-bound traffic from spokes is inspected by the firewall and then sent to the on-premises edge firewall before it reaches the internet, and DNAT inbound is not supported in this mode.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-fw-forced, location: westeurope}
+      vnets:
+        - name: hub-forced
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: AzureFirewallSubnet, cidr: 10.0.0.0/26}
+            - {name: AzureFirewallManagementSubnet, cidr: 10.0.1.0/26}
+            - {name: GatewaySubnet, cidr: 10.0.2.0/27}
+    - subscription: landing-zone
+      resource_group: {name: rg-spoke-forced, location: westeurope}
+      vnets:
+        - name: spoke-forced
+          cidr: 10.1.0.0/16
+          subnets: [{name: snet-app-forced, cidr: 10.1.0.0/24}]
+  elements:
+    - {tf: azurerm_firewall, name: fw-forced, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_public_ip, name: pip-fw-management, in: resource_group:rg-fw-forced}
+    - {tf: azurerm_firewall_policy, name: fwpol-forced, in: resource_group:rg-fw-forced}
+    - {tf: azurerm_virtual_network_gateway, name: vpngw-forced, in: subnet:GatewaySubnet}
+    - {tf: azurerm_local_network_gateway, name: lng-edge, in: resource_group:rg-fw-forced}
+    - {tf: azurerm_log_analytics_workspace, name: law-forced, in: resource_group:rg-fw-forced}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-forced, in: subnet:snet-app-forced}
+  actors: [datacenter, internet]
+  flows:
+    - {from: vnet:hub-forced, to: vnet:spoke-forced, link: azurerm_virtual_network_peering}
+    - {from: vm-app-forced, to: fw-forced, label: "UDR 0.0.0.0/0 to firewall", step: 1}
+    - {from: fw-forced, to: vpngw-forced, label: "0.0.0.0/0 via BGP or UDR on AzureFirewallSubnet", step: 2}
+    - {from: vpngw-forced, to: lng-edge, link: azurerm_virtual_network_gateway_connection, label: "IPsec / ExpressRoute"}
+    - {from: lng-edge, to: datacenter, label: "on-prem edge firewall inspects", step: 3}
+    - {from: datacenter, to: internet, label: "egress from on-premises", step: 4}
+    - {from: pip-fw-management, to: fw-forced, label: "management NIC (platform traffic only)"}
+    - {from: fwpol-forced, to: fw-forced, label: "policy (SNAT private range 0.0.0.0/0)"}
+    - {from: fw-forced, to: law-forced, label: "firewall logs"}
+
+- slug: route-server-nva-bgp
+  title: Dynamic routing with Azure Route Server and BGP-capable NVAs
+  category: networking
+  tags: [route server, bgp, nva, sd-wan, dynamic routing, ecmp, hub-spoke]
+  source: https://learn.microsoft.com/en-us/azure/route-server/overview
+  description: Azure Route Server in the RouteServerSubnet peers over BGP with an SD-WAN appliance that advertises on-premises prefixes and with a security appliance that advertises a default route, and programs both into the effective routes of every VM in the hub and peered spokes without user-defined routes. Branch-to-branch route exchange with the ExpressRoute gateway lets the NVAs learn and advertise routes alongside the circuit, with ECMP across multiple NVA instances.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-hub-routeserver, location: westeurope}
+      vnets:
+        - name: hub-rs
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: RouteServerSubnet, cidr: 10.1.0.0/27}
+            - {name: snet-nva-rs, cidr: 10.1.1.0/24}
+            - {name: rs-GatewaySubnet, cidr: 10.1.2.0/27}
+    - subscription: landing-zone
+      resource_group: {name: rg-spoke-routeserver, location: westeurope}
+      vnets:
+        - name: spoke-rs
+          cidr: 10.2.0.0/16
+          subnets: [{name: snet-app-rs, cidr: 10.2.0.0/24}]
+  elements:
+    - {tf: azurerm_route_server, name: route-server, in: subnet:RouteServerSubnet}
+    - {tf: azurerm_public_ip, name: pip-route-server, in: resource_group:rg-hub-routeserver}
+    - {tf: azurerm_linux_virtual_machine, name: nva-sdwan, in: subnet:snet-nva-rs}
+    - {tf: azurerm_linux_virtual_machine, name: nva-security, in: subnet:snet-nva-rs}
+    - {tf: azurerm_virtual_network_gateway, name: ergw-rs, in: subnet:rs-GatewaySubnet}
+    - {tf: azurerm_express_route_circuit, name: er-circuit-rs, in: resource_group:rg-hub-routeserver}
+    - {tf: azurerm_log_analytics_workspace, name: law-rs, in: resource_group:rg-hub-routeserver}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-rs, in: subnet:snet-app-rs}
+  actors: [datacenter, internet]
+  flows:
+    - {from: vnet:hub-rs, to: vnet:spoke-rs, link: azurerm_virtual_network_peering, label: "peering (use remote route server)"}
+    - {from: pip-route-server, to: route-server, label: "required public IP"}
+    - {from: route-server, to: nva-sdwan, link: azurerm_route_server_bgp_connection, label: "eBGP peering"}
+    - {from: route-server, to: nva-security, link: azurerm_route_server_bgp_connection, label: "eBGP peering"}
+    - {from: datacenter, to: nva-sdwan, label: "SD-WAN tunnel", step: 1}
+    - {from: nva-sdwan, to: route-server, label: "advertise 10.250.0.0/16", step: 2}
+    - {from: nva-security, to: route-server, label: "advertise 0.0.0.0/0"}
+    - {from: route-server, to: vm-app-rs, label: "program effective routes (ECMP)", step: 3}
+    - {from: vm-app-rs, to: nva-security, label: "internet-bound via learned default", step: 4}
+    - {from: nva-security, to: internet, label: "SNAT egress", step: 5}
+    - {from: vm-app-rs, to: nva-sdwan, label: "on-prem prefixes via SD-WAN"}
+    - {from: er-circuit-rs, to: ergw-rs, link: azurerm_virtual_network_gateway_connection, label: "ExpressRoute connection"}
+    - {from: route-server, to: ergw-rs, label: "branch-to-branch route exchange"}
+    - {from: nva-security, to: law-rs, label: "NVA logs"}
+
+- slug: arc-servers-private-link
+  title: Azure Arc-enabled servers over Private Link and ExpressRoute
+  category: networking
+  tags: [azure arc, private link scope, private endpoint, hybrid management, expressroute, azure monitor, private dns]
+  source: https://learn.microsoft.com/en-us/azure/azure-arc/servers/private-link-security
+  description: An Azure Arc Private Link Scope is attached to a private endpoint in the management virtual network so the Connected Machine agent on on-premises servers reaches Azure Arc over ExpressRoute or site-to-site VPN instead of public endpoints. Private DNS zones for privatelink.his.arc.azure.com and privatelink.guestconfiguration.azure.com are linked to the network and resolved from on-premises through a DNS forwarder, and Azure Monitor collection uses its own private link scope.
+  containers:
+    - datacenter: on-premises
+    - subscription: management
+      resource_group: {name: rg-arc-management, location: westeurope}
+      vnets:
+        - name: vnet-arc
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: arc-GatewaySubnet, cidr: 10.0.0.0/27}
+            - {name: snet-arc-endpoints, cidr: 10.0.1.0/24}
+  elements:
+    - {tf: azurerm_arc_private_link_scope, name: arc-private-link-scope, in: resource_group:rg-arc-management}
+    - {tf: azurerm_private_endpoint, name: pe-arc, in: subnet:snet-arc-endpoints}
+    - {tf: azurerm_private_dns_zone, name: pdz-arc-his, in: resource_group:rg-arc-management}
+    - {tf: azurerm_private_dns_zone, name: pdz-guestconfiguration, in: resource_group:rg-arc-management}
+    - {tf: azurerm_virtual_network_gateway, name: ergw-arc, in: subnet:arc-GatewaySubnet}
+    - {tf: azurerm_express_route_circuit, name: er-circuit-arc, in: resource_group:rg-arc-management}
+    - {tf: azurerm_arc_machine, name: arc-server-01, in: datacenter}
+    - {tf: azurerm_arc_machine, name: arc-server-02, in: datacenter}
+    - {tf: azurerm_monitor_private_link_scope, name: ampls, in: resource_group:rg-arc-management}
+    - {tf: azurerm_private_endpoint, name: pe-monitor, in: subnet:snet-arc-endpoints}
+    - {tf: azurerm_log_analytics_workspace, name: law-arc, in: resource_group:rg-arc-management}
+  actors: [datacenter, internet]
+  flows:
+    - {from: datacenter, to: er-circuit-arc, label: "ExpressRoute private peering", step: 1}
+    - {from: er-circuit-arc, to: ergw-arc, link: azurerm_virtual_network_gateway_connection, label: "ExpressRoute connection"}
+    - {from: arc-server-01, to: pe-arc, label: "Connected Machine agent to hybridcompute endpoint", step: 2}
+    - {from: pe-arc, to: arc-private-link-scope, label: "Private Link", step: 3}
+    - {from: arc-private-link-scope, to: arc-server-01, label: "scope membership"}
+    - {from: arc-private-link-scope, to: arc-server-02, label: "scope membership"}
+    - {from: pdz-arc-his, to: vnet:vnet-arc, link: azurerm_private_dns_zone_virtual_network_link, label: "privatelink.his.arc.azure.com"}
+    - {from: pdz-guestconfiguration, to: vnet:vnet-arc, link: azurerm_private_dns_zone_virtual_network_link, label: "privatelink.guestconfiguration.azure.com"}
+    - {from: datacenter, to: pdz-arc-his, label: "on-prem DNS forwards to Azure DNS"}
+    - {from: arc-server-01, to: pe-monitor, label: "Azure Monitor Agent", step: 4}
+    - {from: pe-monitor, to: ampls, label: "Private Link", step: 5}
+    - {from: ampls, to: law-arc, label: "log ingestion", step: 6}
+    - {from: arc-server-01, to: internet, label: "Entra ID and Resource Manager over public TCP 443"}
+
+- slug: azure-local-baseline
+  title: Azure Local (Azure Stack HCI) baseline connected to Azure through Arc
+  category: compute
+  tags: [azure local, azure stack hci, azure arc, hybrid, storage spaces direct, cloud witness, aks, edge]
+  source: https://learn.microsoft.com/en-us/azure/architecture/hybrid/azure-local-baseline
+  description: A multi-node Azure Local instance on certified hardware uses a storage switched network design with dual top-of-rack switches for north-south connectivity and Storage Spaces Direct for resilient storage. The nodes are Arc-enabled so the cluster is deployed and managed from Azure, with Key Vault holding deployment secrets, an Azure Storage cloud witness for quorum, Azure Monitor and Update Manager for operations, and Arc VMs or AKS as the workload platforms.
+  containers:
+    - datacenter: edge-site
+    - subscription: hybrid-management
+      resource_group: {name: rg-azure-local, location: westeurope}
+  elements:
+    - {tf: azurerm_stack_hci_cluster, name: azure-local-instance, in: datacenter}
+    - {tf: azurerm_arc_machine, name: node-01, in: datacenter}
+    - {tf: azurerm_arc_machine, name: node-02, in: datacenter}
+    - {tf: azurerm_stack_hci_logical_network, name: lnet-workload, in: datacenter}
+    - {tf: azurerm_arc_kubernetes_cluster, name: aks-azure-local, in: datacenter}
+    - {tf: azurerm_key_vault, name: kv-azure-local, in: resource_group:rg-azure-local}
+    - {tf: azurerm_storage_account, name: st-cloud-witness, in: resource_group:rg-azure-local}
+    - {tf: azurerm_log_analytics_workspace, name: law-azure-local, in: resource_group:rg-azure-local}
+    - {tf: azurerm_recovery_services_vault, name: rsv-azure-local, in: resource_group:rg-azure-local}
+  actors: [datacenter, user]
+  flows:
+    - {from: node-01, to: azure-local-instance, label: "cluster member (Storage Spaces Direct, storage network)"}
+    - {from: node-02, to: azure-local-instance, label: "cluster member (Storage Spaces Direct, storage network)"}
+    - {from: user, to: azure-local-instance, label: "deploy and manage from Azure portal via Arc"}
+    - {from: azure-local-instance, to: kv-azure-local, label: "deployment secrets over Arc (HTTPS 443 via ToR switches)", step: 1}
+    - {from: azure-local-instance, to: st-cloud-witness, label: "cloud witness quorum", step: 2}
+    - {from: node-01, to: law-azure-local, label: "Arc agent (Monitor Insights, Update Manager)", step: 3}
+    - {from: azure-local-instance, to: lnet-workload, label: "logical network (VLAN) for workloads"}
+    - {from: aks-azure-local, to: azure-local-instance, label: "Arc-enabled AKS runs on the instance"}
+    - {from: azure-local-instance, to: rsv-azure-local, label: "Azure Backup / Site Recovery"}
+
+- slug: avs-expressroute-global-reach
+  title: Azure VMware Solution networking with ExpressRoute and Global Reach
+  category: networking
+  tags: [azure vmware solution, expressroute, global reach, nsx-t, private cloud, hybrid]
+  source: https://learn.microsoft.com/en-us/azure/azure-vmware/architecture-networking
+  description: The Azure VMware Solution private cloud reaches an Azure virtual network through its Microsoft-managed ExpressRoute circuit, which is attached with an authorization key to an ExpressRoute gateway using the Ultra Performance SKU with FastPath for 10 Gbps. Because ExpressRoute gateways do not transit between circuits, ExpressRoute Global Reach links the private cloud circuit to the customer's on-premises circuit so vMotion and management traffic flow directly at the Microsoft edge.
+  containers:
+    - datacenter: on-premises
+    - subscription: avs
+      resource_group: {name: rg-avs, location: westeurope}
+      vnets:
+        - name: vnet-avs-hub
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: avs-GatewaySubnet, cidr: 10.0.0.0/27}
+            - {name: snet-jumpbox, cidr: 10.0.1.0/24}
+            - {name: AzureBastionSubnet, cidr: 10.0.2.0/26}
+  elements:
+    - {tf: azurerm_vmware_private_cloud, name: avs-private-cloud, in: resource_group:rg-avs}
+    - {tf: azurerm_vmware_express_route_authorization, name: avs-er-authorization, in: resource_group:rg-avs}
+    - {tf: azurerm_express_route_circuit, name: er-circuit-onprem, in: resource_group:rg-avs}
+    - {tf: azurerm_virtual_network_gateway, name: ergw-avs, in: subnet:avs-GatewaySubnet}
+    - {tf: azurerm_windows_virtual_machine, name: vm-jumpbox, in: subnet:snet-jumpbox}
+    - {tf: azurerm_bastion_host, name: bastion-avs, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_log_analytics_workspace, name: law-avs, in: resource_group:rg-avs}
+  actors: [datacenter, user, internet]
+  flows:
+    - {from: avs-private-cloud, to: avs-er-authorization, label: "issue authorization key"}
+    - {from: avs-er-authorization, to: ergw-avs, label: "AVS managed ExpressRoute connection (FastPath)", step: 1}
+    - {from: vm-jumpbox, to: avs-private-cloud, label: "vCenter Server / NSX Manager on management segment", step: 2}
+    - {from: datacenter, to: er-circuit-onprem, label: "ExpressRoute private peering", step: 3}
+    - {from: er-circuit-onprem, to: ergw-avs, link: azurerm_virtual_network_gateway_connection, label: "ExpressRoute connection"}
+    - {from: er-circuit-onprem, to: avs-private-cloud, label: "Global Reach between circuits at MSEE (vMotion, management)", step: 4}
+    - {from: avs-private-cloud, to: internet, label: "public IP on NSX edge (disabled by default)"}
+    - {from: user, to: bastion-avs, label: "RDP over TLS"}
+    - {from: bastion-avs, to: vm-jumpbox, label: "private IP"}
+    - {from: avs-private-cloud, to: law-avs, label: "diagnostics"}
+
+- slug: cross-region-load-balancer
+  title: Global tier Azure Load Balancer across regional Standard Load Balancers
+  category: networking
+  tags: [global load balancer, cross-region, anycast, geo-proximity, standard load balancer, multi-region, layer 4]
+  source: https://learn.microsoft.com/en-us/azure/load-balancer/cross-region-overview
+  description: A global tier Standard Load Balancer deployed in a home region exposes a static anycast public IP and holds regional public Standard Load Balancers in its backend pool, routing each flow from the closest participating region over the Microsoft backbone to the nearest healthy regional deployment. Health checks every 5 seconds remove a failed region from rotation, client IP is preserved as Layer 4 pass-through, and outbound traffic uses regional outbound rules or a NAT gateway.
+  containers:
+    - subscription: web-global
+      resource_group: {name: rg-glb-home, location: westeurope}
+    - subscription: web-global
+      resource_group: {name: rg-glb-westus, location: westus}
+      vnets:
+        - name: vnet-westus
+          cidr: 10.1.0.0/16
+          subnets: [{name: snet-web-westus, cidr: 10.1.0.0/24}]
+    - subscription: web-global
+      resource_group: {name: rg-glb-northeurope, location: northeurope}
+      vnets:
+        - name: vnet-northeurope
+          cidr: 10.2.0.0/16
+          subnets: [{name: snet-web-northeurope, cidr: 10.2.0.0/24}]
+  elements:
+    - {tf: azurerm_lb, name: glb-global, in: resource_group:rg-glb-home}
+    - {tf: azurerm_public_ip, name: pip-global-anycast, in: resource_group:rg-glb-home}
+    - {tf: azurerm_log_analytics_workspace, name: law-glb, in: resource_group:rg-glb-home}
+    - {tf: azurerm_lb, name: lb-westus, in: subnet:snet-web-westus}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-westus, in: subnet:snet-web-westus}
+    - {tf: azurerm_nat_gateway, name: natgw-westus, in: subnet:snet-web-westus}
+    - {tf: azurerm_lb, name: lb-northeurope, in: subnet:snet-web-northeurope}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-northeurope, in: subnet:snet-web-northeurope}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: pip-global-anycast, label: "static anycast IP, enters closest participating region", step: 1}
+    - {from: pip-global-anycast, to: glb-global, label: "global tier frontend"}
+    - {from: glb-global, to: lb-westus, label: "geo-proximity over Microsoft backbone, probe every 5 s", step: 2}
+    - {from: glb-global, to: lb-northeurope, label: "failover when a region reports unhealthy"}
+    - {from: lb-westus, to: vmss-westus, label: "matching backend port, client IP preserved", step: 3}
+    - {from: lb-northeurope, to: vmss-northeurope, label: "matching backend port"}
+    - {from: vmss-westus, to: natgw-westus, label: "outbound (no outbound rules on global tier)"}
+    - {from: natgw-westus, to: subnet:snet-web-westus, link: azurerm_subnet_nat_gateway_association}
+    - {from: natgw-westus, to: internet, label: "SNAT egress"}
+    - {from: glb-global, to: law-glb, label: "metrics"}
