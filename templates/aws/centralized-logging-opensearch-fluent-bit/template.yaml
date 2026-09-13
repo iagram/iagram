@@ -1,0 +1,59 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/centralized-logging-with-opensearch/application-log-analytics-pipeline.html); edit freely.
+title: Centralized Logging with OpenSearch for application and AWS service logs
+category: observability
+tags:
+- opensearch
+- fluent bit
+- kinesis
+- lambda
+- centralized logging
+- solutions library
+source: https://docs.aws.amazon.com/solutions/latest/centralized-logging-with-opensearch/application-log-analytics-pipeline.html
+description: Fluent Bit agents installed on EC2 instances and EKS nodes by Systems Manager ship application logs to a Kinesis Data Streams log buffer; a Log Processor Lambda function triggered by the buffer
+  parses the records and bulk-indexes them into an Amazon OpenSearch Service domain, writing failed batches to an S3 backup bucket. A separate service log pipeline loads AWS service logs (ALB, CloudFront,
+  CloudTrail, WAF) from S3 through SQS notifications, and the solution console built on CloudFront, AppSync, Cognito and DynamoDB provisions each pipeline on demand with Step Functions.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-solution-console, type: common.group, name: solution console, parent: reg-us-east-1}
+- {id: grp-log-pipelines, type: common.group, name: log pipelines, parent: reg-us-east-1}
+- {id: vpc-logging, type: aws.vpc, name: logging, parent: reg-us-east-1, props: {cidr: 10.70.0.0/16}}
+- {id: az-logging-a, type: aws.availability_zone, name: a, parent: vpc-logging, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-logging-a, props: {cidr: 10.70.1.0/24, az: a, public: false}}
+- {id: az-logging-b, type: aws.availability_zone, name: b, parent: vpc-logging, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-logging-b, props: {cidr: 10.70.2.0/24, az: b, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: console-cdn, type: aws.cloudfront_distribution, name: console-cdn, parent: grp-solution-console}
+- {id: console-api, type: aws.res.aws_appsync_graphql_api, name: console-api, parent: grp-solution-console, props: {authentication_type: changeme, name: changeme}}
+- {id: pipeline-metadata, type: aws.dynamodb_table, name: pipeline-metadata, parent: grp-solution-console}
+- {id: pipeline-provisioner, type: aws.res.aws_sfn_state_machine, name: pipeline-provisioner, parent: grp-solution-console, props: {definition: changeme, role_arn: changeme}}
+- {id: app-server-fluent-bit, type: aws.ec2_instance, name: app-server-fluent-bit, parent: sub-private-a}
+- {id: app-cluster-fluent-bit, type: aws.eks_cluster, name: app-cluster-fluent-bit, parent: az-logging-b}
+- {id: app-log-buffer, type: aws.res.aws_kinesis_stream, name: app-log-buffer, parent: grp-log-pipelines, props: {name: changeme}}
+- {id: log-processor, type: aws.lambda_function, name: log-processor, parent: grp-log-pipelines}
+- {id: service-log-bucket, type: aws.s3_bucket, name: service-log-bucket, parent: grp-log-pipelines}
+- {id: service-log-notifications, type: aws.sqs_queue, name: service-log-notifications, parent: grp-log-pipelines}
+- {id: failed-records-backup, type: aws.s3_bucket, name: failed-records-backup, parent: grp-log-pipelines}
+- {id: central-logs, type: aws.res.aws_opensearch_domain, name: central-logs, parent: vpc-logging, props: {domain_name: changeme}}
+- {id: install-fluent-bit, type: aws.res.aws_ssm_document, name: install-fluent-bit, parent: reg-us-east-1, props: {content: changeme, document_type: changeme, name: changeme}}
+edges:
+- {from: user, to: console-cdn, label: create log pipeline, step: '1'}
+- {from: console-cdn, to: console-api, label: GraphQL}
+- {from: console-api, to: pipeline-provisioner, label: deploy pipeline stack, step: '2'}
+- {from: install-fluent-bit, to: app-server-fluent-bit, label: SSM installs and configures Fluent Bit, step: '3'}
+- {from: app-server-fluent-bit, to: app-log-buffer, label: Fluent Bit kinesis output, step: '4'}
+- {from: app-cluster-fluent-bit, to: app-log-buffer, label: Fluent Bit DaemonSet, step: '4'}
+- {from: app-log-buffer, to: log-processor, step: '5', link: aws_lambda_event_source_mapping}
+- {from: log-processor, to: central-logs, label: _bulk index, step: '6'}
+- {from: log-processor, to: failed-records-backup, label: failed records}
+- {from: service-log-bucket, to: service-log-notifications, label: S3 event notification}
+- {from: service-log-notifications, to: log-processor, link: aws_lambda_event_source_mapping}
+- {from: console-api, to: pipeline-metadata, label: pipeline state}
+- {from: user, to: central-logs, label: OpenSearch Dashboards}
+steps:
+- {n: '1', text: 'user → console-cdn: create log pipeline'}
+- {n: '2', text: 'console-api → pipeline-provisioner: deploy pipeline stack'}
+- {n: '3', text: 'install-fluent-bit → app-server-fluent-bit: SSM installs and configures Fluent Bit'}
+- {n: '4', text: 'app-server-fluent-bit → app-log-buffer: Fluent Bit kinesis output'}
+- {n: '5', text: app-log-buffer → log-processor}
+- {n: '6', text: 'log-processor → central-logs: _bulk index'}

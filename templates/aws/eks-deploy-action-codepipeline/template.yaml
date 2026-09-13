@@ -1,0 +1,58 @@
+# Generated from the official reference (https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-EKS.html); edit freely.
+title: Continuous deployment to Amazon EKS with the CodePipeline EKS deploy action
+category: devops
+tags:
+- codepipeline
+- eks
+- kubernetes
+- helm
+- kubectl
+- ecr
+- codeconnections
+source: https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-EKS.html
+description: A V2 CodePipeline pulls application source through a CodeConnections GitHub connection, builds and pushes the image with the ECRBuildAndPublish action, then runs the EKSDeploy action, which
+  applies Kubernetes manifests or a Helm chart from the source artifact on CodePipeline-managed CodeBuild compute. The action reaches private clusters through subnets and security groups of the cluster
+  VPC and authenticates with an EKS access entry granted to the pipeline service role.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-west-2}
+- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-us-west-2, props: {cidr: 10.30.0.0/16}}
+- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.30.1.0/24, az: a, public: false}}
+- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.30.2.0/24, az: b, public: false}}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: github-connection, type: aws.res.aws_codestarconnections_connection, name: github-connection, parent: grp-pipeline, props: {name: changeme}}
+- id: eks-pipeline
+  type: aws.res.aws_codepipeline
+  name: eks-pipeline
+  parent: grp-pipeline
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- {id: service-images, type: aws.res.aws_ecr_repository, name: service-images, parent: grp-pipeline, props: {name: changeme}}
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: grp-pipeline}
+- {id: pipeline-action-logs, type: aws.res.aws_cloudwatch_log_group, name: pipeline-action-logs, parent: grp-pipeline}
+- {id: prod-cluster, type: aws.eks_cluster, name: prod-cluster, parent: vpc-eks}
+- {id: ingress-alb, type: aws.alb, name: ingress-alb, parent: az-eks-a}
+- {id: pipeline-service-role, type: aws.res.aws_iam_role, name: pipeline-service-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}}
+edges:
+- {from: saas, to: github-connection, label: GitHub App webhook, step: '1'}
+- {from: github-connection, to: eks-pipeline, label: source action, step: '2'}
+- {from: eks-pipeline, to: service-images, label: ECRBuildAndPublish pushes image tagged with execution id, step: '3'}
+- {from: eks-pipeline, to: pipeline-artifacts, label: artifact store}
+- {from: eks-pipeline, to: prod-cluster, label: 'EKSDeploy: helm upgrade / kubectl apply via cluster VPC', step: '4'}
+- {from: eks-pipeline, to: pipeline-action-logs, label: /aws/codepipeline/<pipeline> logs}
+- {from: prod-cluster, to: service-images, label: pull image, step: '5'}
+- {from: users, to: ingress-alb, label: HTTPS}
+- {from: ingress-alb, to: prod-cluster, label: ingress to pods}
+steps:
+- {n: '1', text: 'saas → github-connection: GitHub App webhook'}
+- {n: '2', text: 'github-connection → eks-pipeline: source action'}
+- {n: '3', text: 'eks-pipeline → service-images: ECRBuildAndPublish pushes image tagged with execution id'}
+- {n: '4', text: 'eks-pipeline → prod-cluster: EKSDeploy: helm upgrade / kubectl apply via cluster VPC'}
+- {n: '5', text: 'prod-cluster → service-images: pull image'}

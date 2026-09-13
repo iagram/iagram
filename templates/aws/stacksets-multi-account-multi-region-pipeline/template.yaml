@@ -1,0 +1,48 @@
+# Generated from the official reference (https://docs.aws.amazon.com/codepipeline/latest/userguide/tutorials-stackset-deployment.html); edit freely.
+title: Multi-account, multi-Region infrastructure pipeline with CloudFormation StackSets actions
+category: devops
+tags:
+- codepipeline
+- cloudformation
+- stacksets
+- multi-account
+- multi-region
+- organizations
+source: https://docs.aws.amazon.com/codepipeline/latest/userguide/tutorials-stackset-deployment.html
+description: A pipeline in the administration account takes a zipped template, parameters file and accounts list from an S3 source bucket, then runs a CloudFormationStackSet action to create the stack set
+  and a CloudFormationStackInstances action to roll the stacks out to target accounts and Regions with failure tolerance and concurrency limits. Self-managed permissions use AWSCloudFormationStackSetAdministrationRole
+  in the administration account and AWSCloudFormationStackSetExecutionRole trusted from each target account.
+nodes:
+- {id: acct-admin, type: aws.account, name: admin}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-admin, props: {region: us-east-1}}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-east-1}
+- {id: acct-workload-a, type: aws.account, name: workload-a}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-workload-a, props: {region: us-east-1}}
+- {id: acct-workload-b, type: aws.account, name: workload-b}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-workload-b, props: {region: eu-central-1}}
+- {id: user, type: common.user, name: user}
+- {id: template-source-bucket, type: aws.s3_bucket, name: template-source-bucket, parent: grp-pipeline}
+- id: stackset-pipeline
+  type: aws.res.aws_codepipeline
+  name: stackset-pipeline
+  parent: grp-pipeline
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: grp-pipeline}
+- {id: stackset-admin-role, type: aws.res.aws_iam_role, name: stackset-admin-role, parent: acct-admin, props: {assume_role_policy: changeme}}
+- {id: baseline-stack-a, type: aws.res.aws_cloudformation_stack, name: baseline-stack-a, parent: acct-workload-a, props: {name: changeme}}
+- {id: stackset-exec-role-a, type: aws.res.aws_iam_role, name: stackset-exec-role-a, parent: acct-workload-a, props: {assume_role_policy: changeme}}
+- {id: baseline-stack-b, type: aws.res.aws_cloudformation_stack, name: baseline-stack-b, parent: acct-workload-b, props: {name: changeme}}
+- {id: stackset-exec-role-b, type: aws.res.aws_iam_role, name: stackset-exec-role-b, parent: acct-workload-b, props: {assume_role_policy: changeme}}
+edges:
+- {from: user, to: template-source-bucket, label: upload template.yml + parameters + accounts zip, step: '1'}
+- {from: template-source-bucket, to: stackset-pipeline, label: S3 source action, step: '2'}
+- {from: stackset-pipeline, to: pipeline-artifacts, label: artifact store}
+- {from: stackset-admin-role, to: stackset-exec-role-a, label: sts AssumeRole}
+- {from: stackset-admin-role, to: stackset-exec-role-b, label: sts AssumeRole}
+steps:
+- {n: '1', text: 'user → template-source-bucket: upload template.yml + parameters + accounts zip'}
+- {n: '2', text: 'template-source-bucket → stackset-pipeline: S3 source action'}

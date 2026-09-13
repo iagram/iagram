@@ -1,0 +1,49 @@
+# Generated from the official reference (https://docs.aws.amazon.com/xray/latest/devguide/xray-services-lambda.html); edit freely.
+title: Distributed tracing of a serverless API with AWS X-Ray active tracing
+category: observability
+tags:
+- x-ray
+- lambda
+- api gateway
+- dynamodb
+- sqs
+- tracing
+- service map
+source: https://docs.aws.amazon.com/xray/latest/devguide/xray-services-lambda.html
+description: API Gateway with X-Ray tracing enabled samples incoming requests and propagates the trace header to a Lambda function with active tracing, where the Lambda-managed daemon emits the invocation
+  segment and the X-Ray SDK records subsegments for DynamoDB and SQS calls. A downstream Lambda consumer of the queue is linked to the producer trace so the service map and trace timeline show the whole
+  request path, and an X-Ray group filters traces with faults for a CloudWatch alarm.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-application, type: common.group, name: application, parent: reg-us-east-1}
+- {id: grp-tracing, type: common.group, name: tracing, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: orders-api, type: aws.res.aws_api_gateway_rest_api, name: orders-api, parent: grp-application, props: {name: changeme}}
+- {id: create-order, type: aws.lambda_function, name: create-order, parent: grp-application}
+- {id: orders-table, type: aws.dynamodb_table, name: orders-table, parent: grp-application}
+- {id: fulfilment-queue, type: aws.sqs_queue, name: fulfilment-queue, parent: grp-application}
+- {id: fulfil-order, type: aws.lambda_function, name: fulfil-order, parent: grp-application}
+- {id: api-sampling-rule, type: aws.res.aws_xray_sampling_rule, name: api-sampling-rule, parent: grp-tracing, props: {fixed_rate: 1, host: changeme, http_method: changeme, priority: 1, reservoir_size: 1,
+    resource_arn: changeme, service_name: changeme, service_type: changeme, url_path: changeme, version: 1}}
+- {id: orders-faults-group, type: aws.res.aws_xray_group, name: orders-faults-group, parent: grp-tracing, props: {filter_expression: changeme, group_name: changeme}}
+- {id: fault-rate-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: fault-rate-alarm, parent: grp-tracing, props: {alarm_name: changeme}}
+- {id: oncall-alerts, type: aws.res.aws_sns_topic, name: oncall-alerts, parent: grp-tracing}
+edges:
+- {from: client, to: orders-api, label: POST /orders, step: '1'}
+- {from: orders-api, to: create-order, label: invoke with X-Amzn-Trace-Id, step: '2'}
+- {from: create-order, to: orders-table, label: PutItem (SDK subsegment), step: '3'}
+- {from: create-order, to: fulfilment-queue, label: SendMessage with trace header, step: '4'}
+- {from: fulfilment-queue, to: fulfil-order, step: '5', link: aws_lambda_event_source_mapping}
+- {from: api-sampling-rule, to: orders-api, label: sampling decision}
+- {from: create-order, to: orders-faults-group, label: 'segments (filter: fault = true)', step: '6'}
+- {from: orders-faults-group, to: fault-rate-alarm, label: ApproximateTraceCount metric, step: '7'}
+- {from: fault-rate-alarm, to: oncall-alerts, label: ALARM action}
+steps:
+- {n: '1', text: 'client → orders-api: POST /orders'}
+- {n: '2', text: 'orders-api → create-order: invoke with X-Amzn-Trace-Id'}
+- {n: '3', text: 'create-order → orders-table: PutItem (SDK subsegment)'}
+- {n: '4', text: 'create-order → fulfilment-queue: SendMessage with trace header'}
+- {n: '5', text: fulfilment-queue → fulfil-order}
+- {n: '6', text: 'create-order → orders-faults-group: segments (filter: fault = true)'}
+- {n: '7', text: 'orders-faults-group → fault-rate-alarm: ApproximateTraceCount metric'}

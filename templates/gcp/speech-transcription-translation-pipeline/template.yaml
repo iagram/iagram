@@ -1,0 +1,45 @@
+# Generated from the official reference (https://docs.cloud.google.com/speech-to-text/v2/docs/batch-recognize); edit freely.
+title: Batch speech transcription and translation pipeline
+category: ml
+tags:
+- speech-to-text
+- translation
+- batch recognize
+- cloud run functions
+- bigquery
+source: https://docs.cloud.google.com/speech-to-text/v2/docs/batch-recognize
+description: Audio recordings uploaded to Cloud Storage trigger a Cloud Run function that submits a Speech-to-Text v2 batch recognition request and writes the transcripts back to a Cloud Storage bucket.
+  A second function is triggered by the transcript objects, calls the Cloud Translation API to produce target-language text, and loads transcripts, translations and metadata into BigQuery for search and
+  analytics.
+nodes:
+- {id: prj-speech-prj, type: gcp.project, name: speech-prj, props: {project_id: speech-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: audio-bucket, type: gcp.storage_bucket, name: audio-bucket, parent: prj-speech-prj}
+- {id: audio-uploaded, type: gcp.pubsub_topic, name: audio-uploaded, parent: prj-speech-prj}
+- {id: transcribe-fn, type: gcp.res.google_cloudfunctions2_function, name: transcribe-fn, parent: prj-speech-prj, props: {location: westeurope, name: changeme}}
+- {id: transcripts-bucket, type: gcp.storage_bucket, name: transcripts-bucket, parent: prj-speech-prj}
+- {id: translate-fn, type: gcp.res.google_cloudfunctions2_function, name: translate-fn, parent: prj-speech-prj, props: {location: westeurope, name: changeme}}
+- {id: translations-bucket, type: gcp.storage_bucket, name: translations-bucket, parent: prj-speech-prj}
+- {id: speech-analytics, type: gcp.bigquery_dataset, name: speech-analytics, parent: prj-speech-prj}
+- {id: media-pipeline-wf, type: gcp.res.google_workflows_workflow, name: media-pipeline-wf, parent: prj-speech-prj}
+edges:
+- {from: users, to: audio-bucket, label: upload recordings, step: '1'}
+- {from: audio-bucket, to: audio-uploaded, label: object notification, step: '2'}
+- {from: audio-uploaded, to: media-pipeline-wf, label: start execution, step: '3'}
+- {from: media-pipeline-wf, to: transcribe-fn, label: invoke, step: '4'}
+- {from: transcribe-fn, to: transcripts-bucket, label: BatchRecognize output, step: '5'}
+- {from: media-pipeline-wf, to: translate-fn, label: invoke after transcript, step: '6'}
+- {from: translate-fn, to: translations-bucket, label: translated text, step: '7'}
+- {from: translate-fn, to: speech-analytics, label: load rows, step: '8'}
+- {from: client, to: speech-analytics, label: SQL queries, step: '9'}
+steps:
+- {n: '1', text: 'users → audio-bucket: upload recordings'}
+- {n: '2', text: 'audio-bucket → audio-uploaded: object notification'}
+- {n: '3', text: 'audio-uploaded → media-pipeline-wf: start execution'}
+- {n: '4', text: 'media-pipeline-wf → transcribe-fn: invoke'}
+- {n: '5', text: 'transcribe-fn → transcripts-bucket: BatchRecognize output'}
+- {n: '6', text: 'media-pipeline-wf → translate-fn: invoke after transcript'}
+- {n: '7', text: 'translate-fn → translations-bucket: translated text'}
+- {n: '8', text: 'translate-fn → speech-analytics: load rows'}
+- {n: '9', text: 'client → speech-analytics: SQL queries'}

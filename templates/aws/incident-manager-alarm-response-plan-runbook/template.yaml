@@ -1,0 +1,45 @@
+# Generated from the official reference (https://docs.aws.amazon.com/incident-manager/latest/userguide/incident-creation.html); edit freely.
+title: Automated incident response with CloudWatch alarms, EventBridge and Incident Manager
+category: devops
+tags:
+- incident manager
+- eventbridge
+- cloudwatch alarms
+- runbook
+- systems manager automation
+- on-call
+source: https://docs.aws.amazon.com/incident-manager/latest/userguide/incident-creation.html
+description: A CloudWatch alarm with a Systems Manager action and an EventBridge rule targeting a response plan both create incidents in Incident Manager, which deduplicates them, records the involved resources
+  and opens a linked OpsItem in OpsCenter. The response plan engages on-call contacts through an escalation plan, posts to a chat channel via SNS and AWS Chatbot, and automatically starts a Systems Manager
+  Automation runbook that receives the incident ARN and involved resource ARNs as parameters to remediate the fault.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-detection, type: common.group, name: detection, parent: reg-us-east-1}
+- {id: grp-incident-response, type: common.group, name: incident response, parent: reg-us-east-1}
+- {id: grp-workload, type: common.group, name: workload, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: api-5xx-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: api-5xx-alarm, parent: grp-detection, props: {alarm_name: changeme}}
+- {id: health-event-rule, type: aws.res.aws_cloudwatch_event_rule, name: health-event-rule, parent: grp-detection}
+- id: sev2-response-plan
+  type: aws.res.aws_ssmincidents_response_plan
+  name: sev2-response-plan
+  parent: grp-incident-response
+  props: {incident_template: {}, name: changeme}
+- {id: primary-oncall, type: aws.res.aws_ssmcontacts_contact, name: primary-oncall, parent: grp-incident-response, props: {alias: changeme, type: changeme}}
+- {id: incident-chat-topic, type: aws.res.aws_sns_topic, name: incident-chat-topic, parent: grp-incident-response}
+- {id: ops-slack-channel, type: aws.res.aws_chatbot_slack_channel_configuration, name: ops-slack-channel, parent: grp-incident-response, props: {configuration_name: changeme, iam_role_arn: changeme, slack_channel_id: changeme,
+    slack_team_id: changeme}}
+- {id: restart-service-runbook, type: aws.res.aws_ssm_document, name: restart-service-runbook, parent: grp-incident-response, props: {content: changeme, document_type: changeme, name: changeme}}
+- {id: runbook-service-role, type: aws.res.aws_iam_role, name: runbook-service-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+edges:
+- {from: api-5xx-alarm, to: sev2-response-plan, label: 'Systems Manager action: create incident', step: '2'}
+- {from: health-event-rule, to: sev2-response-plan, label: AWS Health event}
+- {from: sev2-response-plan, to: incident-chat-topic, label: incident updates, step: '5'}
+- {from: incident-chat-topic, to: ops-slack-channel, label: sns topic subscription}
+- {from: sev2-response-plan, to: restart-service-runbook, label: StartAutomationExecution with involved resources, step: '6'}
+- {from: runbook-service-role, to: restart-service-runbook, label: AssumeRole}
+steps:
+- {n: '2', text: 'api-5xx-alarm → sev2-response-plan: Systems Manager action: create incident'}
+- {n: '5', text: 'sev2-response-plan → incident-chat-topic: incident updates'}
+- {n: '6', text: 'sev2-response-plan → restart-service-runbook: StartAutomationExecution with involved resources'}

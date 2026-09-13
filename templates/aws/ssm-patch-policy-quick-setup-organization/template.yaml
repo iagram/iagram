@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.aws.amazon.com/systems-manager/latest/userguide/patch-manager-policies.html); edit freely.
+title: Organization-wide EC2 patching with Systems Manager patch policies
+category: devops
+tags:
+- systems manager
+- patch manager
+- quick setup
+- state manager
+- compliance
+- organizations
+source: https://docs.aws.amazon.com/systems-manager/latest/userguide/patch-manager-policies.html
+description: A Quick Setup patch policy defined in the management account creates State Manager associations in every target account and Region that run the AWS-RunPatchBaseline document on separate scan
+  and install schedules against the patch baseline selected per operating system. Patch compliance results are reported per account-Region pair, exported as CSV to an S3 bucket, and can be forwarded to
+  Security Hub, while custom baselines are shared through an S3 bucket of baseline overrides.
+nodes:
+- {id: acct-management, type: aws.account, name: management}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}}
+- {id: grp-patch-policy, type: common.group, name: patch policy, parent: reg-us-east-1}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1-2, props: {cidr: 10.40.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.40.1.0/24, az: a, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: linux-security-baseline, type: aws.res.aws_ssm_patch_baseline, name: linux-security-baseline, parent: grp-patch-policy, props: {name: changeme}}
+- {id: windows-baseline, type: aws.res.aws_ssm_patch_baseline, name: windows-baseline, parent: grp-patch-policy, props: {name: changeme}}
+- {id: baseline-overrides-bucket, type: aws.s3_bucket, name: baseline-overrides-bucket, parent: grp-patch-policy}
+- {id: compliance-reports-bucket, type: aws.s3_bucket, name: compliance-reports-bucket, parent: grp-patch-policy}
+- {id: scan-association, type: aws.res.aws_ssm_association, name: scan-association, parent: acct-workload, props: {name: changeme}}
+- {id: install-association, type: aws.res.aws_ssm_association, name: install-association, parent: acct-workload, props: {name: changeme}}
+- {id: aws-runpatchbaseline, type: aws.res.aws_ssm_document, name: aws-runpatchbaseline, parent: acct-workload, props: {content: changeme, document_type: changeme, name: changeme}}
+- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-private-a}
+- {id: ssm-instance-role, type: aws.res.aws_iam_role, name: ssm-instance-role, parent: acct-workload, props: {assume_role_policy: changeme}}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.40.251.0/24, az: b, public: false}}
+edges:
+- {from: user, to: linux-security-baseline, label: define approval rules in Quick Setup, step: '1'}
+- {from: linux-security-baseline, to: baseline-overrides-bucket, label: baseline override JSON, step: '2'}
+- {from: baseline-overrides-bucket, to: scan-association, label: policy deployed via StackSets to each account-Region, step: '3'}
+- {from: scan-association, to: aws-runpatchbaseline, label: Operation=Scan daily, step: '4'}
+- {from: install-association, to: aws-runpatchbaseline, label: Operation=Install weekly, step: '5'}
+- {from: aws-runpatchbaseline, to: app-server, label: SSM Agent runs patch command, step: '6'}
+- {from: ssm-instance-role, to: app-server, label: instance profile}
+- {from: app-server, to: compliance-reports-bucket, label: patch compliance CSV report, step: '7'}
+- {from: windows-baseline, to: baseline-overrides-bucket, label: baseline override JSON}
+steps:
+- {n: '1', text: 'user → linux-security-baseline: define approval rules in Quick Setup'}
+- {n: '2', text: 'linux-security-baseline → baseline-overrides-bucket: baseline override JSON'}
+- {n: '3', text: 'baseline-overrides-bucket → scan-association: policy deployed via StackSets to each account-Region'}
+- {n: '4', text: 'scan-association → aws-runpatchbaseline: Operation=Scan daily'}
+- {n: '5', text: 'install-association → aws-runpatchbaseline: Operation=Install weekly'}
+- {n: '6', text: 'aws-runpatchbaseline → app-server: SSM Agent runs patch command'}
+- {n: '7', text: 'app-server → compliance-reports-bucket: patch compliance CSV report'}

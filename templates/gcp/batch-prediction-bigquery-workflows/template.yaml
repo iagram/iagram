@@ -1,0 +1,40 @@
+# Generated from the official reference (https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions); edit freely.
+title: Scheduled batch prediction from BigQuery with Vertex AI and Workflows
+category: ml
+tags:
+- batch prediction
+- bigquery
+- workflows
+- cloud scheduler
+- model registry
+source: https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions
+description: Cloud Scheduler starts a Workflows execution that submits a Vertex AI batch prediction job for a registered model, reading input rows from a BigQuery table or files in Cloud Storage. The job
+  writes predictions back to a BigQuery destination table, and a Pub/Sub notification lets downstream consumers pick up the results without a long-running online endpoint.
+nodes:
+- {id: prj-batch-pred-prj, type: gcp.project, name: batch-pred-prj, props: {project_id: batch-pred-prj-123456, project: changeme, region: europe-west1}}
+- {id: client, type: common.client, name: client}
+- {id: nightly-schedule, type: gcp.res.google_cloud_scheduler_job, name: nightly-schedule, parent: prj-batch-pred-prj, props: {name: changeme}}
+- {id: batch-predict-wf, type: gcp.res.google_workflows_workflow, name: batch-predict-wf, parent: prj-batch-pred-prj}
+- {id: features-dataset, type: gcp.bigquery_dataset, name: features-dataset, parent: prj-batch-pred-prj}
+- {id: batch-input-bucket, type: gcp.storage_bucket, name: batch-input-bucket, parent: prj-batch-pred-prj}
+- {id: model-artifacts, type: gcp.storage_bucket, name: model-artifacts, parent: prj-batch-pred-prj}
+- {id: predictions-dataset, type: gcp.bigquery_dataset, name: predictions-dataset, parent: prj-batch-pred-prj}
+- {id: predictions-ready, type: gcp.pubsub_topic, name: predictions-ready, parent: prj-batch-pred-prj}
+- {id: notify-consumers-fn, type: gcp.res.google_cloudfunctions2_function, name: notify-consumers-fn, parent: prj-batch-pred-prj, props: {location: westeurope, name: changeme}}
+edges:
+- {from: nightly-schedule, to: batch-predict-wf, label: cron trigger, step: '1'}
+- {from: batch-predict-wf, to: model-artifacts, label: create batch prediction job, step: '2'}
+- {from: features-dataset, to: model-artifacts, label: BigQuery input table, step: '3'}
+- {from: batch-input-bucket, to: model-artifacts, label: JSONL input files, step: '3'}
+- {from: model-artifacts, to: predictions-dataset, label: write predictions, step: '4'}
+- {from: batch-predict-wf, to: predictions-ready, label: publish completion, step: '5'}
+- {from: predictions-ready, to: notify-consumers-fn, label: trigger, step: '6'}
+- {from: client, to: predictions-dataset, label: query results, step: '7'}
+steps:
+- {n: '1', text: 'nightly-schedule → batch-predict-wf: cron trigger'}
+- {n: '2', text: 'batch-predict-wf → model-artifacts: create batch prediction job'}
+- {n: '3', text: 'features-dataset → model-artifacts: BigQuery input table'}
+- {n: '4', text: 'model-artifacts → predictions-dataset: write predictions'}
+- {n: '5', text: 'batch-predict-wf → predictions-ready: publish completion'}
+- {n: '6', text: 'predictions-ready → notify-consumers-fn: trigger'}
+- {n: '7', text: 'client → predictions-dataset: query results'}

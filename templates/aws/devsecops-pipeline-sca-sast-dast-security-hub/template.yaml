@@ -1,0 +1,73 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/devops/building-end-to-end-aws-devsecops-ci-cd-pipeline-with-open-source-sca-sast-and-dast-tools/); edit freely.
+title: DevSecOps pipeline with SCA, SAST and DAST scans reporting to Security Hub
+category: devops
+tags:
+- devsecops
+- codepipeline
+- codebuild
+- security hub
+- sast
+- dast
+- sca
+- elastic beanstalk
+source: https://aws.amazon.com/blogs/devops/building-end-to-end-aws-devsecops-ci-cd-pipeline-with-open-source-sca-sast-and-dast-tools/
+description: A CodeCommit push starts a CodePipeline in which CodeBuild projects run OWASP Dependency-Check (SCA) and SonarQube or PHPStan (SAST) in parallel; a Lambda function converts findings to the
+  AWS Security Finding Format and imports them into Security Hub, failing the stage when vulnerabilities exceed the threshold. Clean builds are deployed by CodeDeploy to an Elastic Beanstalk staging environment
+  where OWASP ZAP runs DAST, and after a manual approval the release is promoted to production while EventBridge, SNS and Parameter Store handle notifications and secrets.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-east-1}
+- {id: grp-security, type: common.group, name: security, parent: reg-us-east-1}
+- {id: grp-environments, type: common.group, name: environments, parent: reg-us-east-1}
+- {id: user, type: common.user, name: user}
+- {id: app-repo, type: aws.res.aws_codecommit_repository, name: app-repo, parent: grp-pipeline, props: {repository_name: changeme}}
+- id: devsecops-pipeline
+  type: aws.res.aws_codepipeline
+  name: devsecops-pipeline
+  parent: grp-pipeline
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- id: sca-dependency-check
+  type: aws.res.aws_codebuild_project
+  name: sca-dependency-check
+  parent: grp-pipeline
+  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
+- id: sast-sonarqube
+  type: aws.res.aws_codebuild_project
+  name: sast-sonarqube
+  parent: grp-pipeline
+  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
+- id: dast-owasp-zap
+  type: aws.res.aws_codebuild_project
+  name: dast-owasp-zap
+  parent: grp-pipeline
+  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: grp-pipeline}
+- {id: findings-importer, type: aws.lambda_function, name: findings-importer, parent: grp-security}
+- {id: security-hub, type: aws.res.aws_securityhub_account, name: security-hub, parent: grp-security}
+- {id: scanner-credentials, type: aws.res.aws_ssm_parameter, name: scanner-credentials, parent: grp-security, props: {name: changeme, type: changeme}}
+- {id: build-state-rule, type: aws.res.aws_cloudwatch_event_rule, name: build-state-rule, parent: reg-us-east-1}
+- {id: pipeline-notifications, type: aws.res.aws_sns_topic, name: pipeline-notifications, parent: reg-us-east-1}
+edges:
+- {from: user, to: app-repo, label: git push, step: '1'}
+- {from: app-repo, to: devsecops-pipeline, label: source stage, step: '2'}
+- {from: devsecops-pipeline, to: sca-dependency-check, label: SCA scan, step: '3'}
+- {from: devsecops-pipeline, to: sast-sonarqube, label: SAST scan (parallel), step: '3'}
+- {from: sca-dependency-check, to: findings-importer, label: scan report, step: '4'}
+- {from: sast-sonarqube, to: findings-importer, label: scan report, step: '4'}
+- {from: findings-importer, to: security-hub, label: BatchImportFindings (ASFF), step: '5'}
+- {from: scanner-credentials, to: sast-sonarqube, label: SonarQube token}
+- {from: dast-owasp-zap, to: findings-importer, label: ZAP report, step: '8'}
+- {from: build-state-rule, to: pipeline-notifications, link: aws_cloudwatch_event_target}
+- {from: devsecops-pipeline, to: pipeline-artifacts, label: artifacts}
+steps:
+- {n: '1', text: 'user → app-repo: git push'}
+- {n: '2', text: 'app-repo → devsecops-pipeline: source stage'}
+- {n: '3', text: 'devsecops-pipeline → sca-dependency-check: SCA scan'}
+- {n: '4', text: 'sca-dependency-check → findings-importer: scan report'}
+- {n: '5', text: 'findings-importer → security-hub: BatchImportFindings (ASFF)'}
+- {n: '8', text: 'dast-owasp-zap → findings-importer: ZAP report'}

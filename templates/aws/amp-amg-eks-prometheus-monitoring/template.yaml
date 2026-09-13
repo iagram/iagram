@@ -1,0 +1,57 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prometheus/latest/userguide/AMP-collector.html); edit freely.
+title: EKS metrics with Amazon Managed Service for Prometheus and Amazon Managed Grafana
+category: observability
+tags:
+- prometheus
+- grafana
+- eks
+- managed collector
+- remote write
+- alertmanager
+source: https://docs.aws.amazon.com/prometheus/latest/userguide/AMP-collector.html
+description: An AWS managed collector (scraper) attached to the EKS cluster discovers Prometheus-compatible endpoints such as the API server, kube-state-metrics and application pods, and remote-writes the
+  samples into an Amazon Managed Service for Prometheus workspace through ENIs in the cluster subnets and a VPC endpoint, with no agent to operate. Amazon Managed Grafana queries the workspace with SigV4
+  through the AWS data source configuration, and workspace alerting rules route firing alerts to an SNS topic.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: grp-managed-observability, type: common.group, name: managed observability, parent: reg-us-west-2}
+- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-us-west-2, props: {cidr: 10.50.0.0/16}}
+- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.50.1.0/24, az: a, public: false}}
+- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.50.2.0/24, az: b, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: idp, type: common.idp, name: idp}
+- {id: platform-cluster, type: aws.eks_cluster, name: platform-cluster, parent: vpc-eks}
+- {id: eks-managed-collector, type: aws.res.aws_prometheus_scraper, name: eks-managed-collector, parent: sub-private-a, props: {scrape_configuration: changeme}}
+- {id: aps-workspaces-endpoint, type: aws.res.aws_vpc_endpoint, name: aps-workspaces-endpoint, parent: sub-private-b, props: {vpc_id: changeme}}
+- {id: platform-metrics, type: aws.res.aws_prometheus_workspace, name: platform-metrics, parent: grp-managed-observability}
+- id: platform-grafana
+  type: aws.res.aws_grafana_workspace
+  name: platform-grafana
+  parent: grp-managed-observability
+  props:
+    account_access_type: changeme
+    authentication_providers: []
+    permission_type: changeme
+- {id: prometheus-alerts, type: aws.res.aws_sns_topic, name: prometheus-alerts, parent: grp-managed-observability}
+- {id: grafana-workspace-role, type: aws.res.aws_iam_role, name: grafana-workspace-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}}
+- {id: scraper-vended-logs, type: aws.res.aws_cloudwatch_log_group, name: scraper-vended-logs, parent: reg-us-west-2}
+edges:
+- {from: eks-managed-collector, to: platform-cluster, label: scrape /metrics via ENIs (access entry), step: '1'}
+- {from: eks-managed-collector, to: aps-workspaces-endpoint, label: remote_write, step: '2'}
+- {from: aps-workspaces-endpoint, to: platform-metrics, label: PrivateLink to aps-workspaces, step: '3'}
+- {from: platform-grafana, to: platform-metrics, label: PromQL query with SigV4, step: '4'}
+- {from: grafana-workspace-role, to: platform-grafana, label: 'aps:QueryMetrics'}
+- {from: platform-metrics, to: prometheus-alerts, label: alert manager definition routes alerts, step: '5'}
+- {from: eks-managed-collector, to: scraper-vended-logs, label: vended logs}
+- {from: idp, to: platform-grafana, label: SAML / IAM Identity Center sign-in}
+- {from: user, to: platform-grafana, label: dashboards, step: '6'}
+steps:
+- {n: '1', text: 'eks-managed-collector → platform-cluster: scrape /metrics via ENIs (access entry)'}
+- {n: '2', text: 'eks-managed-collector → aps-workspaces-endpoint: remote_write'}
+- {n: '3', text: 'aps-workspaces-endpoint → platform-metrics: PrivateLink to aps-workspaces'}
+- {n: '4', text: 'platform-grafana → platform-metrics: PromQL query with SigV4'}
+- {n: '5', text: 'platform-metrics → prometheus-alerts: alert manager definition routes alerts'}
+- {n: '6', text: 'user → platform-grafana: dashboards'}

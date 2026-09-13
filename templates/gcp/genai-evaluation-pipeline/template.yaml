@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/evaluation-overview); edit freely.
+title: Generative AI evaluation pipeline with Vertex AI evaluation service
+category: ml
+tags:
+- evaluation
+- gen ai evaluation service
+- vertex ai pipelines
+- bigquery
+- autosxs
+- llm judge
+source: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/evaluation-overview
+description: Evaluation datasets of prompts and reference answers stored in Cloud Storage and BigQuery feed a Vertex AI Pipelines run that calls the candidate model endpoints and the Gen AI evaluation service
+  for computation-based and model-based metrics. Scores and pairwise AutoSxS judgements are written to BigQuery, a Cloud Run dashboard visualizes them, and a scheduled Cloud Run function re-evaluates production
+  samples to detect regressions before promoting a new model or prompt version.
+nodes:
+- {id: prj-eval-prj, type: gcp.project, name: eval-prj, props: {project_id: eval-prj-123456, project: changeme, region: us-central1}}
+- {id: user, type: common.user, name: user}
+- {id: eval-datasets, type: gcp.storage_bucket, name: eval-datasets, parent: prj-eval-prj}
+- {id: eval-inputs, type: gcp.bigquery_dataset, name: eval-inputs, parent: prj-eval-prj}
+- {id: eval-pipeline-root, type: gcp.storage_bucket, name: eval-pipeline-root, parent: prj-eval-prj}
+- {id: eval-schedule, type: gcp.res.google_cloud_scheduler_job, name: eval-schedule, parent: prj-eval-prj, props: {name: changeme}}
+- {id: run-eval-fn, type: gcp.res.google_cloudfunctions2_function, name: run-eval-fn, parent: prj-eval-prj, props: {location: westeurope, name: changeme}}
+- {id: candidate-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: candidate-endpoint, parent: prj-eval-prj, props: {display_name: changeme, location: westeurope, name: changeme}}
+- {id: eval-results, type: gcp.bigquery_dataset, name: eval-results, parent: prj-eval-prj}
+- {id: eval-dashboard, type: gcp.cloud_run_service, name: eval-dashboard, parent: prj-eval-prj}
+edges:
+- {from: user, to: eval-datasets, label: upload golden set, step: '1'}
+- {from: eval-schedule, to: run-eval-fn, label: cron, step: '2'}
+- {from: run-eval-fn, to: eval-pipeline-root, label: submit evaluation pipeline, step: '3'}
+- {from: eval-datasets, to: eval-pipeline-root, label: prompts + references, step: '4'}
+- {from: eval-inputs, to: eval-pipeline-root, label: sampled production prompts, step: '4'}
+- {from: eval-pipeline-root, to: candidate-endpoint, label: generate candidate responses, step: '5'}
+- {from: eval-pipeline-root, to: eval-results, label: metrics + AutoSxS judgements, step: '6'}
+- {from: user, to: eval-dashboard, label: review scores, step: '7'}
+- {from: eval-dashboard, to: eval-results, label: query, step: '8'}
+steps:
+- {n: '1', text: 'user → eval-datasets: upload golden set'}
+- {n: '2', text: 'eval-schedule → run-eval-fn: cron'}
+- {n: '3', text: 'run-eval-fn → eval-pipeline-root: submit evaluation pipeline'}
+- {n: '4', text: 'eval-datasets → eval-pipeline-root: prompts + references'}
+- {n: '5', text: 'eval-pipeline-root → candidate-endpoint: generate candidate responses'}
+- {n: '6', text: 'eval-pipeline-root → eval-results: metrics + AutoSxS judgements'}
+- {n: '7', text: 'user → eval-dashboard: review scores'}
+- {n: '8', text: 'eval-dashboard → eval-results: query'}

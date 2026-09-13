@@ -1,0 +1,958 @@
+- slug: global-alb-mig-cloud-sql-three-tier
+  title: Three-tier web app on managed instance groups behind a global external Application Load Balancer
+  category: web
+  tags: [global external application load balancer, managed instance group, cloud sql, memorystore, three tier, compute engine]
+  source: https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-compute
+  description: A global forwarding rule on a reserved anycast IP hands HTTPS to a target HTTPS proxy holding a Google-managed certificate; the URL map routes to a backend service whose backends are regional managed instance groups built from an instance template and watched by an HTTP health check. The web tier reads session state from Memorystore for Redis and persists data in a regional Cloud SQL instance reached over private IP, while a Cloud NAT gateway gives the private VMs outbound access for package updates.
+  containers:
+    - project: web-tier-prj
+      region: europe-west1
+      vpcs:
+        - name: web-vpc
+          cidr: 10.10.0.0/16
+          subnets:
+            - {name: web-sub, cidr: 10.10.1.0/24, region: europe-west1}
+            - {name: data-sub, cidr: 10.10.2.0/24, region: europe-west1}
+  elements:
+    - {tf: google_compute_global_address, name: web-ip, in: project:web-tier-prj}
+    - {tf: google_compute_global_forwarding_rule, name: web-https-rule, in: project:web-tier-prj}
+    - {tf: google_compute_target_https_proxy, name: web-https-proxy, in: project:web-tier-prj}
+    - {tf: google_compute_managed_ssl_certificate, name: web-cert, in: project:web-tier-prj}
+    - {tf: google_compute_url_map, name: web-url-map, in: project:web-tier-prj}
+    - {tf: google_compute_backend_service, name: web-backend, in: project:web-tier-prj}
+    - {tf: google_compute_health_check, name: web-hc, in: project:web-tier-prj}
+    - {tf: google_compute_instance_template, name: web-template, in: region}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig, in: subnet:web-sub}
+    - {tf: google_redis_instance, name: session-cache, in: subnet:data-sub}
+    - {tf: google_sql_database_instance, name: app-db, in: subnet:data-sub}
+    - {tf: google_compute_router, name: web-router, in: vpc:web-vpc}
+    - {tf: google_compute_router_nat, name: web-nat, in: vpc:web-vpc}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: web-https-rule, label: HTTPS to anycast IP, step: 1}
+    - {from: web-https-rule, to: web-https-proxy, step: 2}
+    - {from: web-cert, to: web-https-proxy, label: Google-managed certificate}
+    - {from: web-https-proxy, to: web-url-map, step: 3}
+    - {from: web-url-map, to: web-backend, step: 4}
+    - {from: web-backend, to: web-mig, label: HTTP to healthy instances, step: 5}
+    - {from: web-hc, to: web-mig, label: health checks}
+    - {from: web-template, to: web-mig, label: instance template}
+    - {from: web-mig, to: session-cache, label: Redis sessions, step: 6}
+    - {from: web-mig, to: app-db, label: private IP SQL, step: 7}
+    - {from: web-mig, to: web-nat, label: outbound updates}
+    - {from: web-nat, to: internet}
+
+- slug: static-site-backend-bucket-cloud-cdn
+  title: Static website on Cloud Storage served through Cloud CDN and an HTTPS load balancer
+  category: web
+  tags: [cloud storage, cloud cdn, backend bucket, static website, https load balancer, cloud dns]
+  source: https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket
+  description: A multi-region Cloud Storage bucket holds the site files and is wrapped in a backend bucket with Cloud CDN enabled so content is cached at Google edge locations. A URL map, target HTTPS proxy with a Google-managed certificate and a global forwarding rule on a reserved static IP expose the bucket; a Cloud DNS zone points the custom domain at that address.
+  containers:
+    - project: static-web-prj
+      region: europe-west1
+  elements:
+    - {tf: google_dns_managed_zone, name: site-zone, in: project:static-web-prj}
+    - {tf: google_compute_global_address, name: site-ip, in: project:static-web-prj}
+    - {tf: google_compute_global_forwarding_rule, name: site-https-rule, in: project:static-web-prj}
+    - {tf: google_compute_target_https_proxy, name: site-https-proxy, in: project:static-web-prj}
+    - {tf: google_compute_managed_ssl_certificate, name: site-cert, in: project:static-web-prj}
+    - {tf: google_compute_url_map, name: site-url-map, in: project:static-web-prj}
+    - {tf: google_compute_backend_bucket, name: site-cdn-backend, in: project:static-web-prj}
+    - {tf: google_storage_bucket, name: site-assets, in: project:static-web-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: site-zone, label: DNS lookup, step: 1}
+    - {from: users, to: site-https-rule, label: HTTPS, step: 2}
+    - {from: site-https-rule, to: site-https-proxy, step: 3}
+    - {from: site-cert, to: site-https-proxy}
+    - {from: site-https-proxy, to: site-url-map, step: 4}
+    - {from: site-url-map, to: site-cdn-backend, label: Cloud CDN cache, step: 5}
+    - {from: site-cdn-backend, to: site-assets, label: origin fetch on cache miss, step: 6}
+
+- slug: cloud-run-global-alb-serverless-neg-cloud-armor
+  title: Cloud Run behind a global external Application Load Balancer with a serverless NEG and Cloud Armor
+  category: web
+  tags: [cloud run, serverless neg, global external application load balancer, cloud armor, cloud cdn, multi-region]
+  source: https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-serverless
+  description: Cloud Run services in two regions are registered in regional serverless network endpoint groups that are the backends of one global backend service, so a single anycast IP with a Google-managed certificate routes users to the nearest healthy region. A Cloud Armor security policy attached to the backend service filters traffic at the edge and Cloud CDN caches cacheable responses; ingress on the services is restricted to internal-and-load-balancer traffic.
+  containers:
+    - project: run-web-prj
+      region: europe-west1
+  elements:
+    - {tf: google_compute_global_address, name: app-ip, in: project:run-web-prj}
+    - {tf: google_compute_global_forwarding_rule, name: app-https-rule, in: project:run-web-prj}
+    - {tf: google_compute_target_https_proxy, name: app-https-proxy, in: project:run-web-prj}
+    - {tf: google_compute_managed_ssl_certificate, name: app-cert, in: project:run-web-prj}
+    - {tf: google_compute_url_map, name: app-url-map, in: project:run-web-prj}
+    - {tf: google_compute_backend_service, name: app-backend, in: project:run-web-prj}
+    - {tf: google_compute_security_policy, name: app-edge-policy, in: project:run-web-prj}
+    - {tf: google_compute_region_network_endpoint_group, name: app-neg-ew1, in: project:run-web-prj}
+    - {tf: google_compute_region_network_endpoint_group, name: app-neg-ew4, in: project:run-web-prj}
+    - {tf: google_cloud_run_v2_service, name: app-ew1, in: project:run-web-prj}
+    - {tf: google_cloud_run_v2_service, name: app-ew4, in: project:run-web-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: app-https-rule, label: HTTPS, step: 1}
+    - {from: app-https-rule, to: app-https-proxy, step: 2}
+    - {from: app-cert, to: app-https-proxy}
+    - {from: app-https-proxy, to: app-url-map, step: 3}
+    - {from: app-url-map, to: app-backend, label: Cloud CDN enabled, step: 4}
+    - {from: app-edge-policy, to: app-backend, label: Cloud Armor rules}
+    - {from: app-backend, to: app-neg-ew1, label: nearest region, step: 5}
+    - {from: app-backend, to: app-neg-ew4, label: failover region}
+    - {from: app-neg-ew1, to: app-ew1, step: 6}
+    - {from: app-neg-ew4, to: app-ew4}
+
+- slug: cloud-run-cloud-sql-postgres-secret-manager
+  title: Cloud Run service connected to Cloud SQL for PostgreSQL with Secret Manager credentials
+  category: serverless
+  tags: [cloud run, cloud sql, postgresql, secret manager, direct vpc egress, private ip]
+  source: https://docs.cloud.google.com/sql/docs/postgres/connect-run
+  description: A Cloud Run service runs under a dedicated service account holding the Cloud SQL Client role and reads the database password from a Secret Manager secret mounted at deploy time. With Direct VPC egress the revision gets an address in the VPC subnet and talks TCP 5432 to the private IP of a regional Cloud SQL instance in the same region; the container image is pulled from Artifact Registry.
+  containers:
+    - project: run-sql-prj
+      region: europe-west1
+      vpcs:
+        - name: app-vpc
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: run-egress-sub, cidr: 10.20.1.0/24, region: europe-west1}
+            - {name: db-sub, cidr: 10.20.2.0/24, region: europe-west1}
+  elements:
+    - {tf: google_cloud_run_v2_service, name: api-service, in: subnet:run-egress-sub}
+    - {tf: google_service_account, name: api-sa, in: project:run-sql-prj}
+    - {tf: google_secret_manager_secret, name: db-password, in: project:run-sql-prj}
+    - {tf: google_sql_database_instance, name: orders-pg, in: subnet:db-sub}
+    - {tf: google_artifact_registry_repository, name: api-images, in: project:run-sql-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: api-service, label: HTTPS run.app URL, step: 1}
+    - {from: api-sa, to: api-service, label: runtime identity, step: 2}
+    - {from: api-service, to: db-password, label: secret mounted as env var, step: 3}
+    - {from: api-service, to: orders-pg, label: "TCP 5432 private IP", step: 4}
+    - {from: api-images, to: api-service, label: image pull}
+
+- slug: cloud-run-memorystore-direct-vpc-egress
+  title: Cloud Run service reaching Memorystore for Redis over Direct VPC egress
+  category: serverless
+  tags: [cloud run, memorystore, redis, direct vpc egress, serverless vpc access, caching]
+  source: https://docs.cloud.google.com/memorystore/docs/redis/connect-redis-instance-cloud-run
+  description: A Memorystore for Redis instance is authorized on a VPC network and only exposes a private IP, so the Cloud Run service is deployed with Direct VPC egress into a subnet of that network and reaches Redis on port 6379 without a managed connector. A Serverless VPC Access connector is the alternative path for projects that cannot use Direct VPC egress, and the Redis host and port are passed to the container as environment variables.
+  containers:
+    - project: run-cache-prj
+      region: europe-west1
+      vpcs:
+        - name: cache-vpc
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: run-sub, cidr: 10.30.1.0/24, region: europe-west1}
+            - {name: connector-sub, cidr: 10.30.8.0/28, region: europe-west1}
+  elements:
+    - {tf: google_cloud_run_v2_service, name: counter-service, in: subnet:run-sub}
+    - {tf: google_redis_instance, name: counter-redis, in: vpc:cache-vpc}
+    - {tf: google_vpc_access_connector, name: legacy-connector, in: subnet:connector-sub}
+    - {tf: google_service_account, name: counter-sa, in: project:run-cache-prj}
+    - {tf: google_artifact_registry_repository, name: counter-images, in: project:run-cache-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: counter-service, label: HTTPS, step: 1}
+    - {from: counter-service, to: counter-redis, label: "INCR over 6379, Direct VPC egress", step: 2}
+    - {from: counter-service, to: legacy-connector, label: alternative Serverless VPC Access}
+    - {from: legacy-connector, to: counter-redis}
+    - {from: counter-sa, to: counter-service, label: runtime identity}
+    - {from: counter-images, to: counter-service, label: image pull}
+
+- slug: cloud-run-job-cloud-scheduler
+  title: Cloud Run job executed on a cron schedule by Cloud Scheduler
+  category: serverless
+  tags: [cloud run jobs, cloud scheduler, cron, batch, oauth service account]
+  source: https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule
+  description: A Cloud Scheduler job fires on a unix-cron expression and sends an authenticated HTTP POST to the run endpoint of a Cloud Run job, using a service account that holds the Cloud Run Invoker role. The job runs its container tasks to completion, writes results to a Cloud Storage bucket and its logs land in Cloud Logging; the scheduler region does not need to match the job region.
+  containers:
+    - project: run-jobs-prj
+      region: europe-west1
+  elements:
+    - {tf: google_cloud_scheduler_job, name: nightly-report-cron, in: project:run-jobs-prj}
+    - {tf: google_service_account, name: scheduler-invoker-sa, in: project:run-jobs-prj}
+    - {tf: google_cloud_run_v2_job, name: report-job, in: project:run-jobs-prj}
+    - {tf: google_storage_bucket, name: report-output, in: project:run-jobs-prj}
+    - {tf: google_artifact_registry_repository, name: job-images, in: project:run-jobs-prj}
+    - {tf: google_logging_project_sink, name: job-log-sink, in: project:run-jobs-prj}
+  actors: []
+  flows:
+    - {from: nightly-report-cron, to: report-job, label: "POST :run with OAuth token, 0 2 * * *", step: 1}
+    - {from: scheduler-invoker-sa, to: nightly-report-cron, label: Cloud Run Invoker identity}
+    - {from: job-images, to: report-job, label: image pull, step: 2}
+    - {from: report-job, to: report-output, label: write results, step: 3}
+    - {from: report-job, to: job-log-sink, label: task logs}
+
+- slug: eventarc-cloud-storage-trigger-cloud-run
+  title: Cloud Storage object events delivered to Cloud Run through Eventarc
+  category: serverless
+  tags: [eventarc, cloud storage, cloud run, pub/sub, cloudevents, event-driven]
+  source: https://docs.cloud.google.com/eventarc/docs/run/quickstart-storage
+  description: An Eventarc trigger subscribes to google.cloud.storage.object.v1.finalized events from one bucket in the same region; Cloud Storage publishes each event to a Pub/Sub topic that Eventarc creates as the transport and a push subscription delivers the CloudEvent as an HTTP request to a Cloud Run service. The trigger runs as a service account with Eventarc Event Receiver and Cloud Run Invoker roles, and the Cloud Storage service agent needs Pub/Sub Publisher.
+  containers:
+    - project: events-run-prj
+      region: europe-west1
+  elements:
+    - {tf: google_storage_bucket, name: uploads, in: project:events-run-prj}
+    - {tf: google_eventarc_trigger, name: object-finalized-trigger, in: project:events-run-prj}
+    - {tf: google_pubsub_topic, name: eventarc-transport-topic, in: project:events-run-prj}
+    - {tf: google_pubsub_subscription, name: eventarc-push-sub, in: project:events-run-prj}
+    - {tf: google_cloud_run_v2_service, name: helloworld-events, in: project:events-run-prj}
+    - {tf: google_service_account, name: trigger-sa, in: project:events-run-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: uploads, label: upload object, step: 1}
+    - {from: uploads, to: eventarc-transport-topic, label: object.finalized notification, step: 2}
+    - {from: eventarc-transport-topic, to: eventarc-push-sub, step: 3}
+    - {from: object-finalized-trigger, to: eventarc-push-sub, label: filter and route}
+    - {from: eventarc-push-sub, to: helloworld-events, label: HTTP POST CloudEvent, step: 4}
+    - {from: trigger-sa, to: object-finalized-trigger, label: Event Receiver + Run Invoker}
+
+- slug: cloud-run-functions-pubsub-trigger
+  title: Event-driven Cloud Run function triggered by Pub/Sub messages
+  category: serverless
+  tags: [cloud run functions, pub/sub, eventarc, cloudevents, event-driven]
+  source: https://docs.cloud.google.com/functions/docs/tutorials/pubsub
+  description: A CloudEvent function is deployed to Cloud Run functions with an Eventarc trigger filtered on google.cloud.pubsub.topic.v1.messagePublished for one topic. Publishing a message creates an HTTP request that carries the base64-encoded payload to the function, which decodes and processes it; the function source is built by Cloud Build into an Artifact Registry image and logs go to Cloud Logging.
+  containers:
+    - project: fn-events-prj
+      region: europe-west1
+  elements:
+    - {tf: google_pubsub_topic, name: orders-topic, in: project:fn-events-prj}
+    - {tf: google_eventarc_trigger, name: orders-published-trigger, in: project:fn-events-prj}
+    - {tf: google_cloudfunctions2_function, name: process-order-fn, in: project:fn-events-prj}
+    - {tf: google_storage_bucket, name: fn-source, in: project:fn-events-prj}
+    - {tf: google_artifact_registry_repository, name: fn-images, in: project:fn-events-prj}
+    - {tf: google_service_account, name: fn-runtime-sa, in: project:fn-events-prj}
+  actors: [client]
+  flows:
+    - {from: client, to: orders-topic, label: publish message, step: 1}
+    - {from: orders-topic, to: orders-published-trigger, label: messagePublished event, step: 2}
+    - {from: orders-published-trigger, to: process-order-fn, label: HTTP CloudEvent, step: 3}
+    - {from: fn-source, to: process-order-fn, label: source upload}
+    - {from: fn-images, to: process-order-fn, label: built image}
+    - {from: fn-runtime-sa, to: process-order-fn, label: runtime identity}
+
+- slug: api-gateway-cloud-run-function-backend
+  title: API Gateway securing a Cloud Run function backend with API keys
+  category: serverless
+  tags: [api gateway, openapi, cloud run functions, api keys, service account]
+  source: https://docs.cloud.google.com/api-gateway/docs/quickstart
+  description: An API Gateway API holds an API config generated from an OpenAPI spec whose x-google-backend points at a Cloud Run function URL, and a gateway deployment exposes a gateway.dev hostname. The config runs as a service account with invoker permission on the function, and clients must present an API key restricted to the API or receive UNAUTHENTICATED.
+  containers:
+    - project: apigw-prj
+      region: europe-west1
+  elements:
+    - {tf: google_api_gateway_api, name: hello-api, in: project:apigw-prj}
+    - {tf: google_api_gateway_api_config, name: hello-api-config, in: project:apigw-prj}
+    - {tf: google_api_gateway_gateway, name: hello-gateway, in: project:apigw-prj}
+    - {tf: google_apikeys_key, name: hello-api-key, in: project:apigw-prj}
+    - {tf: google_service_account, name: gateway-backend-sa, in: project:apigw-prj}
+    - {tf: google_cloudfunctions2_function, name: hello-get-fn, in: project:apigw-prj}
+    - {tf: google_storage_bucket, name: fn-source, in: project:apigw-prj}
+  actors: [client]
+  flows:
+    - {from: client, to: hello-gateway, label: "GET /hello?key=API_KEY", step: 1}
+    - {from: hello-api-key, to: hello-api, label: key restricted to API}
+    - {from: hello-api-config, to: hello-gateway, label: deployed OpenAPI config}
+    - {from: hello-api, to: hello-api-config}
+    - {from: hello-gateway, to: hello-get-fn, label: x-google-backend with ID token, step: 2}
+    - {from: gateway-backend-sa, to: hello-api-config, label: backend auth identity}
+    - {from: fn-source, to: hello-get-fn, label: source}
+
+- slug: apigee-x-global-alb-psc-cloud-run
+  title: Apigee X runtime exposed through a global external Application Load Balancer and Private Service Connect
+  category: serverless
+  tags: [apigee, private service connect, psc neg, global external application load balancer, cloud run, api management]
+  source: https://docs.cloud.google.com/apigee/docs/api-platform/architecture/overview
+  description: The Apigee organization's runtime instance lives in a Google-managed tenant project and is reached from the customer VPC through a Private Service Connect service attachment; a PSC network endpoint group makes that attachment the backend of a global external Application Load Balancer with a managed certificate. API proxies deployed to the Apigee environment forward to target services such as a Cloud Run backend, and Cloud Armor on the backend service protects the public entry point.
+  containers:
+    - project: apigee-prj
+      region: europe-west1
+      vpcs:
+        - name: apigee-vpc
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: psc-neg-sub, cidr: 10.40.1.0/24, region: europe-west1}
+  elements:
+    - {tf: google_compute_global_address, name: api-ip, in: project:apigee-prj}
+    - {tf: google_compute_global_forwarding_rule, name: api-https-rule, in: project:apigee-prj}
+    - {tf: google_compute_target_https_proxy, name: api-https-proxy, in: project:apigee-prj}
+    - {tf: google_compute_managed_ssl_certificate, name: api-cert, in: project:apigee-prj}
+    - {tf: google_compute_url_map, name: api-url-map, in: project:apigee-prj}
+    - {tf: google_compute_backend_service, name: apigee-backend, in: project:apigee-prj}
+    - {tf: google_compute_security_policy, name: api-armor-policy, in: project:apigee-prj}
+    - {tf: google_compute_region_network_endpoint_group, name: apigee-psc-neg, in: subnet:psc-neg-sub}
+    - {tf: google_apigee_organization, name: apigee-org, in: project:apigee-prj}
+    - {tf: google_apigee_instance, name: apigee-runtime-ew1, in: project:apigee-prj}
+    - {tf: google_apigee_environment, name: prod-env, in: project:apigee-prj}
+    - {tf: google_cloud_run_v2_service, name: orders-backend, in: project:apigee-prj}
+  actors: [client]
+  flows:
+    - {from: client, to: api-https-rule, label: HTTPS API call, step: 1}
+    - {from: api-https-rule, to: api-https-proxy, step: 2}
+    - {from: api-cert, to: api-https-proxy}
+    - {from: api-https-proxy, to: api-url-map, step: 3}
+    - {from: api-url-map, to: apigee-backend, step: 4}
+    - {from: api-armor-policy, to: apigee-backend, label: Cloud Armor}
+    - {from: apigee-backend, to: apigee-psc-neg, step: 5}
+    - {from: apigee-psc-neg, to: apigee-runtime-ew1, label: PSC service attachment, step: 6}
+    - {from: apigee-org, to: apigee-runtime-ew1}
+    - {from: prod-env, to: apigee-runtime-ew1, label: environment attached to instance}
+    - {from: apigee-runtime-ew1, to: orders-backend, label: proxy target endpoint, step: 7}
+
+- slug: firebase-hosting-cloud-run-rewrites
+  title: Firebase Hosting serving static assets with rewrites to a Cloud Run backend
+  category: serverless
+  tags: [firebase hosting, cloud run, rewrites, cdn, dynamic content, firestore]
+  source: https://firebase.google.com/docs/hosting/cloud-run
+  description: Firebase Hosting serves the static site from its global CDN and a rewrite rule in firebase.json forwards requests that match a path pattern to a Cloud Run service in a named region, which must allow unauthenticated invocations because Hosting calls it directly. The dynamic service reads and writes application data in a Firestore database and its container image comes from Artifact Registry.
+  containers:
+    - project: firebase-web-prj
+      region: europe-west1
+  elements:
+    - {tf: google_firebase_project, name: firebase-project, in: project:firebase-web-prj}
+    - {tf: google_firebase_hosting_site, name: web-site, in: project:firebase-web-prj}
+    - {tf: google_cloud_run_v2_service, name: dynamic-api, in: project:firebase-web-prj}
+    - {tf: google_firestore_database, name: app-firestore, in: project:firebase-web-prj}
+    - {tf: google_artifact_registry_repository, name: api-images, in: project:firebase-web-prj}
+    - {tf: google_storage_bucket, name: hosting-uploads, in: project:firebase-web-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: web-site, label: HTTPS static assets from CDN, step: 1}
+    - {from: firebase-project, to: web-site}
+    - {from: web-site, to: dynamic-api, label: "rewrite /api/** to Cloud Run", step: 2}
+    - {from: dynamic-api, to: app-firestore, label: document reads and writes, step: 3}
+    - {from: dynamic-api, to: hosting-uploads, label: user files}
+    - {from: api-images, to: dynamic-api, label: image pull}
+
+- slug: firestore-document-triggers-functions
+  title: Firestore document triggers running Cloud Functions for Firebase via Eventarc
+  category: serverless
+  tags: [firestore, cloud functions for firebase, eventarc, document triggers, pub/sub, firebase]
+  source: https://firebase.google.com/docs/functions/firestore-events
+  description: Second-generation Cloud Functions for Firebase register onDocumentCreated, onDocumentUpdated, onDocumentDeleted or onDocumentWritten handlers on a document path such as users/{userId}; Eventarc delivers each Firestore change as a CloudEvent carrying before and after snapshots. The handlers fan out side effects, for example publishing to a Pub/Sub topic and sending notifications, and must avoid writing back to the triggering document to prevent loops.
+  containers:
+    - project: firestore-fn-prj
+      region: europe-west1
+  elements:
+    - {tf: google_firebase_project, name: firebase-project, in: project:firestore-fn-prj}
+    - {tf: google_firestore_database, name: default-firestore, in: project:firestore-fn-prj}
+    - {tf: google_eventarc_trigger, name: user-written-trigger, in: project:firestore-fn-prj}
+    - {tf: google_cloudfunctions2_function, name: on-user-written, in: project:firestore-fn-prj}
+    - {tf: google_cloudfunctions2_function, name: on-order-created, in: project:firestore-fn-prj}
+    - {tf: google_pubsub_topic, name: notifications-topic, in: project:firestore-fn-prj}
+    - {tf: google_storage_bucket, name: fn-source, in: project:firestore-fn-prj}
+  actors: [mobile, users]
+  flows:
+    - {from: mobile, to: default-firestore, label: Firebase SDK writes, step: 1}
+    - {from: users, to: default-firestore, label: web SDK writes}
+    - {from: default-firestore, to: user-written-trigger, label: "document written on users/{userId}", step: 2}
+    - {from: user-written-trigger, to: on-user-written, label: CloudEvent with before/after snapshots, step: 3}
+    - {from: default-firestore, to: on-order-created, label: onDocumentCreated orders/{orderId}}
+    - {from: on-user-written, to: notifications-topic, label: publish side effect, step: 4}
+    - {from: fn-source, to: on-user-written, label: deployed source}
+    - {from: firebase-project, to: default-firestore}
+
+- slug: cloud-tasks-http-target-cloud-run
+  title: Cloud Tasks queue dispatching authenticated HTTP tasks to a Cloud Run worker
+  category: serverless
+  tags: [cloud tasks, cloud run, http target, oidc, asynchronous, rate limiting]
+  source: https://docs.cloud.google.com/tasks/docs/creating-http-target-tasks
+  description: A front-end Cloud Run service enqueues HTTP target tasks into a Cloud Tasks queue that controls dispatch rate, concurrency and retries; each task carries an OIDC token minted for a service account in the same project. The queue dispatches the task over HTTPS to a private Cloud Run worker, which validates the token before processing the payload and persisting the result to Cloud SQL.
+  containers:
+    - project: tasks-prj
+      region: europe-west1
+  elements:
+    - {tf: google_cloud_run_v2_service, name: web-frontend, in: project:tasks-prj}
+    - {tf: google_cloud_tasks_queue, name: work-queue, in: project:tasks-prj}
+    - {tf: google_service_account, name: tasks-dispatcher-sa, in: project:tasks-prj}
+    - {tf: google_cloud_run_v2_service, name: task-worker, in: project:tasks-prj}
+    - {tf: google_sql_database_instance, name: results-db, in: project:tasks-prj}
+    - {tf: google_secret_manager_secret, name: results-db-password, in: project:tasks-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: web-frontend, label: HTTPS request, step: 1}
+    - {from: web-frontend, to: work-queue, label: CreateTask with HTTP request, step: 2}
+    - {from: tasks-dispatcher-sa, to: work-queue, label: OIDC token identity}
+    - {from: work-queue, to: task-worker, label: "HTTPS dispatch, Authorization: Bearer OIDC", step: 3}
+    - {from: task-worker, to: results-db, label: persist result, step: 4}
+    - {from: task-worker, to: results-db-password, label: credentials}
+
+- slug: cloud-scheduler-pubsub-function
+  title: Scheduled Pub/Sub messages triggering an event-driven Cloud Run function
+  category: serverless
+  tags: [cloud scheduler, pub/sub, cloud run functions, cron, event-driven]
+  source: https://docs.cloud.google.com/scheduler/docs/tut-gcf-pub-sub
+  description: A Cloud Scheduler job publishes a message with a fixed payload to a Pub/Sub topic on a cron schedule, and a Cloud Run function subscribed to that topic through an Eventarc trigger runs each time a message arrives. The pattern decouples the schedule from the code so the same topic can trigger multiple functions, and invocations are visible in the function's logs and metrics.
+  containers:
+    - project: sched-fn-prj
+      region: europe-west1
+  elements:
+    - {tf: google_cloud_scheduler_job, name: weekly-cleanup-cron, in: project:sched-fn-prj}
+    - {tf: google_pubsub_topic, name: cleanup-topic, in: project:sched-fn-prj}
+    - {tf: google_eventarc_trigger, name: cleanup-trigger, in: project:sched-fn-prj}
+    - {tf: google_cloudfunctions2_function, name: cleanup-fn, in: project:sched-fn-prj}
+    - {tf: google_storage_bucket, name: fn-source, in: project:sched-fn-prj}
+    - {tf: google_storage_bucket, name: temp-files, in: project:sched-fn-prj}
+  actors: []
+  flows:
+    - {from: weekly-cleanup-cron, to: cleanup-topic, label: "publish, 30 16 * * 7", step: 1}
+    - {from: cleanup-topic, to: cleanup-trigger, label: messagePublished, step: 2}
+    - {from: cleanup-trigger, to: cleanup-fn, label: HTTP CloudEvent, step: 3}
+    - {from: cleanup-fn, to: temp-files, label: delete expired objects, step: 4}
+    - {from: fn-source, to: cleanup-fn, label: source}
+
+- slug: workflows-eventarc-cloud-run-job
+  title: Workflows orchestrating a parallel Cloud Run job from Cloud Storage events
+  category: serverless
+  tags: [workflows, cloud run jobs, eventarc, cloud storage, orchestration, parallel tasks]
+  source: https://docs.cloud.google.com/workflows/docs/tutorials/execute-cloud-run-jobs
+  description: An Eventarc trigger routes Cloud Storage object.finalized events for an input bucket to a Workflows workflow, which checks the event's bucket and then calls the Cloud Run Jobs API to run a job with environment variable overrides taken from the event. The job's parallel tasks each process a slice of the input file, and the workflow waits for completion and returns the execution result; the job image is built by Cloud Build into Artifact Registry.
+  containers:
+    - project: wf-prj
+      region: europe-west1
+  elements:
+    - {tf: google_storage_bucket, name: input-files, in: project:wf-prj}
+    - {tf: google_eventarc_trigger, name: input-finalized-trigger, in: project:wf-prj}
+    - {tf: google_workflows_workflow, name: process-input-workflow, in: project:wf-prj}
+    - {tf: google_cloud_run_v2_job, name: parallel-processor, in: project:wf-prj}
+    - {tf: google_service_account, name: workflow-sa, in: project:wf-prj}
+    - {tf: google_artifact_registry_repository, name: job-images, in: project:wf-prj}
+    - {tf: google_storage_bucket, name: processed-output, in: project:wf-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: input-files, label: upload input file, step: 1}
+    - {from: input-files, to: input-finalized-trigger, label: object.finalized, step: 2}
+    - {from: input-finalized-trigger, to: process-input-workflow, label: execute with event argument, step: 3}
+    - {from: workflow-sa, to: process-input-workflow, label: Run Developer + Eventarc receiver}
+    - {from: process-input-workflow, to: parallel-processor, label: "jobs.run with env overrides", step: 4}
+    - {from: job-images, to: parallel-processor, label: image pull}
+    - {from: parallel-processor, to: processed-output, label: write task results, step: 5}
+    - {from: parallel-processor, to: process-input-workflow, label: execution completed, step: 6}
+
+- slug: identity-platform-cloud-run-cloud-sql
+  title: End-user authentication with Identity Platform for a Cloud Run app on Cloud SQL
+  category: serverless
+  tags: [identity platform, cloud run, cloud sql, secret manager, end user auth, firebase sdk]
+  source: https://docs.cloud.google.com/run/docs/tutorials/identity-platform
+  description: The browser client loaded from a Cloud Run service signs users in through Identity Platform with the Firebase SDK and obtains an ID token that it sends on each vote request; the service verifies the token with the Firebase Admin SDK before acting. The service uses its own least-privilege service account and a Secret Manager secret to connect to a Cloud SQL for PostgreSQL instance, keeping end-user identity separate from service-to-database credentials.
+  containers:
+    - project: idp-run-prj
+      region: europe-west1
+  elements:
+    - {tf: google_identity_platform_config, name: idp-config, in: project:idp-run-prj}
+    - {tf: google_cloud_run_v2_service, name: voting-service, in: project:idp-run-prj}
+    - {tf: google_service_account, name: voting-sa, in: project:idp-run-prj}
+    - {tf: google_secret_manager_secret, name: votes-db-credentials, in: project:idp-run-prj}
+    - {tf: google_sql_database_instance, name: votes-pg, in: project:idp-run-prj}
+    - {tf: google_artifact_registry_repository, name: voting-images, in: project:idp-run-prj}
+    - {tf: google_cloudbuild_trigger, name: voting-build, in: project:idp-run-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: voting-service, label: load client, step: 1}
+    - {from: users, to: idp-config, label: Google sign-in via Firebase SDK, step: 2}
+    - {from: idp-config, to: users, label: ID token, step: 3}
+    - {from: users, to: voting-service, label: "POST vote with Authorization: Bearer ID token", step: 4}
+    - {from: voting-service, to: idp-config, label: verify token with Admin SDK, step: 5}
+    - {from: voting-sa, to: voting-service, label: least-privilege identity}
+    - {from: voting-service, to: votes-db-credentials, label: read DB secret}
+    - {from: voting-service, to: votes-pg, label: Cloud SQL connector, step: 6}
+    - {from: voting-build, to: voting-images, label: build and push}
+    - {from: voting-images, to: voting-service, label: deploy image}
+
+- slug: gke-autopilot-web-app-artifact-registry
+  title: Containerized web app on GKE Autopilot deployed from Artifact Registry
+  category: containers
+  tags: [gke autopilot, artifact registry, cloud build, loadbalancer service, deployment]
+  source: https://docs.cloud.google.com/kubernetes-engine/docs/learn/cymbal-books/lp1/deploy
+  description: Application modules are built into container images, pushed to a regional Artifact Registry Docker repository and referenced from Kubernetes Deployment manifests applied to a GKE Autopilot cluster, where Google manages nodes and the node service account holds Artifact Registry Reader. A Kubernetes Service of type LoadBalancer provisions a passthrough Network Load Balancer with an external IP that fronts the pods.
+  containers:
+    - project: gke-web-prj
+      region: europe-west1
+      vpcs:
+        - name: gke-vpc
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: gke-sub, cidr: 10.50.0.0/20, region: europe-west1}
+  elements:
+    - {tf: google_artifact_registry_repository, name: cymbal-images, in: project:gke-web-prj}
+    - {tf: google_cloudbuild_trigger, name: cymbal-build, in: project:gke-web-prj}
+    - {tf: google_container_cluster, name: autopilot-cluster, in: subnet:gke-sub}
+    - {tf: google_service_account, name: gke-node-sa, in: project:gke-web-prj}
+    - {tf: google_compute_forwarding_rule, name: web-lb, in: region}
+    - {tf: google_compute_address, name: web-lb-ip, in: region}
+  actors: [users]
+  flows:
+    - {from: cymbal-build, to: cymbal-images, label: docker build and push, step: 1}
+    - {from: cymbal-images, to: autopilot-cluster, label: image pull with Artifact Registry Reader, step: 2}
+    - {from: gke-node-sa, to: autopilot-cluster, label: node identity}
+    - {from: users, to: web-lb, label: HTTP to external IP, step: 3}
+    - {from: web-lb-ip, to: web-lb}
+    - {from: web-lb, to: autopilot-cluster, label: LoadBalancer Service to pods, step: 4}
+
+- slug: gke-private-cluster-cloud-nat
+  title: Private GKE cluster with private nodes, authorized control plane access and Cloud NAT egress
+  category: containers
+  tags: [gke, private cluster, private nodes, authorized networks, cloud nat, bastion]
+  source: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/private-clusters
+  description: Nodes get only internal IP addresses and the control plane is reached through a DNS-based endpoint gated by IAM or an IP-based endpoint limited to authorized network ranges; a bastion VM in the VPC is one of those ranges for kubectl access. Because nodes have no external addresses, a Cloud Router with Cloud NAT provides outbound internet for image pulls from public registries, while Artifact Registry is reached over Private Google Access.
+  containers:
+    - project: gke-private-prj
+      region: europe-west1
+      vpcs:
+        - name: private-vpc
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: gke-nodes-sub, cidr: 10.60.0.0/20, region: europe-west1}
+            - {name: bastion-sub, cidr: 10.60.16.0/24, region: europe-west1}
+  elements:
+    - {tf: google_container_cluster, name: private-cluster, in: subnet:gke-nodes-sub}
+    - {tf: google_container_node_pool, name: private-nodes, in: subnet:gke-nodes-sub}
+    - {tf: google_compute_instance, name: bastion, in: subnet:bastion-sub}
+    - {tf: google_compute_router, name: egress-router, in: vpc:private-vpc}
+    - {tf: google_compute_router_nat, name: egress-nat, in: vpc:private-vpc}
+    - {tf: google_artifact_registry_repository, name: workload-images, in: project:gke-private-prj}
+    - {tf: google_compute_firewall, name: allow-iap-ssh, in: vpc:private-vpc}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: bastion, label: SSH via IAP TCP forwarding, step: 1}
+    - {from: bastion, to: private-cluster, label: kubectl to private endpoint (authorized network), step: 2}
+    - {from: private-cluster, to: private-nodes, label: control plane to nodes}
+    - {from: private-nodes, to: workload-images, label: pull over Private Google Access, step: 3}
+    - {from: private-nodes, to: egress-nat, label: outbound to public registries, step: 4}
+    - {from: egress-router, to: egress-nat}
+    - {from: egress-nat, to: internet, step: 5}
+
+- slug: gke-multi-cluster-gateway-fleet
+  title: External multi-cluster Gateway distributing traffic across GKE clusters in two regions
+  category: containers
+  tags: [gke, multi-cluster gateway, fleet, config cluster, multi-cluster services, global external application load balancer]
+  source: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-multi-cluster-gateways
+  description: Two GKE clusters in different regions are registered to a fleet with Multi-cluster Services and the multi-cluster Gateway controller enabled, and one of them acts as the config cluster where the Gateway and HTTPRoutes are applied. A Gateway of class gke-l7-global-external-managed-mc provisions a global external Application Load Balancer whose backends are ServiceImports spanning both clusters, so paths can pin to a region or balance across both by health and capacity.
+  containers:
+    - project: gke-fleet-prj
+      region: europe-west1
+      vpcs:
+        - name: fleet-vpc
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: west-sub, cidr: 10.70.0.0/20, region: europe-west1}
+            - {name: east-sub, cidr: 10.70.16.0/20, region: europe-west4}
+  elements:
+    - {tf: google_gke_hub_feature, name: multi-cluster-services, in: project:gke-fleet-prj}
+    - {tf: google_gke_hub_feature, name: multi-cluster-ingress, in: project:gke-fleet-prj}
+    - {tf: google_container_cluster, name: gke-west-1, in: subnet:west-sub}
+    - {tf: google_container_cluster, name: gke-east-1, in: subnet:east-sub}
+    - {tf: google_compute_global_forwarding_rule, name: store-external-http, in: project:gke-fleet-prj}
+    - {tf: google_compute_backend_service, name: store-serviceimport-backend, in: project:gke-fleet-prj}
+    - {tf: google_compute_health_check, name: store-hc, in: project:gke-fleet-prj}
+  actors: [users]
+  flows:
+    - {from: multi-cluster-services, to: gke-west-1, link: google_gke_hub_membership}
+    - {from: multi-cluster-services, to: gke-east-1, link: google_gke_hub_membership}
+    - {from: multi-cluster-ingress, to: gke-west-1, label: config cluster hosts Gateway and HTTPRoute}
+    - {from: users, to: store-external-http, label: HTTP to public IP, step: 1}
+    - {from: store-external-http, to: store-serviceimport-backend, label: Gateway-managed URL map, step: 2}
+    - {from: store-serviceimport-backend, to: gke-west-1, label: "/west and default", step: 3}
+    - {from: store-serviceimport-backend, to: gke-east-1, label: "/east and default", step: 4}
+    - {from: store-hc, to: store-serviceimport-backend, label: health checks}
+
+- slug: gke-private-clusters-cloud-service-mesh
+  title: Distributed services across private GKE clusters with Cloud Service Mesh and Multi Cluster Ingress
+  category: containers
+  tags: [gke, cloud service mesh, multi-cluster, private clusters, multi cluster ingress, cloud nat, bank of anthos]
+  source: https://docs.cloud.google.com/architecture/distributed-services-on-gke-private-using-anthos-service-mesh
+  description: Two private GKE application clusters in separate regions run Cloud Service Mesh so a service with pods in both clusters is one distributed service with cross-cluster discovery and mTLS; each cluster's nodes use Cloud NAT for egress and authorized networks for control-plane access. A third small cluster is the Multi Cluster Ingress config cluster that programs a global external Application Load Balancer in front of the mesh ingress gateways in both application clusters.
+  containers:
+    - project: mesh-prj
+      region: europe-west1
+      vpcs:
+        - name: mesh-vpc
+          cidr: 10.80.0.0/16
+          subnets:
+            - {name: app1-sub, cidr: 10.80.0.0/20, region: europe-west1}
+            - {name: app2-sub, cidr: 10.80.16.0/20, region: europe-west4}
+            - {name: ingress-config-sub, cidr: 10.80.32.0/22, region: europe-west3}
+  elements:
+    - {tf: google_container_cluster, name: gke-central-priv, in: subnet:app1-sub}
+    - {tf: google_container_cluster, name: gke-west-priv, in: subnet:app2-sub}
+    - {tf: google_container_cluster, name: ingress-config, in: subnet:ingress-config-sub}
+    - {tf: google_gke_hub_feature, name: servicemesh, in: project:mesh-prj}
+    - {tf: google_gke_hub_feature, name: multiclusteringress, in: project:mesh-prj}
+    - {tf: google_compute_router, name: mesh-router, in: vpc:mesh-vpc}
+    - {tf: google_compute_router_nat, name: mesh-nat, in: vpc:mesh-vpc}
+    - {tf: google_compute_global_forwarding_rule, name: mci-frontend, in: project:mesh-prj}
+    - {tf: google_compute_backend_service, name: mci-ingress-backend, in: project:mesh-prj}
+  actors: [users, internet]
+  flows:
+    - {from: servicemesh, to: gke-central-priv, link: google_gke_hub_membership}
+    - {from: servicemesh, to: gke-west-priv, link: google_gke_hub_membership}
+    - {from: multiclusteringress, to: ingress-config, label: config cluster}
+    - {from: users, to: mci-frontend, label: HTTPS, step: 1}
+    - {from: mci-frontend, to: mci-ingress-backend, step: 2}
+    - {from: mci-ingress-backend, to: gke-central-priv, label: mesh ingress gateway, step: 3}
+    - {from: mci-ingress-backend, to: gke-west-priv, label: mesh ingress gateway}
+    - {from: gke-central-priv, to: gke-west-priv, label: cross-cluster mTLS service calls, step: 4}
+    - {from: gke-central-priv, to: mesh-nat, label: egress}
+    - {from: mesh-router, to: mesh-nat}
+    - {from: mesh-nat, to: internet}
+
+- slug: gke-config-connector-managed-resources
+  title: GKE cluster managing Google Cloud resources with Config Connector
+  category: containers
+  tags: [gke, config connector, kubernetes crds, gitops, workload identity, infrastructure as code]
+  source: https://docs.cloud.google.com/config-connector/docs/overview
+  description: Config Connector runs as an add-on in a GKE cluster and installs CRDs so Cloud SQL instances, Pub/Sub topics and Cloud Storage buckets are declared as Kubernetes objects committed to a Git repository and applied by a Cloud Build trigger. Its controllers reconcile the desired state against Google Cloud APIs using a dedicated IAM service account bound through Workload Identity, so developers never hold direct cloud permissions.
+  containers:
+    - project: kcc-prj
+      region: europe-west1
+      vpcs:
+        - name: kcc-vpc
+          cidr: 10.90.0.0/16
+          subnets:
+            - {name: kcc-gke-sub, cidr: 10.90.0.0/20, region: europe-west1}
+  elements:
+    - {tf: google_container_cluster, name: platform-cluster, in: subnet:kcc-gke-sub}
+    - {tf: google_service_account, name: cnrm-system-sa, in: project:kcc-prj}
+    - {tf: google_sourcerepo_repository, name: infra-manifests, in: project:kcc-prj}
+    - {tf: google_cloudbuild_trigger, name: apply-manifests, in: project:kcc-prj}
+    - {tf: google_sql_database_instance, name: managed-db, in: project:kcc-prj}
+    - {tf: google_pubsub_topic, name: managed-topic, in: project:kcc-prj}
+    - {tf: google_storage_bucket, name: managed-bucket, in: project:kcc-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: infra-manifests, label: git push KCC manifests, step: 1}
+    - {from: infra-manifests, to: apply-manifests, label: trigger on main, step: 2}
+    - {from: apply-manifests, to: platform-cluster, label: kubectl apply, step: 3}
+    - {from: cnrm-system-sa, to: platform-cluster, label: Workload Identity for Config Connector}
+    - {from: platform-cluster, to: managed-db, label: reconcile SQLInstance, step: 4}
+    - {from: platform-cluster, to: managed-topic, label: reconcile PubSubTopic}
+    - {from: platform-cluster, to: managed-bucket, label: reconcile StorageBucket}
+
+- slug: gke-cloud-sql-auth-proxy-sidecar
+  title: GKE workload connecting to Cloud SQL through an Auth Proxy sidecar with Workload Identity
+  category: containers
+  tags: [gke, cloud sql, cloud sql auth proxy, sidecar, workload identity federation, iam database auth]
+  source: https://docs.cloud.google.com/sql/docs/mysql/connect-kubernetes-engine
+  description: The application pod runs the Cloud SQL Auth Proxy as a sidecar so the app connects to localhost while the proxy opens an IAM-authenticated, TLS-encrypted tunnel to the Cloud SQL instance. The pod's Kubernetes service account is bound to a Google service account through Workload Identity Federation for GKE, so no key file is mounted; database credentials come from a Kubernetes Secret populated from Secret Manager.
+  containers:
+    - project: gke-sql-prj
+      region: europe-west1
+      vpcs:
+        - name: app-vpc
+          cidr: 10.100.0.0/16
+          subnets:
+            - {name: gke-sub, cidr: 10.100.0.0/20, region: europe-west1}
+  elements:
+    - {tf: google_container_cluster, name: app-cluster, in: subnet:gke-sub}
+    - {tf: google_service_account, name: sql-client-gsa, in: project:gke-sql-prj}
+    - {tf: google_sql_database_instance, name: app-mysql, in: project:gke-sql-prj}
+    - {tf: google_secret_manager_secret, name: app-db-password, in: project:gke-sql-prj}
+    - {tf: google_artifact_registry_repository, name: app-images, in: project:gke-sql-prj}
+    - {tf: google_compute_forwarding_rule, name: app-lb, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: app-lb, label: HTTP, step: 1}
+    - {from: app-lb, to: app-cluster, label: Service to app pods, step: 2}
+    - {from: sql-client-gsa, to: app-cluster, label: Workload Identity binding to KSA}
+    - {from: app-cluster, to: app-mysql, label: "Auth Proxy sidecar, IAM auth + TLS on 3307", step: 3}
+    - {from: app-db-password, to: app-cluster, label: Kubernetes Secret}
+    - {from: app-images, to: app-cluster, label: image pull}
+
+- slug: cloud-build-deploy-gke-artifact-registry
+  title: Cloud Build pipeline building an image to Artifact Registry and deploying it to GKE
+  category: devops
+  tags: [cloud build, artifact registry, gke, gke-deploy, ci/cd, build trigger]
+  source: https://docs.cloud.google.com/build/docs/deploying-builds/deploy-gke
+  description: A Cloud Build trigger fires on pushes to a connected Git repository and runs a three-step build that builds the container with the docker builder, pushes it to an Artifact Registry Docker repository and calls the gke-deploy builder. gke-deploy rewrites the Kubernetes manifests to the image digest, adds recommended labels, fetches cluster credentials and waits until the rollout on the GKE cluster is ready.
+  containers:
+    - project: build-gke-prj
+      region: europe-west1
+      vpcs:
+        - name: cicd-vpc
+          cidr: 10.110.0.0/16
+          subnets:
+            - {name: gke-sub, cidr: 10.110.0.0/20, region: europe-west1}
+  elements:
+    - {tf: google_sourcerepo_repository, name: app-repo, in: project:build-gke-prj}
+    - {tf: google_cloudbuild_trigger, name: build-and-deploy, in: project:build-gke-prj}
+    - {tf: google_service_account, name: cloudbuild-sa, in: project:build-gke-prj}
+    - {tf: google_artifact_registry_repository, name: app-images, in: project:build-gke-prj}
+    - {tf: google_container_cluster, name: prod-cluster, in: subnet:gke-sub}
+    - {tf: google_storage_bucket, name: build-logs, in: project:build-gke-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: app-repo, label: git push, step: 1}
+    - {from: app-repo, to: build-and-deploy, label: push trigger, step: 2}
+    - {from: cloudbuild-sa, to: build-and-deploy, label: build identity with GKE Developer}
+    - {from: build-and-deploy, to: app-images, label: docker build and push, step: 3}
+    - {from: build-and-deploy, to: prod-cluster, label: gke-deploy with image digest, step: 4}
+    - {from: app-images, to: prod-cluster, label: image pull, step: 5}
+    - {from: build-and-deploy, to: build-logs, label: build logs}
+
+- slug: cloud-build-continuous-deploy-cloud-run
+  title: Continuous deployment from a Git repository to Cloud Run with Cloud Build
+  category: devops
+  tags: [cloud build, cloud run, continuous deployment, buildpacks, artifact registry, developer connect]
+  source: https://docs.cloud.google.com/run/docs/continuous-deployment-with-cloud-build
+  description: Cloud Run's continuous deployment setup connects a GitHub, GitLab or Bitbucket repository through Cloud Build or Developer Connect and creates a trigger on one branch. Each commit is built from a Dockerfile or with Google Cloud buildpacks, the image is stored in Artifact Registry and a new Cloud Run revision is deployed automatically, with the build service account holding Cloud Run Developer and Service Account User.
+  containers:
+    - project: run-cd-prj
+      region: europe-west1
+  elements:
+    - {tf: google_cloudbuildv2_connection, name: github-connection, in: project:run-cd-prj}
+    - {tf: google_cloudbuildv2_repository, name: web-repo, in: project:run-cd-prj}
+    - {tf: google_cloudbuild_trigger, name: deploy-on-main, in: project:run-cd-prj}
+    - {tf: google_service_account, name: build-deploy-sa, in: project:run-cd-prj}
+    - {tf: google_artifact_registry_repository, name: cloud-run-source-deploy, in: project:run-cd-prj}
+    - {tf: google_cloud_run_v2_service, name: web-service, in: project:run-cd-prj}
+  actors: [users, saas]
+  flows:
+    - {from: saas, to: github-connection, label: GitHub app installation}
+    - {from: github-connection, to: web-repo}
+    - {from: users, to: web-repo, label: commit to main, step: 1}
+    - {from: web-repo, to: deploy-on-main, label: push event, step: 2}
+    - {from: build-deploy-sa, to: deploy-on-main, label: Run Developer identity}
+    - {from: deploy-on-main, to: cloud-run-source-deploy, label: buildpacks or Dockerfile build and push, step: 3}
+    - {from: deploy-on-main, to: web-service, label: gcloud run deploy new revision, step: 4}
+    - {from: cloud-run-source-deploy, to: web-service, label: image pull}
+
+- slug: cloud-deploy-pipeline-gke-dev-prod
+  title: Cloud Deploy delivery pipeline promoting releases across dev and prod GKE targets
+  category: devops
+  tags: [cloud deploy, delivery pipeline, gke, skaffold, release, rollout, promotion]
+  source: https://docs.cloud.google.com/deploy/docs/deploy-app-gke
+  description: A Cloud Deploy delivery pipeline defines a serial progression of two targets, each pointing at a GKE cluster, and a Skaffold configuration describes the Kubernetes manifests to render. Creating a release with a digest-qualified image from Artifact Registry automatically rolls out to the dev target; promoting the release creates a rollout to the prod target, and Cloud Deploy stores rendered manifests in a Cloud Storage bucket.
+  containers:
+    - project: deploy-gke-prj
+      region: europe-west1
+      vpcs:
+        - name: deploy-vpc
+          cidr: 10.120.0.0/16
+          subnets:
+            - {name: dev-sub, cidr: 10.120.0.0/20, region: europe-west1}
+            - {name: prod-sub, cidr: 10.120.16.0/20, region: europe-west1}
+  elements:
+    - {tf: google_clouddeploy_delivery_pipeline, name: my-gke-demo-app, in: project:deploy-gke-prj}
+    - {tf: google_clouddeploy_target, name: qsdev, in: project:deploy-gke-prj}
+    - {tf: google_clouddeploy_target, name: qsprod, in: project:deploy-gke-prj}
+    - {tf: google_container_cluster, name: quickstart-cluster-qsdev, in: subnet:dev-sub}
+    - {tf: google_container_cluster, name: quickstart-cluster-qsprod, in: subnet:prod-sub}
+    - {tf: google_artifact_registry_repository, name: release-images, in: project:deploy-gke-prj}
+    - {tf: google_storage_bucket, name: rendered-manifests, in: project:deploy-gke-prj}
+    - {tf: google_service_account, name: clouddeploy-sa, in: project:deploy-gke-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: my-gke-demo-app, label: create release with Skaffold config, step: 1}
+    - {from: release-images, to: my-gke-demo-app, label: SHA-qualified image}
+    - {from: my-gke-demo-app, to: rendered-manifests, label: render manifests, step: 2}
+    - {from: my-gke-demo-app, to: qsdev, label: automatic first rollout, step: 3}
+    - {from: qsdev, to: quickstart-cluster-qsdev, label: kubectl apply, step: 4}
+    - {from: users, to: my-gke-demo-app, label: promote release, step: 5}
+    - {from: my-gke-demo-app, to: qsprod, label: rollout to prod, step: 6}
+    - {from: qsprod, to: quickstart-cluster-qsprod, label: kubectl apply, step: 7}
+    - {from: clouddeploy-sa, to: my-gke-demo-app, label: execution identity}
+
+- slug: batch-job-cloud-storage-volume
+  title: Batch job on Compute Engine VMs mounting a Cloud Storage bucket
+  category: compute
+  tags: [batch, cloud storage fuse, compute engine, hpc, service account, job tasks]
+  source: https://docs.cloud.google.com/batch/docs/create-run-job-storage
+  description: A Batch job specification declares a Cloud Storage bucket as a volume, so Batch provisions Compute Engine VMs from an instance template, mounts the bucket with Cloud Storage FUSE under /mnt/disks and runs each indexed task's script against that path. The job runs as a service account with Storage Object Viewer or Admin on the bucket, task logs stream to Cloud Logging, and a Cloud NAT gateway lets VMs without external IPs fetch packages.
+  containers:
+    - project: batch-prj
+      region: europe-west1
+      vpcs:
+        - name: batch-vpc
+          cidr: 10.130.0.0/16
+          subnets:
+            - {name: batch-sub, cidr: 10.130.0.0/20, region: europe-west1}
+  elements:
+    - {tf: google_compute_instance_template, name: batch-vm-template, in: region}
+    - {tf: google_compute_instance, name: batch-task-vm-0, in: subnet:batch-sub}
+    - {tf: google_compute_instance, name: batch-task-vm-1, in: subnet:batch-sub}
+    - {tf: google_service_account, name: batch-job-sa, in: project:batch-prj}
+    - {tf: google_storage_bucket, name: batch-io-bucket, in: project:batch-prj}
+    - {tf: google_compute_router, name: batch-router, in: vpc:batch-vpc}
+    - {tf: google_compute_router_nat, name: batch-nat, in: vpc:batch-vpc}
+    - {tf: google_logging_project_sink, name: batch-logs, in: project:batch-prj}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: batch-vm-template, label: submit job spec with storage volume, step: 1}
+    - {from: batch-vm-template, to: batch-task-vm-0, label: Batch provisions VMs, step: 2}
+    - {from: batch-vm-template, to: batch-task-vm-1}
+    - {from: batch-job-sa, to: batch-task-vm-0, label: VM service account}
+    - {from: batch-task-vm-0, to: batch-io-bucket, label: "Cloud Storage FUSE mount /mnt/disks", step: 3}
+    - {from: batch-task-vm-1, to: batch-io-bucket, label: write task output}
+    - {from: batch-task-vm-0, to: batch-nat, label: package downloads}
+    - {from: batch-router, to: batch-nat}
+    - {from: batch-nat, to: internet}
+    - {from: batch-task-vm-0, to: batch-logs, label: task stdout/stderr}
+
+- slug: app-engine-standard-cloud-sql
+  title: App Engine standard web app connecting to Cloud SQL over Unix socket or private IP
+  category: web
+  tags: [app engine standard, cloud sql, unix socket, serverless vpc access, secret manager, mysql]
+  source: https://docs.cloud.google.com/sql/docs/mysql/connect-app-engine-standard
+  description: An App Engine standard service in the same region as a Cloud SQL for MySQL instance connects through the /cloudsql Unix socket that App Engine provides, authorized by the app's service account holding Cloud SQL Client. For private IP the app uses a Serverless VPC Access connector into the instance's VPC, and database credentials are read from Secret Manager rather than environment variables; static assets are served from a Cloud Storage bucket.
+  containers:
+    - project: gae-prj
+      region: europe-west1
+      vpcs:
+        - name: gae-vpc
+          cidr: 10.140.0.0/16
+          subnets:
+            - {name: connector-sub, cidr: 10.140.8.0/28, region: europe-west1}
+  elements:
+    - {tf: google_app_engine_application, name: gae-app, in: project:gae-prj}
+    - {tf: google_app_engine_standard_app_version, name: default-v1, in: project:gae-prj}
+    - {tf: google_service_account, name: gae-sa, in: project:gae-prj}
+    - {tf: google_sql_database_instance, name: gae-mysql, in: vpc:gae-vpc}
+    - {tf: google_vpc_access_connector, name: gae-connector, in: subnet:connector-sub}
+    - {tf: google_secret_manager_secret, name: mysql-password, in: project:gae-prj}
+    - {tf: google_storage_bucket, name: gae-static, in: project:gae-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: gae-app, label: HTTPS appspot.com, step: 1}
+    - {from: gae-app, to: default-v1, label: default service traffic split}
+    - {from: gae-sa, to: default-v1, label: Cloud SQL Client identity}
+    - {from: default-v1, to: mysql-password, label: read credentials, step: 2}
+    - {from: default-v1, to: gae-mysql, label: "/cloudsql Unix socket (public IP)", step: 3}
+    - {from: default-v1, to: gae-connector, label: private IP alternative}
+    - {from: gae-connector, to: gae-mysql, label: "TCP 3306"}
+    - {from: default-v1, to: gae-static, label: static assets}
+
+- slug: wordpress-gke-persistent-disk-cloud-sql
+  title: WordPress on GKE with a Persistent Disk volume and Cloud SQL for MySQL
+  category: containers
+  tags: [wordpress, gke, persistent disk, persistentvolumeclaim, cloud sql, cloud sql auth proxy, loadbalancer service]
+  source: https://docs.cloud.google.com/kubernetes-engine/docs/tutorials/persistent-disk
+  description: A single-replica WordPress Deployment on a GKE cluster claims a 200 GB Persistent Disk through a PersistentVolumeClaim for wp-content, and a Cloud SQL Auth Proxy sidecar in the same pod tunnels database traffic to a Cloud SQL for MySQL instance using a service account key stored in a Kubernetes Secret. A Service of type LoadBalancer exposes the blog on an external IP over HTTP.
+  containers:
+    - project: wp-prj
+      region: europe-west1
+      vpcs:
+        - name: wp-vpc
+          cidr: 10.150.0.0/16
+          subnets:
+            - {name: wp-gke-sub, cidr: 10.150.0.0/20, region: europe-west1}
+  elements:
+    - {tf: google_container_cluster, name: wp-cluster, in: subnet:wp-gke-sub}
+    - {tf: google_compute_disk, name: wordpress-volume, in: region}
+    - {tf: google_sql_database_instance, name: wp-mysql, in: project:wp-prj}
+    - {tf: google_service_account, name: cloudsql-proxy-sa, in: project:wp-prj}
+    - {tf: google_compute_forwarding_rule, name: wp-lb, in: region}
+    - {tf: google_compute_address, name: wp-lb-ip, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: wp-lb, label: HTTP to external IP, step: 1}
+    - {from: wp-lb-ip, to: wp-lb}
+    - {from: wp-lb, to: wp-cluster, label: LoadBalancer Service to WordPress pod, step: 2}
+    - {from: wp-cluster, to: wordpress-volume, label: PVC bound to Persistent Disk, step: 3}
+    - {from: wp-cluster, to: wp-mysql, label: Cloud SQL Auth Proxy sidecar on localhost 3306, step: 4}
+    - {from: cloudsql-proxy-sa, to: wp-cluster, label: key in Kubernetes Secret}
+
+- slug: online-boutique-microservices-gke
+  title: Online Boutique microservices demo on GKE with Memorystore and Cloud Service Mesh options
+  category: containers
+  tags: [online boutique, microservices-demo, gke, grpc, memorystore, cloud service mesh, spanner]
+  source: https://github.com/GoogleCloudPlatform/microservices-demo
+  description: Eleven microservices written in Go, C#, Node.js, Python and Java communicate over gRPC behind a Go frontend that is exposed by a LoadBalancer Service on a GKE cluster, with a load generator producing synthetic traffic. The default in-cluster Redis cart store can be swapped for Memorystore for Redis, the product catalog can move to Cloud Spanner or AlloyDB, and Kustomize variants add Cloud Service Mesh sidecars and an Artifact Registry image source.
+  containers:
+    - project: boutique-prj
+      region: europe-west1
+      vpcs:
+        - name: boutique-vpc
+          cidr: 10.160.0.0/16
+          subnets:
+            - {name: boutique-gke-sub, cidr: 10.160.0.0/20, region: europe-west1}
+  elements:
+    - {tf: google_container_cluster, name: online-boutique, in: subnet:boutique-gke-sub}
+    - {tf: google_compute_forwarding_rule, name: frontend-external, in: region}
+    - {tf: google_redis_instance, name: cart-redis, in: vpc:boutique-vpc}
+    - {tf: google_spanner_instance, name: product-catalog-spanner, in: project:boutique-prj}
+    - {tf: google_gke_hub_feature, name: servicemesh, in: project:boutique-prj}
+    - {tf: google_artifact_registry_repository, name: boutique-images, in: project:boutique-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: frontend-external, label: HTTP, step: 1}
+    - {from: frontend-external, to: online-boutique, label: frontend Service, step: 2}
+    - {from: online-boutique, to: cart-redis, label: cartservice to Memorystore, step: 3}
+    - {from: online-boutique, to: product-catalog-spanner, label: productcatalogservice to Spanner, step: 4}
+    - {from: servicemesh, to: online-boutique, link: google_gke_hub_membership}
+    - {from: boutique-images, to: online-boutique, label: image pull}
+
+- slug: iap-compute-engine-web-app
+  title: Web app on Compute Engine protected by Identity-Aware Proxy behind an HTTPS load balancer
+  category: security
+  tags: [identity-aware proxy, iap, compute engine, managed instance group, https load balancer, zero trust]
+  source: https://docs.cloud.google.com/iap/docs/enabling-compute-howto
+  description: A managed instance group behind a global external HTTPS load balancer is the IAP-protected backend service; enabling IAP on the backend service makes every request pass Google sign-in and an IAM check for the IAP-secured Web App User role before it reaches a VM. The app verifies the signed JWT header that IAP adds, a Cloud DNS record maps the domain to the load balancer IP, and a firewall rule allows only IAP and health-check ranges to reach the instances.
+  containers:
+    - project: iap-prj
+      region: europe-west1
+      vpcs:
+        - name: iap-vpc
+          cidr: 10.170.0.0/16
+          subnets:
+            - {name: app-sub, cidr: 10.170.1.0/24, region: europe-west1}
+  elements:
+    - {tf: google_dns_managed_zone, name: app-zone, in: project:iap-prj}
+    - {tf: google_compute_global_forwarding_rule, name: app-https-rule, in: project:iap-prj}
+    - {tf: google_compute_target_https_proxy, name: app-https-proxy, in: project:iap-prj}
+    - {tf: google_compute_managed_ssl_certificate, name: app-cert, in: project:iap-prj}
+    - {tf: google_compute_url_map, name: app-url-map, in: project:iap-prj}
+    - {tf: google_compute_backend_service, name: iap-backend, in: project:iap-prj}
+    - {tf: google_compute_region_instance_group_manager, name: app-mig, in: subnet:app-sub}
+    - {tf: google_compute_firewall, name: allow-iap-and-hc, in: vpc:iap-vpc}
+    - {tf: google_iap_client, name: iap-oauth-client, in: project:iap-prj}
+  actors: [users, idp]
+  flows:
+    - {from: users, to: app-zone, label: DNS lookup}
+    - {from: users, to: app-https-rule, label: HTTPS, step: 1}
+    - {from: app-https-rule, to: app-https-proxy, step: 2}
+    - {from: app-cert, to: app-https-proxy}
+    - {from: app-https-proxy, to: app-url-map, step: 3}
+    - {from: app-url-map, to: iap-backend, label: IAP enabled, step: 4}
+    - {from: iap-backend, to: idp, label: Google sign-in and IAM check, step: 5}
+    - {from: iap-oauth-client, to: iap-backend, label: OAuth client}
+    - {from: iap-backend, to: app-mig, label: "request with X-Goog-IAP-JWT-Assertion", step: 6}
+    - {from: allow-iap-and-hc, to: app-mig, label: allow 35.235.240.0/20 and health checks}
+
+- slug: cloud-armor-recaptcha-bot-management
+  title: Bot management with Cloud Armor and reCAPTCHA on a global external Application Load Balancer
+  category: security
+  tags: [cloud armor, recaptcha, bot management, waf, action token, challenge page, global external application load balancer]
+  source: https://docs.cloud.google.com/armor/docs/bot-management
+  description: reCAPTCHA WAF keys for action tokens, session tokens and a challenge page are created for the site and associated with a Cloud Armor security policy attached to the load balancer's backend service. Rules evaluate the reCAPTCHA token inline at the edge and allow, deny, rate-limit or redirect suspicious requests to the reCAPTCHA challenge page, while legitimate users pass through to the Cloud Run backends via a serverless NEG.
+  containers:
+    - project: bot-mgmt-prj
+      region: europe-west1
+  elements:
+    - {tf: google_recaptcha_enterprise_key, name: action-token-key, in: project:bot-mgmt-prj}
+    - {tf: google_recaptcha_enterprise_key, name: session-token-key, in: project:bot-mgmt-prj}
+    - {tf: google_recaptcha_enterprise_key, name: challenge-page-key, in: project:bot-mgmt-prj}
+    - {tf: google_compute_security_policy, name: bot-policy, in: project:bot-mgmt-prj}
+    - {tf: google_compute_global_forwarding_rule, name: shop-https-rule, in: project:bot-mgmt-prj}
+    - {tf: google_compute_target_https_proxy, name: shop-https-proxy, in: project:bot-mgmt-prj}
+    - {tf: google_compute_url_map, name: shop-url-map, in: project:bot-mgmt-prj}
+    - {tf: google_compute_backend_service, name: shop-backend, in: project:bot-mgmt-prj}
+    - {tf: google_compute_region_network_endpoint_group, name: shop-neg, in: project:bot-mgmt-prj}
+    - {tf: google_cloud_run_v2_service, name: shop-service, in: project:bot-mgmt-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: shop-https-rule, label: "HTTPS with X-Recaptcha-Token", step: 1}
+    - {from: shop-https-rule, to: shop-https-proxy, step: 2}
+    - {from: shop-https-proxy, to: shop-url-map, step: 3}
+    - {from: shop-url-map, to: shop-backend, step: 4}
+    - {from: bot-policy, to: shop-backend, label: security policy attached}
+    - {from: action-token-key, to: bot-policy, label: token evaluated inline}
+    - {from: session-token-key, to: bot-policy, label: session cookie scoring}
+    - {from: challenge-page-key, to: bot-policy, label: redirect suspicious traffic to challenge}
+    - {from: shop-backend, to: shop-neg, label: allowed requests, step: 5}
+    - {from: shop-neg, to: shop-service, step: 6}

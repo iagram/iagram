@@ -1,0 +1,67 @@
+# Generated from the official reference (https://docs.aws.amazon.com/cur/latest/userguide/cur-query-athena.html); edit freely.
+title: Cost observability with Cost and Usage Reports, Athena and QuickSight
+category: analytics-bi
+tags:
+- cost and usage report
+- athena
+- glue
+- quicksight
+- finops
+- cost intelligence
+source: https://docs.aws.amazon.com/cur/latest/userguide/cur-query-athena.html
+description: A Cost and Usage Report configured for Athena integration is delivered in Parquet to an S3 bucket, and the CloudFormation template shipped alongside it creates a Glue database, a Glue crawler
+  and two Lambda functions that are triggered by S3 event notifications to refresh partitions whenever a new report lands. Athena queries the resulting table through a dedicated workgroup and QuickSight
+  connects to Athena as a data source to build cost dashboards, with query results and SPICE refreshes scheduled daily.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-billing-export, type: common.group, name: billing export, parent: reg-us-east-1}
+- {id: grp-query-and-visualize, type: common.group, name: query and visualize, parent: reg-us-east-1}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- id: hourly-cur-parquet
+  type: aws.res.aws_cur_report_definition
+  name: hourly-cur-parquet
+  parent: grp-billing-export
+  props:
+    additional_schema_elements: []
+    compression: changeme
+    format: changeme
+    report_name: changeme
+    s3_bucket: changeme
+    s3_prefix: changeme
+    s3_region: changeme
+    time_unit: changeme
+- {id: cur-bucket, type: aws.s3_bucket, name: cur-bucket, parent: grp-billing-export}
+- {id: cur-initializer, type: aws.lambda_function, name: cur-initializer, parent: grp-billing-export}
+- {id: cur-crawler-trigger, type: aws.lambda_function, name: cur-crawler-trigger, parent: grp-billing-export}
+- {id: cur-crawler, type: aws.res.aws_glue_crawler, name: cur-crawler, parent: grp-billing-export, props: {database_name: changeme, name: changeme, role: changeme}}
+- {id: athenacurcfn-db, type: aws.res.aws_glue_catalog_database, name: athenacurcfn-db, parent: grp-query-and-visualize, props: {name: changeme}}
+- {id: cost-analytics-workgroup, type: aws.res.aws_athena_workgroup, name: cost-analytics-workgroup, parent: grp-query-and-visualize, props: {name: changeme}}
+- {id: athena-results-bucket, type: aws.s3_bucket, name: athena-results-bucket, parent: grp-query-and-visualize}
+- id: athena-cost-datasource
+  type: aws.res.aws_quicksight_data_source
+  name: athena-cost-datasource
+  parent: grp-query-and-visualize
+  props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+- {id: glue-crawler-role, type: aws.res.aws_iam_role, name: glue-crawler-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+edges:
+- {from: hourly-cur-parquet, to: cur-bucket, label: daily Parquet delivery, step: '1'}
+- {from: cur-bucket, to: cur-crawler-trigger, label: S3 event notification, step: '2'}
+- {from: cur-crawler-trigger, to: cur-crawler, label: StartCrawler, step: '3'}
+- {from: cur-crawler, to: athenacurcfn-db, label: update table and partitions, step: '4'}
+- {from: glue-crawler-role, to: cur-crawler, label: crawler role}
+- {from: cur-initializer, to: cur-crawler, label: initial crawl on stack create}
+- {from: cost-analytics-workgroup, to: athenacurcfn-db, label: SQL over CUR table, step: '5'}
+- {from: cost-analytics-workgroup, to: athena-results-bucket, label: query results}
+- {from: athena-cost-datasource, to: cost-analytics-workgroup, label: QuickSight Athena connector, step: '6'}
+- {from: user, to: cost-analytics-workgroup, label: ad hoc cost queries}
+- {from: users, to: athena-cost-datasource, label: cost dashboards (SPICE), step: '7'}
+steps:
+- {n: '1', text: 'hourly-cur-parquet → cur-bucket: daily Parquet delivery'}
+- {n: '2', text: 'cur-bucket → cur-crawler-trigger: S3 event notification'}
+- {n: '3', text: 'cur-crawler-trigger → cur-crawler: StartCrawler'}
+- {n: '4', text: 'cur-crawler → athenacurcfn-db: update table and partitions'}
+- {n: '5', text: 'cost-analytics-workgroup → athenacurcfn-db: SQL over CUR table'}
+- {n: '6', text: 'athena-cost-datasource → cost-analytics-workgroup: QuickSight Athena connector'}
+- {n: '7', text: 'users → athena-cost-datasource: cost dashboards (SPICE)'}

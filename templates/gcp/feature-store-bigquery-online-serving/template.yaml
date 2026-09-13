@@ -1,0 +1,41 @@
+# Generated from the official reference (https://docs.cloud.google.com/vertex-ai/docs/featurestore/latest/overview); edit freely.
+title: Vertex AI Feature Store with BigQuery offline store and online serving
+category: ml
+tags:
+- feature store
+- bigquery
+- online serving
+- bigtable
+- feature registry
+- dataflow
+source: https://docs.cloud.google.com/vertex-ai/docs/featurestore/latest/overview
+description: Feature values are computed by Dataflow from streaming events and batch sources into BigQuery tables that act as the offline store, and feature groups in the Feature Registry point at those
+  tables. A Feature Online Store syncs the latest values on a schedule and serves them at low latency to a Cloud Run prediction service that calls a Vertex AI endpoint, while training pipelines read point-in-time
+  correct features from BigQuery.
+nodes:
+- {id: prj-features-prj, type: gcp.project, name: features-prj, props: {project_id: features-prj-123456, project: changeme, region: us-central1}}
+- {id: device, type: common.device, name: device}
+- {id: client, type: common.client, name: client}
+- {id: raw-events, type: gcp.pubsub_topic, name: raw-events, parent: prj-features-prj}
+- {id: feature-compute, type: gcp.res.google_dataflow_job, name: feature-compute, parent: prj-features-prj, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: offline-store, type: gcp.bigquery_dataset, name: offline-store, parent: prj-features-prj}
+- {id: user-features, type: gcp.res.google_vertex_ai_feature_group, name: user-features, parent: prj-features-prj}
+- {id: online-store, type: gcp.res.google_vertex_ai_feature_online_store, name: online-store, parent: prj-features-prj, props: {name: changeme}}
+- {id: predict-service, type: gcp.cloud_run_service, name: predict-service, parent: prj-features-prj}
+- {id: model-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: model-endpoint, parent: prj-features-prj, props: {display_name: changeme, location: westeurope, name: changeme}}
+edges:
+- {from: device, to: raw-events, label: events, step: '1'}
+- {from: raw-events, to: feature-compute, label: stream, step: '2'}
+- {from: feature-compute, to: offline-store, label: write feature tables, step: '3'}
+- {from: offline-store, to: user-features, label: registered source}
+- {from: client, to: predict-service, label: prediction request, step: '5'}
+- {from: predict-service, to: online-store, label: fetch feature values, step: '6'}
+- {from: predict-service, to: model-endpoint, label: predict, step: '7'}
+- {from: offline-store, to: model-endpoint, label: point-in-time training data}
+steps:
+- {n: '1', text: 'device → raw-events: events'}
+- {n: '2', text: 'raw-events → feature-compute: stream'}
+- {n: '3', text: 'feature-compute → offline-store: write feature tables'}
+- {n: '5', text: 'client → predict-service: prediction request'}
+- {n: '6', text: 'predict-service → online-store: fetch feature values'}
+- {n: '7', text: 'predict-service → model-endpoint: predict'}

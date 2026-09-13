@@ -1,0 +1,61 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/devops/using-aws-codepipeline-to-perform-multi-region-deployments/); edit freely.
+title: Multi-Region application deployment with CodePipeline cross-Region actions
+category: devops
+tags:
+- codepipeline
+- multi-region
+- cross-region actions
+- cloudformation
+- codedeploy
+- ec2
+source: https://aws.amazon.com/blogs/devops/using-aws-codepipeline-to-perform-multi-region-deployments/
+description: A single pipeline in the primary Region takes application code from an S3 source bucket and declares one artifact store bucket per target Region; CodePipeline replicates the input artifact
+  to the artifact store of each Region before a cross-Region action runs there. Parallel CloudFormation deploy actions in us-west-2, us-east-1 and ap-southeast-2 create or update stacks that provision EC2
+  instances with the CodeDeploy agent and hand the revision to CodeDeploy, so every Region receives the same release in one execution.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: grp-primary-pipeline, type: common.group, name: primary pipeline, parent: reg-us-west-2}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: reg-ap-southeast-2, type: aws.region, name: ap-southeast-2, parent: acct-prod, props: {region: ap-southeast-2}}
+- {id: user, type: common.user, name: user}
+- {id: source-bucket, type: aws.s3_bucket, name: source-bucket, parent: grp-primary-pipeline}
+- id: multi-region-pipeline
+  type: aws.res.aws_codepipeline
+  name: multi-region-pipeline
+  parent: grp-primary-pipeline
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- {id: artifact-store-usw2, type: aws.s3_bucket, name: artifact-store-usw2, parent: reg-us-west-2}
+- {id: app-stack-usw2, type: aws.res.aws_cloudformation_stack, name: app-stack-usw2, parent: reg-us-west-2, props: {name: changeme}}
+- {id: app-codedeploy-usw2, type: aws.res.aws_codedeploy_app, name: app-codedeploy-usw2, parent: reg-us-west-2, props: {name: changeme}}
+- {id: artifact-store-use1, type: aws.s3_bucket, name: artifact-store-use1, parent: reg-us-east-1}
+- {id: app-stack-use1, type: aws.res.aws_cloudformation_stack, name: app-stack-use1, parent: reg-us-east-1, props: {name: changeme}}
+- {id: app-codedeploy-use1, type: aws.res.aws_codedeploy_app, name: app-codedeploy-use1, parent: reg-us-east-1, props: {name: changeme}}
+- {id: artifact-store-apse2, type: aws.s3_bucket, name: artifact-store-apse2, parent: reg-ap-southeast-2}
+- {id: app-stack-apse2, type: aws.res.aws_cloudformation_stack, name: app-stack-apse2, parent: reg-ap-southeast-2, props: {name: changeme}}
+- {id: app-codedeploy-apse2, type: aws.res.aws_codedeploy_app, name: app-codedeploy-apse2, parent: reg-ap-southeast-2, props: {name: changeme}}
+- {id: codepipeline-service-role, type: aws.res.aws_iam_role, name: codepipeline-service-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}}
+edges:
+- {from: user, to: source-bucket, label: upload application revision zip, step: '1'}
+- {from: source-bucket, to: multi-region-pipeline, label: S3 source action, step: '2'}
+- {from: multi-region-pipeline, to: artifact-store-usw2, label: artifact store (primary), step: '3'}
+- {from: artifact-store-usw2, to: artifact-store-use1, label: CodePipeline replicates artifact, step: '4'}
+- {from: artifact-store-usw2, to: artifact-store-apse2, label: CodePipeline replicates artifact, step: '4'}
+- {from: multi-region-pipeline, to: app-stack-usw2, label: CloudFormation deploy action, step: '5'}
+- {from: multi-region-pipeline, to: app-stack-use1, label: cross-Region CloudFormation action, step: '5'}
+- {from: multi-region-pipeline, to: app-stack-apse2, label: cross-Region CloudFormation action, step: '5'}
+- {from: app-stack-usw2, to: app-codedeploy-usw2, label: EC2 instances with CodeDeploy agent, step: '6'}
+- {from: app-stack-use1, to: app-codedeploy-use1, label: EC2 instances with CodeDeploy agent, step: '6'}
+- {from: app-stack-apse2, to: app-codedeploy-apse2, label: EC2 instances with CodeDeploy agent, step: '6'}
+- {from: codepipeline-service-role, to: multi-region-pipeline, label: service role}
+steps:
+- {n: '1', text: 'user → source-bucket: upload application revision zip'}
+- {n: '2', text: 'source-bucket → multi-region-pipeline: S3 source action'}
+- {n: '3', text: 'multi-region-pipeline → artifact-store-usw2: artifact store (primary)'}
+- {n: '4', text: 'artifact-store-usw2 → artifact-store-use1: CodePipeline replicates artifact'}
+- {n: '5', text: 'multi-region-pipeline → app-stack-usw2: CloudFormation deploy action'}
+- {n: '6', text: 'app-stack-usw2 → app-codedeploy-usw2: EC2 instances with CodeDeploy agent'}

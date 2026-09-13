@@ -1,0 +1,49 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Unified-Cross-Account.html); edit freely.
+title: Central monitoring account with CloudWatch cross-account observability
+category: observability
+tags:
+- cloudwatch
+- oam
+- cross-account
+- dashboards
+- alarms
+- logs
+- x-ray
+source: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Unified-Cross-Account.html
+description: A monitoring account creates an Observability Access Manager sink, and source accounts across the organization create links to it that share CloudWatch metrics, log groups, X-Ray traces and
+  Application Signals data without copying it. Dashboards, metric alarms and Logs Insights queries in the monitoring account then span every linked account, and alarm actions publish to an SNS topic for
+  the operations team.
+nodes:
+- {id: acct-monitoring, type: aws.account, name: monitoring}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-monitoring, props: {region: eu-west-1}}
+- {id: grp-central-observability, type: common.group, name: central observability, parent: reg-eu-west-1}
+- {id: acct-workload-a, type: aws.account, name: workload-a}
+- {id: reg-eu-west-1-2, type: aws.region, name: eu-west-1, parent: acct-workload-a, props: {region: eu-west-1}}
+- {id: acct-workload-b, type: aws.account, name: workload-b}
+- {id: reg-eu-west-1-3, type: aws.region, name: eu-west-1, parent: acct-workload-b, props: {region: eu-west-1}}
+- {id: user, type: common.user, name: user}
+- {id: observability-sink, type: aws.res.aws_oam_sink, name: observability-sink, parent: grp-central-observability, props: {name: changeme}}
+- {id: fleet-dashboard, type: aws.res.aws_cloudwatch_dashboard, name: fleet-dashboard, parent: grp-central-observability, props: {dashboard_body: changeme, dashboard_name: changeme}}
+- {id: cross-account-error-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: cross-account-error-alarm, parent: grp-central-observability, props: {alarm_name: changeme}}
+- {id: ops-alerts, type: aws.res.aws_sns_topic, name: ops-alerts, parent: grp-central-observability}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: order-service-a, type: aws.lambda_function, name: order-service-a, parent: sub-reg-eu-west-1-a}
+- {id: order-service-a-logs, type: aws.res.aws_cloudwatch_log_group, name: order-service-a-logs, parent: acct-workload-a}
+- {id: web-cluster-b, type: aws.res.aws_ecs_cluster, name: web-cluster-b, parent: acct-workload-b, props: {name: changeme}}
+- {id: web-cluster-b-logs, type: aws.res.aws_cloudwatch_log_group, name: web-cluster-b-logs, parent: acct-workload-b}
+edges:
+- {from: order-service-a, to: order-service-a-logs, label: metrics, step: '1'}
+- {from: web-cluster-b, to: web-cluster-b-logs, label: metrics, step: '1'}
+- {from: observability-sink, to: fleet-dashboard, label: cross-account widgets, step: '3'}
+- {from: observability-sink, to: cross-account-error-alarm, label: alarm on source-account metric, step: '4'}
+- {from: cross-account-error-alarm, to: ops-alerts, label: ALARM action, step: '5'}
+- {from: user, to: fleet-dashboard, label: single-pane dashboard}
+steps:
+- {n: '1', text: 'order-service-a → order-service-a-logs: metrics'}
+- {n: '3', text: 'observability-sink → fleet-dashboard: cross-account widgets'}
+- {n: '4', text: 'observability-sink → cross-account-error-alarm: alarm on source-account metric'}
+- {n: '5', text: 'cross-account-error-alarm → ops-alerts: ALARM action'}

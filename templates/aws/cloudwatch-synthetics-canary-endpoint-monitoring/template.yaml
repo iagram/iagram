@@ -1,0 +1,63 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries.html); edit freely.
+title: Endpoint and user-journey monitoring with CloudWatch Synthetics canaries
+category: observability
+tags:
+- cloudwatch synthetics
+- canary
+- lambda
+- x-ray
+- alarms
+- vpc
+source: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries.html
+description: Synthetics canaries are Node.js, Python or Java scripts that CloudWatch runs as Lambda functions on a rate or cron schedule to exercise a public API and a browser user journey with Playwright
+  or Puppeteer, and an in-VPC canary checks an internal endpoint. Each run stores HAR files, screenshots and logs in an S3 artifact bucket and publishes SuccessPercent and Duration metrics in the CloudWatchSynthetics
+  namespace; alarms on those metrics notify SNS, and X-Ray active tracing places the canaries on the trace map next to the services they call.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-synthetic-monitoring, type: common.group, name: synthetic monitoring, parent: reg-us-east-1}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.80.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.80.1.0/24, az: a, public: false}}
+- {id: internet, type: common.internet, name: internet}
+- id: api-heartbeat-canary
+  type: aws.res.aws_synthetics_canary
+  name: api-heartbeat-canary
+  parent: grp-synthetic-monitoring
+  props: {artifact_s3_location: changeme, execution_role_arn: changeme, handler: changeme, name: changeme, runtime_version: changeme, schedule: {}}
+- id: checkout-journey-canary
+  type: aws.res.aws_synthetics_canary
+  name: checkout-journey-canary
+  parent: grp-synthetic-monitoring
+  props: {artifact_s3_location: changeme, execution_role_arn: changeme, handler: changeme, name: changeme, runtime_version: changeme, schedule: {}}
+- id: internal-service-canary
+  type: aws.res.aws_synthetics_canary
+  name: internal-service-canary
+  parent: sub-private-a
+  props: {artifact_s3_location: changeme, execution_role_arn: changeme, handler: changeme, name: changeme, runtime_version: changeme, schedule: {}}
+- {id: canary-artifacts, type: aws.s3_bucket, name: canary-artifacts, parent: grp-synthetic-monitoring}
+- {id: canary-success-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: canary-success-alarm, parent: grp-synthetic-monitoring, props: {alarm_name: changeme}}
+- {id: availability-alerts, type: aws.res.aws_sns_topic, name: availability-alerts, parent: grp-synthetic-monitoring}
+- {id: availability-dashboard, type: aws.res.aws_cloudwatch_dashboard, name: availability-dashboard, parent: grp-synthetic-monitoring, props: {dashboard_body: changeme, dashboard_name: changeme}}
+- {id: canary-execution-role, type: aws.res.aws_iam_role, name: canary-execution-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+- {id: public-api-alb, type: aws.alb, name: public-api-alb, parent: vpc-app}
+- {id: internal-service-alb, type: aws.alb, name: internal-service-alb, parent: az-app-a}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.80.251.0/24, az: b, public: false}}
+edges:
+- {from: api-heartbeat-canary, to: public-api-alb, label: GET /health every 1 minute, step: '1'}
+- {from: checkout-journey-canary, to: public-api-alb, label: headless browser flow with screenshots, step: '2'}
+- {from: internal-service-canary, to: internal-service-alb, label: in-VPC HTTP check, step: '3'}
+- {from: api-heartbeat-canary, to: canary-artifacts, label: HAR, step: '4'}
+- {from: api-heartbeat-canary, to: canary-success-alarm, label: SuccessPercent metric, step: '5'}
+- {from: canary-success-alarm, to: availability-alerts, label: ALARM action, step: '6'}
+- {from: canary-execution-role, to: api-heartbeat-canary, label: execution role}
+- {from: checkout-journey-canary, to: availability-dashboard, label: Duration and SuccessPercent widgets}
+- {from: internet, to: public-api-alb, label: real user traffic}
+steps:
+- {n: '1', text: 'api-heartbeat-canary → public-api-alb: GET /health every 1 minute'}
+- {n: '2', text: 'checkout-journey-canary → public-api-alb: headless browser flow with screenshots'}
+- {n: '3', text: 'internal-service-canary → internal-service-alb: in-VPC HTTP check'}
+- {n: '4', text: 'api-heartbeat-canary → canary-artifacts: HAR'}
+- {n: '5', text: 'api-heartbeat-canary → canary-success-alarm: SuccessPercent metric'}
+- {n: '6', text: 'canary-success-alarm → availability-alerts: ALARM action'}

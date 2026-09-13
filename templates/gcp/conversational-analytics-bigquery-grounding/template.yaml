@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/overview); edit freely.
+title: Data agent grounded on BigQuery with the Conversational Analytics API
+category: ml
+tags:
+- grounding
+- bigquery
+- conversational analytics
+- data agent
+- gemini
+- natural language to sql
+source: https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/overview
+description: A Cloud Run chat application sends natural-language questions to a Conversational Analytics data agent that is configured with BigQuery datasets as its grounding context, so Gemini generates
+  and executes SQL against the governed data rather than answering from model memory. Conversation history is stored in Firestore, agent definitions and dataset descriptions are versioned in Cloud Storage,
+  and query results plus generated charts are returned to the user.
+nodes:
+- {id: prj-data-agent-prj, type: gcp.project, name: data-agent-prj, props: {project_id: data-agent-prj-123456, project: changeme, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: analytics-chat-ui, type: gcp.cloud_run_service, name: analytics-chat-ui, parent: prj-data-agent-prj}
+- {id: agent-backend, type: gcp.cloud_run_service, name: agent-backend, parent: prj-data-agent-prj}
+- {id: sales-warehouse, type: gcp.bigquery_dataset, name: sales-warehouse, parent: prj-data-agent-prj}
+- {id: agent-query-logs, type: gcp.bigquery_dataset, name: agent-query-logs, parent: prj-data-agent-prj}
+- {id: conversations, type: gcp.res.google_firestore_database, name: conversations, parent: prj-data-agent-prj, props: {location_id: changeme, name: changeme, type: changeme}}
+- {id: agent-context, type: gcp.storage_bucket, name: agent-context, parent: prj-data-agent-prj}
+- id: agent-api-key
+  type: gcp.res.google_secret_manager_secret
+  name: agent-api-key
+  parent: prj-data-agent-prj
+  props: {replication: {}, secret_id: changeme}
+edges:
+- {from: users, to: analytics-chat-ui, label: HTTPS question, step: '1'}
+- {from: analytics-chat-ui, to: agent-backend, label: forward with conversation id, step: '2'}
+- {from: agent-backend, to: conversations, label: load/save history, step: '3'}
+- {from: agent-context, to: agent-backend, label: data agent definition + schema notes}
+- {from: agent-backend, to: sales-warehouse, label: generated SQL executed by data agent, step: '4'}
+- {from: agent-backend, to: agent-query-logs, label: log question + SQL + result, step: '5'}
+- {from: agent-backend, to: agent-api-key, label: fetch credentials}
+- {from: agent-backend, to: analytics-chat-ui, label: grounded answer + chart, step: '6'}
+steps:
+- {n: '1', text: 'users → analytics-chat-ui: HTTPS question'}
+- {n: '2', text: 'analytics-chat-ui → agent-backend: forward with conversation id'}
+- {n: '3', text: 'agent-backend → conversations: load/save history'}
+- {n: '4', text: 'agent-backend → sales-warehouse: generated SQL executed by data agent'}
+- {n: '5', text: 'agent-backend → agent-query-logs: log question + SQL + result'}
+- {n: '6', text: 'agent-backend → analytics-chat-ui: grounded answer + chart'}

@@ -189,6 +189,14 @@ func Render(c *catalog.Catalog, slug string, spec *Spec) (*document.Document, er
 		d.Nodes = append(d.Nodes, n)
 	}
 	byID := d.Index()
+	linkNames := map[string]int{} // two links between the same pair (ECMP tunnels) need distinct names
+	uniqueLink := func(name string) string {
+		linkNames[name]++
+		if n := linkNames[name]; n > 1 {
+			return fmt.Sprintf("%s_%d", name, n)
+		}
+		return name
+	}
 	// Required properties nobody supplies get a placeholder, so every template
 	// validates and can be planned after the obvious edits.
 	for i := range d.Nodes {
@@ -225,6 +233,7 @@ func Render(c *catalog.Catalog, slug string, spec *Spec) (*document.Document, er
 			if ed.Name == "" {
 				ed.Name = slugify(src.Name + "_" + dst.Name)
 			}
+			ed.Name = uniqueLink(ed.Name)
 			ed.Props = linkProps(c, b)
 		case se.Kind != "":
 			ed.Kind = se.Kind
@@ -250,7 +259,7 @@ func Render(c *catalog.Catalog, slug string, spec *Spec) (*document.Document, er
 			}
 			if rule.Kind == catalog.LinkKind {
 				b, _ := c.LinkFor(src.Type, dst.Type, rule.Type)
-				ed.Type, ed.Name, ed.Props = rule.Type, slugify(src.Name+"_"+dst.Name), linkProps(c, b)
+				ed.Type, ed.Name, ed.Props = rule.Type, uniqueLink(slugify(src.Name+"_"+dst.Name)), linkProps(c, b)
 			}
 		}
 		d.Edges = append(d.Edges, ed)

@@ -1,0 +1,66 @@
+# Generated from the official reference (https://docs.aws.amazon.com/codepipeline/latest/userguide/tutorials-ecr-build-publish.html); edit freely.
+title: Container image pipeline with the ECRBuildAndPublish action and ECS deploy
+category: devops
+tags:
+- codepipeline
+- ecr
+- docker
+- container image
+- ecs
+- codeconnections
+- inspector
+source: https://docs.aws.amazon.com/codepipeline/latest/userguide/tutorials-ecr-build-publish.html
+description: A V2 pipeline sources a repository containing a Dockerfile and imagedefinitions.json through a GitHub App connection, then the managed ECRBuildAndPublish build action logs in to ECR, builds
+  the image on CodePipeline-managed CodeBuild compute and pushes it without a buildspec. An Amazon ECS standard deploy action registers a new task definition revision with the pushed image URI and updates
+  the service; ECR enhanced scanning with Amazon Inspector evaluates each pushed image for vulnerabilities.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-east-1}
+- {id: grp-runtime, type: common.group, name: runtime, parent: reg-us-east-1}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: github-connection, type: aws.res.aws_codestarconnections_connection, name: github-connection, parent: grp-pipeline, props: {name: changeme}}
+- id: image-pipeline
+  type: aws.res.aws_codepipeline
+  name: image-pipeline
+  parent: grp-pipeline
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: grp-pipeline}
+- {id: hello-world-images, type: aws.res.aws_ecr_repository, name: hello-world-images, parent: grp-pipeline, props: {name: changeme}}
+- id: ecr-enhanced-scanning
+  type: aws.res.aws_inspector2_enabler
+  name: ecr-enhanced-scanning
+  parent: grp-pipeline
+  props:
+    account_ids: []
+    resource_types: []
+- {id: build-action-logs, type: aws.res.aws_cloudwatch_log_group, name: build-action-logs, parent: grp-pipeline}
+- {id: web-cluster, type: aws.res.aws_ecs_cluster, name: web-cluster, parent: grp-runtime, props: {name: changeme}}
+- {id: hello-world-service, type: aws.res.aws_ecs_service, name: hello-world-service, parent: web-cluster, props: {name: changeme}}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: web-alb, type: aws.alb, name: web-alb, parent: vpc-reg-us-east-1}
+- {id: sub-vpc-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: vpc-reg-us-east-1, props: {cidr: 10.200.250.0/24, az: a, public: false}}
+- {id: sub-vpc-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: vpc-reg-us-east-1, props: {cidr: 10.200.251.0/24, az: b, public: false}}
+edges:
+- {from: saas, to: github-connection, label: commit with Dockerfile + imagedefinitions.json, step: '1'}
+- {from: github-connection, to: image-pipeline, label: source action, step: '2'}
+- {from: image-pipeline, to: hello-world-images, label: ECRBuildAndPublish docker build and push, step: '3'}
+- {from: image-pipeline, to: build-action-logs, label: managed compute logs}
+- {from: ecr-enhanced-scanning, to: hello-world-images, label: Inspector scan on push, step: '4'}
+- {from: image-pipeline, to: hello-world-service, label: Amazon ECS deploy action (new task definition revision), step: '5'}
+- {from: hello-world-service, to: hello-world-images, label: pull image, step: '6'}
+- {from: image-pipeline, to: pipeline-artifacts, label: artifacts}
+- {from: users, to: web-alb, label: HTTP}
+- {from: web-alb, to: hello-world-service, label: forward}
+steps:
+- {n: '1', text: 'saas → github-connection: commit with Dockerfile + imagedefinitions.json'}
+- {n: '2', text: 'github-connection → image-pipeline: source action'}
+- {n: '3', text: 'image-pipeline → hello-world-images: ECRBuildAndPublish docker build and push'}
+- {n: '4', text: 'ecr-enhanced-scanning → hello-world-images: Inspector scan on push'}
+- {n: '5', text: 'image-pipeline → hello-world-service: Amazon ECS deploy action (new task definition revision)'}
+- {n: '6', text: 'hello-world-service → hello-world-images: pull image'}

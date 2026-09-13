@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/trace-data.html); edit freely.
+title: OpenTelemetry collection on Amazon ECS with the ADOT collector sidecar
+category: observability
+tags:
+- adot
+- opentelemetry
+- ecs
+- x-ray
+- cloudwatch
+- prometheus
+- sidecar
+source: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/trace-data.html
+description: Each ECS task definition adds an aws-otel-collector sidecar container that receives OTLP spans and metrics from the instrumented application container over localhost, and its configuration
+  is loaded from an SSM Parameter Store parameter. The collector exports traces to AWS X-Ray, application metrics to CloudWatch (EMF) or to an Amazon Managed Service for Prometheus workspace, and its own
+  logs to CloudWatch Logs through the task role permissions.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
+- {id: grp-telemetry-backends, type: common.group, name: telemetry backends, parent: reg-eu-central-1}
+- {id: vpc-services, type: aws.vpc, name: services, parent: reg-eu-central-1, props: {cidr: 10.60.0.0/16}}
+- {id: az-services-a, type: aws.availability_zone, name: a, parent: vpc-services, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-services-a, props: {cidr: 10.60.1.0/24, az: a, public: false}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-services-a, props: {cidr: 10.60.0.0/24, az: a, public: true}}
+- {id: users, type: common.users, name: users}
+- {id: api-alb, type: aws.alb, name: api-alb, parent: az-services-a}
+- {id: services-cluster, type: aws.res.aws_ecs_cluster, name: services-cluster, parent: vpc-services, props: {name: changeme}}
+- {id: checkout-task-with-adot, type: aws.res.aws_ecs_task_definition, name: checkout-task-with-adot, parent: sub-private-a, props: {container_definitions: changeme, family: changeme}}
+- {id: checkout-service, type: aws.res.aws_ecs_service, name: checkout-service, parent: services-cluster, props: {name: changeme}}
+- {id: otel-collector-config, type: aws.res.aws_ssm_parameter, name: otel-collector-config, parent: reg-eu-central-1, props: {name: changeme, type: changeme}}
+- {id: ecs-task-role, type: aws.res.aws_iam_role, name: ecs-task-role, parent: reg-eu-central-1, props: {assume_role_policy: changeme}}
+- {id: checkout-traces, type: aws.res.aws_xray_group, name: checkout-traces, parent: grp-telemetry-backends, props: {filter_expression: changeme, group_name: changeme}}
+- {id: adot-collector-logs, type: aws.res.aws_cloudwatch_log_group, name: adot-collector-logs, parent: grp-telemetry-backends}
+- {id: app-metrics, type: aws.res.aws_prometheus_workspace, name: app-metrics, parent: grp-telemetry-backends}
+- {id: checkout-dashboard, type: aws.res.aws_cloudwatch_dashboard, name: checkout-dashboard, parent: grp-telemetry-backends, props: {dashboard_body: changeme, dashboard_name: changeme}}
+- {id: az-vpc-services-b, type: aws.availability_zone, name: b, parent: vpc-services, props: {zone: b}}
+- {id: sub-vpc-services-b, type: aws.subnet, name: private-b, parent: az-vpc-services-b, props: {cidr: 10.60.251.0/24, az: b, public: false}}
+edges:
+- {from: users, to: api-alb, label: HTTPS, step: '1'}
+- {from: api-alb, to: checkout-service, label: forward, step: '2'}
+- {from: otel-collector-config, to: checkout-task-with-adot, label: AOT_CONFIG_CONTENT from Parameter Store, step: '3'}
+- {from: checkout-service, to: checkout-task-with-adot, label: 'app container -> sidecar OTLP localhost:4317', step: '4'}
+- {from: checkout-task-with-adot, to: checkout-traces, label: awsxray exporter PutTraceSegments, step: '5'}
+- {from: checkout-task-with-adot, to: app-metrics, label: prometheusremotewrite exporter, step: '6'}
+- {from: checkout-task-with-adot, to: adot-collector-logs, label: awslogs driver}
+- {from: ecs-task-role, to: checkout-task-with-adot, label: xray + logs + aps permissions}
+- {from: app-metrics, to: checkout-dashboard, label: metrics widgets}
+steps:
+- {n: '1', text: 'users → api-alb: HTTPS'}
+- {n: '2', text: 'api-alb → checkout-service: forward'}
+- {n: '3', text: 'otel-collector-config → checkout-task-with-adot: AOT_CONFIG_CONTENT from Parameter Store'}
+- {n: '4', text: 'checkout-service → checkout-task-with-adot: app container -> sidecar OTLP localhost:4317'}
+- {n: '5', text: 'checkout-task-with-adot → checkout-traces: awsxray exporter PutTraceSegments'}
+- {n: '6', text: 'checkout-task-with-adot → app-metrics: prometheusremotewrite exporter'}

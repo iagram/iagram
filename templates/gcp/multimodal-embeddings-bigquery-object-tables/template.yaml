@@ -1,0 +1,48 @@
+# Generated from the official reference (https://docs.cloud.google.com/bigquery/docs/generate-multimodal-embeddings); edit freely.
+title: Multimodal ingestion with BigQuery object tables and embeddings
+category: ml
+tags:
+- multimodal
+- embeddings
+- object tables
+- bigquery
+- vector search
+- cloud storage
+source: https://docs.cloud.google.com/bigquery/docs/generate-multimodal-embeddings
+description: Images and video frames uploaded to Cloud Storage are exposed as a BigQuery object table through a Cloud resource connection, and a remote model wrapping the Vertex AI multimodal embedding
+  model generates embeddings with AI.GENERATE_EMBEDDING. A vector index over the embeddings table lets a Cloud Run search service run text-to-image semantic queries with VECTOR_SEARCH, with new uploads
+  incrementally embedded by a scheduled query.
+nodes:
+- {id: prj-multimodal-prj, type: gcp.project, name: multimodal-prj, props: {project_id: multimodal-prj-123456, project: changeme, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: media-bucket, type: gcp.storage_bucket, name: media-bucket, parent: prj-multimodal-prj}
+- {id: media-uploaded, type: gcp.pubsub_topic, name: media-uploaded, parent: prj-multimodal-prj}
+- {id: vertex-connection, type: gcp.res.google_bigquery_connection, name: vertex-connection, parent: prj-multimodal-prj}
+- {id: media-dataset, type: gcp.bigquery_dataset, name: media-dataset, parent: prj-multimodal-prj}
+- id: embed-new-media
+  type: gcp.res.google_bigquery_data_transfer_config
+  name: embed-new-media
+  parent: prj-multimodal-prj
+  props: {data_source_id: changeme, display_name: changeme, params: {}}
+- {id: semantic-search-api, type: gcp.cloud_run_service, name: semantic-search-api, parent: prj-multimodal-prj}
+- {id: thumbnail-fn, type: gcp.res.google_cloudfunctions2_function, name: thumbnail-fn, parent: prj-multimodal-prj, props: {location: westeurope, name: changeme}}
+edges:
+- {from: users, to: media-bucket, label: upload images/video, step: '1'}
+- {from: media-bucket, to: media-uploaded, label: object notification, step: '2'}
+- {from: media-uploaded, to: thumbnail-fn, label: trigger, step: '3'}
+- {from: thumbnail-fn, to: media-bucket, label: write frames/thumbnails, step: '4'}
+- {from: media-bucket, to: media-dataset, label: object table over bucket, step: '5'}
+- {from: vertex-connection, to: media-dataset, label: remote embedding model}
+- {from: embed-new-media, to: media-dataset, label: scheduled AI.GENERATE_EMBEDDING, step: '6'}
+- {from: client, to: semantic-search-api, label: text query, step: '7'}
+- {from: semantic-search-api, to: media-dataset, label: VECTOR_SEARCH, step: '8'}
+steps:
+- {n: '1', text: 'users → media-bucket: upload images/video'}
+- {n: '2', text: 'media-bucket → media-uploaded: object notification'}
+- {n: '3', text: 'media-uploaded → thumbnail-fn: trigger'}
+- {n: '4', text: 'thumbnail-fn → media-bucket: write frames/thumbnails'}
+- {n: '5', text: 'media-bucket → media-dataset: object table over bucket'}
+- {n: '6', text: 'embed-new-media → media-dataset: scheduled AI.GENERATE_EMBEDDING'}
+- {n: '7', text: 'client → semantic-search-api: text query'}
+- {n: '8', text: 'semantic-search-api → media-dataset: VECTOR_SEARCH'}

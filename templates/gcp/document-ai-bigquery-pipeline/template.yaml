@@ -1,0 +1,43 @@
+# Generated from the official reference (https://docs.cloud.google.com/document-ai/docs/big-query-integration); edit freely.
+title: Document processing pipeline with Document AI and BigQuery
+category: ml
+tags:
+- document ai
+- ocr
+- form parser
+- bigquery
+- object tables
+- cloud run functions
+source: https://docs.cloud.google.com/document-ai/docs/big-query-integration
+description: Scanned documents uploaded to Cloud Storage are referenced by a BigQuery object table and a Cloud Run function invokes a Document AI processor, either directly or through the ML.PROCESS_DOCUMENT
+  function, to extract structured fields. Extracted entities land in BigQuery tables where they are joined with business data, embedded for vector search and made available to downstream analytics and generative
+  AI applications.
+nodes:
+- {id: prj-docai-prj, type: gcp.project, name: docai-prj, props: {project_id: docai-prj-123456, project: changeme, region: europe-west3}}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: inbound-docs, type: gcp.storage_bucket, name: inbound-docs, parent: prj-docai-prj}
+- {id: doc-arrived, type: gcp.pubsub_topic, name: doc-arrived, parent: prj-docai-prj}
+- {id: process-doc-fn, type: gcp.res.google_cloudfunctions2_function, name: process-doc-fn, parent: prj-docai-prj, props: {location: westeurope, name: changeme}}
+- {id: invoice-parser, type: gcp.res.google_document_ai_processor, name: invoice-parser, parent: prj-docai-prj, props: {display_name: changeme, location: westeurope, type: changeme}}
+- {id: processed-json, type: gcp.storage_bucket, name: processed-json, parent: prj-docai-prj}
+- {id: documents-dataset, type: gcp.bigquery_dataset, name: documents-dataset, parent: prj-docai-prj}
+- {id: cloud-resource-conn, type: gcp.res.google_bigquery_connection, name: cloud-resource-conn, parent: prj-docai-prj}
+edges:
+- {from: users, to: inbound-docs, label: upload PDFs, step: '1'}
+- {from: inbound-docs, to: doc-arrived, label: object notification, step: '2'}
+- {from: doc-arrived, to: process-doc-fn, label: trigger, step: '3'}
+- {from: process-doc-fn, to: invoice-parser, label: batch process request, step: '4'}
+- {from: invoice-parser, to: processed-json, label: Document JSON output, step: '5'}
+- {from: processed-json, to: documents-dataset, label: load extracted entities, step: '6'}
+- {from: documents-dataset, to: invoice-parser, label: ML.PROCESS_DOCUMENT via connection}
+- {from: cloud-resource-conn, to: invoice-parser, label: remote model}
+- {from: client, to: documents-dataset, label: SQL analytics, step: '7'}
+steps:
+- {n: '1', text: 'users → inbound-docs: upload PDFs'}
+- {n: '2', text: 'inbound-docs → doc-arrived: object notification'}
+- {n: '3', text: 'doc-arrived → process-doc-fn: trigger'}
+- {n: '4', text: 'process-doc-fn → invoice-parser: batch process request'}
+- {n: '5', text: 'invoice-parser → processed-json: Document JSON output'}
+- {n: '6', text: 'processed-json → documents-dataset: load extracted entities'}
+- {n: '7', text: 'client → documents-dataset: SQL analytics'}

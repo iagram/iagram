@@ -1,0 +1,45 @@
+# Generated from the official reference (https://docs.cloud.google.com/bigquery/docs/bigqueryml-mf-implicit-tutorial); edit freely.
+title: Recommendation system with BigQuery ML matrix factorization
+category: ml
+tags:
+- recommendations
+- bigquery ml
+- matrix factorization
+- vertex ai endpoint
+- memorystore
+source: https://docs.cloud.google.com/bigquery/docs/bigqueryml-mf-implicit-tutorial
+description: User interaction events streamed through Pub/Sub into BigQuery train a BigQuery ML matrix factorization model on implicit feedback, and ML.RECOMMEND materializes ranked item lists per user
+  on a schedule. The precomputed recommendations are exported to Memorystore for low-latency reads by a Cloud Run API, while the model is also registered in Vertex AI Model Registry and deployed to an online
+  endpoint for cold-start scoring.
+nodes:
+- {id: prj-recs-prj, type: gcp.project, name: recs-prj, props: {project_id: recs-prj-123456, project: changeme, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: user-events, type: gcp.pubsub_topic, name: user-events, parent: prj-recs-prj}
+- {id: events-dataset, type: gcp.bigquery_dataset, name: events-dataset, parent: prj-recs-prj}
+- {id: recs-model-dataset, type: gcp.bigquery_dataset, name: recs-model-dataset, parent: prj-recs-prj}
+- {id: retrain-nightly, type: gcp.res.google_cloud_scheduler_job, name: retrain-nightly, parent: prj-recs-prj, props: {name: changeme}}
+- {id: recs-refresh-wf, type: gcp.res.google_workflows_workflow, name: recs-refresh-wf, parent: prj-recs-prj}
+- {id: recs-cache, type: gcp.res.google_redis_instance, name: recs-cache, parent: prj-recs-prj, props: {memory_size_gb: 1, name: changeme}}
+- {id: recs-api, type: gcp.cloud_run_service, name: recs-api, parent: prj-recs-prj}
+- {id: recs-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: recs-endpoint, parent: prj-recs-prj, props: {display_name: changeme, location: westeurope, name: changeme}}
+edges:
+- {from: mobile, to: user-events, label: clicks / views, step: '1'}
+- {from: user-events, to: events-dataset, label: BigQuery subscription, step: '2'}
+- {from: retrain-nightly, to: recs-refresh-wf, label: cron, step: '3'}
+- {from: recs-refresh-wf, to: recs-model-dataset, label: CREATE MODEL + ML.RECOMMEND, step: '4'}
+- {from: events-dataset, to: recs-model-dataset, label: training data}
+- {from: recs-refresh-wf, to: recs-cache, label: export top-N per user, step: '5'}
+- {from: recs-model-dataset, to: recs-endpoint, label: register + deploy model}
+- {from: users, to: recs-api, label: GET recommendations, step: '6'}
+- {from: recs-api, to: recs-cache, label: cache read, step: '7'}
+- {from: recs-api, to: recs-endpoint, label: online scoring fallback, step: '8'}
+steps:
+- {n: '1', text: 'mobile → user-events: clicks / views'}
+- {n: '2', text: 'user-events → events-dataset: BigQuery subscription'}
+- {n: '3', text: 'retrain-nightly → recs-refresh-wf: cron'}
+- {n: '4', text: 'recs-refresh-wf → recs-model-dataset: CREATE MODEL + ML.RECOMMEND'}
+- {n: '5', text: 'recs-refresh-wf → recs-cache: export top-N per user'}
+- {n: '6', text: 'users → recs-api: GET recommendations'}
+- {n: '7', text: 'recs-api → recs-cache: cache read'}
+- {n: '8', text: 'recs-api → recs-endpoint: online scoring fallback'}

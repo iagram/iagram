@@ -1,0 +1,45 @@
+# Generated from the official reference (https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/automating-updates-to-serverless-apps.html); edit freely.
+title: Gradual Lambda deployment with AWS SAM and CodeDeploy canary traffic shifting
+category: devops
+tags:
+- lambda
+- sam
+- codedeploy
+- canary
+- alias
+- rollback
+source: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/automating-updates-to-serverless-apps.html
+description: AWS SAM publishes a new Lambda version, keeps a live alias, and hands traffic shifting to a CodeDeploy application on the Lambda compute platform using a preference such as Canary10Percent10Minutes
+  or Linear10PercentEvery1Minute. Pre-traffic and post-traffic hook functions validate the release, and CloudWatch alarms on the alias error metrics trigger an automatic rollback if they fire during the
+  shift.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-deployment, type: common.group, name: deployment, parent: reg-us-east-1}
+- {id: grp-application, type: common.group, name: application, parent: reg-us-east-1}
+- {id: user, type: common.user, name: user}
+- {id: client, type: common.client, name: client}
+- {id: sam-artifacts, type: aws.s3_bucket, name: sam-artifacts, parent: grp-deployment}
+- {id: sam-stack, type: aws.res.aws_cloudformation_stack, name: sam-stack, parent: grp-deployment, props: {name: changeme}}
+- {id: lambda-deploy-app, type: aws.res.aws_codedeploy_app, name: lambda-deploy-app, parent: grp-deployment, props: {name: changeme}}
+- {id: pre-traffic-hook, type: aws.lambda_function, name: pre-traffic-hook, parent: grp-deployment}
+- {id: post-traffic-hook, type: aws.lambda_function, name: post-traffic-hook, parent: grp-deployment}
+- {id: orders-api, type: aws.res.aws_api_gateway_rest_api, name: orders-api, parent: grp-application, props: {name: changeme}}
+- {id: orders-handler, type: aws.lambda_function, name: orders-handler, parent: grp-application}
+- {id: alias-errors-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: alias-errors-alarm, parent: grp-application, props: {alarm_name: changeme}}
+edges:
+- {from: user, to: sam-artifacts, label: sam deploy uploads code.zip, step: '1'}
+- {from: sam-artifacts, to: sam-stack, label: CloudFormation change set, step: '2'}
+- {from: sam-stack, to: orders-handler, label: publish new version (AutoPublishAlias), step: '3'}
+- {from: sam-stack, to: lambda-deploy-app, label: DeploymentPreference creates deployment, step: '4'}
+- {from: lambda-deploy-app, to: pre-traffic-hook, label: PreTraffic hook, step: '5'}
+- {from: alias-errors-alarm, to: lambda-deploy-app, label: ALARM triggers rollback}
+- {from: lambda-deploy-app, to: post-traffic-hook, label: PostTraffic hook, step: '7'}
+- {from: client, to: orders-api, label: HTTPS}
+steps:
+- {n: '1', text: 'user → sam-artifacts: sam deploy uploads code.zip'}
+- {n: '2', text: 'sam-artifacts → sam-stack: CloudFormation change set'}
+- {n: '3', text: 'sam-stack → orders-handler: publish new version (AutoPublishAlias)'}
+- {n: '4', text: 'sam-stack → lambda-deploy-app: DeploymentPreference creates deployment'}
+- {n: '5', text: 'lambda-deploy-app → pre-traffic-hook: PreTraffic hook'}
+- {n: '7', text: 'lambda-deploy-app → post-traffic-hook: PostTraffic hook'}

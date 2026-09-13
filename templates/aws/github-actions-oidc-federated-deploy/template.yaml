@@ -1,0 +1,49 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/security/use-iam-roles-to-connect-github-actions-to-actions-in-aws/); edit freely.
+title: GitHub Actions deploying to AWS with OIDC federation instead of access keys
+category: devops
+tags:
+- github actions
+- oidc
+- iam
+- sts
+- ecr
+- ecs
+- keyless
+source: https://aws.amazon.com/blogs/security/use-iam-roles-to-connect-github-actions-to-actions-in-aws/
+description: An IAM OpenID Connect identity provider trusts token.actions.githubusercontent.com, and an IAM role trust policy restricts sts AssumeRoleWithWebIdentity to a specific repository and branch
+  through the sub and aud claims. The workflow uses aws-actions/configure-aws-credentials to exchange the GitHub-issued JWT for short-lived credentials, then pushes an image to ECR and updates an ECS service,
+  so no long-lived IAM user keys are stored as GitHub secrets.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-identity, type: common.group, name: identity, parent: reg-us-east-1}
+- {id: grp-deployment-target, type: common.group, name: deployment target, parent: reg-us-east-1}
+- {id: saas, type: common.saas, name: saas}
+- {id: user, type: common.user, name: user}
+- id: github-oidc-provider
+  type: aws.res.aws_iam_openid_connect_provider
+  name: github-oidc-provider
+  parent: grp-identity
+  props:
+    client_id_list: []
+    url: changeme
+- {id: github-deploy-role, type: aws.res.aws_iam_role, name: github-deploy-role, parent: grp-identity, props: {assume_role_policy: changeme}}
+- {id: app-images, type: aws.res.aws_ecr_repository, name: app-images, parent: grp-deployment-target, props: {name: changeme}}
+- {id: app-cluster, type: aws.res.aws_ecs_cluster, name: app-cluster, parent: grp-deployment-target, props: {name: changeme}}
+- {id: app-service, type: aws.res.aws_ecs_service, name: app-service, parent: app-cluster, props: {name: changeme}}
+- {id: static-assets, type: aws.s3_bucket, name: static-assets, parent: grp-deployment-target}
+- {id: api-audit-trail, type: aws.res.aws_cloudtrail, name: api-audit-trail, parent: reg-us-east-1, props: {name: changeme, s3_bucket_name: changeme}}
+edges:
+- {from: user, to: saas, label: push to main, step: '1'}
+- {from: saas, to: github-oidc-provider, label: 'workflow requests JWT (aud: sts.amazonaws.com)', step: '2'}
+- {from: saas, to: github-deploy-role, label: 'sts:AssumeRoleWithWebIdentity scoped by repo:org/repo:ref', step: '3'}
+- {from: saas, to: app-images, label: docker push with temporary credentials, step: '4'}
+- {from: saas, to: app-service, label: aws ecs update-service with new task definition, step: '5'}
+- {from: saas, to: static-assets, label: aws s3 sync}
+- {from: github-deploy-role, to: api-audit-trail, label: role session logged}
+steps:
+- {n: '1', text: 'user → saas: push to main'}
+- {n: '2', text: 'saas → github-oidc-provider: workflow requests JWT (aud: sts.amazonaws.com)'}
+- {n: '3', text: 'saas → github-deploy-role: sts:AssumeRoleWithWebIdentity scoped by repo:org/repo:ref'}
+- {n: '4', text: 'saas → app-images: docker push with temporary credentials'}
+- {n: '5', text: 'saas → app-service: aws ecs update-service with new task definition'}

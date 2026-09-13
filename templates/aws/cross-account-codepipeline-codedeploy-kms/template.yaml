@@ -1,0 +1,68 @@
+# Generated from the official reference (https://docs.aws.amazon.com/codepipeline/latest/userguide/pipelines-create-cross-account.html); edit freely.
+title: Cross-account deployment pipeline with CodePipeline, KMS and CodeDeploy
+category: devops
+tags:
+- codepipeline
+- cross-account
+- codedeploy
+- kms
+- multi-account
+- s3 artifacts
+source: https://docs.aws.amazon.com/codepipeline/latest/userguide/pipelines-create-cross-account.html
+description: A pipeline in the tooling account encrypts its S3 artifact store with a customer managed KMS key whose key policy and bucket policy grant the workload account access, and the CodePipeline service
+  role is allowed to assume a cross-account role there. The deploy action runs with that role ARN against a CodeDeploy application and deployment group owned by the workload account, whose EC2 instance
+  profile can read the artifact bucket and decrypt with the key.
+nodes:
+- {id: acct-tooling, type: aws.account, name: tooling}
+- {id: reg-us-east-2, type: aws.region, name: us-east-2, parent: acct-tooling, props: {region: us-east-2}}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-east-2}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-2-2, type: aws.region, name: us-east-2, parent: acct-workload, props: {region: us-east-2}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-2-2, props: {cidr: 10.10.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.10.1.0/24, az: a, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: app-repo, type: aws.res.aws_codecommit_repository, name: app-repo, parent: grp-pipeline, props: {repository_name: changeme}}
+- id: cross-account-pipeline
+  type: aws.res.aws_codepipeline
+  name: cross-account-pipeline
+  parent: grp-pipeline
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- id: app-build
+  type: aws.res.aws_codebuild_project
+  name: app-build
+  parent: grp-pipeline
+  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
+- {id: pipeline-artifact-bucket, type: aws.s3_bucket, name: pipeline-artifact-bucket, parent: grp-pipeline}
+- {id: artifact-cmk, type: aws.res.aws_kms_key, name: artifact-cmk, parent: grp-pipeline}
+- {id: codepipeline-service-role, type: aws.res.aws_iam_role, name: codepipeline-service-role, parent: acct-tooling, props: {assume_role_policy: changeme}}
+- {id: cross-account-deploy-role, type: aws.res.aws_iam_role, name: cross-account-deploy-role, parent: acct-workload, props: {assume_role_policy: changeme}}
+- {id: workload-codedeploy-app, type: aws.res.aws_codedeploy_app, name: workload-codedeploy-app, parent: acct-workload, props: {name: changeme}}
+- {id: app-asg, type: aws.res.aws_autoscaling_group, name: app-asg, parent: sub-private-a, props: {max_size: 1, min_size: 1}}
+- {id: ec2-instance-role, type: aws.res.aws_iam_role, name: ec2-instance-role, parent: acct-workload, props: {assume_role_policy: changeme}}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.10.251.0/24, az: b, public: false}}
+edges:
+- {from: user, to: app-repo, label: git push, step: '1'}
+- {from: app-repo, to: cross-account-pipeline, label: source action, step: '2'}
+- {from: cross-account-pipeline, to: app-build, label: build action, step: '3'}
+- {from: app-build, to: pipeline-artifact-bucket, label: build artifact encrypted with CMK, step: '4'}
+- {from: artifact-cmk, to: pipeline-artifact-bucket, label: SSE-KMS}
+- {from: codepipeline-service-role, to: cross-account-deploy-role, label: 'sts:AssumeRole (roleArn on action)', step: '5'}
+- {from: cross-account-pipeline, to: workload-codedeploy-app, label: CodeDeploy deploy action in workload account, step: '6'}
+- {from: workload-codedeploy-app, to: app-asg, label: deployment group targets, step: '7'}
+- {from: app-asg, to: pipeline-artifact-bucket, label: agent GetObject + kms Decrypt, step: '8'}
+- {from: ec2-instance-role, to: app-asg, label: instance profile}
+steps:
+- {n: '1', text: 'user → app-repo: git push'}
+- {n: '2', text: 'app-repo → cross-account-pipeline: source action'}
+- {n: '3', text: 'cross-account-pipeline → app-build: build action'}
+- {n: '4', text: 'app-build → pipeline-artifact-bucket: build artifact encrypted with CMK'}
+- {n: '5', text: 'codepipeline-service-role → cross-account-deploy-role: sts:AssumeRole (roleArn on action)'}
+- {n: '6', text: 'cross-account-pipeline → workload-codedeploy-app: CodeDeploy deploy action in workload account'}
+- {n: '7', text: 'workload-codedeploy-app → app-asg: deployment group targets'}
+- {n: '8', text: 'app-asg → pipeline-artifact-bucket: agent GetObject + kms Decrypt'}

@@ -1,0 +1,52 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/architecture-for-mlops-using-tfx-kubeflow-pipelines-and-cloud-build); edit freely.
+title: MLOps with Vertex AI Pipelines, Model Registry and Cloud Build
+category: ml
+tags:
+- mlops
+- vertex ai pipelines
+- model registry
+- cloud build
+- tfx
+- continuous training
+source: https://docs.cloud.google.com/architecture/architecture-for-mlops-using-tfx-kubeflow-pipelines-and-cloud-build
+description: Cloud Build runs CI on the pipeline source, builds component images into Artifact Registry and compiles the pipeline definition to Cloud Storage, from where Vertex AI Pipelines executes data
+  validation, transformation with Dataflow, training and evaluation steps. Validated models are registered in Vertex AI Model Registry and deployed to an online endpoint, while Cloud Scheduler and Pub/Sub
+  trigger continuous training runs on new data in BigQuery.
+nodes:
+- {id: prj-mlops-prj, type: gcp.project, name: mlops-prj, props: {project_id: mlops-prj-123456, project: changeme, region: us-central1}}
+- {id: grp-ci-cd, type: common.group, name: ci-cd, parent: prj-mlops-prj}
+- {id: grp-training, type: common.group, name: training, parent: prj-mlops-prj}
+- {id: grp-serving, type: common.group, name: serving, parent: prj-mlops-prj}
+- {id: user, type: common.user, name: user}
+- {id: client, type: common.client, name: client}
+- {id: pipeline-source, type: gcp.res.google_sourcerepo_repository, name: pipeline-source, parent: grp-ci-cd, props: {name: changeme}}
+- {id: pipeline-ci, type: gcp.res.google_cloudbuild_trigger, name: pipeline-ci, parent: grp-ci-cd}
+- {id: component-images, type: gcp.res.google_artifact_registry_repository, name: component-images, parent: grp-ci-cd, props: {format: changeme, repository_id: changeme}}
+- {id: pipeline-root, type: gcp.storage_bucket, name: pipeline-root, parent: grp-training}
+- {id: training-data, type: gcp.bigquery_dataset, name: training-data, parent: grp-training}
+- {id: retrain-schedule, type: gcp.res.google_cloud_scheduler_job, name: retrain-schedule, parent: grp-training, props: {name: changeme}}
+- {id: pipeline-trigger, type: gcp.pubsub_topic, name: pipeline-trigger, parent: grp-training}
+- {id: submit-pipeline-fn, type: gcp.res.google_cloudfunctions2_function, name: submit-pipeline-fn, parent: grp-training, props: {location: westeurope, name: changeme}}
+- {id: prod-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: prod-endpoint, parent: grp-serving, props: {display_name: changeme, location: westeurope, name: changeme}}
+edges:
+- {from: user, to: pipeline-source, label: push pipeline code, step: '1'}
+- {from: pipeline-source, to: pipeline-ci, label: trigger build, step: '2'}
+- {from: pipeline-ci, to: component-images, label: push component images, step: '3'}
+- {from: pipeline-ci, to: pipeline-root, label: upload compiled pipeline, step: '4'}
+- {from: retrain-schedule, to: pipeline-trigger, label: cron message, step: '5'}
+- {from: pipeline-trigger, to: submit-pipeline-fn, label: trigger, step: '6'}
+- {from: submit-pipeline-fn, to: pipeline-root, label: run Vertex AI pipeline, step: '7'}
+- {from: training-data, to: pipeline-root, label: extract + validate + train, step: '8'}
+- {from: pipeline-root, to: prod-endpoint, label: register + deploy model, step: '9'}
+- {from: client, to: prod-endpoint, label: online prediction, step: '10'}
+steps:
+- {n: '1', text: 'user → pipeline-source: push pipeline code'}
+- {n: '2', text: 'pipeline-source → pipeline-ci: trigger build'}
+- {n: '3', text: 'pipeline-ci → component-images: push component images'}
+- {n: '4', text: 'pipeline-ci → pipeline-root: upload compiled pipeline'}
+- {n: '5', text: 'retrain-schedule → pipeline-trigger: cron message'}
+- {n: '6', text: 'pipeline-trigger → submit-pipeline-fn: trigger'}
+- {n: '7', text: 'submit-pipeline-fn → pipeline-root: run Vertex AI pipeline'}
+- {n: '8', text: 'training-data → pipeline-root: extract + validate + train'}
+- {n: '9', text: 'pipeline-root → prod-endpoint: register + deploy model'}
+- {n: '10', text: 'client → prod-endpoint: online prediction'}

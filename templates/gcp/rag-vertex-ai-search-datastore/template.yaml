@@ -1,0 +1,54 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/rag-genai-gemini-enterprise-vertexai); edit freely.
+title: RAG with a Vertex AI Search data store and Gemini Enterprise
+category: ml
+tags:
+- rag
+- vertex ai search
+- discovery engine
+- gemini enterprise
+- managed data store
+source: https://docs.cloud.google.com/architecture/rag-genai-gemini-enterprise-vertexai
+description: Raw documents uploaded to Cloud Storage trigger Cloud Run functions through Pub/Sub that generate metadata, after which a managed Vertex AI Search data store parses, chunks, embeds and indexes
+  the content without a self-managed vector database. A Cloud Run frontend and backend forward user questions to the Gemini Enterprise API, which searches the data store, augments the prompt and returns
+  a grounded answer.
+nodes:
+- {id: prj-search-rag-prj, type: gcp.project, name: search-rag-prj, props: {project_id: search-rag-prj-123456, project: changeme, region: europe-west1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: prj-search-rag-prj}
+- {id: grp-serving, type: common.group, name: serving, parent: prj-search-rag-prj}
+- {id: users, type: common.users, name: users}
+- {id: docs-bucket, type: gcp.storage_bucket, name: docs-bucket, parent: grp-ingestion}
+- {id: docs-topic, type: gcp.pubsub_topic, name: docs-topic, parent: grp-ingestion}
+- {id: metadata-fn, type: gcp.res.google_cloudfunctions2_function, name: metadata-fn, parent: grp-ingestion, props: {location: westeurope, name: changeme}}
+- {id: metadata-bucket, type: gcp.storage_bucket, name: metadata-bucket, parent: grp-ingestion}
+- {id: enterprise-datastore, type: gcp.res.google_discovery_engine_data_store, name: enterprise-datastore, parent: grp-serving, props: {content_config: changeme, data_store_id: changeme, display_name: changeme,
+    industry_vertical: changeme, location: westeurope}}
+- id: enterprise-search-app
+  type: gcp.res.google_discovery_engine_search_engine
+  name: enterprise-search-app
+  parent: grp-serving
+  props:
+    collection_id: changeme
+    data_store_ids: []
+    display_name: changeme
+    engine_id: changeme
+    location: westeurope
+    search_engine_config: {}
+- {id: web-frontend, type: gcp.cloud_run_service, name: web-frontend, parent: grp-serving}
+- {id: api-backend, type: gcp.cloud_run_service, name: api-backend, parent: grp-serving}
+edges:
+- {from: docs-bucket, to: docs-topic, label: upload event, step: '1'}
+- {from: docs-topic, to: metadata-fn, label: trigger, step: '2'}
+- {from: metadata-fn, to: metadata-bucket, label: write JSONL metadata, step: '3'}
+- {from: metadata-bucket, to: enterprise-datastore, label: import + chunk + embed, step: '4'}
+- {from: enterprise-datastore, to: enterprise-search-app, label: indexed content}
+- {from: users, to: web-frontend, label: HTTPS question, step: '5'}
+- {from: web-frontend, to: api-backend, label: query, step: '6'}
+- {from: api-backend, to: enterprise-search-app, label: search + grounded generation, step: '7'}
+steps:
+- {n: '1', text: 'docs-bucket → docs-topic: upload event'}
+- {n: '2', text: 'docs-topic → metadata-fn: trigger'}
+- {n: '3', text: 'metadata-fn → metadata-bucket: write JSONL metadata'}
+- {n: '4', text: 'metadata-bucket → enterprise-datastore: import + chunk + embed'}
+- {n: '5', text: 'users → web-frontend: HTTPS question'}
+- {n: '6', text: 'web-frontend → api-backend: query'}
+- {n: '7', text: 'api-backend → enterprise-search-app: search + grounded generation'}

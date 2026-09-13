@@ -1,0 +1,43 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/single-agent-ai-system-adk-cloud-run); edit freely.
+title: Single-agent AI system with ADK, MCP tools and Cloud Run
+category: ml
+tags:
+- agent
+- adk
+- function calling
+- mcp
+- cloud run
+- gemini
+source: https://docs.cloud.google.com/architecture/single-agent-ai-system-adk-cloud-run
+description: A frontend Cloud Run service forwards user prompts to an Agent Development Kit agent hosted on a second Cloud Run service, which reasons with a Gemini model on Vertex AI and decides which tools
+  to call. Tool calls go through Model Context Protocol servers to enterprise data such as Firestore and BigQuery, session state is persisted, and logs and traces flow to Cloud Observability.
+nodes:
+- {id: prj-agent-prj, type: gcp.project, name: agent-prj, props: {project_id: agent-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: chat-frontend, type: gcp.cloud_run_service, name: chat-frontend, parent: prj-agent-prj}
+- {id: adk-agent, type: gcp.cloud_run_service, name: adk-agent, parent: prj-agent-prj}
+- {id: mcp-tools-server, type: gcp.cloud_run_service, name: mcp-tools-server, parent: prj-agent-prj}
+- {id: session-store, type: gcp.res.google_firestore_database, name: session-store, parent: prj-agent-prj, props: {location_id: changeme, name: changeme, type: changeme}}
+- {id: enterprise-data, type: gcp.bigquery_dataset, name: enterprise-data, parent: prj-agent-prj}
+- id: tool-api-keys
+  type: gcp.res.google_secret_manager_secret
+  name: tool-api-keys
+  parent: prj-agent-prj
+  props: {replication: {}, secret_id: changeme}
+- {id: agent-images, type: gcp.res.google_artifact_registry_repository, name: agent-images, parent: prj-agent-prj, props: {format: changeme, repository_id: changeme}}
+edges:
+- {from: users, to: chat-frontend, label: HTTPS prompt, step: '1'}
+- {from: chat-frontend, to: adk-agent, label: forward request, step: '2'}
+- {from: adk-agent, to: session-store, label: read/write session state, step: '3'}
+- {from: adk-agent, to: mcp-tools-server, label: tool call (MCP), step: '4'}
+- {from: mcp-tools-server, to: enterprise-data, label: query data, step: '5'}
+- {from: mcp-tools-server, to: tool-api-keys, label: fetch credentials}
+- {from: adk-agent, to: chat-frontend, label: grounded response, step: '6'}
+- {from: agent-images, to: adk-agent, label: container image}
+steps:
+- {n: '1', text: 'users → chat-frontend: HTTPS prompt'}
+- {n: '2', text: 'chat-frontend → adk-agent: forward request'}
+- {n: '3', text: 'adk-agent → session-store: read/write session state'}
+- {n: '4', text: 'adk-agent → mcp-tools-server: tool call (MCP)'}
+- {n: '5', text: 'mcp-tools-server → enterprise-data: query data'}
+- {n: '6', text: 'adk-agent → chat-frontend: grounded response'}

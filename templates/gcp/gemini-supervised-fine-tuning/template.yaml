@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini-supervised-tuning); edit freely.
+title: Supervised fine-tuning of Gemini with Cloud Storage datasets
+category: ml
+tags:
+- fine-tuning
+- gemini
+- supervised tuning
+- model registry
+- evaluation
+- vertex ai endpoint
+source: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini-supervised-tuning
+description: Curated prompt-response pairs are exported from BigQuery to JSONL files in Cloud Storage and a Vertex AI Pipelines run launches a supervised tuning job for a Gemini base model with a held-out
+  validation split. The tuned model is registered in Vertex AI Model Registry, evaluated against the base model, and deployed to an endpoint consumed by a Cloud Run application, with tuning metrics logged
+  to BigQuery.
+nodes:
+- {id: prj-tuning-prj, type: gcp.project, name: tuning-prj, props: {project_id: tuning-prj-123456, project: changeme, region: us-central1}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: curated-examples, type: gcp.bigquery_dataset, name: curated-examples, parent: prj-tuning-prj}
+- {id: tuning-datasets, type: gcp.storage_bucket, name: tuning-datasets, parent: prj-tuning-prj}
+- {id: pipeline-root, type: gcp.storage_bucket, name: pipeline-root, parent: prj-tuning-prj}
+- {id: weekly-tune, type: gcp.res.google_cloud_scheduler_job, name: weekly-tune, parent: prj-tuning-prj, props: {name: changeme}}
+- {id: launch-tuning-fn, type: gcp.res.google_cloudfunctions2_function, name: launch-tuning-fn, parent: prj-tuning-prj, props: {location: westeurope, name: changeme}}
+- {id: tuned-gemini-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: tuned-gemini-endpoint, parent: prj-tuning-prj, props: {display_name: changeme, location: westeurope, name: changeme}}
+- {id: assistant-app, type: gcp.cloud_run_service, name: assistant-app, parent: prj-tuning-prj}
+- {id: tuning-metrics, type: gcp.bigquery_dataset, name: tuning-metrics, parent: prj-tuning-prj}
+edges:
+- {from: user, to: curated-examples, label: label + review examples, step: '1'}
+- {from: curated-examples, to: tuning-datasets, label: export JSONL train/validation, step: '2'}
+- {from: weekly-tune, to: launch-tuning-fn, label: cron, step: '3'}
+- {from: launch-tuning-fn, to: pipeline-root, label: run tuning pipeline, step: '4'}
+- {from: tuning-datasets, to: pipeline-root, label: tuning job input, step: '5'}
+- {from: pipeline-root, to: tuned-gemini-endpoint, label: register + deploy tuned model, step: '6'}
+- {from: pipeline-root, to: tuning-metrics, label: loss + eval metrics, step: '7'}
+- {from: users, to: assistant-app, label: HTTPS, step: '8'}
+- {from: assistant-app, to: tuned-gemini-endpoint, label: generateContent, step: '9'}
+steps:
+- {n: '1', text: 'user → curated-examples: label + review examples'}
+- {n: '2', text: 'curated-examples → tuning-datasets: export JSONL train/validation'}
+- {n: '3', text: 'weekly-tune → launch-tuning-fn: cron'}
+- {n: '4', text: 'launch-tuning-fn → pipeline-root: run tuning pipeline'}
+- {n: '5', text: 'tuning-datasets → pipeline-root: tuning job input'}
+- {n: '6', text: 'pipeline-root → tuned-gemini-endpoint: register + deploy tuned model'}
+- {n: '7', text: 'pipeline-root → tuning-metrics: loss + eval metrics'}
+- {n: '8', text: 'users → assistant-app: HTTPS'}
+- {n: '9', text: 'assistant-app → tuned-gemini-endpoint: generateContent'}

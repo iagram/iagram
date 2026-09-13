@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/gen-ai-rag-vertex-ai-vector-search); edit freely.
+title: RAG infrastructure with Vertex AI Vector Search and Cloud Run
+category: ml
+tags:
+- rag
+- vector search
+- embeddings
+- cloud run
+- pub/sub
+- gemini
+source: https://docs.cloud.google.com/architecture/gen-ai-rag-vertex-ai-vector-search
+description: Document uploads to Cloud Storage publish Pub/Sub notifications that trigger a Cloud Run function to chunk the content, call the Vertex AI embeddings API and upsert vectors into a Vector Search
+  index deployed on an index endpoint. A frontend Cloud Run service forwards user queries to a backend service that embeds the query, retrieves grounding chunks from Vector Search, augments the prompt for
+  a Gemini model and applies safety filters before answering.
+nodes:
+- {id: prj-rag-prj, type: gcp.project, name: rag-prj, props: {project_id: rag-prj-123456, project: changeme, region: europe-west1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: prj-rag-prj}
+- {id: grp-serving, type: common.group, name: serving, parent: prj-rag-prj}
+- {id: users, type: common.users, name: users}
+- {id: raw-docs-bucket, type: gcp.storage_bucket, name: raw-docs-bucket, parent: grp-ingestion}
+- {id: doc-uploaded-topic, type: gcp.pubsub_topic, name: doc-uploaded-topic, parent: grp-ingestion}
+- {id: embed-fn, type: gcp.res.google_cloudfunctions2_function, name: embed-fn, parent: grp-ingestion, props: {location: westeurope, name: changeme}}
+- {id: docs-index, type: gcp.res.google_vertex_ai_index, name: docs-index, parent: grp-serving, props: {display_name: changeme}}
+- {id: docs-index-endpoint, type: gcp.res.google_vertex_ai_index_endpoint, name: docs-index-endpoint, parent: grp-serving, props: {display_name: changeme}}
+- {id: chat-frontend, type: gcp.cloud_run_service, name: chat-frontend, parent: grp-serving}
+- {id: rag-backend, type: gcp.cloud_run_service, name: rag-backend, parent: grp-serving}
+- {id: eval-scores, type: gcp.bigquery_dataset, name: eval-scores, parent: prj-rag-prj}
+edges:
+- {from: raw-docs-bucket, to: doc-uploaded-topic, label: object finalize notification, step: '1'}
+- {from: doc-uploaded-topic, to: embed-fn, label: push trigger, step: '2'}
+- {from: embed-fn, to: docs-index, label: chunk + embed + upsert, step: '3'}
+- {from: docs-index, to: docs-index-endpoint, label: deployed index}
+- {from: users, to: chat-frontend, label: HTTPS prompt, step: '4'}
+- {from: chat-frontend, to: rag-backend, label: query, step: '5'}
+- {from: rag-backend, to: docs-index-endpoint, label: nearest-neighbour lookup, step: '6'}
+- {from: rag-backend, to: eval-scores, label: response quality scores, step: '7'}
+steps:
+- {n: '1', text: 'raw-docs-bucket → doc-uploaded-topic: object finalize notification'}
+- {n: '2', text: 'doc-uploaded-topic → embed-fn: push trigger'}
+- {n: '3', text: 'embed-fn → docs-index: chunk + embed + upsert'}
+- {n: '4', text: 'users → chat-frontend: HTTPS prompt'}
+- {n: '5', text: 'chat-frontend → rag-backend: query'}
+- {n: '6', text: 'rag-backend → docs-index-endpoint: nearest-neighbour lookup'}
+- {n: '7', text: 'rag-backend → eval-scores: response quality scores'}

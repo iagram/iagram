@@ -1,0 +1,55 @@
+# Generated from the official reference (https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/overview); edit freely.
+title: Model monitoring for skew and drift on Vertex AI endpoints
+category: ml
+tags:
+- model monitoring
+- drift
+- skew
+- vertex ai endpoint
+- bigquery
+- alerting
+- retraining
+source: https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/overview
+description: Requests to a Vertex AI online endpoint are logged to BigQuery, and a Vertex AI model monitor compares the serving feature distributions against the training baseline in Cloud Storage on a
+  schedule to detect skew and drift. Threshold breaches raise Cloud Monitoring alerts that publish to Pub/Sub, where a Cloud Run function triggers the retraining pipeline in Vertex AI Pipelines to refresh
+  the deployed model.
+nodes:
+- {id: prj-monitoring-prj, type: gcp.project, name: monitoring-prj, props: {project_id: monitoring-prj-123456, project: changeme, region: us-central1}}
+- {id: client, type: common.client, name: client}
+- {id: user, type: common.user, name: user}
+- {id: prod-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: prod-endpoint, parent: prj-monitoring-prj, props: {display_name: changeme, location: westeurope, name: changeme}}
+- {id: prediction-logs, type: gcp.bigquery_dataset, name: prediction-logs, parent: prj-monitoring-prj}
+- {id: training-baseline, type: gcp.storage_bucket, name: training-baseline, parent: prj-monitoring-prj}
+- {id: monitor-schedule, type: gcp.res.google_cloud_scheduler_job, name: monitor-schedule, parent: prj-monitoring-prj, props: {name: changeme}}
+- id: drift-alert
+  type: gcp.res.google_monitoring_alert_policy
+  name: drift-alert
+  parent: prj-monitoring-prj
+  props:
+    combiner: changeme
+    conditions: []
+    display_name: changeme
+- {id: drift-detected, type: gcp.pubsub_topic, name: drift-detected, parent: prj-monitoring-prj}
+- {id: trigger-retrain-fn, type: gcp.res.google_cloudfunctions2_function, name: trigger-retrain-fn, parent: prj-monitoring-prj, props: {location: westeurope, name: changeme}}
+- {id: retrain-pipeline-root, type: gcp.storage_bucket, name: retrain-pipeline-root, parent: prj-monitoring-prj}
+edges:
+- {from: client, to: prod-endpoint, label: online predictions, step: '1'}
+- {from: prod-endpoint, to: prediction-logs, label: request-response logging, step: '2'}
+- {from: monitor-schedule, to: prediction-logs, label: scheduled monitoring job reads serving data, step: '3'}
+- {from: training-baseline, to: prediction-logs, label: baseline distribution comparison, step: '4'}
+- {from: prediction-logs, to: drift-alert, label: skew/drift metrics, step: '5'}
+- {from: drift-alert, to: drift-detected, label: notification channel, step: '6'}
+- {from: drift-alert, to: user, label: email / chat alert, step: '6'}
+- {from: drift-detected, to: trigger-retrain-fn, label: trigger, step: '7'}
+- {from: trigger-retrain-fn, to: retrain-pipeline-root, label: submit retraining pipeline, step: '8'}
+- {from: retrain-pipeline-root, to: prod-endpoint, label: deploy refreshed model, step: '9'}
+steps:
+- {n: '1', text: 'client → prod-endpoint: online predictions'}
+- {n: '2', text: 'prod-endpoint → prediction-logs: request-response logging'}
+- {n: '3', text: 'monitor-schedule → prediction-logs: scheduled monitoring job reads serving data'}
+- {n: '4', text: 'training-baseline → prediction-logs: baseline distribution comparison'}
+- {n: '5', text: 'prediction-logs → drift-alert: skew/drift metrics'}
+- {n: '6', text: 'drift-alert → drift-detected: notification channel'}
+- {n: '7', text: 'drift-detected → trigger-retrain-fn: trigger'}
+- {n: '8', text: 'trigger-retrain-fn → retrain-pipeline-root: submit retraining pipeline'}
+- {n: '9', text: 'retrain-pipeline-root → prod-endpoint: deploy refreshed model'}

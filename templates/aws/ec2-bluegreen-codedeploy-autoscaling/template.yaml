@@ -1,0 +1,70 @@
+# Generated from the official reference (https://docs.aws.amazon.com/codedeploy/latest/userguide/deployments-create-console-blue-green.html); edit freely.
+title: EC2 blue/green deployment with CodeDeploy, Auto Scaling and a load balancer
+category: devops
+tags:
+- codedeploy
+- ec2
+- auto scaling
+- blue/green
+- elb
+- codepipeline
+source: https://docs.aws.amazon.com/codedeploy/latest/userguide/deployments-create-console-blue-green.html
+description: A CodeDeploy deployment group on the EC2/On-premises platform copies the current (blue) Auto Scaling group into a replacement (green) group, installs the revision from the pipeline artifact
+  bucket on the new instances, and registers them with the load balancer target group once healthy. Traffic is rerouted from the original instances to the replacement instances, and the original Auto Scaling
+  group is terminated after a configurable wait so a rollback simply reregisters the blue fleet.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-eu-west-1}
+- {id: vpc-web, type: aws.vpc, name: web, parent: reg-eu-west-1, props: {cidr: 10.20.0.0/16}}
+- {id: az-web-a, type: aws.availability_zone, name: a, parent: vpc-web, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-web-a, props: {cidr: 10.20.0.0/24, az: a, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-web-a, props: {cidr: 10.20.10.0/24, az: a, public: false}}
+- {id: az-web-b, type: aws.availability_zone, name: b, parent: vpc-web, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-web-b, props: {cidr: 10.20.11.0/24, az: b, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: web-app-repo, type: aws.res.aws_codecommit_repository, name: web-app-repo, parent: grp-pipeline, props: {repository_name: changeme}}
+- id: web-pipeline
+  type: aws.res.aws_codepipeline
+  name: web-pipeline
+  parent: grp-pipeline
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- id: web-build
+  type: aws.res.aws_codebuild_project
+  name: web-build
+  parent: grp-pipeline
+  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
+- {id: revision-bucket, type: aws.s3_bucket, name: revision-bucket, parent: grp-pipeline}
+- {id: web-codedeploy-app, type: aws.res.aws_codedeploy_app, name: web-codedeploy-app, parent: grp-pipeline, props: {name: changeme}}
+- {id: web-alb, type: aws.alb, name: web-alb, parent: az-web-a}
+- {id: web-launch-template, type: aws.res.aws_launch_template, name: web-launch-template, parent: vpc-web}
+- {id: blue-asg, type: aws.res.aws_autoscaling_group, name: blue-asg, parent: sub-private-a, props: {max_size: 1, min_size: 1}}
+- {id: green-asg, type: aws.res.aws_autoscaling_group, name: green-asg, parent: sub-private-b, props: {max_size: 1, min_size: 1}}
+- {id: codedeploy-service-role, type: aws.res.aws_iam_role, name: codedeploy-service-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}}
+edges:
+- {from: user, to: web-app-repo, label: git push, step: '1'}
+- {from: web-app-repo, to: web-pipeline, label: source action, step: '2'}
+- {from: web-pipeline, to: web-build, label: build appspec.yml bundle, step: '3'}
+- {from: web-build, to: revision-bucket, label: revision artifact, step: '4'}
+- {from: web-pipeline, to: web-codedeploy-app, label: CodeDeploy deploy action, step: '5'}
+- {from: web-codedeploy-app, to: green-asg, label: copy blue ASG and launch replacement instances, step: '6'}
+- {from: revision-bucket, to: green-asg, label: CodeDeploy agent pulls revision, step: '7'}
+- {from: web-codedeploy-app, to: web-alb, label: register green targets and reroute traffic, step: '8'}
+- {from: web-codedeploy-app, to: blue-asg, label: deregister and terminate after wait, step: '9'}
+- {from: users, to: web-alb, label: HTTPS}
+- {from: web-launch-template, to: green-asg, label: launch template}
+steps:
+- {n: '1', text: 'user → web-app-repo: git push'}
+- {n: '2', text: 'web-app-repo → web-pipeline: source action'}
+- {n: '3', text: 'web-pipeline → web-build: build appspec.yml bundle'}
+- {n: '4', text: 'web-build → revision-bucket: revision artifact'}
+- {n: '5', text: 'web-pipeline → web-codedeploy-app: CodeDeploy deploy action'}
+- {n: '6', text: 'web-codedeploy-app → green-asg: copy blue ASG and launch replacement instances'}
+- {n: '7', text: 'revision-bucket → green-asg: CodeDeploy agent pulls revision'}
+- {n: '8', text: 'web-codedeploy-app → web-alb: register green targets and reroute traffic'}
+- {n: '9', text: 'web-codedeploy-app → blue-asg: deregister and terminate after wait'}
