@@ -1,0 +1,65 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/multiplayer-session-based-game-hosting-on-aws/); edit freely.
+title: Session-based multiplayer game backend with GameLift FlexMatch
+category: industry
+tags:
+- gaming
+- game backend
+- gamelift
+- flexmatch
+- matchmaking
+- api gateway
+- dynamodb
+source: https://docs.aws.amazon.com/solutions/multiplayer-session-based-game-hosting-on-aws/
+description: Guidance for Multiplayer Session-Based Game Hosting on AWS has game clients measure Region latency, then call an API Gateway backend whose Lambda function submits a StartMatchmaking request
+  to Amazon GameLift FlexMatch; the GameLift queue places the match on the lowest-latency fleet location. Matchmaking events flow to an SNS topic and a Lambda function records ticket status in DynamoDB,
+  the client polls for the game session IP and port, connects directly to the game server and instances ship logs and metrics to CloudWatch.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-backend-api, type: common.group, name: backend-api, parent: reg-us-east-1}
+- {id: grp-game-hosting, type: common.group, name: game-hosting, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: player-identity, type: aws.res.aws_cognito_user_pool, name: player-identity, parent: grp-backend-api, props: {name: changeme}}
+- {id: matchmaking-api, type: aws.res.aws_api_gateway_rest_api, name: matchmaking-api, parent: grp-backend-api, props: {name: changeme}}
+- {id: request-matchmaking, type: aws.lambda_function, name: request-matchmaking, parent: grp-backend-api}
+- {id: get-match-status, type: aws.lambda_function, name: get-match-status, parent: grp-backend-api}
+- {id: matchmaking-tickets, type: aws.dynamodb_table, name: matchmaking-tickets, parent: grp-backend-api}
+- id: game-server-build
+  type: aws.res.aws_gamelift_build
+  name: game-server-build
+  parent: grp-game-hosting
+  props: {name: changeme, operating_system: changeme, storage_location: {}}
+- {id: game-server-fleet, type: aws.res.aws_gamelift_fleet, name: game-server-fleet, parent: grp-game-hosting, props: {ec2_instance_type: changeme, name: changeme}}
+- {id: placement-queue, type: aws.res.aws_gamelift_game_session_queue, name: placement-queue, parent: grp-game-hosting, props: {name: changeme}}
+- {id: matchmaking-events, type: aws.res.aws_sns_topic, name: matchmaking-events, parent: reg-us-east-1}
+- {id: process-matchmaking-events, type: aws.lambda_function, name: process-matchmaking-events, parent: reg-us-east-1}
+- {id: game-server-logs, type: aws.res.aws_cloudwatch_log_group, name: game-server-logs, parent: reg-us-east-1}
+edges:
+- {from: client, to: matchmaking-tickets, label: latency probe to Regional endpoint, step: '1'}
+- {from: client, to: matchmaking-api, label: POST request-matchmaking with latencies, step: '2'}
+- {from: matchmaking-api, to: player-identity, label: JWT validation, step: '3'}
+- {from: matchmaking-api, to: request-matchmaking, label: Lambda proxy, step: '4'}
+- {from: request-matchmaking, to: placement-queue, label: StartMatchmaking via FlexMatch, step: '5'}
+- {from: placement-queue, to: game-server-fleet, label: game session placement, step: '6'}
+- {from: game-server-build, to: game-server-fleet, label: server build}
+- {from: placement-queue, to: matchmaking-events, label: MatchmakingSucceeded event, step: '7'}
+- {from: matchmaking-events, to: process-matchmaking-events, step: '8', link: aws_sns_topic_subscription}
+- {from: process-matchmaking-events, to: matchmaking-tickets, label: update ticket status}
+- {from: client, to: matchmaking-api, label: GET match status, step: '9'}
+- {from: matchmaking-api, to: get-match-status, label: Lambda proxy}
+- {from: get-match-status, to: matchmaking-tickets, label: GetItem ticket, step: '10'}
+- {from: client, to: game-server-fleet, label: UDP or TCP game session connect, step: '11'}
+- {from: game-server-fleet, to: game-server-logs, label: CloudWatch agent, step: '12'}
+steps:
+- {n: '1', text: 'client → matchmaking-tickets: latency probe to Regional endpoint'}
+- {n: '2', text: 'client → matchmaking-api: POST request-matchmaking with latencies'}
+- {n: '3', text: 'matchmaking-api → player-identity: JWT validation'}
+- {n: '4', text: 'matchmaking-api → request-matchmaking: Lambda proxy'}
+- {n: '5', text: 'request-matchmaking → placement-queue: StartMatchmaking via FlexMatch'}
+- {n: '6', text: 'placement-queue → game-server-fleet: game session placement'}
+- {n: '7', text: 'placement-queue → matchmaking-events: MatchmakingSucceeded event'}
+- {n: '8', text: matchmaking-events → process-matchmaking-events}
+- {n: '9', text: 'client → matchmaking-api: GET match status'}
+- {n: '10', text: 'get-match-status → matchmaking-tickets: GetItem ticket'}
+- {n: '11', text: 'client → game-server-fleet: UDP or TCP game session connect'}
+- {n: '12', text: 'game-server-fleet → game-server-logs: CloudWatch agent'}

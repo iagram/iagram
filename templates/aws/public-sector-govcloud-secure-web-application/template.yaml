@@ -1,0 +1,63 @@
+# Generated from the official reference (https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/whatis.html); edit freely.
+title: Secure public sector web application in AWS GovCloud (US)
+category: industry
+tags:
+- public sector
+- govcloud
+- fedramp high
+- cui
+- fips endpoints
+- web application
+source: https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/whatis.html
+description: A citizen-facing web application deployed in the AWS GovCloud (US-West) Region for Controlled Unclassified Information, using FIPS 140-3 endpoints, WAF and an Application Load Balancer in front
+  of an ECS service in private subnets and an encrypted Aurora cluster. Identity is federated from an agency IdP through Cognito, KMS customer managed keys encrypt all data at rest, and CloudTrail, AWS
+  Config, GuardDuty and Security Hub provide the continuous monitoring evidence required by FedRAMP High.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-gov-west-1, type: aws.region, name: us-gov-west-1, parent: acct-prod, props: {region: us-gov-west-1}}
+- {id: vpc-agency-app, type: aws.vpc, name: agency-app, parent: reg-us-gov-west-1, props: {cidr: 10.50.0.0/16}}
+- {id: az-agency-app-a, type: aws.availability_zone, name: a, parent: vpc-agency-app, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-agency-app-a, props: {cidr: 10.50.0.0/24, az: a, public: true}}
+- {id: az-agency-app-b, type: aws.availability_zone, name: b, parent: vpc-agency-app, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-agency-app-b, props: {cidr: 10.50.1.0/24, az: b, public: true}}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-agency-app-a, props: {cidr: 10.50.10.0/24, az: a, public: false}}
+- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-agency-app-b, props: {cidr: 10.50.11.0/24, az: b, public: false}}
+- {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-agency-app-a, props: {cidr: 10.50.20.0/24, az: a, public: false}}
+- {id: sub-data-b, type: aws.subnet, name: data-b, parent: az-agency-app-b, props: {cidr: 10.50.21.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: idp, type: common.idp, name: idp}
+- id: agency-waf
+  type: aws.res.aws_wafv2_web_acl
+  name: agency-waf
+  parent: reg-us-gov-west-1
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+- {id: agency-alb, type: aws.alb, name: agency-alb, parent: az-agency-app-a}
+- {id: agency-services, type: aws.res.aws_ecs_cluster, name: agency-services, parent: sub-app-a, props: {name: changeme}}
+- {id: cui-aurora, type: aws.res.aws_rds_cluster, name: cui-aurora, parent: sub-data-a, props: {engine: changeme}}
+- {id: cui-documents, type: aws.s3_bucket, name: cui-documents, parent: reg-us-gov-west-1}
+- {id: citizen-identity, type: aws.res.aws_cognito_user_pool, name: citizen-identity, parent: reg-us-gov-west-1, props: {name: changeme}}
+- {id: cui-cmk, type: aws.res.aws_kms_key, name: cui-cmk, parent: reg-us-gov-west-1}
+- {id: agency-audit-trail, type: aws.res.aws_cloudtrail, name: agency-audit-trail, parent: reg-us-gov-west-1, props: {name: changeme, s3_bucket_name: changeme}}
+- {id: compliance-recorder, type: aws.res.aws_config_configuration_recorder, name: compliance-recorder, parent: reg-us-gov-west-1, props: {role_arn: changeme}}
+- {id: threat-detection, type: aws.res.aws_guardduty_detector, name: threat-detection, parent: reg-us-gov-west-1}
+- {id: fedramp-findings, type: aws.res.aws_securityhub_account, name: fedramp-findings, parent: reg-us-gov-west-1}
+edges:
+- {from: users, to: agency-waf, label: HTTPS FIPS endpoint, step: '1'}
+- {from: agency-waf, to: agency-alb, label: filtered requests, step: '2'}
+- {from: agency-alb, to: agency-services, label: HTTPS to tasks, step: '3'}
+- {from: users, to: citizen-identity, label: sign-in}
+- {from: idp, to: citizen-identity, label: SAML federation, step: '4'}
+- {from: agency-services, to: cui-aurora, label: encrypted SQL, step: '5'}
+- {from: agency-services, to: cui-documents, label: SSE-KMS PutObject, step: '6'}
+- {from: cui-aurora, to: cui-cmk, label: encryption at rest}
+- {from: cui-documents, to: cui-cmk, label: encryption at rest}
+- {from: agency-audit-trail, to: cui-documents, label: audit log delivery}
+- {from: compliance-recorder, to: fedramp-findings, label: config compliance}
+- {from: threat-detection, to: fedramp-findings, label: findings}
+steps:
+- {n: '1', text: 'users → agency-waf: HTTPS FIPS endpoint'}
+- {n: '2', text: 'agency-waf → agency-alb: filtered requests'}
+- {n: '3', text: 'agency-alb → agency-services: HTTPS to tasks'}
+- {n: '4', text: 'idp → citizen-identity: SAML federation'}
+- {n: '5', text: 'agency-services → cui-aurora: encrypted SQL'}
+- {n: '6', text: 'agency-services → cui-documents: SSE-KMS PutObject'}

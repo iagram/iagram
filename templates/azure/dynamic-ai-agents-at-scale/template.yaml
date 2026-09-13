@@ -1,0 +1,93 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/ai-agents-at-scale); edit freely.
+title: Dynamic AI agents at scale on AKS with semantic agent selection
+category: ml
+tags:
+- multi-agent
+- aks
+- ai-search
+- semantic-cache
+- redis
+- foundry
+- azure-openai
+- orchestration
+source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/ai-agents-at-scale
+description: An agent service on AKS receives user queries behind Application Gateway, and an agent selector queries an AI Search semantic cache of sample utterances to shortlist candidate agents before
+  an LLM picks one or the top-scoring agent is invoked directly. An agent factory instantiates the selected agent, which calls Azure OpenAI models in Foundry, keeps multiturn context in Azure Managed Redis,
+  and reaches external APIs or MCP servers through a firewall or NAT gateway.
+nodes:
+- {id: sub-agents-prod, type: azure.subscription, name: agents-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-agents-scale, type: azure.resource_group, name: rg-agents-scale, parent: sub-agents-prod, props: {location: westus3}}
+- {id: vpc-vnet-agents, type: azure.vnet, name: vnet-agents, parent: rg-rg-agents-scale, props: {cidr: 10.20.0.0/16}}
+- {id: sub-snet-gateway, type: azure.subnet, name: snet-gateway, parent: vpc-vnet-agents, props: {cidr: 10.20.0.0/24}}
+- {id: sub-snet-cluster, type: azure.subnet, name: snet-cluster, parent: vpc-vnet-agents, props: {cidr: 10.20.16.0/20}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-agents, props: {cidr: 10.20.1.0/24}}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-agents, props: {cidr: 10.20.2.0/26}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- id: agw-agents
+  type: azure.res.azurerm_application_gateway
+  name: agw-agents
+  parent: sub-snet-gateway
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: aks-agents, type: azure.aks_cluster, name: aks-agents, parent: sub-snet-cluster}
+- {id: acragents, type: azure.container_registry, name: acragents, parent: rg-rg-agents-scale}
+- {id: srch-semantic-cache, type: azure.res.azurerm_search_service, name: srch-semantic-cache, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: foundry-agents, type: azure.res.azurerm_cognitive_account, name: foundry-agents, parent: rg-rg-agents-scale, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: gpt-4o-agents
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-agents
+  parent: rg-rg-agents-scale
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- {id: redis-conversation, type: azure.res.azurerm_redis_cache, name: redis-conversation, parent: rg-rg-agents-scale, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: cosmos-agent-registry
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-agent-registry
+  parent: rg-rg-agents-scale
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: stagentlogs, type: azure.storage_account, name: stagentlogs, parent: rg-rg-agents-scale}
+- {id: kv-agents, type: azure.key_vault, name: kv-agents, parent: rg-rg-agents-scale}
+- id: pe-search-cache
+  type: azure.res.azurerm_private_endpoint
+  name: pe-search-cache
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: afw-agents, type: azure.res.azurerm_firewall, name: afw-agents, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: appi-agents, type: azure.res.azurerm_application_insights, name: appi-agents, parent: rg-rg-agents-scale, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-agents, type: azure.res.azurerm_log_analytics_workspace, name: law-agents, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: agw-agents, label: HTTPS (WAF), step: '1'}
+- {from: agw-agents, to: aks-agents, label: AI agent service, step: '2'}
+- {from: aks-agents, to: pe-search-cache, label: vector similarity on utterances, step: '3'}
+- {from: pe-search-cache, to: srch-semantic-cache, label: private link}
+- {from: aks-agents, to: cosmos-agent-registry, label: agent definitions (code / YAML), step: '4'}
+- {from: aks-agents, to: gpt-4o-agents, label: agent selection and response, step: '5'}
+- {from: gpt-4o-agents, to: foundry-agents, label: hosted in Foundry}
+- {from: aks-agents, to: redis-conversation, label: chat history (TTL)}
+- {from: aks-agents, to: afw-agents, label: external APIs / MCP, step: '6'}
+- {from: afw-agents, to: internet, label: static outbound IP}
+- {from: acragents, to: aks-agents, label: agent images}
+- {from: aks-agents, to: appi-agents, label: OpenTelemetry traces}
+- {from: appi-agents, to: law-agents, label: logs and KQL}
+steps:
+- {n: '1', text: 'users → agw-agents: HTTPS (WAF)'}
+- {n: '2', text: 'agw-agents → aks-agents: AI agent service'}
+- {n: '3', text: 'aks-agents → pe-search-cache: vector similarity on utterances'}
+- {n: '4', text: 'aks-agents → cosmos-agent-registry: agent definitions (code / YAML)'}
+- {n: '5', text: 'aks-agents → gpt-4o-agents: agent selection and response'}
+- {n: '6', text: 'aks-agents → afw-agents: external APIs / MCP'}

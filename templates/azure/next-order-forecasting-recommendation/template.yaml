@@ -1,0 +1,69 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/idea/next-order-forecasting); edit freely.
+title: Next-order forecasting and product recommendations with Azure Machine Learning
+category: ml
+tags:
+- recommendation
+- forecasting
+- parallel-jobs
+- compute-cluster
+- online-endpoint
+- data-factory
+- sql-database
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/idea/next-order-forecasting
+description: Azure Data Factory ingests order, customer, merchandise, and partner data into a Data Lake Storage and SQL Database staging area, and Azure Machine Learning parallel jobs on a compute cluster
+  train a forecasting model for every customer-store and SKU combination. Registered models are deployed to managed online endpoints, predictions are written back to the analytical stores, and a web app,
+  Power BI, or Power Apps surface recommended SKUs and quantities to customers.
+nodes:
+- {id: sub-distribution-analytics, type: azure.subscription, name: distribution-analytics, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-order-forecast, type: azure.resource_group, name: rg-order-forecast, parent: sub-distribution-analytics, props: {location: centralus}}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: database, type: common.database, name: database}
+- {id: sql-orders-staging, type: azure.res.azurerm_mssql_server, name: sql-orders-staging, parent: rg-rg-order-forecast, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: adf-order-ingest, type: azure.res.azurerm_data_factory, name: adf-order-ingest, parent: rg-rg-order-forecast, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: storderlake, type: azure.storage_account, name: storderlake, parent: rg-rg-order-forecast}
+- id: mlw-forecast
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-forecast
+  parent: rg-rg-order-forecast
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- id: cpu-cluster-forecast
+  type: azure.res.azurerm_machine_learning_compute_cluster
+  name: cpu-cluster-forecast
+  parent: rg-rg-order-forecast
+  props: {location: westeurope, machine_learning_workspace_id: changeme, name: changeme, scale_settings: {}, vm_priority: changeme, vm_size: changeme}
+- {id: online-endpoint-forecast, type: azure.res.azurerm_machine_learning_inference_cluster, name: online-endpoint-forecast, parent: rg-rg-order-forecast, props: {kubernetes_cluster_id: changeme, location: westeurope,
+    machine_learning_workspace_id: changeme, name: changeme}}
+- {id: acrforecast, type: azure.container_registry, name: acrforecast, parent: rg-rg-order-forecast}
+- {id: kv-forecast, type: azure.key_vault, name: kv-forecast, parent: rg-rg-order-forecast}
+- {id: asp-recommendations, type: azure.res.azurerm_service_plan, name: asp-recommendations, parent: rg-rg-order-forecast, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: app-recommendations
+  type: azure.res.azurerm_linux_web_app
+  name: app-recommendations
+  parent: rg-rg-order-forecast
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: appi-forecast, type: azure.res.azurerm_application_insights, name: appi-forecast, parent: rg-rg-order-forecast, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: database, to: adf-order-ingest, label: orders, step: '1'}
+- {from: saas, to: adf-order-ingest, label: partner data (weather}
+- {from: adf-order-ingest, to: storderlake, label: staging (data lake), step: '2'}
+- {from: adf-order-ingest, to: sql-orders-staging, label: staging (SQL)}
+- {from: storderlake, to: cpu-cluster-forecast, label: per store-SKU datasets, step: '3'}
+- {from: cpu-cluster-forecast, to: mlw-forecast, label: parallel jobs register models, step: '4'}
+- {from: mlw-forecast, to: online-endpoint-forecast, label: deploy to managed online endpoint, step: '5'}
+- {from: acrforecast, to: online-endpoint-forecast, label: scoring environment}
+- {from: online-endpoint-forecast, to: sql-orders-staging, label: write predictions, step: '6'}
+- {from: app-recommendations, to: online-endpoint-forecast, label: real-time SKU and quantity forecast, step: '7'}
+- {from: users, to: app-recommendations, label: recommended next order, step: '8'}
+- {from: app-recommendations, to: kv-forecast, label: endpoint key}
+- {from: app-recommendations, to: appi-forecast, label: telemetry}
+steps:
+- {n: '1', text: 'database → adf-order-ingest: orders'}
+- {n: '2', text: 'adf-order-ingest → storderlake: staging (data lake)'}
+- {n: '3', text: 'storderlake → cpu-cluster-forecast: per store-SKU datasets'}
+- {n: '4', text: 'cpu-cluster-forecast → mlw-forecast: parallel jobs register models'}
+- {n: '5', text: 'mlw-forecast → online-endpoint-forecast: deploy to managed online endpoint'}
+- {n: '6', text: 'online-endpoint-forecast → sql-orders-staging: write predictions'}
+- {n: '7', text: 'app-recommendations → online-endpoint-forecast: real-time SKU and quantity forecast'}
+- {n: '8', text: 'users → app-recommendations: recommended next order'}

@@ -1,0 +1,96 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-microsoft-foundry-chat); edit freely.
+title: Baseline Microsoft Foundry chat with RAG
+category: ml
+tags:
+- rag
+- azure-openai
+- ai-search
+- app-service
+- private-endpoint
+- application-gateway
+- foundry-agent
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-microsoft-foundry-chat
+description: A zone-redundant App Service chat UI behind Application Gateway with WAF calls a Foundry Agent Service prompt agent over a private endpoint; the agent grounds Azure OpenAI completions with
+  vector results from Azure AI Search and persists conversation state in Cosmos DB and Blob Storage. Every PaaS dependency is reached through private endpoints in a segmented virtual network, and agent
+  egress to public tools and MCP servers is forced through Azure Firewall FQDN rules.
+nodes:
+- {id: sub-workload-prod, type: azure.subscription, name: workload-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-chat-baseline, type: azure.resource_group, name: rg-chat-baseline, parent: sub-workload-prod, props: {location: eastus2}}
+- {id: vpc-vnet-chat, type: azure.vnet, name: vnet-chat, parent: rg-rg-chat-baseline, props: {cidr: 10.0.0.0/16}}
+- {id: sub-snet-appgateway, type: azure.subnet, name: snet-appGateway, parent: vpc-vnet-chat, props: {cidr: 10.0.1.0/24}}
+- {id: sub-snet-appserviceplan, type: azure.subnet, name: snet-appServicePlan, parent: vpc-vnet-chat, props: {cidr: 10.0.2.0/24}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-chat, props: {cidr: 10.0.3.0/24}}
+- {id: sub-snet-agentsegress, type: azure.subnet, name: snet-agentsEgress, parent: vpc-vnet-chat, props: {cidr: 10.0.4.0/24}}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-chat, props: {cidr: 10.0.5.0/26}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- id: agw-chat
+  type: azure.res.azurerm_application_gateway
+  name: agw-chat
+  parent: sub-snet-appgateway
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: asp-chat, type: azure.res.azurerm_service_plan, name: asp-chat, parent: sub-snet-appserviceplan, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-chat-ui
+  type: azure.res.azurerm_linux_web_app
+  name: app-chat-ui
+  parent: sub-snet-appserviceplan
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: pe-foundry
+  type: azure.res.azurerm_private_endpoint
+  name: pe-foundry
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: foundry-chat, type: azure.res.azurerm_cognitive_account, name: foundry-chat, parent: rg-rg-chat-baseline, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: gpt-4o-deployment
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-deployment
+  parent: rg-rg-chat-baseline
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- {id: srch-grounding, type: azure.res.azurerm_search_service, name: srch-grounding, parent: rg-rg-chat-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- id: cosmos-enterprise-memory
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-enterprise-memory
+  parent: rg-rg-chat-baseline
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: stchatfiles, type: azure.storage_account, name: stchatfiles, parent: rg-rg-chat-baseline}
+- {id: kv-chat-tls, type: azure.key_vault, name: kv-chat-tls, parent: rg-rg-chat-baseline}
+- {id: afw-egress, type: azure.res.azurerm_firewall, name: afw-egress, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: appi-chat, type: azure.res.azurerm_application_insights, name: appi-chat, parent: rg-rg-chat-baseline, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-chat, type: azure.res.azurerm_log_analytics_workspace, name: law-chat, parent: rg-rg-chat-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: agw-chat, label: HTTPS (WAF), step: '1'}
+- {from: agw-chat, to: app-chat-ui, label: route to chat UI, step: '2'}
+- {from: app-chat-ui, to: pe-foundry, label: Responses API (managed identity), step: '3'}
+- {from: pe-foundry, to: foundry-chat, label: private link}
+- {from: foundry-chat, to: srch-grounding, label: AI Search tool (vector + semantic), step: '4'}
+- {from: foundry-chat, to: afw-egress, label: public tool / MCP egress, step: '5'}
+- {from: afw-egress, to: internet, label: FQDN-allowed egress}
+- {from: foundry-chat, to: gpt-4o-deployment, label: model inference, step: '6'}
+- {from: foundry-chat, to: cosmos-enterprise-memory, label: persist conversation items, step: '7'}
+- {from: foundry-chat, to: stchatfiles, label: uploaded files}
+- {from: agw-chat, to: kv-chat-tls, label: TLS certificate}
+- {from: app-chat-ui, to: appi-chat, label: telemetry}
+- {from: appi-chat, to: law-chat, label: logs}
+steps:
+- {n: '1', text: 'users → agw-chat: HTTPS (WAF)'}
+- {n: '2', text: 'agw-chat → app-chat-ui: route to chat UI'}
+- {n: '3', text: 'app-chat-ui → pe-foundry: Responses API (managed identity)'}
+- {n: '4', text: 'foundry-chat → srch-grounding: AI Search tool (vector + semantic)'}
+- {n: '5', text: 'foundry-chat → afw-egress: public tool / MCP egress'}
+- {n: '6', text: 'foundry-chat → gpt-4o-deployment: model inference'}
+- {n: '7', text: 'foundry-chat → cosmos-enterprise-memory: persist conversation items'}

@@ -1,0 +1,82 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/azure-openai-gateway-multi-backend); edit freely.
+title: GenAI gateway with API Management across multiple Foundry model backends
+category: ml
+tags:
+- genai-gateway
+- api-management
+- load-balancing
+- circuit-breaker
+- azure-openai
+- multi-region
+- token-limit
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/azure-openai-gateway-multi-backend
+description: Intelligent applications call a single API Management endpoint instead of Foundry data-plane APIs directly, and gateway policies load-balance across provisioned and standard model deployments
+  in several Azure OpenAI instances and regions with priority routing, circuit breaking on 429 responses, token rate limits, and token metrics. Private endpoints connect the gateway to each backend, and
+  Event Hubs plus Log Analytics receive usage and prompt logs for chargeback and auditing.
+nodes:
+- {id: sub-ai-platform, type: azure.subscription, name: ai-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-genai-gateway, type: azure.resource_group, name: rg-genai-gateway, parent: sub-ai-platform, props: {location: eastus2}}
+- {id: vpc-vnet-gateway, type: azure.vnet, name: vnet-gateway, parent: rg-rg-genai-gateway, props: {cidr: 10.60.0.0/16}}
+- {id: sub-snet-apim, type: azure.subnet, name: snet-apim, parent: vpc-vnet-gateway, props: {cidr: 10.60.0.0/24}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-gateway, props: {cidr: 10.60.1.0/24}}
+- {id: rg-rg-genai-backends-west, type: azure.resource_group, name: rg-genai-backends-west, parent: sub-ai-platform, props: {location: westus}}
+- {id: client, type: common.client, name: client}
+- {id: users, type: common.users, name: users}
+- {id: apim-genai-gateway, type: azure.res.azurerm_api_management, name: apim-genai-gateway, parent: sub-snet-apim, props: {location: westeurope, name: changeme, publisher_email: changeme, publisher_name: changeme,
+    resource_group_name: changeme, sku_name: changeme}}
+- id: pe-aoai-east
+  type: azure.res.azurerm_private_endpoint
+  name: pe-aoai-east
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-aoai-west
+  type: azure.res.azurerm_private_endpoint
+  name: pe-aoai-west
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: aoai-east-ptu, type: azure.res.azurerm_cognitive_account, name: aoai-east-ptu, parent: rg-rg-genai-gateway, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: gpt-4o-provisioned
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-provisioned
+  parent: rg-rg-genai-gateway
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- id: gpt-4o-standard
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-standard
+  parent: rg-rg-genai-gateway
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- {id: aoai-west-standard, type: azure.res.azurerm_cognitive_account, name: aoai-west-standard, parent: rg-rg-genai-backends-west, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: gpt-4o-west
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-west
+  parent: rg-rg-genai-backends-west
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- {id: evh-gateway-logs, type: azure.res.azurerm_eventhub_namespace, name: evh-gateway-logs, parent: rg-rg-genai-gateway, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: redis-semantic-cache, type: azure.res.azurerm_redis_cache, name: redis-semantic-cache, parent: rg-rg-genai-gateway, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: kv-gateway, type: azure.key_vault, name: kv-gateway, parent: rg-rg-genai-gateway}
+- {id: appi-gateway, type: azure.res.azurerm_application_insights, name: appi-gateway, parent: rg-rg-genai-gateway, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-gateway, type: azure.res.azurerm_log_analytics_workspace, name: law-gateway, parent: rg-rg-genai-gateway, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: client, label: intelligent application}
+- {from: client, to: apim-genai-gateway, label: chat completions (Entra token), step: '1'}
+- {from: apim-genai-gateway, to: redis-semantic-cache, label: llm-semantic-cache lookup, step: '2'}
+- {from: apim-genai-gateway, to: pe-aoai-east, label: priority 1 backend (PTU), step: '3'}
+- {from: pe-aoai-east, to: aoai-east-ptu, label: private link}
+- {from: aoai-east-ptu, to: gpt-4o-provisioned, label: provisioned deployment}
+- {from: aoai-east-ptu, to: gpt-4o-standard, label: spillover deployment}
+- {from: apim-genai-gateway, to: pe-aoai-west, label: priority 2 on 429 / circuit open, step: '4'}
+- {from: pe-aoai-west, to: aoai-west-standard, label: private link}
+- {from: aoai-west-standard, to: gpt-4o-west, label: standard deployment}
+- {from: apim-genai-gateway, to: evh-gateway-logs, label: log-to-eventhub prompts and tokens, step: '5'}
+- {from: apim-genai-gateway, to: appi-gateway, label: llm-emit-token-metric}
+- {from: appi-gateway, to: law-gateway, label: chargeback queries}
+- {from: apim-genai-gateway, to: kv-gateway, label: backend credentials}
+steps:
+- {n: '1', text: 'client → apim-genai-gateway: chat completions (Entra token)'}
+- {n: '2', text: 'apim-genai-gateway → redis-semantic-cache: llm-semantic-cache lookup'}
+- {n: '3', text: 'apim-genai-gateway → pe-aoai-east: priority 1 backend (PTU)'}
+- {n: '4', text: 'apim-genai-gateway → pe-aoai-west: priority 2 on 429 / circuit open'}
+- {n: '5', text: 'apim-genai-gateway → evh-gateway-logs: log-to-eventhub prompts and tokens'}

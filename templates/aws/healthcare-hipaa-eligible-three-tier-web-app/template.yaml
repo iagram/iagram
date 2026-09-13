@@ -1,0 +1,61 @@
+# Generated from the official reference (https://aws.amazon.com/compliance/hipaa-compliance/); edit freely.
+title: HIPAA-eligible three-tier patient web application
+category: industry
+tags:
+- healthcare
+- hipaa
+- phi
+- three-tier
+- encryption
+- audit
+source: https://aws.amazon.com/compliance/hipaa-compliance/
+description: A patient-facing web application built only from HIPAA Eligible Services under an AWS Business Associate Addendum, with CloudFront and WAF in front of an Application Load Balancer and ECS tasks
+  in private subnets. Protected health information is stored in an encrypted Aurora cluster and S3 bucket using KMS customer managed keys, Cognito handles patient identity, and CloudTrail plus CloudWatch
+  Logs provide the audit trail HIPAA requires.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-phi-app, type: aws.vpc, name: phi-app, parent: reg-us-east-1, props: {cidr: 10.20.0.0/16}}
+- {id: az-phi-app-a, type: aws.availability_zone, name: a, parent: vpc-phi-app, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-phi-app-a, props: {cidr: 10.20.0.0/24, az: a, public: true}}
+- {id: az-phi-app-b, type: aws.availability_zone, name: b, parent: vpc-phi-app, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-phi-app-b, props: {cidr: 10.20.1.0/24, az: b, public: true}}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-phi-app-a, props: {cidr: 10.20.10.0/24, az: a, public: false}}
+- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-phi-app-b, props: {cidr: 10.20.11.0/24, az: b, public: false}}
+- {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-phi-app-a, props: {cidr: 10.20.20.0/24, az: a, public: false}}
+- {id: sub-data-b, type: aws.subnet, name: data-b, parent: az-phi-app-b, props: {cidr: 10.20.21.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: patient-portal-cdn, type: aws.cloudfront_distribution, name: patient-portal-cdn, parent: reg-us-east-1}
+- id: portal-waf
+  type: aws.res.aws_wafv2_web_acl
+  name: portal-waf
+  parent: reg-us-east-1
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+- {id: patient-identity, type: aws.res.aws_cognito_user_pool, name: patient-identity, parent: reg-us-east-1, props: {name: changeme}}
+- {id: portal-alb, type: aws.alb, name: portal-alb, parent: az-phi-app-a}
+- {id: portal-services, type: aws.res.aws_ecs_cluster, name: portal-services, parent: sub-app-a, props: {name: changeme}}
+- {id: phi-aurora, type: aws.res.aws_rds_cluster, name: phi-aurora, parent: sub-data-a, props: {engine: changeme}}
+- {id: medical-documents, type: aws.s3_bucket, name: medical-documents, parent: reg-us-east-1}
+- {id: phi-cmk, type: aws.res.aws_kms_key, name: phi-cmk, parent: reg-us-east-1}
+- {id: db-credentials, type: aws.res.aws_secretsmanager_secret, name: db-credentials, parent: reg-us-east-1}
+- {id: phi-audit-trail, type: aws.res.aws_cloudtrail, name: phi-audit-trail, parent: reg-us-east-1, props: {name: changeme, s3_bucket_name: changeme}}
+- {id: application-logs, type: aws.res.aws_cloudwatch_log_group, name: application-logs, parent: reg-us-east-1}
+edges:
+- {from: users, to: patient-portal-cdn, label: HTTPS TLS 1.2+, step: '1'}
+- {from: patient-portal-cdn, to: portal-waf, label: managed rules}
+- {from: patient-portal-cdn, to: portal-alb, label: origin request, step: '2'}
+- {from: portal-alb, to: portal-services, label: HTTPS to tasks, step: '3'}
+- {from: portal-services, to: patient-identity, label: OIDC token validation}
+- {from: portal-services, to: db-credentials, label: GetSecretValue}
+- {from: portal-services, to: phi-aurora, label: encrypted SQL, step: '4'}
+- {from: portal-services, to: medical-documents, label: SSE-KMS PutObject, step: '5'}
+- {from: phi-aurora, to: phi-cmk, label: encryption at rest}
+- {from: medical-documents, to: phi-cmk, label: encryption at rest}
+- {from: portal-services, to: application-logs, label: application logs}
+- {from: phi-audit-trail, to: medical-documents, label: audit log delivery}
+steps:
+- {n: '1', text: 'users → patient-portal-cdn: HTTPS TLS 1.2+'}
+- {n: '2', text: 'patient-portal-cdn → portal-alb: origin request'}
+- {n: '3', text: 'portal-alb → portal-services: HTTPS to tasks'}
+- {n: '4', text: 'portal-services → phi-aurora: encrypted SQL'}
+- {n: '5', text: 'portal-services → medical-documents: SSE-KMS PutObject'}

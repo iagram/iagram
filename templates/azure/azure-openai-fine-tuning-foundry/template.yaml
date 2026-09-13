@@ -1,0 +1,67 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/fine-tuning); edit freely.
+title: Fine-tuning Azure OpenAI models in Microsoft Foundry
+category: ml
+tags:
+- fine-tuning
+- azure-openai
+- foundry
+- jsonl
+- lora
+- model-deployment
+- evaluation
+source: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/fine-tuning
+description: Training and validation data in JSONL chat-completions format are uploaded from Blob Storage to a Foundry resource, where a supervised, DPO, or reinforcement fine-tuning job customises a base
+  model such as GPT-4o or GPT-4.1 with LoRA-based training and emits loss and token-accuracy metrics and per-epoch checkpoints. The resulting fine-tuned model is deployed as its own deployment, evaluated
+  in the playground and with the Evaluation SDK, and consumed by applications through the standard inference endpoint.
+nodes:
+- {id: sub-genai-platform, type: azure.subscription, name: genai-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-finetune, type: azure.resource_group, name: rg-finetune, parent: sub-genai-platform, props: {location: swedencentral}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: stfinetunedata, type: azure.storage_account, name: stfinetunedata, parent: rg-rg-finetune}
+- {id: foundry-finetune, type: azure.res.azurerm_cognitive_account, name: foundry-finetune, parent: rg-rg-finetune, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: gpt-4o-base
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-base
+  parent: rg-rg-finetune
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- id: gpt-4o-finetuned-v1
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-finetuned-v1
+  parent: rg-rg-finetune
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- id: mlw-eval-finetune
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-eval-finetune
+  parent: rg-rg-finetune
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- id: app-finetuned-consumer
+  type: azure.res.azurerm_linux_web_app
+  name: app-finetuned-consumer
+  parent: rg-rg-finetune
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: kv-finetune, type: azure.key_vault, name: kv-finetune, parent: rg-rg-finetune}
+- {id: appi-finetune, type: azure.res.azurerm_application_insights, name: appi-finetune, parent: rg-rg-finetune, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-finetune, type: azure.res.azurerm_log_analytics_workspace, name: law-finetune, parent: rg-rg-finetune, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: stfinetunedata, label: upload JSONL training / validation sets, step: '1'}
+- {from: stfinetunedata, to: foundry-finetune, label: import training files, step: '2'}
+- {from: user, to: foundry-finetune, label: create fine-tuning job (SFT / DPO / RFT), step: '3'}
+- {from: gpt-4o-base, to: gpt-4o-finetuned-v1, label: base model + LoRA weights, step: '4'}
+- {from: foundry-finetune, to: gpt-4o-finetuned-v1, label: deploy checkpoint, step: '5'}
+- {from: mlw-eval-finetune, to: gpt-4o-finetuned-v1, label: evaluation runs vs base, step: '6'}
+- {from: users, to: app-finetuned-consumer, label: HTTPS, step: '7'}
+- {from: app-finetuned-consumer, to: gpt-4o-finetuned-v1, label: inference on fine-tuned deployment, step: '8'}
+- {from: app-finetuned-consumer, to: kv-finetune, label: endpoint secrets}
+- {from: foundry-finetune, to: appi-finetune, label: job metrics and usage}
+- {from: appi-finetune, to: law-finetune, label: logs}
+steps:
+- {n: '1', text: 'user → stfinetunedata: upload JSONL training / validation sets'}
+- {n: '2', text: 'stfinetunedata → foundry-finetune: import training files'}
+- {n: '3', text: 'user → foundry-finetune: create fine-tuning job (SFT / DPO / RFT)'}
+- {n: '4', text: 'gpt-4o-base → gpt-4o-finetuned-v1: base model + LoRA weights'}
+- {n: '5', text: 'foundry-finetune → gpt-4o-finetuned-v1: deploy checkpoint'}
+- {n: '6', text: 'mlw-eval-finetune → gpt-4o-finetuned-v1: evaluation runs vs base'}
+- {n: '7', text: 'users → app-finetuned-consumer: HTTPS'}
+- {n: '8', text: 'app-finetuned-consumer → gpt-4o-finetuned-v1: inference on fine-tuned deployment'}

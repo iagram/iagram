@@ -1,0 +1,80 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/automate-document-classification-durable-functions); edit freely.
+title: Automated document classification with Durable Functions and Document Intelligence
+category: ml
+tags:
+- document-intelligence
+- durable-functions
+- service-bus
+- ai-search
+- embeddings
+- rag
+- cosmos-db
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/automate-document-classification-durable-functions
+description: A web app stores uploaded multi-document files in Blob Storage and enqueues a Service Bus command that starts a Durable Functions orchestration, whose activities call Document Intelligence
+  to split and classify each embedded document, store metadata in Cosmos DB, chunk the text, and write text-embedding-3-large vectors into an AI Search index. A pre-deployed Foundry Agent Service prompt
+  agent with the AI Search tool then answers user questions over the indexed content with inline citations.
+nodes:
+- {id: sub-docs-prod, type: azure.subscription, name: docs-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-doc-classify, type: azure.resource_group, name: rg-doc-classify, parent: sub-docs-prod, props: {location: eastus}}
+- {id: user, type: common.user, name: user}
+- {id: asp-docs, type: azure.res.azurerm_service_plan, name: asp-docs, parent: rg-rg-doc-classify, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-doc-upload
+  type: azure.res.azurerm_linux_web_app
+  name: app-doc-upload
+  parent: rg-rg-doc-classify
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: stdocfiles, type: azure.storage_account, name: stdocfiles, parent: rg-rg-doc-classify}
+- {id: sb-doc-commands, type: azure.res.azurerm_servicebus_namespace, name: sb-doc-commands, parent: rg-rg-doc-classify, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- id: func-doc-orchestrator
+  type: azure.res.azurerm_linux_function_app
+  name: func-doc-orchestrator
+  parent: rg-rg-doc-classify
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: docintel-analyze, type: azure.res.azurerm_cognitive_account, name: docintel-analyze, parent: rg-rg-doc-classify, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: cosmos-doc-metadata
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-doc-metadata
+  parent: rg-rg-doc-classify
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: foundry-docs, type: azure.res.azurerm_cognitive_account, name: foundry-docs, parent: rg-rg-doc-classify, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: text-embedding-3-large
+  type: azure.res.azurerm_cognitive_deployment
+  name: text-embedding-3-large
+  parent: rg-rg-doc-classify
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- id: gpt-4-1-agent-model
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4-1-agent-model
+  parent: rg-rg-doc-classify
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- {id: srch-doc-index, type: azure.res.azurerm_search_service, name: srch-doc-index, parent: rg-rg-doc-classify, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: appi-docs, type: azure.res.azurerm_application_insights, name: appi-docs, parent: rg-rg-doc-classify, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: app-doc-upload, label: upload PDF / TIFF, step: '1'}
+- {from: app-doc-upload, to: stdocfiles, label: store document file (1a)}
+- {from: app-doc-upload, to: sb-doc-commands, label: enqueue command (1b)}
+- {from: sb-doc-commands, to: func-doc-orchestrator, label: trigger orchestration, step: '2'}
+- {from: func-doc-orchestrator, to: docintel-analyze, label: Analyze Document API, step: '3'}
+- {from: func-doc-orchestrator, to: cosmos-doc-metadata, label: type, step: '4'}
+- {from: func-doc-orchestrator, to: text-embedding-3-large, label: chunk and embed, step: '5'}
+- {from: func-doc-orchestrator, to: srch-doc-index, label: write vectors + correlation ID}
+- {from: app-doc-upload, to: foundry-docs, label: call prompt agent (AI Projects SDK), step: '6'}
+- {from: foundry-docs, to: srch-doc-index, label: hybrid query via AI Search tool, step: '7'}
+- {from: foundry-docs, to: gpt-4-1-agent-model, label: cited answer}
+- {from: func-doc-orchestrator, to: appi-docs, label: telemetry}
+steps:
+- {n: '1', text: 'user → app-doc-upload: upload PDF / TIFF'}
+- {n: '2', text: 'sb-doc-commands → func-doc-orchestrator: trigger orchestration'}
+- {n: '3', text: 'func-doc-orchestrator → docintel-analyze: Analyze Document API'}
+- {n: '4', text: 'func-doc-orchestrator → cosmos-doc-metadata: type'}
+- {n: '5', text: 'func-doc-orchestrator → text-embedding-3-large: chunk and embed'}
+- {n: '6', text: 'app-doc-upload → foundry-docs: call prompt agent (AI Projects SDK)'}
+- {n: '7', text: 'foundry-docs → srch-doc-index: hybrid query via AI Search tool'}

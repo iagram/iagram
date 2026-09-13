@@ -1,0 +1,99 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-microsoft-foundry-landing-zone); edit freely.
+title: Baseline Foundry chat and agents in an Azure landing zone
+category: ml
+tags:
+- landing-zone
+- foundry-agent
+- hub-spoke
+- azure-openai
+- private-dns
+- firewall
+- platform-team
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-microsoft-foundry-landing-zone
+description: The baseline Foundry chat workload is deployed into an application landing zone spoke whose virtual network is peered to a platform-owned connectivity hub that supplies Azure Firewall, private
+  DNS zones, and hybrid connectivity. The workload team owns App Service, Foundry Agent Service, AI Search, Cosmos DB, and their private endpoints, while internet egress and DNS resolution are delegated
+  to the platform team through hub routing.
+nodes:
+- {id: sub-platform-connectivity, type: azure.subscription, name: platform-connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-hub, type: azure.resource_group, name: rg-hub, parent: sub-platform-connectivity, props: {location: eastus2}}
+- {id: vpc-vnet-hub, type: azure.vnet, name: vnet-hub, parent: rg-rg-hub, props: {cidr: 10.100.0.0/22}}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-hub, props: {cidr: 10.100.0.0/26}}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-hub, props: {cidr: 10.100.1.0/26}}
+- {id: sub-app-landing-zone, type: azure.subscription, name: app-landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-chat-alz, type: azure.resource_group, name: rg-chat-alz, parent: sub-app-landing-zone, props: {location: eastus2}}
+- {id: vpc-vnet-spoke-chat, type: azure.vnet, name: vnet-spoke-chat, parent: rg-rg-chat-alz, props: {cidr: 10.1.0.0/22}}
+- {id: sub-snet-appgateway, type: azure.subnet, name: snet-appGateway, parent: vpc-vnet-spoke-chat, props: {cidr: 10.1.0.0/24}}
+- {id: sub-snet-appserviceplan, type: azure.subnet, name: snet-appServicePlan, parent: vpc-vnet-spoke-chat, props: {cidr: 10.1.1.0/24}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-spoke-chat, props: {cidr: 10.1.2.0/24}}
+- {id: sub-snet-agentsegress, type: azure.subnet, name: snet-agentsEgress, parent: vpc-vnet-spoke-chat, props: {cidr: 10.1.3.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: afw-hub, type: azure.res.azurerm_firewall, name: afw-hub, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: bas-hub, type: azure.res.azurerm_bastion_host, name: bas-hub, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-platform, type: azure.res.azurerm_log_analytics_workspace, name: law-platform, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: agw-chat-alz
+  type: azure.res.azurerm_application_gateway
+  name: agw-chat-alz
+  parent: sub-snet-appgateway
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- id: app-chat-alz
+  type: azure.res.azurerm_linux_web_app
+  name: app-chat-alz
+  parent: sub-snet-appserviceplan
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: pe-foundry-alz
+  type: azure.res.azurerm_private_endpoint
+  name: pe-foundry-alz
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: foundry-alz, type: azure.res.azurerm_cognitive_account, name: foundry-alz, parent: rg-rg-chat-alz, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: gpt-4o-alz
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-alz
+  parent: rg-rg-chat-alz
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- {id: srch-alz, type: azure.res.azurerm_search_service, name: srch-alz, parent: rg-rg-chat-alz, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- id: cosmos-alz
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-alz
+  parent: rg-rg-chat-alz
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: stalzagent, type: azure.storage_account, name: stalzagent, parent: rg-rg-chat-alz}
+- {id: kv-alz, type: azure.key_vault, name: kv-alz, parent: rg-rg-chat-alz}
+edges:
+- {from: vpc-vnet-hub, to: vpc-vnet-spoke-chat, label: hub-spoke peering, link: azurerm_virtual_network_peering}
+- {from: users, to: agw-chat-alz, label: HTTPS (WAF), step: '1'}
+- {from: agw-chat-alz, to: app-chat-alz, label: chat UI, step: '2'}
+- {from: app-chat-alz, to: pe-foundry-alz, label: agent invocation, step: '3'}
+- {from: pe-foundry-alz, to: foundry-alz, label: private link}
+- {from: foundry-alz, to: srch-alz, label: grounding query, step: '4'}
+- {from: foundry-alz, to: gpt-4o-alz, label: completion, step: '5'}
+- {from: foundry-alz, to: cosmos-alz, label: conversation state, step: '6'}
+- {from: foundry-alz, to: afw-hub, label: 0.0.0.0/0 via UDR to hub, step: '7'}
+- {from: afw-hub, to: internet, label: allowed FQDNs}
+- {from: dc-on-premises, to: afw-hub, label: hybrid connectivity}
+- {from: bas-hub, to: app-chat-alz, label: ops access}
+- {from: foundry-alz, to: law-platform, label: diagnostics}
+steps:
+- {n: '1', text: 'users → agw-chat-alz: HTTPS (WAF)'}
+- {n: '2', text: 'agw-chat-alz → app-chat-alz: chat UI'}
+- {n: '3', text: 'app-chat-alz → pe-foundry-alz: agent invocation'}
+- {n: '4', text: 'foundry-alz → srch-alz: grounding query'}
+- {n: '5', text: 'foundry-alz → gpt-4o-alz: completion'}
+- {n: '6', text: 'foundry-alz → cosmos-alz: conversation state'}
+- {n: '7', text: 'foundry-alz → afw-hub: 0.0.0.0/0 via UDR to hub'}

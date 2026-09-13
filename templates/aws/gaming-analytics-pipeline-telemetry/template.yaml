@@ -1,0 +1,65 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/game-analytics-pipeline-on-aws/); edit freely.
+title: Game analytics pipeline for real-time and batch telemetry
+category: industry
+tags:
+- gaming
+- game analytics
+- telemetry
+- kinesis
+- flink
+- opensearch
+- firehose
+- athena
+source: https://docs.aws.amazon.com/solutions/game-analytics-pipeline-on-aws/
+description: Guidance for Game Analytics Pipeline on AWS accepts telemetry from game clients and servers through an API Gateway backend backed by Lambda and DynamoDB for authentication and administration,
+  and writes events to a Kinesis data stream. An optional real-time path processes the stream with Managed Service for Apache Flink into OpenSearch dashboards, while Kinesis Data Firehose batches events
+  as Parquet into an S3 data lake with Glue tables queried by Athena, or alternatively streams them into Redshift Serverless.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-real-time, type: common.group, name: real-time, parent: reg-us-east-1}
+- {id: grp-data-lake, type: common.group, name: data-lake, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: server, type: common.server, name: server}
+- {id: users, type: common.users, name: users}
+- {id: events-api, type: aws.res.aws_api_gateway_rest_api, name: events-api, parent: grp-ingestion, props: {name: changeme}}
+- {id: events-authorizer, type: aws.lambda_function, name: events-authorizer, parent: grp-ingestion}
+- {id: applications-and-keys, type: aws.dynamodb_table, name: applications-and-keys, parent: grp-ingestion}
+- {id: game-events-stream, type: aws.res.aws_kinesis_stream, name: game-events-stream, parent: grp-ingestion, props: {name: changeme}}
+- {id: realtime-metrics-flink, type: aws.res.aws_kinesisanalyticsv2_application, name: realtime-metrics-flink, parent: grp-real-time, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: live-ops-dashboards, type: aws.res.aws_opensearch_domain, name: live-ops-dashboards, parent: grp-real-time, props: {domain_name: changeme}}
+- {id: events-to-s3, type: aws.res.aws_kinesis_firehose_delivery_stream, name: events-to-s3, parent: grp-data-lake, props: {destination: changeme, name: changeme}}
+- {id: analytics-data-lake, type: aws.s3_bucket, name: analytics-data-lake, parent: grp-data-lake}
+- {id: game-events-catalog, type: aws.res.aws_glue_catalog_database, name: game-events-catalog, parent: grp-data-lake, props: {name: changeme}}
+- id: events-etl
+  type: aws.res.aws_glue_job
+  name: events-etl
+  parent: grp-data-lake
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: game-analytics-queries, type: aws.res.aws_athena_workgroup, name: game-analytics-queries, parent: grp-data-lake, props: {name: changeme}}
+- {id: game-warehouse, type: aws.res.aws_redshift_cluster, name: game-warehouse, parent: grp-data-lake, props: {cluster_identifier: changeme, node_type: changeme}}
+edges:
+- {from: client, to: events-api, label: POST /events, step: '1'}
+- {from: server, to: events-api, label: server telemetry, step: '1'}
+- {from: events-api, to: events-authorizer, label: API key authorizer, step: '2'}
+- {from: events-authorizer, to: applications-and-keys, label: GetItem}
+- {from: events-api, to: game-events-stream, label: PutRecords, step: '3'}
+- {from: game-events-stream, to: realtime-metrics-flink, label: Flink source, step: '4'}
+- {from: realtime-metrics-flink, to: live-ops-dashboards, label: aggregated metrics}
+- {from: game-events-stream, to: events-to-s3, label: Firehose source, step: '5'}
+- {from: events-to-s3, to: analytics-data-lake, label: Parquet partitions, step: '6'}
+- {from: analytics-data-lake, to: events-etl, label: ETL}
+- {from: events-etl, to: game-events-catalog, label: Hive or Iceberg tables}
+- {from: game-events-catalog, to: game-analytics-queries, label: SQL, step: '7'}
+- {from: game-events-stream, to: game-warehouse, label: streaming ingestion, step: '8'}
+- {from: users, to: live-ops-dashboards, label: live dashboards}
+steps:
+- {n: '1', text: 'client → events-api: POST /events'}
+- {n: '2', text: 'events-api → events-authorizer: API key authorizer'}
+- {n: '3', text: 'events-api → game-events-stream: PutRecords'}
+- {n: '4', text: 'game-events-stream → realtime-metrics-flink: Flink source'}
+- {n: '5', text: 'game-events-stream → events-to-s3: Firehose source'}
+- {n: '6', text: 'events-to-s3 → analytics-data-lake: Parquet partitions'}
+- {n: '7', text: 'game-events-catalog → game-analytics-queries: SQL'}
+- {n: '8', text: 'game-events-stream → game-warehouse: streaming ingestion'}

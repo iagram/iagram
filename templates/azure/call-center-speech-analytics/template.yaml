@@ -1,0 +1,68 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/openai/architecture/call-center-openai-analytics); edit freely.
+title: Post-call analytics with Speech, Language, and Foundry models
+category: ml
+tags:
+- speech-to-text
+- batch-transcription
+- pii-redaction
+- azure-openai
+- functions
+- blob-storage
+- power-bi
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/openai/architecture/call-center-openai-analytics
+description: Recorded call audio lands in Blob Storage and a blob or timer trigger starts an Azure Function that submits files to the Speech batch transcription API, redacts personal data with the Language
+  conversation PII feature, and sends the transcript to a Foundry-hosted GPT model for intent, sentiment, entity, and summary extraction. Results are stored in a second Blob container for Power BI reporting,
+  a web app, and CRM enrichment, with Content Understanding available as an alternative single-step audio analyzer.
+nodes:
+- {id: dc-telephony, type: common.datacenter, name: telephony}
+- {id: sub-contact-center, type: azure.subscription, name: contact-center, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-call-analytics, type: azure.resource_group, name: rg-call-analytics, parent: sub-contact-center, props: {location: eastus}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: stcallaudio, type: azure.storage_account, name: stcallaudio, parent: rg-rg-call-analytics}
+- id: func-transcription
+  type: azure.res.azurerm_linux_function_app
+  name: func-transcription
+  parent: rg-rg-call-analytics
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: speech-batch, type: azure.res.azurerm_cognitive_account, name: speech-batch, parent: rg-rg-call-analytics, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: language-pii, type: azure.res.azurerm_cognitive_account, name: language-pii, parent: rg-rg-call-analytics, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: foundry-call-insights, type: azure.res.azurerm_cognitive_account, name: foundry-call-insights, parent: rg-rg-call-analytics, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: gpt-5-analytics
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-5-analytics
+  parent: rg-rg-call-analytics
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- {id: stcallinsights, type: azure.storage_account, name: stcallinsights, parent: rg-rg-call-analytics}
+- id: app-call-history
+  type: azure.res.azurerm_linux_web_app
+  name: app-call-history
+  parent: rg-rg-call-analytics
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: kv-call-analytics, type: azure.key_vault, name: kv-call-analytics, parent: rg-rg-call-analytics}
+- {id: appi-call-analytics, type: azure.res.azurerm_application_insights, name: appi-call-analytics, parent: rg-rg-call-analytics, props: {application_type: changeme, location: westeurope, name: changeme,
+    resource_group_name: changeme}}
+edges:
+- {from: dc-telephony, to: stcallaudio, label: upload recorded audio, step: '1'}
+- {from: stcallaudio, to: func-transcription, label: blob / timer trigger, step: '2'}
+- {from: func-transcription, to: speech-batch, label: batch transcription, step: '3'}
+- {from: func-transcription, to: language-pii, label: conversation PII redaction, step: '4'}
+- {from: func-transcription, to: gpt-5-analytics, label: intent, step: '5'}
+- {from: gpt-5-analytics, to: foundry-call-insights, label: Foundry model deployment}
+- {from: func-transcription, to: stcallinsights, label: store processed output, step: '6'}
+- {from: stcallinsights, to: users, label: Power BI reports, step: '7'}
+- {from: stcallinsights, to: app-call-history, label: call history and summaries}
+- {from: stcallinsights, to: saas, label: CRM enrichment}
+- {from: func-transcription, to: kv-call-analytics, label: secrets}
+- {from: func-transcription, to: appi-call-analytics, label: telemetry}
+steps:
+- {n: '1', text: 'datacenter → stcallaudio: upload recorded audio'}
+- {n: '2', text: 'stcallaudio → func-transcription: blob / timer trigger'}
+- {n: '3', text: 'func-transcription → speech-batch: batch transcription'}
+- {n: '4', text: 'func-transcription → language-pii: conversation PII redaction'}
+- {n: '5', text: 'func-transcription → gpt-5-analytics: intent'}
+- {n: '6', text: 'func-transcription → stcallinsights: store processed output'}
+- {n: '7', text: 'stcallinsights → users: Power BI reports'}

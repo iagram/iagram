@@ -1,0 +1,58 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/video-on-demand-on-aws/); edit freely.
+title: Broadcast video-on-demand processing with Step Functions and MediaConvert
+category: industry
+tags:
+- media
+- broadcast
+- video on demand
+- mediaconvert
+- step functions
+- mediapackage
+- cloudfront
+source: https://docs.aws.amazon.com/solutions/video-on-demand-on-aws/
+description: Guidance for Video on Demand on AWS stores source mezzanine files in an S3 bucket with a lifecycle policy to Glacier, and Step Functions state machines orchestrate Lambda functions for the
+  ingest, processing and publishing stages. AWS Elemental MediaConvert transcodes to HLS and DASH, job metadata is recorded in DynamoDB, EventBridge rules capture MediaConvert notifications, SNS and SQS
+  publish workflow outputs, optional MediaPackage repackages the assets and CloudFront delivers the distribution bucket to viewers.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingest, type: common.group, name: ingest, parent: reg-us-east-1}
+- {id: grp-processing, type: common.group, name: processing, parent: reg-us-east-1}
+- {id: grp-publishing, type: common.group, name: publishing, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: source-media, type: aws.s3_bucket, name: source-media, parent: grp-ingest}
+- {id: ingest-workflow, type: aws.res.aws_sfn_state_machine, name: ingest-workflow, parent: grp-ingest, props: {definition: changeme, role_arn: changeme}}
+- {id: validate-source, type: aws.lambda_function, name: validate-source, parent: grp-ingest}
+- {id: process-workflow, type: aws.res.aws_sfn_state_machine, name: process-workflow, parent: grp-processing, props: {definition: changeme, role_arn: changeme}}
+- {id: transcode-queue, type: aws.res.aws_media_convert_queue, name: transcode-queue, parent: grp-processing, props: {name: changeme}}
+- {id: workflow-metadata, type: aws.dynamodb_table, name: workflow-metadata, parent: grp-processing}
+- {id: mediaconvert-complete, type: aws.res.aws_cloudwatch_event_rule, name: mediaconvert-complete, parent: grp-processing}
+- {id: publish-workflow, type: aws.res.aws_sfn_state_machine, name: publish-workflow, parent: grp-publishing, props: {definition: changeme, role_arn: changeme}}
+- {id: distribution-media, type: aws.s3_bucket, name: distribution-media, parent: grp-publishing}
+- {id: vod-cdn, type: aws.cloudfront_distribution, name: vod-cdn, parent: grp-publishing}
+- {id: workflow-notifications, type: aws.res.aws_sns_topic, name: workflow-notifications, parent: reg-us-east-1}
+- {id: workflow-outputs, type: aws.sqs_queue, name: workflow-outputs, parent: reg-us-east-1}
+edges:
+- {from: client, to: source-media, label: upload source file, step: '1'}
+- {from: source-media, to: ingest-workflow, label: S3 event starts execution, step: '2'}
+- {from: ingest-workflow, to: validate-source, label: MediaInfo task}
+- {from: validate-source, to: workflow-metadata, label: PutItem}
+- {from: ingest-workflow, to: process-workflow, label: encoding profile, step: '3'}
+- {from: process-workflow, to: transcode-queue, label: CreateJob HLS and DASH, step: '4'}
+- {from: transcode-queue, to: distribution-media, label: transcoded outputs, step: '5'}
+- {from: mediaconvert-complete, to: publish-workflow, step: '6', link: aws_cloudwatch_event_target}
+- {from: publish-workflow, to: workflow-metadata, label: update job status}
+- {from: publish-workflow, to: workflow-notifications, label: publish complete, step: '7'}
+- {from: workflow-notifications, to: workflow-outputs, link: aws_sns_topic_subscription}
+- {from: users, to: vod-cdn, label: playback, step: '8'}
+- {from: vod-cdn, to: distribution-media, label: origin}
+steps:
+- {n: '1', text: 'client → source-media: upload source file'}
+- {n: '2', text: 'source-media → ingest-workflow: S3 event starts execution'}
+- {n: '3', text: 'ingest-workflow → process-workflow: encoding profile'}
+- {n: '4', text: 'process-workflow → transcode-queue: CreateJob HLS and DASH'}
+- {n: '5', text: 'transcode-queue → distribution-media: transcoded outputs'}
+- {n: '6', text: mediaconvert-complete → publish-workflow}
+- {n: '7', text: 'publish-workflow → workflow-notifications: publish complete'}
+- {n: '8', text: 'users → vod-cdn: playback'}

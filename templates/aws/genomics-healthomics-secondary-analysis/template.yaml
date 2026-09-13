@@ -1,0 +1,56 @@
+# Generated from the official reference (https://docs.aws.amazon.com/omics/latest/dev/workflows.html); edit freely.
+title: Genomics secondary analysis with AWS HealthOmics workflows and Batch
+category: industry
+tags:
+- life sciences
+- genomics
+- healthomics
+- batch
+- nextflow
+- secondary analysis
+- variant calling
+source: https://docs.aws.amazon.com/omics/latest/dev/workflows.html
+description: Sequencer output in FASTQ format lands in an S3 bucket and a Step Functions state machine starts a HealthOmics workflow run whose containerised tasks are pulled from ECR; custom tertiary steps
+  that need bespoke compute run on an AWS Batch compute environment. Variant calls and QC reports are written back to S3, catalogued in Glue and queried with Athena, and SNS notifies researchers when a
+  sample completes.
+nodes:
+- {id: dc-sequencing-lab, type: common.datacenter, name: sequencing-lab}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-orchestration, type: common.group, name: orchestration, parent: reg-us-east-1}
+- {id: grp-compute, type: common.group, name: compute, parent: reg-us-east-1}
+- {id: grp-results, type: common.group, name: results, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: fastq-landing, type: aws.s3_bucket, name: fastq-landing, parent: reg-us-east-1}
+- {id: on-sample-arrival, type: aws.lambda_function, name: on-sample-arrival, parent: grp-orchestration}
+- {id: sample-pipeline, type: aws.res.aws_sfn_state_machine, name: sample-pipeline, parent: grp-orchestration, props: {definition: changeme, role_arn: changeme}}
+- {id: bioinformatics-tools, type: aws.res.aws_ecr_repository, name: bioinformatics-tools, parent: grp-compute, props: {name: changeme}}
+- {id: tertiary-analysis-ce, type: aws.res.aws_batch_compute_environment, name: tertiary-analysis-ce, parent: grp-compute, props: {type: changeme}}
+- {id: tertiary-job-queue, type: aws.res.aws_batch_job_queue, name: tertiary-job-queue, parent: grp-compute, props: {name: changeme, priority: 1, state: changeme}}
+- {id: variant-results, type: aws.s3_bucket, name: variant-results, parent: grp-results}
+- {id: variants-catalog, type: aws.res.aws_glue_catalog_database, name: variants-catalog, parent: grp-results, props: {name: changeme}}
+- {id: cohort-queries, type: aws.res.aws_athena_workgroup, name: cohort-queries, parent: grp-results, props: {name: changeme}}
+- {id: sample-complete, type: aws.res.aws_sns_topic, name: sample-complete, parent: reg-us-east-1}
+- {id: genomics-cmk, type: aws.res.aws_kms_key, name: genomics-cmk, parent: reg-us-east-1}
+edges:
+- {from: dc-sequencing-lab, to: fastq-landing, label: FASTQ upload, step: '1'}
+- {from: fastq-landing, to: on-sample-arrival, label: S3 event, step: '2'}
+- {from: on-sample-arrival, to: sample-pipeline, label: StartExecution, step: '3'}
+- {from: sample-pipeline, to: bioinformatics-tools, label: HealthOmics run pulls task containers, step: '4'}
+- {from: sample-pipeline, to: tertiary-job-queue, label: SubmitJob, step: '5'}
+- {from: tertiary-job-queue, to: tertiary-analysis-ce, label: scheduled jobs}
+- {from: tertiary-analysis-ce, to: variant-results, label: VCF and QC output, step: '6'}
+- {from: variant-results, to: variants-catalog, label: partitioned tables}
+- {from: variants-catalog, to: cohort-queries, label: SQL, step: '7'}
+- {from: users, to: cohort-queries, label: cohort analysis}
+- {from: sample-pipeline, to: sample-complete, label: completion notification, step: '8'}
+- {from: variant-results, to: genomics-cmk, label: SSE-KMS}
+steps:
+- {n: '1', text: 'datacenter → fastq-landing: FASTQ upload'}
+- {n: '2', text: 'fastq-landing → on-sample-arrival: S3 event'}
+- {n: '3', text: 'on-sample-arrival → sample-pipeline: StartExecution'}
+- {n: '4', text: 'sample-pipeline → bioinformatics-tools: HealthOmics run pulls task containers'}
+- {n: '5', text: 'sample-pipeline → tertiary-job-queue: SubmitJob'}
+- {n: '6', text: 'tertiary-analysis-ce → variant-results: VCF and QC output'}
+- {n: '7', text: 'variants-catalog → cohort-queries: SQL'}
+- {n: '8', text: 'sample-pipeline → sample-complete: completion notification'}

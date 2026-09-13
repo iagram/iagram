@@ -1,0 +1,79 @@
+# Generated from the official reference (https://docs.aws.amazon.com/clean-rooms/latest/userguide/what-is.html); edit freely.
+title: Advertiser and publisher data collaboration with AWS Clean Rooms
+category: industry
+tags:
+- advertising
+- clean rooms
+- data collaboration
+- privacy
+- glue
+- athena
+- measurement
+source: https://docs.aws.amazon.com/clean-rooms/latest/userguide/what-is.html
+description: An advertiser and a publisher each register S3 datasets as Glue Data Catalog tables and associate them as configured tables with analysis rules in an AWS Clean Rooms collaboration, so neither
+  party sees the other's raw rows. The member allowed to query runs aggregation or list queries that Clean Rooms executes against the original data locations, writes the results to the querying member's
+  S3 bucket and catalogues them for Athena reporting, with CloudTrail logging every query.
+nodes:
+- {id: acct-publisher, type: aws.account, name: publisher}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-publisher, props: {region: us-east-1}}
+- {id: grp-publisher-data, type: common.group, name: publisher-data, parent: reg-us-east-1}
+- {id: acct-advertiser, type: aws.account, name: advertiser}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-advertiser, props: {region: us-east-1}}
+- {id: grp-advertiser-data, type: common.group, name: advertiser-data, parent: reg-us-east-1-2}
+- {id: grp-results, type: common.group, name: results, parent: reg-us-east-1-2}
+- {id: users, type: common.users, name: users}
+- {id: publisher-impressions, type: aws.s3_bucket, name: publisher-impressions, parent: grp-publisher-data}
+- {id: publisher-catalog, type: aws.res.aws_glue_catalog_database, name: publisher-catalog, parent: grp-publisher-data, props: {name: changeme}}
+- id: impressions-configured-table
+  type: aws.res.aws_cleanrooms_configured_table
+  name: impressions-configured-table
+  parent: grp-publisher-data
+  props:
+    allowed_columns: []
+    analysis_method: changeme
+    name: changeme
+    table_reference: {}
+- {id: advertiser-conversions, type: aws.s3_bucket, name: advertiser-conversions, parent: grp-advertiser-data}
+- {id: advertiser-catalog, type: aws.res.aws_glue_catalog_database, name: advertiser-catalog, parent: grp-advertiser-data, props: {name: changeme}}
+- id: conversions-configured-table
+  type: aws.res.aws_cleanrooms_configured_table
+  name: conversions-configured-table
+  parent: grp-advertiser-data
+  props:
+    allowed_columns: []
+    analysis_method: changeme
+    name: changeme
+    table_reference: {}
+- id: campaign-measurement
+  type: aws.res.aws_cleanrooms_collaboration
+  name: campaign-measurement
+  parent: acct-advertiser
+  props:
+    creator_display_name: changeme
+    creator_member_abilities: []
+    description: changeme
+    name: changeme
+    query_log_status: changeme
+- {id: query-results, type: aws.s3_bucket, name: query-results, parent: grp-results}
+- {id: measurement-reports, type: aws.res.aws_athena_workgroup, name: measurement-reports, parent: grp-results, props: {name: changeme}}
+- {id: collaboration-audit, type: aws.res.aws_cloudtrail, name: collaboration-audit, parent: acct-advertiser, props: {name: changeme, s3_bucket_name: changeme}}
+edges:
+- {from: publisher-impressions, to: publisher-catalog, label: Glue table, step: '1'}
+- {from: publisher-catalog, to: impressions-configured-table, label: aggregation analysis rule, step: '2'}
+- {from: advertiser-conversions, to: advertiser-catalog, label: Glue table, step: '1'}
+- {from: advertiser-catalog, to: conversions-configured-table, label: aggregation analysis rule, step: '2'}
+- {from: impressions-configured-table, to: campaign-measurement, label: table association, step: '3'}
+- {from: conversions-configured-table, to: campaign-measurement, label: table association, step: '3'}
+- {from: users, to: campaign-measurement, label: run SQL aggregation query, step: '4'}
+- {from: campaign-measurement, to: publisher-impressions, label: read in place}
+- {from: campaign-measurement, to: advertiser-conversions, label: read in place}
+- {from: campaign-measurement, to: query-results, label: aggregated output, step: '5'}
+- {from: query-results, to: measurement-reports, label: SQL reporting, step: '6'}
+- {from: campaign-measurement, to: collaboration-audit, label: query logs}
+steps:
+- {n: '1', text: 'publisher-impressions → publisher-catalog: Glue table'}
+- {n: '2', text: 'publisher-catalog → impressions-configured-table: aggregation analysis rule'}
+- {n: '3', text: 'impressions-configured-table → campaign-measurement: table association'}
+- {n: '4', text: 'users → campaign-measurement: run SQL aggregation query'}
+- {n: '5', text: 'campaign-measurement → query-results: aggregated output'}
+- {n: '6', text: 'query-results → measurement-reports: SQL reporting'}

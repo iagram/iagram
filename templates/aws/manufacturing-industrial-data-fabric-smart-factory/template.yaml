@@ -1,0 +1,79 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/industrial-data-fabric-on-aws/); edit freely.
+title: Smart factory industrial data fabric from edge to lakehouse
+category: industry
+tags:
+- manufacturing
+- smart factory
+- industrial data fabric
+- iot sitewise
+- greengrass
+- lakehouse
+source: https://docs.aws.amazon.com/solutions/industrial-data-fabric-on-aws/
+description: Guidance for Manufacturing on AWS connects plant equipment through IoT Greengrass and SiteWise Edge gateways that stream OT data to IoT Core, Kinesis and MSK, while Storage Gateway and Glue
+  move IT data from on-premises applications and ERP into S3. The cloud side catalogues the data in the Glue Data Catalog, processes streams with Managed Service for Apache Flink, unifies S3 and Redshift
+  in a lakehouse and exposes it to SageMaker models and Bedrock agents, with Grafana dashboards for operators.
+nodes:
+- {id: dc-factory-floor, type: common.datacenter, name: factory-floor}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-eu-central-1}
+- {id: grp-lakehouse, type: common.group, name: lakehouse, parent: reg-eu-central-1}
+- {id: grp-ai-ml, type: common.group, name: ai-ml, parent: reg-eu-central-1}
+- {id: device, type: common.device, name: device}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-eu-central-1, type: aws.vpc, name: main, parent: reg-eu-central-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-central-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-central-1, props: {zone: a}}
+- {id: sub-reg-eu-central-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-central-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-central-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-central-1, props: {zone: b}}
+- {id: sub-reg-eu-central-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-central-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: line-1-plc-gateway, type: aws.res.aws_iot_thing, name: line-1-plc-gateway, parent: sub-reg-eu-central-1-a, props: {name: changeme}}
+- {id: plant-file-gateway, type: aws.res.aws_storagegateway_gateway, name: plant-file-gateway, parent: sub-reg-eu-central-1-a, props: {gateway_name: changeme, gateway_timezone: changeme}}
+- {id: ot-telemetry-rule, type: aws.res.aws_iot_topic_rule, name: ot-telemetry-rule, parent: grp-ingestion, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: machine-telemetry, type: aws.res.aws_kinesis_stream, name: machine-telemetry, parent: grp-ingestion, props: {name: changeme}}
+- id: plant-event-bus
+  type: aws.res.aws_msk_cluster
+  name: plant-event-bus
+  parent: grp-ingestion
+  props: {broker_node_group_info: {}, cluster_name: changeme, kafka_version: changeme, number_of_broker_nodes: 1}
+- {id: oee-stream-processor, type: aws.res.aws_kinesisanalyticsv2_application, name: oee-stream-processor, parent: grp-ingestion, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: industrial-data-lake, type: aws.s3_bucket, name: industrial-data-lake, parent: grp-lakehouse}
+- {id: industrial-catalog, type: aws.res.aws_glue_catalog_database, name: industrial-catalog, parent: grp-lakehouse, props: {name: changeme}}
+- {id: manufacturing-warehouse, type: aws.res.aws_redshift_cluster, name: manufacturing-warehouse, parent: grp-lakehouse, props: {cluster_identifier: changeme, node_type: changeme}}
+- {id: plant-analytics, type: aws.res.aws_athena_workgroup, name: plant-analytics, parent: grp-lakehouse, props: {name: changeme}}
+- {id: defect-detection-model, type: aws.res.aws_sagemaker_endpoint, name: defect-detection-model, parent: grp-ai-ml, props: {endpoint_config_name: changeme}}
+- {id: maintenance-docs-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: maintenance-docs-kb, parent: grp-ai-ml, props: {name: changeme, role_arn: changeme}}
+- id: plant-dashboards
+  type: aws.res.aws_grafana_workspace
+  name: plant-dashboards
+  parent: reg-eu-central-1
+  props:
+    account_access_type: changeme
+    authentication_providers: []
+    permission_type: changeme
+edges:
+- {from: device, to: line-1-plc-gateway, label: OPC UA and Modbus, step: '1'}
+- {from: line-1-plc-gateway, to: ot-telemetry-rule, label: MQTT to IoT Core, step: '2'}
+- {from: ot-telemetry-rule, to: machine-telemetry, label: rule action, step: '3'}
+- {from: ot-telemetry-rule, to: plant-event-bus, label: Kafka action}
+- {from: machine-telemetry, to: oee-stream-processor, label: Flink source, step: '4'}
+- {from: oee-stream-processor, to: industrial-data-lake, label: enriched OT data, step: '5'}
+- {from: plant-file-gateway, to: industrial-data-lake, label: NFS and SMB file shares}
+- {from: saas, to: industrial-data-lake, label: ERP extracts via AppFlow}
+- {from: industrial-data-lake, to: industrial-catalog, label: Glue crawler}
+- {from: industrial-catalog, to: plant-analytics, label: SQL, step: '6'}
+- {from: industrial-data-lake, to: manufacturing-warehouse, label: zero-ETL lakehouse, step: '7'}
+- {from: industrial-data-lake, to: defect-detection-model, label: training data, step: '8'}
+- {from: defect-detection-model, to: line-1-plc-gateway, label: model deployed to Greengrass edge}
+- {from: industrial-data-lake, to: maintenance-docs-kb, label: production documentation}
+- {from: manufacturing-warehouse, to: plant-dashboards, label: dashboards}
+- {from: users, to: plant-dashboards, label: OEE views}
+steps:
+- {n: '1', text: 'device → line-1-plc-gateway: OPC UA and Modbus'}
+- {n: '2', text: 'line-1-plc-gateway → ot-telemetry-rule: MQTT to IoT Core'}
+- {n: '3', text: 'ot-telemetry-rule → machine-telemetry: rule action'}
+- {n: '4', text: 'machine-telemetry → oee-stream-processor: Flink source'}
+- {n: '5', text: 'oee-stream-processor → industrial-data-lake: enriched OT data'}
+- {n: '6', text: 'industrial-catalog → plant-analytics: SQL'}
+- {n: '7', text: 'industrial-data-lake → manufacturing-warehouse: zero-ETL lakehouse'}
+- {n: '8', text: 'industrial-data-lake → defect-detection-model: training data'}

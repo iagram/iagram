@@ -1,0 +1,48 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/detect-fraudulent-transactions-using-machine-learning-with-amazon-sagemaker/); edit freely.
+title: Real-time transaction fraud detection with SageMaker endpoints
+category: industry
+tags:
+- financial services
+- fraud detection
+- sagemaker
+- xgboost
+- random cut forest
+- api gateway
+source: https://aws.amazon.com/blogs/machine-learning/detect-fraudulent-transactions-using-machine-learning-with-amazon-sagemaker/
+description: Historical card transactions in S3 train an unsupervised Random Cut Forest model and supervised XGBoost models in SageMaker, which are deployed to managed real-time endpoints. Client applications
+  call an API Gateway REST API whose Lambda function invokes both endpoints and streams the anomaly score and fraud prediction through Kinesis Data Firehose to S3 for analysis.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-training, type: common.group, name: training, parent: reg-us-east-1}
+- {id: grp-inference, type: common.group, name: inference, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: transactions-training-data, type: aws.s3_bucket, name: transactions-training-data, parent: grp-training}
+- {id: fraud-model-notebook, type: aws.res.aws_sagemaker_notebook_instance, name: fraud-model-notebook, parent: grp-training, props: {instance_type: changeme, name: changeme, role_arn: changeme}}
+- {id: xgboost-fraud-model, type: aws.res.aws_sagemaker_model, name: xgboost-fraud-model, parent: grp-training, props: {execution_role_arn: changeme}}
+- {id: rcf-anomaly-endpoint, type: aws.res.aws_sagemaker_endpoint, name: rcf-anomaly-endpoint, parent: grp-inference, props: {endpoint_config_name: changeme}}
+- {id: xgboost-fraud-endpoint, type: aws.res.aws_sagemaker_endpoint, name: xgboost-fraud-endpoint, parent: grp-inference, props: {endpoint_config_name: changeme}}
+- {id: fraud-scoring-api, type: aws.res.aws_api_gateway_rest_api, name: fraud-scoring-api, parent: grp-inference, props: {name: changeme}}
+- {id: invoke-models, type: aws.lambda_function, name: invoke-models, parent: grp-inference}
+- {id: predictions-firehose, type: aws.res.aws_kinesis_firehose_delivery_stream, name: predictions-firehose, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
+- {id: predictions-archive, type: aws.s3_bucket, name: predictions-archive, parent: reg-us-east-1}
+edges:
+- {from: transactions-training-data, to: fraud-model-notebook, label: labelled transactions, step: '1'}
+- {from: fraud-model-notebook, to: xgboost-fraud-model, label: training job, step: '2'}
+- {from: xgboost-fraud-model, to: xgboost-fraud-endpoint, label: deploy, step: '3'}
+- {from: fraud-model-notebook, to: rcf-anomaly-endpoint, label: deploy RCF}
+- {from: client, to: fraud-scoring-api, label: POST transaction, step: '4'}
+- {from: fraud-scoring-api, to: invoke-models, label: Lambda proxy, step: '5'}
+- {from: invoke-models, to: rcf-anomaly-endpoint, label: InvokeEndpoint anomaly score, step: '6'}
+- {from: invoke-models, to: xgboost-fraud-endpoint, label: InvokeEndpoint fraud probability}
+- {from: invoke-models, to: predictions-firehose, label: PutRecord, step: '7'}
+- {from: predictions-firehose, to: predictions-archive, label: buffered delivery, step: '8'}
+steps:
+- {n: '1', text: 'transactions-training-data → fraud-model-notebook: labelled transactions'}
+- {n: '2', text: 'fraud-model-notebook → xgboost-fraud-model: training job'}
+- {n: '3', text: 'xgboost-fraud-model → xgboost-fraud-endpoint: deploy'}
+- {n: '4', text: 'client → fraud-scoring-api: POST transaction'}
+- {n: '5', text: 'fraud-scoring-api → invoke-models: Lambda proxy'}
+- {n: '6', text: 'invoke-models → rcf-anomaly-endpoint: InvokeEndpoint anomaly score'}
+- {n: '7', text: 'invoke-models → predictions-firehose: PutRecord'}
+- {n: '8', text: 'predictions-firehose → predictions-archive: buffered delivery'}

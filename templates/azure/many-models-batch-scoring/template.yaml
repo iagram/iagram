@@ -1,0 +1,63 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/idea/many-models-machine-learning-azure-machine-learning); edit freely.
+title: Many-models training and batch scoring with Azure Machine Learning
+category: ml
+tags:
+- batch-scoring
+- many-models
+- parallel-run-step
+- compute-cluster
+- data-factory
+- data-lake
+- synapse
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/idea/many-models-machine-learning-azure-machine-learning
+description: Azure Data Factory copies source data into Data Lake Storage, and Azure Machine Learning pipelines on a compute cluster use ParallelRunStep to train one model per data partition, register qualifying
+  models, and batch-score every partition in parallel. Predictions are written back to the data lake and served from Synapse SQL to Power BI, while a managed online endpoint loads models on demand for real-time
+  requests.
+nodes:
+- {id: sub-forecasting-prod, type: azure.subscription, name: forecasting-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-many-models, type: azure.resource_group, name: rg-many-models, parent: sub-forecasting-prod, props: {location: northeurope}}
+- {id: saas, type: common.saas, name: saas}
+- {id: client, type: common.client, name: client}
+- {id: users, type: common.users, name: users}
+- {id: sql-source-orders, type: azure.res.azurerm_mssql_server, name: sql-source-orders, parent: rg-rg-many-models, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: adf-ingest, type: azure.res.azurerm_data_factory, name: adf-ingest, parent: rg-rg-many-models, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stmanymodelslake, type: azure.storage_account, name: stmanymodelslake, parent: rg-rg-many-models}
+- id: mlw-many-models
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-many-models
+  parent: rg-rg-many-models
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- id: cpu-cluster-parallel
+  type: azure.res.azurerm_machine_learning_compute_cluster
+  name: cpu-cluster-parallel
+  parent: rg-rg-many-models
+  props: {location: westeurope, machine_learning_workspace_id: changeme, name: changeme, scale_settings: {}, vm_priority: changeme, vm_size: changeme}
+- {id: aks-realtime-scoring, type: azure.res.azurerm_machine_learning_inference_cluster, name: aks-realtime-scoring, parent: rg-rg-many-models, props: {kubernetes_cluster_id: changeme, location: westeurope,
+    machine_learning_workspace_id: changeme, name: changeme}}
+- {id: acrmanymodels, type: azure.container_registry, name: acrmanymodels, parent: rg-rg-many-models}
+- {id: kv-many-models, type: azure.key_vault, name: kv-many-models, parent: rg-rg-many-models}
+- {id: syn-predictions, type: azure.res.azurerm_synapse_workspace, name: syn-predictions, parent: rg-rg-many-models, props: {location: westeurope, name: changeme, resource_group_name: changeme, storage_data_lake_gen2_filesystem_id: changeme}}
+- {id: appi-many-models, type: azure.res.azurerm_application_insights, name: appi-many-models, parent: rg-rg-many-models, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: sql-source-orders, to: adf-ingest, label: copy source data, step: '1'}
+- {from: adf-ingest, to: stmanymodelslake, label: land tabular dataset, step: '2'}
+- {from: stmanymodelslake, to: cpu-cluster-parallel, label: partitioned datasets, step: '3'}
+- {from: cpu-cluster-parallel, to: mlw-many-models, label: ParallelRunStep trains and registers models, step: '4'}
+- {from: saas, to: mlw-many-models, label: 'DevOps promotion: evaluate and register', step: '5'}
+- {from: mlw-many-models, to: cpu-cluster-parallel, label: batch-scoring pipeline (tag lookup), step: '6'}
+- {from: cpu-cluster-parallel, to: stmanymodelslake, label: write predictions (DataTransferStep), step: '7'}
+- {from: stmanymodelslake, to: syn-predictions, label: load to Synapse SQL, step: '8'}
+- {from: syn-predictions, to: users, label: Power BI dashboards, step: '9'}
+- {from: client, to: aks-realtime-scoring, label: real-time scoring (models loaded on demand)}
+- {from: acrmanymodels, to: aks-realtime-scoring, label: scoring image}
+- {from: aks-realtime-scoring, to: appi-many-models, label: telemetry}
+steps:
+- {n: '1', text: 'sql-source-orders → adf-ingest: copy source data'}
+- {n: '2', text: 'adf-ingest → stmanymodelslake: land tabular dataset'}
+- {n: '3', text: 'stmanymodelslake → cpu-cluster-parallel: partitioned datasets'}
+- {n: '4', text: 'cpu-cluster-parallel → mlw-many-models: ParallelRunStep trains and registers models'}
+- {n: '5', text: 'saas → mlw-many-models: DevOps promotion: evaluate and register'}
+- {n: '6', text: 'mlw-many-models → cpu-cluster-parallel: batch-scoring pipeline (tag lookup)'}
+- {n: '7', text: 'cpu-cluster-parallel → stmanymodelslake: write predictions (DataTransferStep)'}
+- {n: '8', text: 'stmanymodelslake → syn-predictions: load to Synapse SQL'}
+- {n: '9', text: 'syn-predictions → users: Power BI dashboards'}

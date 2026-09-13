@@ -1,0 +1,54 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/ai-search-skillsets); edit freely.
+title: Knowledge mining with AI Search enrichment skillsets
+category: ml
+tags:
+- knowledge-mining
+- ai-search
+- skillset
+- ocr
+- entity-recognition
+- custom-skill
+- knowledge-store
+source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/ai-search-skillsets
+description: An AI Search indexer cracks documents and images from Blob Storage and runs a skillset of built-in Vision OCR and Language entity and key-phrase skills plus a custom Azure Functions web API
+  skill to enrich domain-specific content. Enriched documents are written to a full-text and vector search index and projected into a knowledge store in Blob and Table Storage, and an App Service web app
+  queries the index.
+nodes:
+- {id: sub-knowledge-mining, type: azure.subscription, name: knowledge-mining, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-knowledge-mining, type: azure.resource_group, name: rg-knowledge-mining, parent: sub-knowledge-mining, props: {location: eastus}}
+- {id: users, type: common.users, name: users}
+- {id: stunstructureddocs, type: azure.storage_account, name: stunstructureddocs, parent: rg-rg-knowledge-mining}
+- {id: srch-knowledge, type: azure.res.azurerm_search_service, name: srch-knowledge, parent: rg-rg-knowledge-mining, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: aiservices-enrichment, type: azure.res.azurerm_cognitive_account, name: aiservices-enrichment, parent: rg-rg-knowledge-mining, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: func-custom-skill
+  type: azure.res.azurerm_linux_function_app
+  name: func-custom-skill
+  parent: rg-rg-knowledge-mining
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: stknowledgestore, type: azure.storage_account, name: stknowledgestore, parent: rg-rg-knowledge-mining}
+- {id: asp-search-ui, type: azure.res.azurerm_service_plan, name: asp-search-ui, parent: rg-rg-knowledge-mining, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: app-search-ui
+  type: azure.res.azurerm_linux_web_app
+  name: app-search-ui
+  parent: rg-rg-knowledge-mining
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: kv-knowledge, type: azure.key_vault, name: kv-knowledge, parent: rg-rg-knowledge-mining}
+- {id: appi-knowledge, type: azure.res.azurerm_application_insights, name: appi-knowledge, parent: rg-rg-knowledge-mining, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: stunstructureddocs, to: srch-knowledge, label: indexer ingests blobs, step: '1'}
+- {from: srch-knowledge, to: aiservices-enrichment, label: 'built-in skills: OCR, image analysis, entities, key phrases', step: '2'}
+- {from: srch-knowledge, to: func-custom-skill, label: custom web API skill, step: '3'}
+- {from: srch-knowledge, to: stknowledgestore, label: knowledge store projections, step: '4'}
+- {from: users, to: app-search-ui, label: HTTPS, step: '5'}
+- {from: app-search-ui, to: srch-knowledge, label: full-text and filtered queries, step: '6'}
+- {from: app-search-ui, to: kv-knowledge, label: query key}
+- {from: app-search-ui, to: appi-knowledge, label: telemetry}
+steps:
+- {n: '1', text: 'stunstructureddocs → srch-knowledge: indexer ingests blobs'}
+- {n: '2', text: 'srch-knowledge → aiservices-enrichment: built-in skills: OCR, image analysis, entities, key phrases'}
+- {n: '3', text: 'srch-knowledge → func-custom-skill: custom web API skill'}
+- {n: '4', text: 'srch-knowledge → stknowledgestore: knowledge store projections'}
+- {n: '5', text: 'users → app-search-ui: HTTPS'}
+- {n: '6', text: 'app-search-ui → srch-knowledge: full-text and filtered queries'}

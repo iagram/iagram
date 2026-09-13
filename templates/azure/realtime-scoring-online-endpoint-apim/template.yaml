@@ -1,0 +1,58 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/machine-learning/concept-endpoints-online); edit freely.
+title: Real-time scoring with managed online endpoints behind API Management
+category: ml
+tags:
+- online-endpoint
+- real-time-inference
+- blue-green
+- api-management
+- private-endpoint
+- autoscale
+source: https://learn.microsoft.com/en-us/azure/machine-learning/concept-endpoints-online
+description: A managed online endpoint hosts blue and green deployments of a registered model with a traffic split for safe rollout and traffic mirroring, and inbound scoring calls reach it through the
+  workspace private endpoint while the managed virtual network isolates outbound traffic. API Management fronts the endpoint to apply authentication, rate limits, and versioning for client applications,
+  with Azure Monitor and Application Insights collecting latency, request, and container metrics.
+nodes:
+- {id: sub-inference-prod, type: azure.subscription, name: inference-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-realtime-scoring, type: azure.resource_group, name: rg-realtime-scoring, parent: sub-inference-prod, props: {location: uksouth}}
+- {id: vpc-vnet-scoring, type: azure.vnet, name: vnet-scoring, parent: rg-rg-realtime-scoring, props: {cidr: 10.40.0.0/16}}
+- {id: sub-snet-apim, type: azure.subnet, name: snet-apim, parent: vpc-vnet-scoring, props: {cidr: 10.40.0.0/24}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-scoring, props: {cidr: 10.40.1.0/24}}
+- {id: sub-snet-scoring, type: azure.subnet, name: snet-scoring, parent: vpc-vnet-scoring, props: {cidr: 10.40.2.0/24}}
+- {id: client, type: common.client, name: client}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: apim-scoring, type: azure.res.azurerm_api_management, name: apim-scoring, parent: sub-snet-apim, props: {location: westeurope, name: changeme, publisher_email: changeme, publisher_name: changeme,
+    resource_group_name: changeme, sku_name: changeme}}
+- id: pe-mlw-scoring
+  type: azure.res.azurerm_private_endpoint
+  name: pe-mlw-scoring
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: mlw-scoring
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-scoring
+  parent: rg-rg-realtime-scoring
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- {id: online-endpoint-blue-green, type: azure.res.azurerm_machine_learning_inference_cluster, name: online-endpoint-blue-green, parent: sub-snet-scoring, props: {kubernetes_cluster_id: changeme, location: westeurope,
+    machine_learning_workspace_id: changeme, name: changeme}}
+- {id: acrscoring, type: azure.container_registry, name: acrscoring, parent: rg-rg-realtime-scoring}
+- {id: stscoringmodels, type: azure.storage_account, name: stscoringmodels, parent: rg-rg-realtime-scoring}
+- {id: kv-scoring, type: azure.key_vault, name: kv-scoring, parent: rg-rg-realtime-scoring}
+- {id: appi-scoring, type: azure.res.azurerm_application_insights, name: appi-scoring, parent: rg-rg-realtime-scoring, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-scoring, type: azure.res.azurerm_log_analytics_workspace, name: law-scoring, parent: rg-rg-realtime-scoring, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: client, to: apim-scoring, label: POST /score (subscription key / JWT), step: '1'}
+- {from: mobile, to: apim-scoring, label: HTTPS}
+- {from: apim-scoring, to: pe-mlw-scoring, label: forward to scoring URI, step: '2'}
+- {from: pe-mlw-scoring, to: online-endpoint-blue-green, label: traffic split 90/10 blue/green, step: '3'}
+- {from: mlw-scoring, to: online-endpoint-blue-green, label: deploy registered model + environment}
+- {from: acrscoring, to: online-endpoint-blue-green, label: inference image}
+- {from: stscoringmodels, to: online-endpoint-blue-green, label: model artifacts (storage initializer)}
+- {from: online-endpoint-blue-green, to: appi-scoring, label: request latency, step: '4'}
+- {from: appi-scoring, to: law-scoring, label: metrics and autoscale signals}
+- {from: mlw-scoring, to: kv-scoring, label: secrets}
+steps:
+- {n: '1', text: 'client → apim-scoring: POST /score (subscription key / JWT)'}
+- {n: '2', text: 'apim-scoring → pe-mlw-scoring: forward to scoring URI'}
+- {n: '3', text: 'pe-mlw-scoring → online-endpoint-blue-green: traffic split 90/10 blue/green'}
+- {n: '4', text: 'online-endpoint-blue-green → appi-scoring: request latency'}

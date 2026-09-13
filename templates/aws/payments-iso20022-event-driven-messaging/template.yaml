@@ -1,0 +1,64 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/iso-20022-messaging-workflows-on-aws/); edit freely.
+title: ISO 20022 payment messaging workflows with SQS FIFO microservices
+category: industry
+tags:
+- financial services
+- payments
+- iso 20022
+- event-driven
+- sqs
+- dynamodb
+- multi-region
+source: https://docs.aws.amazon.com/solutions/iso-20022-messaging-workflows-on-aws/
+description: Guidance for ISO 20022 Messaging Workflows on AWS receives payment messages through a Cognito-protected API Gateway, assigns a transaction ID recorded in DynamoDB, and passes the message through
+  incoming, processing and releasing microservices connected by FIFO SQS queues. Each stage persists the ISO 20022 payload to S3 and updates the transaction status (ACCP, ACTC, ACSP, ACSC or RJCT); a timeout
+  function rejects transactions that exceed the SLA and SNS notifies consumers when an outgoing message is ready.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-api-layer, type: common.group, name: api-layer, parent: reg-us-east-1}
+- {id: grp-workflow, type: common.group, name: workflow, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: api-consumer-auth, type: aws.res.aws_cognito_user_pool, name: api-consumer-auth, parent: grp-api-layer, props: {name: changeme}}
+- {id: payments-api, type: aws.res.aws_api_gateway_rest_api, name: payments-api, parent: grp-api-layer, props: {name: changeme}}
+- {id: transaction-msa, type: aws.lambda_function, name: transaction-msa, parent: grp-api-layer}
+- {id: transaction-status, type: aws.dynamodb_table, name: transaction-status, parent: reg-us-east-1}
+- {id: incoming-queue, type: aws.sqs_queue, name: incoming-queue, parent: grp-workflow}
+- {id: incoming-msa, type: aws.lambda_function, name: incoming-msa, parent: grp-workflow}
+- {id: processing-queue, type: aws.sqs_queue, name: processing-queue, parent: grp-workflow}
+- {id: processing-msa, type: aws.lambda_function, name: processing-msa, parent: grp-workflow}
+- {id: releasing-queue, type: aws.sqs_queue, name: releasing-queue, parent: grp-workflow}
+- {id: releasing-msa, type: aws.lambda_function, name: releasing-msa, parent: grp-workflow}
+- {id: iso20022-messages, type: aws.s3_bucket, name: iso20022-messages, parent: reg-us-east-1}
+- {id: outgoing-notifications, type: aws.res.aws_sns_topic, name: outgoing-notifications, parent: reg-us-east-1}
+- {id: timeout-msa, type: aws.lambda_function, name: timeout-msa, parent: grp-workflow}
+- {id: payments-cmk, type: aws.res.aws_kms_key, name: payments-cmk, parent: reg-us-east-1}
+edges:
+- {from: client, to: api-consumer-auth, label: OAuth 2.0 token, step: '1'}
+- {from: client, to: payments-api, label: POST transaction, step: '2'}
+- {from: payments-api, to: transaction-msa, label: create transaction ID, step: '3'}
+- {from: transaction-msa, to: transaction-status, label: status ACCP}
+- {from: payments-api, to: incoming-queue, label: ISO 20022 pacs.008, step: '4'}
+- {from: incoming-queue, to: incoming-msa, step: '5', link: aws_lambda_event_source_mapping}
+- {from: incoming-msa, to: iso20022-messages, label: incoming path}
+- {from: incoming-msa, to: processing-queue, label: status ACTC}
+- {from: processing-queue, to: processing-msa, step: '6', link: aws_lambda_event_source_mapping}
+- {from: processing-msa, to: transaction-status, label: ACSP or RJCT}
+- {from: processing-msa, to: releasing-queue, label: confirmation or rejection}
+- {from: releasing-queue, to: releasing-msa, step: '7', link: aws_lambda_event_source_mapping}
+- {from: releasing-msa, to: iso20022-messages, label: outgoing path}
+- {from: releasing-msa, to: outgoing-notifications, label: publish, step: '8'}
+- {from: timeout-msa, to: transaction-status, label: SLA breach RJCT, step: '9'}
+- {from: iso20022-messages, to: payments-cmk, label: SSE-KMS}
+- {from: dc-on-premises, to: payments-api, label: MQ reader and writer bridge}
+steps:
+- {n: '1', text: 'client → api-consumer-auth: OAuth 2.0 token'}
+- {n: '2', text: 'client → payments-api: POST transaction'}
+- {n: '3', text: 'payments-api → transaction-msa: create transaction ID'}
+- {n: '4', text: 'payments-api → incoming-queue: ISO 20022 pacs.008'}
+- {n: '5', text: incoming-queue → incoming-msa}
+- {n: '6', text: processing-queue → processing-msa}
+- {n: '7', text: releasing-queue → releasing-msa}
+- {n: '8', text: 'releasing-msa → outgoing-notifications: publish'}
+- {n: '9', text: 'timeout-msa → transaction-status: SLA breach RJCT'}

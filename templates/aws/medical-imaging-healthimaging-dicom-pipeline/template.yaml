@@ -1,0 +1,57 @@
+# Generated from the official reference (https://docs.aws.amazon.com/healthimaging/latest/devguide/what-is-healthimaging.html); edit freely.
+title: Medical imaging DICOM import and viewer with AWS HealthImaging
+category: industry
+tags:
+- healthcare
+- medical imaging
+- dicom
+- healthimaging
+- pacs
+- viewer
+source: https://docs.aws.amazon.com/healthimaging/latest/devguide/what-is-healthimaging.html
+description: A hospital PACS or modality pushes DICOM studies to an S3 input bucket, a Lambda function starts a HealthImaging import job that creates image sets in a data store, and import results and metadata
+  are written to an S3 output bucket and indexed in DynamoDB. Radiologists open a zero-footprint viewer served from CloudFront that authenticates with Cognito and retrieves image frames through API Gateway,
+  while EventBridge routes import events for downstream AI inference on a SageMaker endpoint.
+nodes:
+- {id: dc-hospital-pacs, type: common.datacenter, name: hospital-pacs}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-import, type: common.group, name: import, parent: reg-us-east-1}
+- {id: grp-viewer, type: common.group, name: viewer, parent: reg-us-east-1}
+- {id: grp-ai, type: common.group, name: ai, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: dicom-input, type: aws.s3_bucket, name: dicom-input, parent: grp-import}
+- {id: start-dicom-import, type: aws.lambda_function, name: start-dicom-import, parent: grp-import}
+- {id: import-output, type: aws.s3_bucket, name: import-output, parent: grp-import}
+- {id: image-set-index, type: aws.dynamodb_table, name: image-set-index, parent: grp-import}
+- {id: imaging-events, type: aws.res.aws_cloudwatch_event_bus, name: imaging-events, parent: reg-us-east-1, props: {name: changeme}}
+- {id: viewer-cdn, type: aws.cloudfront_distribution, name: viewer-cdn, parent: grp-viewer}
+- {id: viewer-static-site, type: aws.s3_bucket, name: viewer-static-site, parent: grp-viewer}
+- {id: radiologist-identity, type: aws.res.aws_cognito_user_pool, name: radiologist-identity, parent: grp-viewer, props: {name: changeme}}
+- {id: image-frame-api, type: aws.res.aws_api_gateway_rest_api, name: image-frame-api, parent: grp-viewer, props: {name: changeme}}
+- {id: get-image-frame, type: aws.lambda_function, name: get-image-frame, parent: grp-viewer}
+- {id: imaging-ai-endpoint, type: aws.res.aws_sagemaker_endpoint, name: imaging-ai-endpoint, parent: grp-ai, props: {endpoint_config_name: changeme}}
+- {id: imaging-cmk, type: aws.res.aws_kms_key, name: imaging-cmk, parent: reg-us-east-1}
+edges:
+- {from: dc-hospital-pacs, to: dicom-input, label: DICOM studies, step: '1'}
+- {from: dicom-input, to: start-dicom-import, label: S3 event, step: '2'}
+- {from: start-dicom-import, to: import-output, label: StartDICOMImportJob output, step: '3'}
+- {from: start-dicom-import, to: image-set-index, label: image set IDs, step: '4'}
+- {from: imaging-events, to: get-image-frame, label: import completed events}
+- {from: users, to: viewer-cdn, label: HTTPS viewer, step: '5'}
+- {from: viewer-cdn, to: viewer-static-site, label: static origin}
+- {from: users, to: radiologist-identity, label: sign-in}
+- {from: viewer-cdn, to: image-frame-api, label: frame requests, step: '6'}
+- {from: image-frame-api, to: get-image-frame, label: Lambda proxy}
+- {from: get-image-frame, to: image-set-index, label: lookup image set, step: '7'}
+- {from: imaging-events, to: imaging-ai-endpoint, label: inference on new studies, step: '8'}
+- {from: import-output, to: imaging-cmk, label: SSE-KMS}
+steps:
+- {n: '1', text: 'datacenter → dicom-input: DICOM studies'}
+- {n: '2', text: 'dicom-input → start-dicom-import: S3 event'}
+- {n: '3', text: 'start-dicom-import → import-output: StartDICOMImportJob output'}
+- {n: '4', text: 'start-dicom-import → image-set-index: image set IDs'}
+- {n: '5', text: 'users → viewer-cdn: HTTPS viewer'}
+- {n: '6', text: 'viewer-cdn → image-frame-api: frame requests'}
+- {n: '7', text: 'get-image-frame → image-set-index: lookup image set'}
+- {n: '8', text: 'imaging-events → imaging-ai-endpoint: inference on new studies'}

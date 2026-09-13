@@ -1,0 +1,45 @@
+# Generated from the official reference (https://aws.amazon.com/solutions/guidance/product-substitutions-on-aws/); edit freely.
+title: Retail product substitutions with OpenSearch k-NN embeddings
+category: industry
+tags:
+- retail
+- personalization
+- product substitution
+- opensearch
+- k-nn
+- embeddings
+source: https://aws.amazon.com/solutions/guidance/product-substitutions-on-aws/
+description: Guidance for Product Substitutions on AWS embeds product names and descriptions with Lambda and stores the vectors in an Amazon OpenSearch Service k-NN index seeded from product data in S3
+  and DynamoDB. A Cognito-authenticated API Gateway endpoint invokes a query Lambda that finds the nearest neighbours of an out-of-stock item and returns substitute products, with CloudWatch metrics and
+  SNS alerts for operations.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-query-api, type: common.group, name: query-api, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: product-catalog-data, type: aws.s3_bucket, name: product-catalog-data, parent: grp-ingestion}
+- {id: product-seed-table, type: aws.dynamodb_table, name: product-seed-table, parent: grp-ingestion}
+- {id: embed-and-load, type: aws.lambda_function, name: embed-and-load, parent: grp-ingestion}
+- {id: product-knn-index, type: aws.res.aws_opensearch_domain, name: product-knn-index, parent: reg-us-east-1, props: {domain_name: changeme}}
+- {id: api-users, type: aws.res.aws_cognito_user_pool, name: api-users, parent: grp-query-api, props: {name: changeme}}
+- {id: substitutions-api, type: aws.res.aws_api_gateway_rest_api, name: substitutions-api, parent: grp-query-api, props: {name: changeme}}
+- {id: find-substitutes, type: aws.lambda_function, name: find-substitutes, parent: grp-query-api}
+- {id: ops-alerts, type: aws.res.aws_sns_topic, name: ops-alerts, parent: reg-us-east-1}
+- {id: search-latency-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: search-latency-alarm, parent: reg-us-east-1, props: {alarm_name: changeme}}
+edges:
+- {from: product-catalog-data, to: embed-and-load, label: product descriptions, step: '1'}
+- {from: product-seed-table, to: embed-and-load, label: seed items}
+- {from: embed-and-load, to: product-knn-index, label: index embeddings, step: '2'}
+- {from: client, to: substitutions-api, label: GET substitutes for SKU, step: '3'}
+- {from: substitutions-api, to: api-users, label: Cognito authorizer}
+- {from: substitutions-api, to: find-substitutes, label: Lambda proxy, step: '4'}
+- {from: find-substitutes, to: product-knn-index, label: k-NN query, step: '5'}
+- {from: product-knn-index, to: search-latency-alarm, label: metrics}
+- {from: search-latency-alarm, to: ops-alerts, label: alarm action}
+steps:
+- {n: '1', text: 'product-catalog-data → embed-and-load: product descriptions'}
+- {n: '2', text: 'embed-and-load → product-knn-index: index embeddings'}
+- {n: '3', text: 'client → substitutions-api: GET substitutes for SKU'}
+- {n: '4', text: 'substitutions-api → find-substitutes: Lambda proxy'}
+- {n: '5', text: 'find-substitutes → product-knn-index: k-NN query'}

@@ -1,0 +1,58 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/analyze-video-computer-vision-machine-learning); edit freely.
+title: Automated video analysis with Azure Machine Learning and Vision
+category: ml
+tags:
+- computer-vision
+- video
+- frame-extraction
+- inference-cluster
+- logic-apps
+- ocr
+- fabric
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/analyze-video-computer-vision-machine-learning
+description: MP4 footage uploaded to Blob Storage triggers an Azure Machine Learning pipeline that runs FFmpeg on an inference cluster to extract frames into Data Lake Storage. A Logic Apps workflow detects
+  the new images, calls Custom Vision for domain object detection and the Vision OCR API for text, parses the JSON results into a Fabric warehouse, and Power BI visualises the outcomes.
+nodes:
+- {id: sub-video-analytics, type: azure.subscription, name: video-analytics, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-video-cv, type: azure.resource_group, name: rg-video-cv, parent: sub-video-analytics, props: {location: westus2}}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: stvideoraw, type: azure.storage_account, name: stvideoraw, parent: rg-rg-video-cv}
+- id: mlw-video
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-video
+  parent: rg-rg-video-cv
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- {id: aks-frame-extraction, type: azure.res.azurerm_machine_learning_inference_cluster, name: aks-frame-extraction, parent: rg-rg-video-cv, props: {kubernetes_cluster_id: changeme, location: westeurope,
+    machine_learning_workspace_id: changeme, name: changeme}}
+- {id: acrvideo, type: azure.container_registry, name: acrvideo, parent: rg-rg-video-cv}
+- {id: stframeslake, type: azure.storage_account, name: stframeslake, parent: rg-rg-video-cv}
+- {id: logic-frame-analysis, type: azure.res.azurerm_logic_app_workflow, name: logic-frame-analysis, parent: rg-rg-video-cv, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: customvision-objects, type: azure.res.azurerm_cognitive_account, name: customvision-objects, parent: rg-rg-video-cv, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: vision-ocr, type: azure.res.azurerm_cognitive_account, name: vision-ocr, parent: rg-rg-video-cv, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: kv-video, type: azure.key_vault, name: kv-video, parent: rg-rg-video-cv}
+- {id: appi-video, type: azure.res.azurerm_application_insights, name: appi-video, parent: rg-rg-video-cv, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: device, to: stvideoraw, label: upload MP4 footage, step: '1'}
+- {from: stvideoraw, to: mlw-video, label: pipeline detects new videos, step: '2'}
+- {from: mlw-video, to: aks-frame-extraction, label: run FFmpeg frame extraction, step: '3'}
+- {from: acrvideo, to: aks-frame-extraction, label: FFmpeg image}
+- {from: aks-frame-extraction, to: stframeslake, label: JPG / PNG frames, step: '4'}
+- {from: stframeslake, to: logic-frame-analysis, label: new image trigger, step: '5'}
+- {from: logic-frame-analysis, to: customvision-objects, label: object detection, step: '6'}
+- {from: logic-frame-analysis, to: vision-ocr, label: OCR read}
+- {from: logic-frame-analysis, to: saas, label: parsed JSON to Fabric warehouse, step: '7'}
+- {from: saas, to: users, label: Power BI, step: '8'}
+- {from: logic-frame-analysis, to: kv-video, label: API keys}
+- {from: mlw-video, to: appi-video, label: pipeline telemetry}
+steps:
+- {n: '1', text: 'device → stvideoraw: upload MP4 footage'}
+- {n: '2', text: 'stvideoraw → mlw-video: pipeline detects new videos'}
+- {n: '3', text: 'mlw-video → aks-frame-extraction: run FFmpeg frame extraction'}
+- {n: '4', text: 'aks-frame-extraction → stframeslake: JPG / PNG frames'}
+- {n: '5', text: 'stframeslake → logic-frame-analysis: new image trigger'}
+- {n: '6', text: 'logic-frame-analysis → customvision-objects: object detection'}
+- {n: '7', text: 'logic-frame-analysis → saas: parsed JSON to Fabric warehouse'}
+- {n: '8', text: 'saas → users: Power BI'}

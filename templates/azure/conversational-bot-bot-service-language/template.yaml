@@ -1,0 +1,56 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/bot-service/bot-builder-basics); edit freely.
+title: Conversational bot with Azure AI Bot Service and Language
+category: ml
+tags:
+- bot-service
+- bot-framework
+- channels
+- teams
+- conversational-language-understanding
+- question-answering
+- app-service
+source: https://learn.microsoft.com/en-us/azure/bot-service/bot-builder-basics
+description: Azure AI Bot Service connects channels such as Microsoft Teams and web chat to a bot web application on App Service, exchanging message and conversation-update activities over HTTPS POST within
+  15-second turns. The bot uses Azure AI Language conversational language understanding and custom question answering to interpret intents and answer FAQs, persists conversation state in Cosmos DB, and
+  reports telemetry to Application Insights.
+nodes:
+- {id: sub-bots-prod, type: azure.subscription, name: bots-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-conversational-bot, type: azure.resource_group, name: rg-conversational-bot, parent: sub-bots-prod, props: {location: westeurope}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: asp-bot, type: azure.res.azurerm_service_plan, name: asp-bot, parent: rg-rg-conversational-bot, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-bot-messaging
+  type: azure.res.azurerm_linux_web_app
+  name: app-bot-messaging
+  parent: rg-rg-conversational-bot
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: language-clu-qna, type: azure.res.azurerm_cognitive_account, name: language-clu-qna, parent: rg-rg-conversational-bot, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: srch-qna-knowledge, type: azure.res.azurerm_search_service, name: srch-qna-knowledge, parent: rg-rg-conversational-bot, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}}
+- id: cosmos-bot-state
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-bot-state
+  parent: rg-rg-conversational-bot
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: stbottranscripts, type: azure.storage_account, name: stbottranscripts, parent: rg-rg-conversational-bot}
+- {id: kv-bot, type: azure.key_vault, name: kv-bot, parent: rg-rg-conversational-bot}
+- {id: appi-bot, type: azure.res.azurerm_application_insights, name: appi-bot, parent: rg-rg-conversational-bot, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: saas, label: Teams / web chat channel, step: '1'}
+- {from: app-bot-messaging, to: language-clu-qna, label: CLU intents and custom question answering, step: '4'}
+- {from: language-clu-qna, to: srch-qna-knowledge, label: knowledge base index}
+- {from: app-bot-messaging, to: cosmos-bot-state, label: conversation and user state, step: '5'}
+- {from: app-bot-messaging, to: stbottranscripts, label: transcript logging}
+- {from: app-bot-messaging, to: kv-bot, label: app ID and secrets}
+- {from: app-bot-messaging, to: appi-bot, label: telemetry}
+steps:
+- {n: '1', text: 'users → saas: Teams / web chat channel'}
+- {n: '4', text: 'app-bot-messaging → language-clu-qna: CLU intents and custom question answering'}
+- {n: '5', text: 'app-bot-messaging → cosmos-bot-state: conversation and user state'}

@@ -1,0 +1,80 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/genaiops-for-mlops); edit freely.
+title: GenAIOps evaluation pipeline extending MLOps
+category: ml
+tags:
+- genaiops
+- llmops
+- evaluation
+- prompt-flow
+- azure-machine-learning
+- ai-search
+- ci-cd
+- monitoring
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/genaiops-for-mlops
+description: Existing Azure Machine Learning pipelines are extended to chunk, enrich, embed, and index grounding documents into AI Search, and to run prompt and RAG evaluation jobs that score groundedness,
+  relevance, coherence, and fluency with the Azure AI Evaluation SDK or Foundry evaluations. A CI/CD pipeline deploys the orchestrator and prompt assets to App Service behind an API Management gateway that
+  logs inputs and outputs for production monitoring and human feedback.
+nodes:
+- {id: sub-genai-platform, type: azure.subscription, name: genai-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-genaiops, type: azure.resource_group, name: rg-genaiops, parent: sub-genai-platform, props: {location: eastus2}}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- id: mlw-genaiops
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-genaiops
+  parent: rg-rg-genaiops
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- id: cpu-cluster-eval
+  type: azure.res.azurerm_machine_learning_compute_cluster
+  name: cpu-cluster-eval
+  parent: rg-rg-genaiops
+  props: {location: westeurope, machine_learning_workspace_id: changeme, name: changeme, scale_settings: {}, vm_priority: changeme, vm_size: changeme}
+- {id: stgroundingdocs, type: azure.storage_account, name: stgroundingdocs, parent: rg-rg-genaiops}
+- {id: srch-genaiops, type: azure.res.azurerm_search_service, name: srch-genaiops, parent: rg-rg-genaiops, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: foundry-genaiops, type: azure.res.azurerm_cognitive_account, name: foundry-genaiops, parent: rg-rg-genaiops, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: gpt-4o-eval
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-eval
+  parent: rg-rg-genaiops
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- id: text-embedding-3-small
+  type: azure.res.azurerm_cognitive_deployment
+  name: text-embedding-3-small
+  parent: rg-rg-genaiops
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- {id: apim-genaiops, type: azure.res.azurerm_api_management, name: apim-genaiops, parent: rg-rg-genaiops, props: {location: westeurope, name: changeme, publisher_email: changeme, publisher_name: changeme,
+    resource_group_name: changeme, sku_name: changeme}}
+- id: app-orchestrator-prod
+  type: azure.res.azurerm_linux_web_app
+  name: app-orchestrator-prod
+  parent: rg-rg-genaiops
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: acrgenaiops, type: azure.container_registry, name: acrgenaiops, parent: rg-rg-genaiops}
+- {id: kv-genaiops, type: azure.key_vault, name: kv-genaiops, parent: rg-rg-genaiops}
+- {id: appi-genaiops, type: azure.res.azurerm_application_insights, name: appi-genaiops, parent: rg-rg-genaiops, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: stgroundingdocs, to: cpu-cluster-eval, label: 'DataOps: chunk, enrich, embed', step: '1'}
+- {from: cpu-cluster-eval, to: text-embedding-3-small, label: embeddings}
+- {from: cpu-cluster-eval, to: srch-genaiops, label: index chunks, step: '2'}
+- {from: user, to: mlw-genaiops, label: prompt and RAG experiments, step: '3'}
+- {from: mlw-genaiops, to: cpu-cluster-eval, label: evaluation job (groundedness, step: '4'}
+- {from: cpu-cluster-eval, to: gpt-4o-eval, label: LLM-judged metrics}
+- {from: saas, to: app-orchestrator-prod, label: 'CI/CD: deploy orchestrator and prompts', step: '5'}
+- {from: acrgenaiops, to: app-orchestrator-prod, label: orchestrator image}
+- {from: users, to: apim-genaiops, label: chat requests, step: '6'}
+- {from: apim-genaiops, to: app-orchestrator-prod, label: route}
+- {from: app-orchestrator-prod, to: srch-genaiops, label: retrieve grounding data}
+- {from: app-orchestrator-prod, to: gpt-4o-eval, label: completion}
+- {from: gpt-4o-eval, to: foundry-genaiops, label: model deployment}
+- {from: apim-genaiops, to: appi-genaiops, label: log prompts, step: '7'}
+- {from: app-orchestrator-prod, to: kv-genaiops, label: secrets}
+steps:
+- {n: '1', text: 'stgroundingdocs → cpu-cluster-eval: DataOps: chunk, enrich, embed'}
+- {n: '2', text: 'cpu-cluster-eval → srch-genaiops: index chunks'}
+- {n: '3', text: 'user → mlw-genaiops: prompt and RAG experiments'}
+- {n: '4', text: 'mlw-genaiops → cpu-cluster-eval: evaluation job (groundedness'}
+- {n: '5', text: 'saas → app-orchestrator-prod: CI/CD: deploy orchestrator and prompts'}
+- {n: '6', text: 'users → apim-genaiops: chat requests'}
+- {n: '7', text: 'apim-genaiops → appi-genaiops: log prompts'}

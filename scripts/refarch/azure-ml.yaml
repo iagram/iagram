@@ -1,0 +1,722 @@
+# Azure reference architectures: machine learning and generative AI
+# Sources verified against learn.microsoft.com on 2026-09-13.
+
+- slug: baseline-foundry-chat-rag
+  title: Baseline Microsoft Foundry chat with RAG
+  category: ml
+  tags: [rag, azure-openai, ai-search, app-service, private-endpoint, application-gateway, foundry-agent]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-microsoft-foundry-chat
+  description: A zone-redundant App Service chat UI behind Application Gateway with WAF calls a Foundry Agent Service prompt agent over a private endpoint; the agent grounds Azure OpenAI completions with vector results from Azure AI Search and persists conversation state in Cosmos DB and Blob Storage. Every PaaS dependency is reached through private endpoints in a segmented virtual network, and agent egress to public tools and MCP servers is forced through Azure Firewall FQDN rules.
+  containers:
+    - subscription: workload-prod
+      resource_group: {name: rg-chat-baseline, location: eastus2}
+      vnets:
+        - name: vnet-chat
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: snet-appGateway, cidr: 10.0.1.0/24, public: true}
+            - {name: snet-appServicePlan, cidr: 10.0.2.0/24}
+            - {name: snet-privateEndpoints, cidr: 10.0.3.0/24}
+            - {name: snet-agentsEgress, cidr: 10.0.4.0/24}
+            - {name: AzureFirewallSubnet, cidr: 10.0.5.0/26}
+  elements:
+    - {tf: azurerm_application_gateway, name: agw-chat, in: subnet:snet-appGateway}
+    - {tf: azurerm_service_plan, name: asp-chat, in: subnet:snet-appServicePlan}
+    - {tf: azurerm_linux_web_app, name: app-chat-ui, in: subnet:snet-appServicePlan}
+    - {tf: azurerm_private_endpoint, name: pe-foundry, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_cognitive_account, name: foundry-chat, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-deployment, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_search_service, name: srch-grounding, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-enterprise-memory, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_storage_account, name: stchatfiles, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_key_vault, name: kv-chat-tls, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_firewall, name: afw-egress, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_application_insights, name: appi-chat, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_log_analytics_workspace, name: law-chat, in: resource_group:rg-chat-baseline}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: agw-chat, label: HTTPS (WAF), step: 1}
+    - {from: agw-chat, to: app-chat-ui, label: route to chat UI, step: 2}
+    - {from: app-chat-ui, to: pe-foundry, label: Responses API (managed identity), step: 3}
+    - {from: pe-foundry, to: foundry-chat, label: private link}
+    - {from: foundry-chat, to: srch-grounding, label: AI Search tool (vector + semantic), step: 4}
+    - {from: foundry-chat, to: afw-egress, label: public tool / MCP egress, step: 5}
+    - {from: afw-egress, to: internet, label: FQDN-allowed egress}
+    - {from: foundry-chat, to: gpt-4o-deployment, label: model inference, step: 6}
+    - {from: foundry-chat, to: cosmos-enterprise-memory, label: persist conversation items, step: 7}
+    - {from: foundry-chat, to: stchatfiles, label: uploaded files}
+    - {from: agw-chat, to: kv-chat-tls, label: TLS certificate}
+    - {from: app-chat-ui, to: appi-chat, label: telemetry}
+    - {from: appi-chat, to: law-chat, label: logs}
+
+- slug: foundry-agents-landing-zone
+  title: Baseline Foundry chat and agents in an Azure landing zone
+  category: ml
+  tags: [landing-zone, foundry-agent, hub-spoke, azure-openai, private-dns, firewall, platform-team]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-microsoft-foundry-landing-zone
+  description: The baseline Foundry chat workload is deployed into an application landing zone spoke whose virtual network is peered to a platform-owned connectivity hub that supplies Azure Firewall, private DNS zones, and hybrid connectivity. The workload team owns App Service, Foundry Agent Service, AI Search, Cosmos DB, and their private endpoints, while internet egress and DNS resolution are delegated to the platform team through hub routing.
+  containers:
+    - subscription: platform-connectivity
+      resource_group: {name: rg-hub, location: eastus2}
+      vnets:
+        - name: vnet-hub
+          cidr: 10.100.0.0/22
+          subnets:
+            - {name: AzureFirewallSubnet, cidr: 10.100.0.0/26}
+            - {name: AzureBastionSubnet, cidr: 10.100.1.0/26}
+    - subscription: app-landing-zone
+      resource_group: {name: rg-chat-alz, location: eastus2}
+      vnets:
+        - name: vnet-spoke-chat
+          cidr: 10.1.0.0/22
+          subnets:
+            - {name: snet-appGateway, cidr: 10.1.0.0/24, public: true}
+            - {name: snet-appServicePlan, cidr: 10.1.1.0/24}
+            - {name: snet-privateEndpoints, cidr: 10.1.2.0/24}
+            - {name: snet-agentsEgress, cidr: 10.1.3.0/24}
+  elements:
+    - {tf: azurerm_firewall, name: afw-hub, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_bastion_host, name: bas-hub, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_log_analytics_workspace, name: law-platform, in: resource_group:rg-hub}
+    - {tf: azurerm_application_gateway, name: agw-chat-alz, in: subnet:snet-appGateway}
+    - {tf: azurerm_linux_web_app, name: app-chat-alz, in: subnet:snet-appServicePlan}
+    - {tf: azurerm_private_endpoint, name: pe-foundry-alz, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_cognitive_account, name: foundry-alz, in: resource_group:rg-chat-alz}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-alz, in: resource_group:rg-chat-alz}
+    - {tf: azurerm_search_service, name: srch-alz, in: resource_group:rg-chat-alz}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-alz, in: resource_group:rg-chat-alz}
+    - {tf: azurerm_storage_account, name: stalzagent, in: resource_group:rg-chat-alz}
+    - {tf: azurerm_key_vault, name: kv-alz, in: resource_group:rg-chat-alz}
+  actors: [users, internet, datacenter]
+  flows:
+    - {from: vnet:vnet-hub, to: vnet:vnet-spoke-chat, link: azurerm_virtual_network_peering, label: hub-spoke peering}
+    - {from: users, to: agw-chat-alz, label: HTTPS (WAF), step: 1}
+    - {from: agw-chat-alz, to: app-chat-alz, label: chat UI, step: 2}
+    - {from: app-chat-alz, to: pe-foundry-alz, label: agent invocation, step: 3}
+    - {from: pe-foundry-alz, to: foundry-alz, label: private link}
+    - {from: foundry-alz, to: srch-alz, label: grounding query, step: 4}
+    - {from: foundry-alz, to: gpt-4o-alz, label: completion, step: 5}
+    - {from: foundry-alz, to: cosmos-alz, label: conversation state, step: 6}
+    - {from: foundry-alz, to: afw-hub, label: "0.0.0.0/0 via UDR to hub", step: 7}
+    - {from: afw-hub, to: internet, label: allowed FQDNs}
+    - {from: datacenter, to: afw-hub, label: hybrid connectivity}
+    - {from: bas-hub, to: app-chat-alz, label: ops access}
+    - {from: foundry-alz, to: law-platform, label: diagnostics}
+
+- slug: dynamic-ai-agents-at-scale
+  title: Dynamic AI agents at scale on AKS with semantic agent selection
+  category: ml
+  tags: [multi-agent, aks, ai-search, semantic-cache, redis, foundry, azure-openai, orchestration]
+  source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/ai-agents-at-scale
+  description: An agent service on AKS receives user queries behind Application Gateway, and an agent selector queries an AI Search semantic cache of sample utterances to shortlist candidate agents before an LLM picks one or the top-scoring agent is invoked directly. An agent factory instantiates the selected agent, which calls Azure OpenAI models in Foundry, keeps multiturn context in Azure Managed Redis, and reaches external APIs or MCP servers through a firewall or NAT gateway.
+  containers:
+    - subscription: agents-prod
+      resource_group: {name: rg-agents-scale, location: westus3}
+      vnets:
+        - name: vnet-agents
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: snet-gateway, cidr: 10.20.0.0/24, public: true}
+            - {name: snet-cluster, cidr: 10.20.16.0/20}
+            - {name: snet-privateEndpoints, cidr: 10.20.1.0/24}
+            - {name: AzureFirewallSubnet, cidr: 10.20.2.0/26}
+  elements:
+    - {tf: azurerm_application_gateway, name: agw-agents, in: subnet:snet-gateway}
+    - {tf: azurerm_kubernetes_cluster, name: aks-agents, in: subnet:snet-cluster}
+    - {tf: azurerm_container_registry, name: acragents, in: resource_group:rg-agents-scale}
+    - {tf: azurerm_search_service, name: srch-semantic-cache, in: resource_group:rg-agents-scale}
+    - {tf: azurerm_cognitive_account, name: foundry-agents, in: resource_group:rg-agents-scale}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-agents, in: resource_group:rg-agents-scale}
+    - {tf: azurerm_redis_cache, name: redis-conversation, in: resource_group:rg-agents-scale}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-agent-registry, in: resource_group:rg-agents-scale}
+    - {tf: azurerm_storage_account, name: stagentlogs, in: resource_group:rg-agents-scale}
+    - {tf: azurerm_key_vault, name: kv-agents, in: resource_group:rg-agents-scale}
+    - {tf: azurerm_private_endpoint, name: pe-search-cache, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_firewall, name: afw-agents, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_application_insights, name: appi-agents, in: resource_group:rg-agents-scale}
+    - {tf: azurerm_log_analytics_workspace, name: law-agents, in: resource_group:rg-agents-scale}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: agw-agents, label: HTTPS (WAF), step: 1}
+    - {from: agw-agents, to: aks-agents, label: AI agent service, step: 2}
+    - {from: aks-agents, to: pe-search-cache, label: vector similarity on utterances, step: 3}
+    - {from: pe-search-cache, to: srch-semantic-cache, label: private link}
+    - {from: aks-agents, to: cosmos-agent-registry, label: agent definitions (code / YAML), step: 4}
+    - {from: aks-agents, to: gpt-4o-agents, label: agent selection and response, step: 5}
+    - {from: gpt-4o-agents, to: foundry-agents, label: hosted in Foundry}
+    - {from: aks-agents, to: redis-conversation, label: chat history (TTL)}
+    - {from: aks-agents, to: afw-agents, label: external APIs / MCP, step: 6}
+    - {from: afw-agents, to: internet, label: static outbound IP}
+    - {from: acragents, to: aks-agents, label: agent images}
+    - {from: aks-agents, to: appi-agents, label: OpenTelemetry traces}
+    - {from: appi-agents, to: law-agents, label: logs and KQL}
+
+- slug: document-classification-durable-functions
+  title: Automated document classification with Durable Functions and Document Intelligence
+  category: ml
+  tags: [document-intelligence, durable-functions, service-bus, ai-search, embeddings, rag, cosmos-db]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/automate-document-classification-durable-functions
+  description: A web app stores uploaded multi-document files in Blob Storage and enqueues a Service Bus command that starts a Durable Functions orchestration, whose activities call Document Intelligence to split and classify each embedded document, store metadata in Cosmos DB, chunk the text, and write text-embedding-3-large vectors into an AI Search index. A pre-deployed Foundry Agent Service prompt agent with the AI Search tool then answers user questions over the indexed content with inline citations.
+  containers:
+    - subscription: docs-prod
+      resource_group: {name: rg-doc-classify, location: eastus}
+  elements:
+    - {tf: azurerm_service_plan, name: asp-docs, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_linux_web_app, name: app-doc-upload, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_storage_account, name: stdocfiles, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_servicebus_namespace, name: sb-doc-commands, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_linux_function_app, name: func-doc-orchestrator, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_cognitive_account, name: docintel-analyze, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-doc-metadata, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_cognitive_account, name: foundry-docs, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_cognitive_deployment, name: text-embedding-3-large, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4-1-agent-model, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_search_service, name: srch-doc-index, in: resource_group:rg-doc-classify}
+    - {tf: azurerm_application_insights, name: appi-docs, in: resource_group:rg-doc-classify}
+  actors: [user]
+  flows:
+    - {from: user, to: app-doc-upload, label: upload PDF / TIFF, step: 1}
+    - {from: app-doc-upload, to: stdocfiles, label: store document file (1a)}
+    - {from: app-doc-upload, to: sb-doc-commands, label: enqueue command (1b)}
+    - {from: sb-doc-commands, to: func-doc-orchestrator, label: trigger orchestration, step: 2}
+    - {from: func-doc-orchestrator, to: docintel-analyze, label: Analyze Document API, step: 3}
+    - {from: func-doc-orchestrator, to: cosmos-doc-metadata, label: type, location, page range, step: 4}
+    - {from: func-doc-orchestrator, to: text-embedding-3-large, label: chunk and embed, step: 5}
+    - {from: func-doc-orchestrator, to: srch-doc-index, label: write vectors + correlation ID}
+    - {from: app-doc-upload, to: foundry-docs, label: call prompt agent (AI Projects SDK), step: 6}
+    - {from: foundry-docs, to: srch-doc-index, label: hybrid query via AI Search tool, step: 7}
+    - {from: foundry-docs, to: gpt-4-1-agent-model, label: cited answer}
+    - {from: func-doc-orchestrator, to: appi-docs, label: telemetry}
+
+- slug: mlops-v2-azure-machine-learning
+  title: MLOps v2 with Azure Machine Learning
+  category: ml
+  tags: [mlops, azure-machine-learning, ci-cd, model-registry, compute-cluster, online-endpoint, monitoring]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/machine-learning-operations-v2
+  description: Data scientists iterate in a development workspace, and a CI/CD pipeline promotes code and trained models through a shared Azure Machine Learning registry into a production workspace where a compute cluster retrains and a managed online endpoint serves predictions. Data drift and model performance monitoring in Azure Monitor and Application Insights close the loop by triggering retraining, with Data Lake Storage, Key Vault, and Container Registry as the workspace dependencies.
+  containers:
+    - subscription: ml-platform
+      resource_group: {name: rg-mlops-dev, location: westeurope}
+    - subscription: ml-platform
+      resource_group: {name: rg-mlops-prod, location: westeurope}
+      vnets:
+        - name: vnet-mlops-prod
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: snet-training, cidr: 10.30.1.0/24}
+            - {name: snet-privateEndpoints, cidr: 10.30.2.0/24}
+  elements:
+    - {tf: azurerm_machine_learning_workspace, name: mlw-dev, in: resource_group:rg-mlops-dev}
+    - {tf: azurerm_machine_learning_compute_instance, name: ci-datascientist, in: resource_group:rg-mlops-dev}
+    - {tf: azurerm_storage_account, name: stmlopsdev, in: resource_group:rg-mlops-dev}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-prod, in: resource_group:rg-mlops-prod}
+    - {tf: azurerm_machine_learning_compute_cluster, name: cpu-cluster-prod, in: subnet:snet-training}
+    - {tf: azurerm_machine_learning_inference_cluster, name: aks-inference-prod, in: subnet:snet-training}
+    - {tf: azurerm_private_endpoint, name: pe-mlw-prod, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_storage_account, name: stmlopsdatalake, in: resource_group:rg-mlops-prod}
+    - {tf: azurerm_container_registry, name: acrmlops, in: resource_group:rg-mlops-prod}
+    - {tf: azurerm_key_vault, name: kv-mlops-prod, in: resource_group:rg-mlops-prod}
+    - {tf: azurerm_application_insights, name: appi-mlops-prod, in: resource_group:rg-mlops-prod}
+    - {tf: azurerm_log_analytics_workspace, name: law-mlops, in: resource_group:rg-mlops-prod}
+  actors: [user, client, saas]
+  flows:
+    - {from: user, to: ci-datascientist, label: experiment (inner loop), step: 1}
+    - {from: ci-datascientist, to: mlw-dev, label: track runs and register model, step: 2}
+    - {from: stmlopsdev, to: ci-datascientist, label: sample data}
+    - {from: saas, to: mlw-prod, label: "CI/CD: promote pipeline and model", step: 3}
+    - {from: mlw-prod, to: cpu-cluster-prod, label: retraining pipeline job, step: 4}
+    - {from: stmlopsdatalake, to: cpu-cluster-prod, label: training data}
+    - {from: acrmlops, to: aks-inference-prod, label: scoring environment image}
+    - {from: mlw-prod, to: aks-inference-prod, label: deploy registered model, step: 5}
+    - {from: client, to: pe-mlw-prod, label: score request (private), step: 6}
+    - {from: pe-mlw-prod, to: aks-inference-prod, label: online scoring}
+    - {from: aks-inference-prod, to: appi-mlops-prod, label: inference telemetry and drift signals, step: 7}
+    - {from: appi-mlops-prod, to: law-mlops, label: logs}
+    - {from: mlw-prod, to: kv-mlops-prod, label: secrets}
+
+- slug: many-models-batch-scoring
+  title: Many-models training and batch scoring with Azure Machine Learning
+  category: ml
+  tags: [batch-scoring, many-models, parallel-run-step, compute-cluster, data-factory, data-lake, synapse]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/idea/many-models-machine-learning-azure-machine-learning
+  description: Azure Data Factory copies source data into Data Lake Storage, and Azure Machine Learning pipelines on a compute cluster use ParallelRunStep to train one model per data partition, register qualifying models, and batch-score every partition in parallel. Predictions are written back to the data lake and served from Synapse SQL to Power BI, while a managed online endpoint loads models on demand for real-time requests.
+  containers:
+    - subscription: forecasting-prod
+      resource_group: {name: rg-many-models, location: northeurope}
+  elements:
+    - {tf: azurerm_mssql_server, name: sql-source-orders, in: resource_group:rg-many-models}
+    - {tf: azurerm_data_factory, name: adf-ingest, in: resource_group:rg-many-models}
+    - {tf: azurerm_storage_account, name: stmanymodelslake, in: resource_group:rg-many-models}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-many-models, in: resource_group:rg-many-models}
+    - {tf: azurerm_machine_learning_compute_cluster, name: cpu-cluster-parallel, in: resource_group:rg-many-models}
+    - {tf: azurerm_machine_learning_inference_cluster, name: aks-realtime-scoring, in: resource_group:rg-many-models}
+    - {tf: azurerm_container_registry, name: acrmanymodels, in: resource_group:rg-many-models}
+    - {tf: azurerm_key_vault, name: kv-many-models, in: resource_group:rg-many-models}
+    - {tf: azurerm_synapse_workspace, name: syn-predictions, in: resource_group:rg-many-models}
+    - {tf: azurerm_application_insights, name: appi-many-models, in: resource_group:rg-many-models}
+  actors: [saas, client, users]
+  flows:
+    - {from: sql-source-orders, to: adf-ingest, label: copy source data, step: 1}
+    - {from: adf-ingest, to: stmanymodelslake, label: land tabular dataset, step: 2}
+    - {from: stmanymodelslake, to: cpu-cluster-parallel, label: partitioned datasets, step: 3}
+    - {from: cpu-cluster-parallel, to: mlw-many-models, label: ParallelRunStep trains and registers models, step: 4}
+    - {from: saas, to: mlw-many-models, label: "DevOps promotion: evaluate and register", step: 5}
+    - {from: mlw-many-models, to: cpu-cluster-parallel, label: batch-scoring pipeline (tag lookup), step: 6}
+    - {from: cpu-cluster-parallel, to: stmanymodelslake, label: write predictions (DataTransferStep), step: 7}
+    - {from: stmanymodelslake, to: syn-predictions, label: load to Synapse SQL, step: 8}
+    - {from: syn-predictions, to: users, label: Power BI dashboards, step: 9}
+    - {from: client, to: aks-realtime-scoring, label: real-time scoring (models loaded on demand)}
+    - {from: acrmanymodels, to: aks-realtime-scoring, label: scoring image}
+    - {from: aks-realtime-scoring, to: appi-many-models, label: telemetry}
+
+- slug: realtime-scoring-online-endpoint-apim
+  title: Real-time scoring with managed online endpoints behind API Management
+  category: ml
+  tags: [online-endpoint, real-time-inference, blue-green, api-management, private-endpoint, autoscale]
+  source: https://learn.microsoft.com/en-us/azure/machine-learning/concept-endpoints-online
+  description: A managed online endpoint hosts blue and green deployments of a registered model with a traffic split for safe rollout and traffic mirroring, and inbound scoring calls reach it through the workspace private endpoint while the managed virtual network isolates outbound traffic. API Management fronts the endpoint to apply authentication, rate limits, and versioning for client applications, with Azure Monitor and Application Insights collecting latency, request, and container metrics.
+  containers:
+    - subscription: inference-prod
+      resource_group: {name: rg-realtime-scoring, location: uksouth}
+      vnets:
+        - name: vnet-scoring
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: snet-apim, cidr: 10.40.0.0/24, public: true}
+            - {name: snet-privateEndpoints, cidr: 10.40.1.0/24}
+            - {name: snet-scoring, cidr: 10.40.2.0/24}
+  elements:
+    - {tf: azurerm_api_management, name: apim-scoring, in: subnet:snet-apim}
+    - {tf: azurerm_private_endpoint, name: pe-mlw-scoring, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-scoring, in: resource_group:rg-realtime-scoring}
+    - {tf: azurerm_machine_learning_inference_cluster, name: online-endpoint-blue-green, in: subnet:snet-scoring}
+    - {tf: azurerm_container_registry, name: acrscoring, in: resource_group:rg-realtime-scoring}
+    - {tf: azurerm_storage_account, name: stscoringmodels, in: resource_group:rg-realtime-scoring}
+    - {tf: azurerm_key_vault, name: kv-scoring, in: resource_group:rg-realtime-scoring}
+    - {tf: azurerm_application_insights, name: appi-scoring, in: resource_group:rg-realtime-scoring}
+    - {tf: azurerm_log_analytics_workspace, name: law-scoring, in: resource_group:rg-realtime-scoring}
+  actors: [client, mobile]
+  flows:
+    - {from: client, to: apim-scoring, label: "POST /score (subscription key / JWT)", step: 1}
+    - {from: mobile, to: apim-scoring, label: HTTPS}
+    - {from: apim-scoring, to: pe-mlw-scoring, label: forward to scoring URI, step: 2}
+    - {from: pe-mlw-scoring, to: online-endpoint-blue-green, label: "traffic split 90/10 blue/green", step: 3}
+    - {from: mlw-scoring, to: online-endpoint-blue-green, label: deploy registered model + environment}
+    - {from: acrscoring, to: online-endpoint-blue-green, label: inference image}
+    - {from: stscoringmodels, to: online-endpoint-blue-green, label: model artifacts (storage initializer)}
+    - {from: online-endpoint-blue-green, to: appi-scoring, label: request latency, container logs, step: 4}
+    - {from: appi-scoring, to: law-scoring, label: metrics and autoscale signals}
+    - {from: mlw-scoring, to: kv-scoring, label: secrets}
+
+- slug: call-center-speech-analytics
+  title: Post-call analytics with Speech, Language, and Foundry models
+  category: ml
+  tags: [speech-to-text, batch-transcription, pii-redaction, azure-openai, functions, blob-storage, power-bi]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/openai/architecture/call-center-openai-analytics
+  description: Recorded call audio lands in Blob Storage and a blob or timer trigger starts an Azure Function that submits files to the Speech batch transcription API, redacts personal data with the Language conversation PII feature, and sends the transcript to a Foundry-hosted GPT model for intent, sentiment, entity, and summary extraction. Results are stored in a second Blob container for Power BI reporting, a web app, and CRM enrichment, with Content Understanding available as an alternative single-step audio analyzer.
+  containers:
+    - datacenter: telephony
+    - subscription: contact-center
+      resource_group: {name: rg-call-analytics, location: eastus}
+  elements:
+    - {tf: azurerm_storage_account, name: stcallaudio, in: resource_group:rg-call-analytics}
+    - {tf: azurerm_linux_function_app, name: func-transcription, in: resource_group:rg-call-analytics}
+    - {tf: azurerm_cognitive_account, name: speech-batch, in: resource_group:rg-call-analytics}
+    - {tf: azurerm_cognitive_account, name: language-pii, in: resource_group:rg-call-analytics}
+    - {tf: azurerm_cognitive_account, name: foundry-call-insights, in: resource_group:rg-call-analytics}
+    - {tf: azurerm_cognitive_deployment, name: gpt-5-analytics, in: resource_group:rg-call-analytics}
+    - {tf: azurerm_storage_account, name: stcallinsights, in: resource_group:rg-call-analytics}
+    - {tf: azurerm_linux_web_app, name: app-call-history, in: resource_group:rg-call-analytics}
+    - {tf: azurerm_key_vault, name: kv-call-analytics, in: resource_group:rg-call-analytics}
+    - {tf: azurerm_application_insights, name: appi-call-analytics, in: resource_group:rg-call-analytics}
+  actors: [datacenter, users, saas]
+  flows:
+    - {from: datacenter, to: stcallaudio, label: upload recorded audio, step: 1}
+    - {from: stcallaudio, to: func-transcription, label: blob / timer trigger, step: 2}
+    - {from: func-transcription, to: speech-batch, label: batch transcription, step: 3}
+    - {from: func-transcription, to: language-pii, label: conversation PII redaction, step: 4}
+    - {from: func-transcription, to: gpt-5-analytics, label: intent, sentiment, entities, summary, step: 5}
+    - {from: gpt-5-analytics, to: foundry-call-insights, label: Foundry model deployment}
+    - {from: func-transcription, to: stcallinsights, label: store processed output, step: 6}
+    - {from: stcallinsights, to: users, label: Power BI reports, step: 7}
+    - {from: stcallinsights, to: app-call-history, label: call history and summaries}
+    - {from: stcallinsights, to: saas, label: CRM enrichment}
+    - {from: func-transcription, to: kv-call-analytics, label: secrets}
+    - {from: func-transcription, to: appi-call-analytics, label: telemetry}
+
+- slug: video-analysis-computer-vision-aml
+  title: Automated video analysis with Azure Machine Learning and Vision
+  category: ml
+  tags: [computer-vision, video, frame-extraction, inference-cluster, logic-apps, ocr, fabric]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/analyze-video-computer-vision-machine-learning
+  description: MP4 footage uploaded to Blob Storage triggers an Azure Machine Learning pipeline that runs FFmpeg on an inference cluster to extract frames into Data Lake Storage. A Logic Apps workflow detects the new images, calls Custom Vision for domain object detection and the Vision OCR API for text, parses the JSON results into a Fabric warehouse, and Power BI visualises the outcomes.
+  containers:
+    - subscription: video-analytics
+      resource_group: {name: rg-video-cv, location: westus2}
+  elements:
+    - {tf: azurerm_storage_account, name: stvideoraw, in: resource_group:rg-video-cv}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-video, in: resource_group:rg-video-cv}
+    - {tf: azurerm_machine_learning_inference_cluster, name: aks-frame-extraction, in: resource_group:rg-video-cv}
+    - {tf: azurerm_container_registry, name: acrvideo, in: resource_group:rg-video-cv}
+    - {tf: azurerm_storage_account, name: stframeslake, in: resource_group:rg-video-cv}
+    - {tf: azurerm_logic_app_workflow, name: logic-frame-analysis, in: resource_group:rg-video-cv}
+    - {tf: azurerm_cognitive_account, name: customvision-objects, in: resource_group:rg-video-cv}
+    - {tf: azurerm_cognitive_account, name: vision-ocr, in: resource_group:rg-video-cv}
+    - {tf: azurerm_key_vault, name: kv-video, in: resource_group:rg-video-cv}
+    - {tf: azurerm_application_insights, name: appi-video, in: resource_group:rg-video-cv}
+  actors: [device, users, saas]
+  flows:
+    - {from: device, to: stvideoraw, label: upload MP4 footage, step: 1}
+    - {from: stvideoraw, to: mlw-video, label: pipeline detects new videos, step: 2}
+    - {from: mlw-video, to: aks-frame-extraction, label: run FFmpeg frame extraction, step: 3}
+    - {from: acrvideo, to: aks-frame-extraction, label: FFmpeg image}
+    - {from: aks-frame-extraction, to: stframeslake, label: JPG / PNG frames, step: 4}
+    - {from: stframeslake, to: logic-frame-analysis, label: new image trigger, step: 5}
+    - {from: logic-frame-analysis, to: customvision-objects, label: object detection, step: 6}
+    - {from: logic-frame-analysis, to: vision-ocr, label: OCR read}
+    - {from: logic-frame-analysis, to: saas, label: parsed JSON to Fabric warehouse, step: 7}
+    - {from: saas, to: users, label: Power BI, step: 8}
+    - {from: logic-frame-analysis, to: kv-video, label: API keys}
+    - {from: mlw-video, to: appi-video, label: pipeline telemetry}
+
+- slug: knowledge-mining-ai-search-skillsets
+  title: Knowledge mining with AI Search enrichment skillsets
+  category: ml
+  tags: [knowledge-mining, ai-search, skillset, ocr, entity-recognition, custom-skill, knowledge-store]
+  source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/ai-search-skillsets
+  description: An AI Search indexer cracks documents and images from Blob Storage and runs a skillset of built-in Vision OCR and Language entity and key-phrase skills plus a custom Azure Functions web API skill to enrich domain-specific content. Enriched documents are written to a full-text and vector search index and projected into a knowledge store in Blob and Table Storage, and an App Service web app queries the index.
+  containers:
+    - subscription: knowledge-mining
+      resource_group: {name: rg-knowledge-mining, location: eastus}
+  elements:
+    - {tf: azurerm_storage_account, name: stunstructureddocs, in: resource_group:rg-knowledge-mining}
+    - {tf: azurerm_search_service, name: srch-knowledge, in: resource_group:rg-knowledge-mining}
+    - {tf: azurerm_cognitive_account, name: aiservices-enrichment, in: resource_group:rg-knowledge-mining}
+    - {tf: azurerm_linux_function_app, name: func-custom-skill, in: resource_group:rg-knowledge-mining}
+    - {tf: azurerm_storage_account, name: stknowledgestore, in: resource_group:rg-knowledge-mining}
+    - {tf: azurerm_service_plan, name: asp-search-ui, in: resource_group:rg-knowledge-mining}
+    - {tf: azurerm_linux_web_app, name: app-search-ui, in: resource_group:rg-knowledge-mining}
+    - {tf: azurerm_key_vault, name: kv-knowledge, in: resource_group:rg-knowledge-mining}
+    - {tf: azurerm_application_insights, name: appi-knowledge, in: resource_group:rg-knowledge-mining}
+  actors: [users]
+  flows:
+    - {from: stunstructureddocs, to: srch-knowledge, label: indexer ingests blobs, step: 1}
+    - {from: srch-knowledge, to: aiservices-enrichment, label: "built-in skills: OCR, image analysis, entities, key phrases", step: 2}
+    - {from: srch-knowledge, to: func-custom-skill, label: custom web API skill, step: 3}
+    - {from: srch-knowledge, to: stknowledgestore, label: knowledge store projections, step: 4}
+    - {from: users, to: app-search-ui, label: HTTPS, step: 5}
+    - {from: app-search-ui, to: srch-knowledge, label: full-text and filtered queries, step: 6}
+    - {from: app-search-ui, to: kv-knowledge, label: query key}
+    - {from: app-search-ui, to: appi-knowledge, label: telemetry}
+
+- slug: secure-multitenant-rag
+  title: Secure multitenant RAG inferencing for a GenAI SaaS
+  category: ml
+  tags: [multitenant, saas, rag, security-trimming, ai-search, cosmos-db, postgresql, orchestrator]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/secure-multitenant-rag
+  description: A multitenant intelligent application authenticates users with an identity provider and calls an orchestrator API that fetches grounding data only from stores the tenant and user are authorised to read, applying tenant discriminators and security filters before building the prompt for a Foundry model. A data-access API layer encapsulates routing to store-per-tenant AI Search indexes, a partitioned multitenant Cosmos DB store, and a shared PostgreSQL knowledge store, and logs grounding access for audit.
+  containers:
+    - subscription: saas-provider
+      resource_group: {name: rg-mt-rag, location: westeurope}
+      vnets:
+        - name: vnet-mt-rag
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: snet-apps, cidr: 10.50.1.0/24}
+            - {name: snet-privateEndpoints, cidr: 10.50.2.0/24}
+  elements:
+    - {tf: azurerm_service_plan, name: asp-mt-rag, in: subnet:snet-apps}
+    - {tf: azurerm_linux_web_app, name: app-tenant-ui, in: subnet:snet-apps}
+    - {tf: azurerm_linux_web_app, name: app-orchestrator, in: subnet:snet-apps}
+    - {tf: azurerm_linux_web_app, name: app-data-access-api, in: subnet:snet-apps}
+    - {tf: azurerm_search_service, name: srch-tenant-a, in: resource_group:rg-mt-rag}
+    - {tf: azurerm_search_service, name: srch-tenant-b, in: resource_group:rg-mt-rag}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-multitenant, in: resource_group:rg-mt-rag}
+    - {tf: azurerm_postgresql_flexible_server, name: pg-shared-knowledge, in: resource_group:rg-mt-rag}
+    - {tf: azurerm_cognitive_account, name: foundry-mt, in: resource_group:rg-mt-rag}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-mt, in: resource_group:rg-mt-rag}
+    - {tf: azurerm_private_endpoint, name: pe-foundry-mt, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_key_vault, name: kv-mt-rag, in: resource_group:rg-mt-rag}
+    - {tf: azurerm_application_insights, name: appi-mt-rag, in: resource_group:rg-mt-rag}
+  actors: [users, idp]
+  flows:
+    - {from: users, to: app-tenant-ui, label: HTTPS, step: 1}
+    - {from: app-tenant-ui, to: idp, label: authenticate (tenant claims), step: 2}
+    - {from: app-tenant-ui, to: app-orchestrator, label: query + user token, step: 3}
+    - {from: app-orchestrator, to: app-data-access-api, label: fetch authorised grounding data, step: 4}
+    - {from: app-data-access-api, to: srch-tenant-a, label: store-per-tenant index (4a)}
+    - {from: app-data-access-api, to: srch-tenant-b, label: store-per-tenant index (4a)}
+    - {from: app-data-access-api, to: cosmos-multitenant, label: tenant partition key filter (4b)}
+    - {from: app-data-access-api, to: pg-shared-knowledge, label: shared store (4c)}
+    - {from: app-orchestrator, to: pe-foundry-mt, label: prompt with grounding data, step: 5}
+    - {from: pe-foundry-mt, to: gpt-4o-mt, label: inference}
+    - {from: gpt-4o-mt, to: foundry-mt, label: model deployment}
+    - {from: app-data-access-api, to: appi-mt-rag, label: grounding access audit log}
+    - {from: app-orchestrator, to: kv-mt-rag, label: secrets}
+
+- slug: genai-gateway-apim-multi-backend
+  title: GenAI gateway with API Management across multiple Foundry model backends
+  category: ml
+  tags: [genai-gateway, api-management, load-balancing, circuit-breaker, azure-openai, multi-region, token-limit]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/azure-openai-gateway-multi-backend
+  description: Intelligent applications call a single API Management endpoint instead of Foundry data-plane APIs directly, and gateway policies load-balance across provisioned and standard model deployments in several Azure OpenAI instances and regions with priority routing, circuit breaking on 429 responses, token rate limits, and token metrics. Private endpoints connect the gateway to each backend, and Event Hubs plus Log Analytics receive usage and prompt logs for chargeback and auditing.
+  containers:
+    - subscription: ai-platform
+      resource_group: {name: rg-genai-gateway, location: eastus2}
+      vnets:
+        - name: vnet-gateway
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: snet-apim, cidr: 10.60.0.0/24, public: true}
+            - {name: snet-privateEndpoints, cidr: 10.60.1.0/24}
+    - subscription: ai-platform
+      resource_group: {name: rg-genai-backends-west, location: westus}
+  elements:
+    - {tf: azurerm_api_management, name: apim-genai-gateway, in: subnet:snet-apim}
+    - {tf: azurerm_private_endpoint, name: pe-aoai-east, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_private_endpoint, name: pe-aoai-west, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_cognitive_account, name: aoai-east-ptu, in: resource_group:rg-genai-gateway}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-provisioned, in: resource_group:rg-genai-gateway}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-standard, in: resource_group:rg-genai-gateway}
+    - {tf: azurerm_cognitive_account, name: aoai-west-standard, in: resource_group:rg-genai-backends-west}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-west, in: resource_group:rg-genai-backends-west}
+    - {tf: azurerm_eventhub_namespace, name: evh-gateway-logs, in: resource_group:rg-genai-gateway}
+    - {tf: azurerm_redis_cache, name: redis-semantic-cache, in: resource_group:rg-genai-gateway}
+    - {tf: azurerm_key_vault, name: kv-gateway, in: resource_group:rg-genai-gateway}
+    - {tf: azurerm_application_insights, name: appi-gateway, in: resource_group:rg-genai-gateway}
+    - {tf: azurerm_log_analytics_workspace, name: law-gateway, in: resource_group:rg-genai-gateway}
+  actors: [client, users]
+  flows:
+    - {from: users, to: client, label: intelligent application}
+    - {from: client, to: apim-genai-gateway, label: chat completions (Entra token), step: 1}
+    - {from: apim-genai-gateway, to: redis-semantic-cache, label: llm-semantic-cache lookup, step: 2}
+    - {from: apim-genai-gateway, to: pe-aoai-east, label: priority 1 backend (PTU), step: 3}
+    - {from: pe-aoai-east, to: aoai-east-ptu, label: private link}
+    - {from: aoai-east-ptu, to: gpt-4o-provisioned, label: provisioned deployment}
+    - {from: aoai-east-ptu, to: gpt-4o-standard, label: spillover deployment}
+    - {from: apim-genai-gateway, to: pe-aoai-west, label: "priority 2 on 429 / circuit open", step: 4}
+    - {from: pe-aoai-west, to: aoai-west-standard, label: private link}
+    - {from: aoai-west-standard, to: gpt-4o-west, label: standard deployment}
+    - {from: apim-genai-gateway, to: evh-gateway-logs, label: log-to-eventhub prompts and tokens, step: 5}
+    - {from: apim-genai-gateway, to: appi-gateway, label: llm-emit-token-metric}
+    - {from: appi-gateway, to: law-gateway, label: chargeback queries}
+    - {from: apim-genai-gateway, to: kv-gateway, label: backend credentials}
+
+- slug: content-safety-gateway-apim
+  title: Content safety gateway with API Management and Azure AI Content Safety
+  category: ml
+  tags: [content-safety, prompt-shield, api-management, llm-content-safety, blocklist, azure-openai, guardrails]
+  source: https://learn.microsoft.com/en-us/azure/api-management/llm-content-safety-policy
+  description: API Management applies the llm-content-safety policy to inbound prompts and outbound completions, sending them through a managed-identity backend to Azure AI Content Safety, which scores hate, self-harm, sexual, and violence categories, matches custom blocklists, and runs prompt shields for jailbreak attempts. Requests above the configured severity thresholds are blocked with a 403 before they reach the Azure OpenAI deployment, and the same policy protects MCP tool and agent APIs managed by the gateway.
+  containers:
+    - subscription: ai-platform
+      resource_group: {name: rg-content-safety-gw, location: swedencentral}
+      vnets:
+        - name: vnet-safety-gw
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: snet-apim, cidr: 10.70.0.0/24, public: true}
+            - {name: snet-privateEndpoints, cidr: 10.70.1.0/24}
+  elements:
+    - {tf: azurerm_api_management, name: apim-safety-gateway, in: subnet:snet-apim}
+    - {tf: azurerm_cognitive_account, name: contentsafety-guardrails, in: resource_group:rg-content-safety-gw}
+    - {tf: azurerm_private_endpoint, name: pe-contentsafety, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_cognitive_account, name: aoai-protected, in: resource_group:rg-content-safety-gw}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-protected, in: resource_group:rg-content-safety-gw}
+    - {tf: azurerm_private_endpoint, name: pe-aoai-protected, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_linux_web_app, name: app-chat-client, in: resource_group:rg-content-safety-gw}
+    - {tf: azurerm_key_vault, name: kv-safety-gw, in: resource_group:rg-content-safety-gw}
+    - {tf: azurerm_application_insights, name: appi-safety-gw, in: resource_group:rg-content-safety-gw}
+    - {tf: azurerm_log_analytics_workspace, name: law-safety-gw, in: resource_group:rg-content-safety-gw}
+  actors: [users]
+  flows:
+    - {from: users, to: app-chat-client, label: HTTPS, step: 1}
+    - {from: app-chat-client, to: apim-safety-gateway, label: chat completion request, step: 2}
+    - {from: apim-safety-gateway, to: pe-contentsafety, label: "inbound: analyze prompt + shield-prompt", step: 3}
+    - {from: pe-contentsafety, to: contentsafety-guardrails, label: managed identity backend}
+    - {from: apim-safety-gateway, to: pe-aoai-protected, label: forward if below thresholds, step: 4}
+    - {from: pe-aoai-protected, to: aoai-protected, label: private link}
+    - {from: aoai-protected, to: gpt-4o-protected, label: completion}
+    - {from: apim-safety-gateway, to: pe-contentsafety, label: "outbound: analyze completion (enforce-on-completions)", step: 5}
+    - {from: apim-safety-gateway, to: app-chat-client, label: "200 response or 403 blocked", step: 6}
+    - {from: apim-safety-gateway, to: appi-safety-gw, label: blocked-request telemetry}
+    - {from: appi-safety-gw, to: law-safety-gw, label: logs}
+    - {from: apim-safety-gateway, to: kv-safety-gw, label: named values}
+
+- slug: genaiops-prompt-evaluation-pipeline
+  title: GenAIOps evaluation pipeline extending MLOps
+  category: ml
+  tags: [genaiops, llmops, evaluation, prompt-flow, azure-machine-learning, ai-search, ci-cd, monitoring]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/genaiops-for-mlops
+  description: Existing Azure Machine Learning pipelines are extended to chunk, enrich, embed, and index grounding documents into AI Search, and to run prompt and RAG evaluation jobs that score groundedness, relevance, coherence, and fluency with the Azure AI Evaluation SDK or Foundry evaluations. A CI/CD pipeline deploys the orchestrator and prompt assets to App Service behind an API Management gateway that logs inputs and outputs for production monitoring and human feedback.
+  containers:
+    - subscription: genai-platform
+      resource_group: {name: rg-genaiops, location: eastus2}
+  elements:
+    - {tf: azurerm_machine_learning_workspace, name: mlw-genaiops, in: resource_group:rg-genaiops}
+    - {tf: azurerm_machine_learning_compute_cluster, name: cpu-cluster-eval, in: resource_group:rg-genaiops}
+    - {tf: azurerm_storage_account, name: stgroundingdocs, in: resource_group:rg-genaiops}
+    - {tf: azurerm_search_service, name: srch-genaiops, in: resource_group:rg-genaiops}
+    - {tf: azurerm_cognitive_account, name: foundry-genaiops, in: resource_group:rg-genaiops}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-eval, in: resource_group:rg-genaiops}
+    - {tf: azurerm_cognitive_deployment, name: text-embedding-3-small, in: resource_group:rg-genaiops}
+    - {tf: azurerm_api_management, name: apim-genaiops, in: resource_group:rg-genaiops}
+    - {tf: azurerm_linux_web_app, name: app-orchestrator-prod, in: resource_group:rg-genaiops}
+    - {tf: azurerm_container_registry, name: acrgenaiops, in: resource_group:rg-genaiops}
+    - {tf: azurerm_key_vault, name: kv-genaiops, in: resource_group:rg-genaiops}
+    - {tf: azurerm_application_insights, name: appi-genaiops, in: resource_group:rg-genaiops}
+  actors: [user, saas, users]
+  flows:
+    - {from: stgroundingdocs, to: cpu-cluster-eval, label: "DataOps: chunk, enrich, embed", step: 1}
+    - {from: cpu-cluster-eval, to: text-embedding-3-small, label: embeddings}
+    - {from: cpu-cluster-eval, to: srch-genaiops, label: index chunks, step: 2}
+    - {from: user, to: mlw-genaiops, label: prompt and RAG experiments, step: 3}
+    - {from: mlw-genaiops, to: cpu-cluster-eval, label: evaluation job (groundedness, relevance), step: 4}
+    - {from: cpu-cluster-eval, to: gpt-4o-eval, label: LLM-judged metrics}
+    - {from: saas, to: app-orchestrator-prod, label: "CI/CD: deploy orchestrator and prompts", step: 5}
+    - {from: acrgenaiops, to: app-orchestrator-prod, label: orchestrator image}
+    - {from: users, to: apim-genaiops, label: chat requests, step: 6}
+    - {from: apim-genaiops, to: app-orchestrator-prod, label: route}
+    - {from: app-orchestrator-prod, to: srch-genaiops, label: retrieve grounding data}
+    - {from: app-orchestrator-prod, to: gpt-4o-eval, label: completion}
+    - {from: gpt-4o-eval, to: foundry-genaiops, label: model deployment}
+    - {from: apim-genaiops, to: appi-genaiops, label: log prompts, outputs, tokens, step: 7}
+    - {from: app-orchestrator-prod, to: kv-genaiops, label: secrets}
+
+- slug: azure-openai-fine-tuning-foundry
+  title: Fine-tuning Azure OpenAI models in Microsoft Foundry
+  category: ml
+  tags: [fine-tuning, azure-openai, foundry, jsonl, lora, model-deployment, evaluation]
+  source: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/fine-tuning
+  description: Training and validation data in JSONL chat-completions format are uploaded from Blob Storage to a Foundry resource, where a supervised, DPO, or reinforcement fine-tuning job customises a base model such as GPT-4o or GPT-4.1 with LoRA-based training and emits loss and token-accuracy metrics and per-epoch checkpoints. The resulting fine-tuned model is deployed as its own deployment, evaluated in the playground and with the Evaluation SDK, and consumed by applications through the standard inference endpoint.
+  containers:
+    - subscription: genai-platform
+      resource_group: {name: rg-finetune, location: swedencentral}
+  elements:
+    - {tf: azurerm_storage_account, name: stfinetunedata, in: resource_group:rg-finetune}
+    - {tf: azurerm_cognitive_account, name: foundry-finetune, in: resource_group:rg-finetune}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-base, in: resource_group:rg-finetune}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-finetuned-v1, in: resource_group:rg-finetune}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-eval-finetune, in: resource_group:rg-finetune}
+    - {tf: azurerm_linux_web_app, name: app-finetuned-consumer, in: resource_group:rg-finetune}
+    - {tf: azurerm_key_vault, name: kv-finetune, in: resource_group:rg-finetune}
+    - {tf: azurerm_application_insights, name: appi-finetune, in: resource_group:rg-finetune}
+    - {tf: azurerm_log_analytics_workspace, name: law-finetune, in: resource_group:rg-finetune}
+  actors: [user, users]
+  flows:
+    - {from: user, to: stfinetunedata, label: upload JSONL training / validation sets, step: 1}
+    - {from: stfinetunedata, to: foundry-finetune, label: import training files, step: 2}
+    - {from: user, to: foundry-finetune, label: create fine-tuning job (SFT / DPO / RFT), step: 3}
+    - {from: gpt-4o-base, to: gpt-4o-finetuned-v1, label: base model + LoRA weights, step: 4}
+    - {from: foundry-finetune, to: gpt-4o-finetuned-v1, label: deploy checkpoint, step: 5}
+    - {from: mlw-eval-finetune, to: gpt-4o-finetuned-v1, label: evaluation runs vs base, step: 6}
+    - {from: users, to: app-finetuned-consumer, label: HTTPS, step: 7}
+    - {from: app-finetuned-consumer, to: gpt-4o-finetuned-v1, label: inference on fine-tuned deployment, step: 8}
+    - {from: app-finetuned-consumer, to: kv-finetune, label: endpoint secrets}
+    - {from: foundry-finetune, to: appi-finetune, label: job metrics and usage}
+    - {from: appi-finetune, to: law-finetune, label: logs}
+
+- slug: conversational-bot-bot-service-language
+  title: Conversational bot with Azure AI Bot Service and Language
+  category: ml
+  tags: [bot-service, bot-framework, channels, teams, conversational-language-understanding, question-answering, app-service]
+  source: https://learn.microsoft.com/en-us/azure/bot-service/bot-builder-basics
+  description: Azure AI Bot Service connects channels such as Microsoft Teams and web chat to a bot web application on App Service, exchanging message and conversation-update activities over HTTPS POST within 15-second turns. The bot uses Azure AI Language conversational language understanding and custom question answering to interpret intents and answer FAQs, persists conversation state in Cosmos DB, and reports telemetry to Application Insights.
+  containers:
+    - subscription: bots-prod
+      resource_group: {name: rg-conversational-bot, location: westeurope}
+  elements:
+    - {tf: azurerm_bot_service_azure_bot, name: bot-enterprise-assistant, in: resource_group:rg-conversational-bot}
+    - {tf: azurerm_service_plan, name: asp-bot, in: resource_group:rg-conversational-bot}
+    - {tf: azurerm_linux_web_app, name: app-bot-messaging, in: resource_group:rg-conversational-bot}
+    - {tf: azurerm_cognitive_account, name: language-clu-qna, in: resource_group:rg-conversational-bot}
+    - {tf: azurerm_search_service, name: srch-qna-knowledge, in: resource_group:rg-conversational-bot}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-bot-state, in: resource_group:rg-conversational-bot}
+    - {tf: azurerm_storage_account, name: stbottranscripts, in: resource_group:rg-conversational-bot}
+    - {tf: azurerm_key_vault, name: kv-bot, in: resource_group:rg-conversational-bot}
+    - {tf: azurerm_application_insights, name: appi-bot, in: resource_group:rg-conversational-bot}
+  actors: [users, saas]
+  flows:
+    - {from: users, to: saas, label: Teams / web chat channel, step: 1}
+    - {from: saas, to: bot-enterprise-assistant, label: channel activity, step: 2}
+    - {from: bot-enterprise-assistant, to: app-bot-messaging, label: "HTTPS POST /api/messages", step: 3}
+    - {from: app-bot-messaging, to: language-clu-qna, label: CLU intents and custom question answering, step: 4}
+    - {from: language-clu-qna, to: srch-qna-knowledge, label: knowledge base index}
+    - {from: app-bot-messaging, to: cosmos-bot-state, label: conversation and user state, step: 5}
+    - {from: app-bot-messaging, to: stbottranscripts, label: transcript logging}
+    - {from: app-bot-messaging, to: bot-enterprise-assistant, label: reply activity, step: 6}
+    - {from: app-bot-messaging, to: kv-bot, label: app ID and secrets}
+    - {from: app-bot-messaging, to: appi-bot, label: telemetry}
+
+- slug: rag-ingestion-pipeline-semantic-search
+  title: RAG data pipeline and semantic search with Azure AI Search
+  category: ml
+  tags: [rag, semantic-search, chunking, embeddings, hybrid-search, ai-search, orchestrator, evaluation]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/rag/rag-solution-design-and-evaluation-guide
+  description: A data pipeline pulls documents from Blob Storage, chunks and enriches them with metadata, generates embeddings with an Azure OpenAI embedding model, and persists the chunks into an AI Search index configured for vector, full-text, and hybrid queries with semantic ranking. At request time an orchestrator on App Service issues the search, packages the top results and the user query into a prompt for the chat model, and returns the grounded response to the intelligent application.
+  containers:
+    - subscription: knowledge-apps
+      resource_group: {name: rg-rag-search, location: eastus}
+  elements:
+    - {tf: azurerm_storage_account, name: stragsources, in: resource_group:rg-rag-search}
+    - {tf: azurerm_linux_function_app, name: func-rag-pipeline, in: resource_group:rg-rag-search}
+    - {tf: azurerm_cognitive_account, name: docintel-layout, in: resource_group:rg-rag-search}
+    - {tf: azurerm_cognitive_account, name: foundry-rag, in: resource_group:rg-rag-search}
+    - {tf: azurerm_cognitive_deployment, name: text-embedding-3-large, in: resource_group:rg-rag-search}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-chat, in: resource_group:rg-rag-search}
+    - {tf: azurerm_search_service, name: srch-hybrid-index, in: resource_group:rg-rag-search}
+    - {tf: azurerm_service_plan, name: asp-rag, in: resource_group:rg-rag-search}
+    - {tf: azurerm_linux_web_app, name: app-rag-orchestrator, in: resource_group:rg-rag-search}
+    - {tf: azurerm_key_vault, name: kv-rag, in: resource_group:rg-rag-search}
+    - {tf: azurerm_application_insights, name: appi-rag, in: resource_group:rg-rag-search}
+  actors: [users, client]
+  flows:
+    - {from: stragsources, to: func-rag-pipeline, label: documents pushed / pulled, step: 1}
+    - {from: func-rag-pipeline, to: docintel-layout, label: document layout analysis for chunking, step: 2}
+    - {from: func-rag-pipeline, to: text-embedding-3-large, label: embed chunks and metadata, step: 3}
+    - {from: text-embedding-3-large, to: foundry-rag, label: model deployment}
+    - {from: func-rag-pipeline, to: srch-hybrid-index, label: persist chunks (vector + text fields), step: 4}
+    - {from: users, to: client, label: intelligent application UI}
+    - {from: client, to: app-rag-orchestrator, label: query API, step: 5}
+    - {from: app-rag-orchestrator, to: srch-hybrid-index, label: hybrid search + semantic ranker, step: 6}
+    - {from: app-rag-orchestrator, to: gpt-4o-chat, label: prompt with top-N chunks, step: 7}
+    - {from: gpt-4o-chat, to: foundry-rag, label: model deployment}
+    - {from: app-rag-orchestrator, to: kv-rag, label: secrets}
+    - {from: app-rag-orchestrator, to: appi-rag, label: telemetry}
+
+- slug: next-order-forecasting-recommendation
+  title: Next-order forecasting and product recommendations with Azure Machine Learning
+  category: ml
+  tags: [recommendation, forecasting, parallel-jobs, compute-cluster, online-endpoint, data-factory, sql-database]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/idea/next-order-forecasting
+  description: Azure Data Factory ingests order, customer, merchandise, and partner data into a Data Lake Storage and SQL Database staging area, and Azure Machine Learning parallel jobs on a compute cluster train a forecasting model for every customer-store and SKU combination. Registered models are deployed to managed online endpoints, predictions are written back to the analytical stores, and a web app, Power BI, or Power Apps surface recommended SKUs and quantities to customers.
+  containers:
+    - subscription: distribution-analytics
+      resource_group: {name: rg-order-forecast, location: centralus}
+  elements:
+    - {tf: azurerm_mssql_server, name: sql-orders-staging, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_data_factory, name: adf-order-ingest, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_storage_account, name: storderlake, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-forecast, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_machine_learning_compute_cluster, name: cpu-cluster-forecast, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_machine_learning_inference_cluster, name: online-endpoint-forecast, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_container_registry, name: acrforecast, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_key_vault, name: kv-forecast, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_service_plan, name: asp-recommendations, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_linux_web_app, name: app-recommendations, in: resource_group:rg-order-forecast}
+    - {tf: azurerm_application_insights, name: appi-forecast, in: resource_group:rg-order-forecast}
+  actors: [saas, users, database]
+  flows:
+    - {from: database, to: adf-order-ingest, label: orders, customers, merchandise, step: 1}
+    - {from: saas, to: adf-order-ingest, label: partner data (weather, events)}
+    - {from: adf-order-ingest, to: storderlake, label: staging (data lake), step: 2}
+    - {from: adf-order-ingest, to: sql-orders-staging, label: staging (SQL)}
+    - {from: storderlake, to: cpu-cluster-forecast, label: per store-SKU datasets, step: 3}
+    - {from: cpu-cluster-forecast, to: mlw-forecast, label: parallel jobs register models, step: 4}
+    - {from: mlw-forecast, to: online-endpoint-forecast, label: deploy to managed online endpoint, step: 5}
+    - {from: acrforecast, to: online-endpoint-forecast, label: scoring environment}
+    - {from: online-endpoint-forecast, to: sql-orders-staging, label: write predictions, step: 6}
+    - {from: app-recommendations, to: online-endpoint-forecast, label: real-time SKU and quantity forecast, step: 7}
+    - {from: users, to: app-recommendations, label: recommended next order, step: 8}
+    - {from: app-recommendations, to: kv-forecast, label: endpoint key}
+    - {from: app-recommendations, to: appi-forecast, label: telemetry}

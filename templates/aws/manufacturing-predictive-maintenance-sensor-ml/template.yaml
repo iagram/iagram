@@ -1,0 +1,74 @@
+# Generated from the official reference (https://docs.aws.amazon.com/lookout-for-equipment/latest/ug/what-is.html); edit freely.
+title: Predictive maintenance from equipment sensor data with SageMaker
+category: industry
+tags:
+- manufacturing
+- predictive maintenance
+- condition monitoring
+- iot core
+- sagemaker
+- anomaly detection
+source: https://docs.aws.amazon.com/lookout-for-equipment/latest/ug/what-is.html
+description: Vibration, temperature and process sensors publish to IoT Core, a topic rule fans the readings into Kinesis Data Firehose for a historian in S3 and into Timestream for live dashboards, and
+  historical data from SCADA systems is uploaded to the same bucket. A SageMaker model trained on the sensor history and labelled failure periods is deployed to an endpoint; a scheduled Lambda scores fresh
+  windows and raises SNS alerts that create work orders in the maintenance system.
+nodes:
+- {id: dc-plant, type: common.datacenter, name: plant}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-eu-west-1}
+- {id: grp-storage, type: common.group, name: storage, parent: reg-eu-west-1}
+- {id: grp-inference, type: common.group, name: inference, parent: reg-eu-west-1}
+- {id: device, type: common.device, name: device}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: compressor-sensor-gateway, type: aws.res.aws_iot_thing, name: compressor-sensor-gateway, parent: sub-reg-eu-west-1-a, props: {name: changeme}}
+- {id: sensor-fanout-rule, type: aws.res.aws_iot_topic_rule, name: sensor-fanout-rule, parent: grp-ingestion, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: sensor-history-firehose, type: aws.res.aws_kinesis_firehose_delivery_stream, name: sensor-history-firehose, parent: grp-ingestion, props: {destination: changeme, name: changeme}}
+- {id: live-sensor-readings, type: aws.res.aws_timestreamwrite_database, name: live-sensor-readings, parent: grp-storage, props: {database_name: changeme}}
+- {id: sensor-historian, type: aws.s3_bucket, name: sensor-historian, parent: grp-storage}
+- {id: sensor-catalog, type: aws.res.aws_glue_catalog_database, name: sensor-catalog, parent: grp-storage, props: {name: changeme}}
+- {id: failure-prediction-model, type: aws.res.aws_sagemaker_model, name: failure-prediction-model, parent: grp-inference, props: {execution_role_arn: changeme}}
+- {id: failure-prediction-endpoint, type: aws.res.aws_sagemaker_endpoint, name: failure-prediction-endpoint, parent: grp-inference, props: {endpoint_config_name: changeme}}
+- {id: score-sensor-window, type: aws.lambda_function, name: score-sensor-window, parent: grp-inference}
+- {id: every-5-minutes, type: aws.res.aws_cloudwatch_event_rule, name: every-5-minutes, parent: grp-inference}
+- {id: maintenance-alerts, type: aws.res.aws_sns_topic, name: maintenance-alerts, parent: reg-eu-west-1}
+- id: asset-health-dashboards
+  type: aws.res.aws_grafana_workspace
+  name: asset-health-dashboards
+  parent: reg-eu-west-1
+  props:
+    account_access_type: changeme
+    authentication_providers: []
+    permission_type: changeme
+edges:
+- {from: device, to: compressor-sensor-gateway, label: vibration and temperature, step: '1'}
+- {from: compressor-sensor-gateway, to: sensor-fanout-rule, label: MQTT, step: '2'}
+- {from: sensor-fanout-rule, to: sensor-history-firehose, label: Firehose action, step: '3'}
+- {from: sensor-fanout-rule, to: live-sensor-readings, label: Timestream action}
+- {from: sensor-history-firehose, to: sensor-historian, label: Parquet delivery, step: '4'}
+- {from: sensor-historian, to: sensor-catalog, label: schema}
+- {from: sensor-historian, to: failure-prediction-model, label: training with failure labels, step: '5'}
+- {from: failure-prediction-model, to: failure-prediction-endpoint, label: deploy, step: '6'}
+- {from: every-5-minutes, to: score-sensor-window, step: '7', link: aws_cloudwatch_event_target}
+- {from: score-sensor-window, to: live-sensor-readings, label: query last window}
+- {from: score-sensor-window, to: failure-prediction-endpoint, label: InvokeEndpoint, step: '8'}
+- {from: score-sensor-window, to: maintenance-alerts, label: anomaly alert, step: '9'}
+- {from: maintenance-alerts, to: saas, label: CMMS work order}
+- {from: live-sensor-readings, to: asset-health-dashboards, label: time series panels}
+- {from: users, to: asset-health-dashboards, label: asset health}
+steps:
+- {n: '1', text: 'device → compressor-sensor-gateway: vibration and temperature'}
+- {n: '2', text: 'compressor-sensor-gateway → sensor-fanout-rule: MQTT'}
+- {n: '3', text: 'sensor-fanout-rule → sensor-history-firehose: Firehose action'}
+- {n: '4', text: 'sensor-history-firehose → sensor-historian: Parquet delivery'}
+- {n: '5', text: 'sensor-historian → failure-prediction-model: training with failure labels'}
+- {n: '6', text: 'failure-prediction-model → failure-prediction-endpoint: deploy'}
+- {n: '7', text: every-5-minutes → score-sensor-window}
+- {n: '8', text: 'score-sensor-window → failure-prediction-endpoint: InvokeEndpoint'}
+- {n: '9', text: 'score-sensor-window → maintenance-alerts: anomaly alert'}

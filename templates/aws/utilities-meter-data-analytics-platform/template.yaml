@@ -1,0 +1,75 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/meter-data-analytics-on-aws/); edit freely.
+title: Utility smart meter data analytics with Timestream, Glue and Redshift
+category: industry
+tags:
+- energy
+- utilities
+- smart meter
+- mdms
+- timestream
+- glue
+- redshift
+- forecasting
+source: https://docs.aws.amazon.com/solutions/meter-data-analytics-on-aws/
+description: Guidance for Meter Data Analytics on AWS ingests interval reads from meter data management or head-end systems through Transfer Family SFTP for batch files and Kinesis for streaming, stores
+  time series in Timestream and raw data in S3. Glue and EMR run ETL into a curated data lake catalogued in the Glue Data Catalog, Athena and Redshift serve SQL analytics, Grafana publishes dashboards and
+  SageMaker models detect grid anomalies and forecast demand.
+nodes:
+- {id: dc-utility-head-end, type: common.datacenter, name: utility-head-end}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-storage, type: common.group, name: storage, parent: reg-us-east-1}
+- {id: grp-processing, type: common.group, name: processing, parent: reg-us-east-1}
+- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: mdms-sftp, type: aws.res.aws_transfer_server, name: mdms-sftp, parent: grp-ingestion}
+- {id: meter-reads-stream, type: aws.res.aws_kinesis_stream, name: meter-reads-stream, parent: grp-ingestion, props: {name: changeme}}
+- {id: read-adapter, type: aws.lambda_function, name: read-adapter, parent: grp-ingestion}
+- {id: interval-reads, type: aws.res.aws_timestreamwrite_database, name: interval-reads, parent: grp-storage, props: {database_name: changeme}}
+- {id: raw-meter-data, type: aws.s3_bucket, name: raw-meter-data, parent: grp-storage}
+- id: curate-reads-etl
+  type: aws.res.aws_glue_job
+  name: curate-reads-etl
+  parent: grp-processing
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: meter-analytics-emr, type: aws.res.aws_emr_cluster, name: meter-analytics-emr, parent: grp-processing, props: {name: changeme, release_label: changeme, service_role: changeme}}
+- {id: curated-data-lake, type: aws.s3_bucket, name: curated-data-lake, parent: grp-storage}
+- {id: meter-catalog, type: aws.res.aws_glue_catalog_database, name: meter-catalog, parent: grp-storage, props: {name: changeme}}
+- {id: meter-queries, type: aws.res.aws_athena_workgroup, name: meter-queries, parent: grp-analytics, props: {name: changeme}}
+- {id: utility-warehouse, type: aws.res.aws_redshift_cluster, name: utility-warehouse, parent: grp-analytics, props: {cluster_identifier: changeme, node_type: changeme}}
+- id: grid-dashboards
+  type: aws.res.aws_grafana_workspace
+  name: grid-dashboards
+  parent: grp-analytics
+  props:
+    account_access_type: changeme
+    authentication_providers: []
+    permission_type: changeme
+- {id: demand-forecast, type: aws.res.aws_sagemaker_endpoint, name: demand-forecast, parent: grp-analytics, props: {endpoint_config_name: changeme}}
+edges:
+- {from: dc-utility-head-end, to: mdms-sftp, label: batch interval files, step: '1'}
+- {from: dc-utility-head-end, to: meter-reads-stream, label: streaming reads, step: '1'}
+- {from: mdms-sftp, to: raw-meter-data, label: SFTP to S3}
+- {from: meter-reads-stream, to: read-adapter, step: '2', link: aws_lambda_event_source_mapping}
+- {from: read-adapter, to: interval-reads, label: WriteRecords, step: '3'}
+- {from: read-adapter, to: raw-meter-data, label: raw archive}
+- {from: raw-meter-data, to: curate-reads-etl, label: ETL source, step: '4'}
+- {from: raw-meter-data, to: meter-analytics-emr, label: value-add processing}
+- {from: curate-reads-etl, to: curated-data-lake, label: curated datasets, step: '5'}
+- {from: curated-data-lake, to: meter-catalog, label: metadata}
+- {from: meter-catalog, to: meter-queries, label: SQL, step: '6'}
+- {from: curated-data-lake, to: utility-warehouse, label: COPY, step: '7'}
+- {from: utility-warehouse, to: grid-dashboards, label: dashboards, step: '8'}
+- {from: curated-data-lake, to: demand-forecast, label: training and inference, step: '9'}
+- {from: users, to: grid-dashboards, label: grid analytics}
+steps:
+- {n: '1', text: 'datacenter → mdms-sftp: batch interval files'}
+- {n: '2', text: meter-reads-stream → read-adapter}
+- {n: '3', text: 'read-adapter → interval-reads: WriteRecords'}
+- {n: '4', text: 'raw-meter-data → curate-reads-etl: ETL source'}
+- {n: '5', text: 'curate-reads-etl → curated-data-lake: curated datasets'}
+- {n: '6', text: 'meter-catalog → meter-queries: SQL'}
+- {n: '7', text: 'curated-data-lake → utility-warehouse: COPY'}
+- {n: '8', text: 'utility-warehouse → grid-dashboards: dashboards'}
+- {n: '9', text: 'curated-data-lake → demand-forecast: training and inference'}

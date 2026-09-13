@@ -1,0 +1,87 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/secure-multitenant-rag); edit freely.
+title: Secure multitenant RAG inferencing for a GenAI SaaS
+category: ml
+tags:
+- multitenant
+- saas
+- rag
+- security-trimming
+- ai-search
+- cosmos-db
+- postgresql
+- orchestrator
+source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/secure-multitenant-rag
+description: A multitenant intelligent application authenticates users with an identity provider and calls an orchestrator API that fetches grounding data only from stores the tenant and user are authorised
+  to read, applying tenant discriminators and security filters before building the prompt for a Foundry model. A data-access API layer encapsulates routing to store-per-tenant AI Search indexes, a partitioned
+  multitenant Cosmos DB store, and a shared PostgreSQL knowledge store, and logs grounding access for audit.
+nodes:
+- {id: sub-saas-provider, type: azure.subscription, name: saas-provider, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-mt-rag, type: azure.resource_group, name: rg-mt-rag, parent: sub-saas-provider, props: {location: westeurope}}
+- {id: vpc-vnet-mt-rag, type: azure.vnet, name: vnet-mt-rag, parent: rg-rg-mt-rag, props: {cidr: 10.50.0.0/16}}
+- {id: sub-snet-apps, type: azure.subnet, name: snet-apps, parent: vpc-vnet-mt-rag, props: {cidr: 10.50.1.0/24}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-mt-rag, props: {cidr: 10.50.2.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: idp, type: common.idp, name: idp}
+- {id: asp-mt-rag, type: azure.res.azurerm_service_plan, name: asp-mt-rag, parent: sub-snet-apps, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-tenant-ui
+  type: azure.res.azurerm_linux_web_app
+  name: app-tenant-ui
+  parent: sub-snet-apps
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: app-orchestrator
+  type: azure.res.azurerm_linux_web_app
+  name: app-orchestrator
+  parent: sub-snet-apps
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: app-data-access-api
+  type: azure.res.azurerm_linux_web_app
+  name: app-data-access-api
+  parent: sub-snet-apps
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: srch-tenant-a, type: azure.res.azurerm_search_service, name: srch-tenant-a, parent: rg-rg-mt-rag, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: srch-tenant-b, type: azure.res.azurerm_search_service, name: srch-tenant-b, parent: rg-rg-mt-rag, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- id: cosmos-multitenant
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-multitenant
+  parent: rg-rg-mt-rag
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: pg-shared-knowledge, type: azure.postgres_flexible_server, name: pg-shared-knowledge, parent: rg-rg-mt-rag}
+- {id: foundry-mt, type: azure.res.azurerm_cognitive_account, name: foundry-mt, parent: rg-rg-mt-rag, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: gpt-4o-mt
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-mt
+  parent: rg-rg-mt-rag
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- id: pe-foundry-mt
+  type: azure.res.azurerm_private_endpoint
+  name: pe-foundry-mt
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: kv-mt-rag, type: azure.key_vault, name: kv-mt-rag, parent: rg-rg-mt-rag}
+- {id: appi-mt-rag, type: azure.res.azurerm_application_insights, name: appi-mt-rag, parent: rg-rg-mt-rag, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: app-tenant-ui, label: HTTPS, step: '1'}
+- {from: app-tenant-ui, to: idp, label: authenticate (tenant claims), step: '2'}
+- {from: app-tenant-ui, to: app-orchestrator, label: query + user token, step: '3'}
+- {from: app-orchestrator, to: app-data-access-api, label: fetch authorised grounding data, step: '4'}
+- {from: app-data-access-api, to: srch-tenant-a, label: store-per-tenant index (4a)}
+- {from: app-data-access-api, to: srch-tenant-b, label: store-per-tenant index (4a)}
+- {from: app-data-access-api, to: cosmos-multitenant, label: tenant partition key filter (4b)}
+- {from: app-data-access-api, to: pg-shared-knowledge, label: shared store (4c)}
+- {from: app-orchestrator, to: pe-foundry-mt, label: prompt with grounding data, step: '5'}
+- {from: pe-foundry-mt, to: gpt-4o-mt, label: inference}
+- {from: gpt-4o-mt, to: foundry-mt, label: model deployment}
+- {from: app-data-access-api, to: appi-mt-rag, label: grounding access audit log}
+- {from: app-orchestrator, to: kv-mt-rag, label: secrets}
+steps:
+- {n: '1', text: 'users → app-tenant-ui: HTTPS'}
+- {n: '2', text: 'app-tenant-ui → idp: authenticate (tenant claims)'}
+- {n: '3', text: 'app-tenant-ui → app-orchestrator: query + user token'}
+- {n: '4', text: 'app-orchestrator → app-data-access-api: fetch authorised grounding data'}
+- {n: '5', text: 'app-orchestrator → pe-foundry-mt: prompt with grounding data'}

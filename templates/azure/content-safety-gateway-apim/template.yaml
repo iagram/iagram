@@ -1,0 +1,71 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/api-management/llm-content-safety-policy); edit freely.
+title: Content safety gateway with API Management and Azure AI Content Safety
+category: ml
+tags:
+- content-safety
+- prompt-shield
+- api-management
+- llm-content-safety
+- blocklist
+- azure-openai
+- guardrails
+source: https://learn.microsoft.com/en-us/azure/api-management/llm-content-safety-policy
+description: API Management applies the llm-content-safety policy to inbound prompts and outbound completions, sending them through a managed-identity backend to Azure AI Content Safety, which scores hate,
+  self-harm, sexual, and violence categories, matches custom blocklists, and runs prompt shields for jailbreak attempts. Requests above the configured severity thresholds are blocked with a 403 before they
+  reach the Azure OpenAI deployment, and the same policy protects MCP tool and agent APIs managed by the gateway.
+nodes:
+- {id: sub-ai-platform, type: azure.subscription, name: ai-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-content-safety-gw, type: azure.resource_group, name: rg-content-safety-gw, parent: sub-ai-platform, props: {location: swedencentral}}
+- {id: vpc-vnet-safety-gw, type: azure.vnet, name: vnet-safety-gw, parent: rg-rg-content-safety-gw, props: {cidr: 10.70.0.0/16}}
+- {id: sub-snet-apim, type: azure.subnet, name: snet-apim, parent: vpc-vnet-safety-gw, props: {cidr: 10.70.0.0/24}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-safety-gw, props: {cidr: 10.70.1.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: apim-safety-gateway, type: azure.res.azurerm_api_management, name: apim-safety-gateway, parent: sub-snet-apim, props: {location: westeurope, name: changeme, publisher_email: changeme, publisher_name: changeme,
+    resource_group_name: changeme, sku_name: changeme}}
+- {id: contentsafety-guardrails, type: azure.res.azurerm_cognitive_account, name: contentsafety-guardrails, parent: rg-rg-content-safety-gw, props: {kind: changeme, location: westeurope, name: changeme,
+    resource_group_name: changeme, sku_name: changeme}}
+- id: pe-contentsafety
+  type: azure.res.azurerm_private_endpoint
+  name: pe-contentsafety
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: aoai-protected, type: azure.res.azurerm_cognitive_account, name: aoai-protected, parent: rg-rg-content-safety-gw, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: gpt-4o-protected
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-protected
+  parent: rg-rg-content-safety-gw
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+- id: pe-aoai-protected
+  type: azure.res.azurerm_private_endpoint
+  name: pe-aoai-protected
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: app-chat-client
+  type: azure.res.azurerm_linux_web_app
+  name: app-chat-client
+  parent: rg-rg-content-safety-gw
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: kv-safety-gw, type: azure.key_vault, name: kv-safety-gw, parent: rg-rg-content-safety-gw}
+- {id: appi-safety-gw, type: azure.res.azurerm_application_insights, name: appi-safety-gw, parent: rg-rg-content-safety-gw, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-safety-gw, type: azure.res.azurerm_log_analytics_workspace, name: law-safety-gw, parent: rg-rg-content-safety-gw, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: app-chat-client, label: HTTPS, step: '1'}
+- {from: app-chat-client, to: apim-safety-gateway, label: chat completion request, step: '2'}
+- {from: apim-safety-gateway, to: pe-contentsafety, label: 'inbound: analyze prompt + shield-prompt', step: '3'}
+- {from: pe-contentsafety, to: contentsafety-guardrails, label: managed identity backend}
+- {from: apim-safety-gateway, to: pe-aoai-protected, label: forward if below thresholds, step: '4'}
+- {from: pe-aoai-protected, to: aoai-protected, label: private link}
+- {from: aoai-protected, to: gpt-4o-protected, label: completion}
+- {from: apim-safety-gateway, to: pe-contentsafety, label: 'outbound: analyze completion (enforce-on-completions)', step: '5'}
+- {from: apim-safety-gateway, to: app-chat-client, label: 200 response or 403 blocked, step: '6'}
+- {from: apim-safety-gateway, to: appi-safety-gw, label: blocked-request telemetry}
+- {from: appi-safety-gw, to: law-safety-gw, label: logs}
+- {from: apim-safety-gateway, to: kv-safety-gw, label: named values}
+steps:
+- {n: '1', text: 'users → app-chat-client: HTTPS'}
+- {n: '2', text: 'app-chat-client → apim-safety-gateway: chat completion request'}
+- {n: '3', text: 'apim-safety-gateway → pe-contentsafety: inbound: analyze prompt + shield-prompt'}
+- {n: '4', text: 'apim-safety-gateway → pe-aoai-protected: forward if below thresholds'}
+- {n: '5', text: 'apim-safety-gateway → pe-contentsafety: outbound: analyze completion (enforce-on-completions)'}
+- {n: '6', text: 'apim-safety-gateway → app-chat-client: 200 response or 403 blocked'}

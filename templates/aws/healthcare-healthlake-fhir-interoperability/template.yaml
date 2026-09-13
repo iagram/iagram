@@ -1,0 +1,54 @@
+# Generated from the official reference (https://docs.aws.amazon.com/healthlake/latest/devguide/what-is-amazon-health-lake.html); edit freely.
+title: FHIR interoperability platform with AWS HealthLake
+category: industry
+tags:
+- healthcare
+- fhir
+- healthlake
+- interoperability
+- smart on fhir
+- athena
+source: https://docs.aws.amazon.com/healthlake/latest/devguide/what-is-amazon-health-lake.html
+description: Clinical systems land FHIR R4 bundles and legacy C-CDA or CSV exports in an S3 staging bucket, from which a Lambda function starts HealthLake import jobs into a managed FHIR data store; integrated
+  NLP enriches unstructured notes and stores the extracted entities as FHIR resources. SMART on FHIR applications authenticate with Cognito and call the data store through API Gateway, EventBridge routes
+  data store events, and Lake Formation governs Athena SQL analytics over the exported data.
+nodes:
+- {id: dc-hospital-ehr, type: common.datacenter, name: hospital-ehr}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-fhir-access, type: common.group, name: fhir-access, parent: reg-us-east-1}
+- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: fhir-staging, type: aws.s3_bucket, name: fhir-staging, parent: grp-ingestion}
+- {id: start-import-job, type: aws.lambda_function, name: start-import-job, parent: grp-ingestion}
+- {id: healthlake-cmk, type: aws.res.aws_kms_key, name: healthlake-cmk, parent: reg-us-east-1}
+- {id: smart-on-fhir-users, type: aws.res.aws_cognito_user_pool, name: smart-on-fhir-users, parent: grp-fhir-access, props: {name: changeme}}
+- {id: fhir-proxy-api, type: aws.res.aws_api_gateway_rest_api, name: fhir-proxy-api, parent: grp-fhir-access, props: {name: changeme}}
+- {id: fhir-request-signer, type: aws.lambda_function, name: fhir-request-signer, parent: grp-fhir-access}
+- {id: healthlake-events, type: aws.res.aws_cloudwatch_event_bus, name: healthlake-events, parent: reg-us-east-1, props: {name: changeme}}
+- {id: fhir-export, type: aws.s3_bucket, name: fhir-export, parent: grp-analytics}
+- {id: fhir-catalog, type: aws.res.aws_glue_catalog_database, name: fhir-catalog, parent: grp-analytics, props: {name: changeme}}
+- {id: population-health-queries, type: aws.res.aws_athena_workgroup, name: population-health-queries, parent: grp-analytics, props: {name: changeme}}
+- {id: fhir-audit-trail, type: aws.res.aws_cloudtrail, name: fhir-audit-trail, parent: reg-us-east-1, props: {name: changeme, s3_bucket_name: changeme}}
+edges:
+- {from: dc-hospital-ehr, to: fhir-staging, label: FHIR bundles and C-CDA exports, step: '1'}
+- {from: fhir-staging, to: start-import-job, label: S3 event, step: '2'}
+- {from: start-import-job, to: healthlake-cmk, label: encrypted data store import, step: '3'}
+- {from: client, to: smart-on-fhir-users, label: SMART App Launch OAuth 2.0, step: '4'}
+- {from: client, to: fhir-proxy-api, label: FHIR REST GET Patient, step: '5'}
+- {from: fhir-proxy-api, to: fhir-request-signer, label: SigV4 signing to data store, step: '6'}
+- {from: healthlake-events, to: start-import-job, label: import job status events}
+- {from: fhir-request-signer, to: fhir-export, label: bulk data export, step: '7'}
+- {from: fhir-export, to: fhir-catalog, label: crawled schema}
+- {from: fhir-catalog, to: population-health-queries, label: SQL over FHIR resources, step: '8'}
+- {from: fhir-audit-trail, to: fhir-export, label: API audit logs}
+steps:
+- {n: '1', text: 'datacenter → fhir-staging: FHIR bundles and C-CDA exports'}
+- {n: '2', text: 'fhir-staging → start-import-job: S3 event'}
+- {n: '3', text: 'start-import-job → healthlake-cmk: encrypted data store import'}
+- {n: '4', text: 'client → smart-on-fhir-users: SMART App Launch OAuth 2.0'}
+- {n: '5', text: 'client → fhir-proxy-api: FHIR REST GET Patient'}
+- {n: '6', text: 'fhir-proxy-api → fhir-request-signer: SigV4 signing to data store'}
+- {n: '7', text: 'fhir-request-signer → fhir-export: bulk data export'}
+- {n: '8', text: 'fhir-catalog → population-health-queries: SQL over FHIR resources'}
