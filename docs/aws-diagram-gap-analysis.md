@@ -267,7 +267,27 @@ Needed: `profile` / `assume_role_arn` props on `aws.account` feeding
 `provider_args`, an e2e test with two accounts, and equivalence-table support
 for N roots (GCP projects, Azure subscriptions).
 
-## 3. Recommended order
+## 3. Status (implemented 2026-09-13)
+
+| Gap | Delivered as |
+|---|---|
+| G1 generic group | `common.group` (transparent container, colour property) |
+| G2 numbered steps | `step` on nodes and edges, `steps[]` text, badges, steps editor |
+| G3 actors | `common.*` actors with the official general icons, `flow` edges |
+| G4 Availability Zone | `aws.availability_zone`, `gcp.zone`, `azure.zone` with `provides` |
+| G5 spanning ASG | `_spans.yaml`: Auto Scaling band, coverage mirrored as reference edges |
+| G6 link resources | `_links.yaml`: link edges rendered as resources, importer round trip |
+| G7 resource icons | 418 resource icons, 13 group icons, distinct palette tiles |
+| G8 deck colours | `style` / `style_variants` on containers |
+| G9 captions | `caption_prop` + free `caption` |
+| G10 edge styles | `edges[].style` (direction, dash, colour, inactive) + rule defaults |
+| G11 notes, legend | `common.note`, floating legend (`View > Legend`) |
+| G12 Organizations | `aws.organization`, `aws.organizational_unit` (resource role, nested) |
+| G13 edge location | covered by `common.group` |
+| G14 Kubernetes objects | not done: needs a `kubernetes` catalog layer |
+| G15 multi-account | `assume_role_arn` / `external_id` on accounts; accounts inside OUs |
+
+## 3b. Recommended order (original)
 
 1. **G7 resource icons + G8 group styles** — pure catalog/icon work, no model
    change, and the diagrams start looking like AWS diagrams. One day.

@@ -271,6 +271,20 @@ func (g *gen) resourceBlocks() error {
 		for k, v := range provide.Values(g.c, g.nodes, n) {
 			block[k] = v
 		}
+		withName := map[string]any{"name": n.Name}
+		for k, v := range n.Props {
+			withName[k] = v
+		}
+		for attr, tpl := range e.Terraform.Attrs {
+			if v, ok := renderValue(tpl, withName); ok {
+				block[attr] = v
+			}
+		}
+		for input, ref := range e.Terraform.InputsFromParent {
+			if expr, ok := g.resolveAncestorRef(n, ref); ok {
+				block[input] = expr
+			}
+		}
 		if alias := g.providerAlias(n, e.Provider); alias != "" {
 			local := g.localName(e.Provider)
 			block["provider"] = local + "." + alias
@@ -565,11 +579,11 @@ func (g *gen) resolveAncestorRef(n *document.Node, ref string) (string, bool) {
 	if anc == nil {
 		return "", false
 	}
-	e, ok := g.c.Get(anc.Type)
-	if !ok || e.Terraform == nil || e.Terraform.Role != catalog.RoleModule {
+	addr, ok := g.address(anc)
+	if !ok {
 		return "", false
 	}
-	return fmt.Sprintf("${module.%s.%s}", sanitize(anc.ID), output), true
+	return fmt.Sprintf("${%s.%s}", addr, output), true
 }
 
 func (g *gen) isUnder(n *document.Node, ancestorID string) bool {

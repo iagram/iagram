@@ -93,6 +93,13 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 	// Target root chain: one chain per source top-level root (account).
 	// Region-role source nodes collapse into the chain's region prop.
 	newParent := map[string]string{} // source node id -> target node id (for containers/roots)
+	// Roots are account-role nodes: an organization box above them is a drawing.
+	rootOf := func(n *document.Node) string {
+		return topRootIn(n, byID, func(x *document.Node) bool {
+			e, ok := c.Get(x.Type)
+			return ok && e.Terraform != nil && e.Terraform.Role == catalog.RoleAccount
+		})
+	}
 	var chainBottomFor func(srcID string) string
 	chainCache := map[string]string{}
 	chainBottomFor = func(srcRootID string) string {
@@ -240,17 +247,17 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 				break
 			}
 			if ce, ok := c.Get(cur.Type); ok && ce.Terraform != nil && (ce.Terraform.Role == catalog.RoleAccount || ce.Terraform.Role == catalog.RoleRegion) {
-				parent = chainBottomFor(topRoot(&n, byID))
+				parent = chainBottomFor(rootOf(&n))
 				break
 			}
 		}
 		if parent == "" {
-			parent = chainBottomFor(topRoot(&n, byID))
+			parent = chainBottomFor(rootOf(&n))
 		}
 		tn := find(tid)
 		te, _ := c.Get(tn.Type)
 		if pn := find(parent); pn != nil && !c.CanContain(pn.Type, tn.Type) {
-			bottom := chainBottomFor(topRoot(&n, byID))
+			bottom := chainBottomFor(rootOf(&n))
 			if bn := find(bottom); bn != nil && !c.CanContain(bn.Type, tn.Type) {
 				for i := range out.Nodes {
 					if oe, _ := c.Get(out.Nodes[i].Type); !oe.Transparent && c.CanContain(out.Nodes[i].Type, tn.Type) {
@@ -355,16 +362,26 @@ func regionOf(n *document.Node, byID map[string]*document.Node, regions map[stri
 	return ""
 }
 
-func topRoot(n *document.Node, byID map[string]*document.Node) string {
-	cur := n
-	for cur.Parent != "" {
+// topRootIn returns the outermost ancestor; when isRoot is given, the
+// outermost ancestor satisfying it (an account inside an organization box).
+func topRootIn(n *document.Node, byID map[string]*document.Node, isRoot func(*document.Node) bool) string {
+	cur, best := n, n
+	seen := map[string]bool{}
+	for {
+		if isRoot == nil || isRoot(cur) {
+			best = cur
+		}
+		if cur.Parent == "" || seen[cur.ID] {
+			break
+		}
+		seen[cur.ID] = true
 		p, ok := byID[cur.Parent]
 		if !ok {
 			break
 		}
 		cur = p
 	}
-	return cur.ID
+	return best.ID
 }
 
 func defaultName(e *catalog.Entry, srcRootID string, byID map[string]*document.Node) string {

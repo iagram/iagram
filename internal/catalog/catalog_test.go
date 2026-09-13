@@ -428,3 +428,17 @@ func TestLinkResources(t *testing.T) {
 		}
 	}
 }
+
+func TestOrganizationBoxes(t *testing.T) {
+	c := load(t)
+	if !c.CanContain(catalog.Root, "aws.organization") || !c.CanContain("aws.organization", "aws.organizational_unit") || !c.CanContain("aws.organizational_unit", "aws.organizational_unit") {
+		t.Error("organization > OU > OU nesting should be allowed")
+	}
+	if !c.CanContain("aws.organizational_unit", "aws.account") || !c.CanContain("aws.organization", "aws.account") || !c.CanContain(catalog.Root, "aws.account") {
+		t.Error("accounts live on the canvas or inside the organization tree")
+	}
+	e, _ := c.Get("aws.organizational_unit")
+	if e == nil || e.Terraform == nil || e.Terraform.Role != catalog.RoleResource || e.Terraform.Attrs["name"] != "${name}" {
+		t.Errorf("OU entry = %+v", e)
+	}
+}

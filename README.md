@@ -108,12 +108,12 @@ iagram.json ──validate──▶ generate ──▶ .iagram/tf/main.tf.json +
 |---|---|
 | **Canvas tabs** | One tab per provider. In **mirror** mode (default) the tab you draw on is the source and the other tabs show its live equivalent through the equivalence table, dropped elements listed in a banner; editing a mirrored tab makes that provider the source. Turn mirroring off for independent canvases in one file. Plan/Apply run the source. |
 | **Palette** (left) | Search; curated elements grouped by category; **More services**: one tile per official icon (its resource type is picked in the settings). Searching also lists individual matching resource types. Items that fit the selected container are highlighted, the rest dimmed. Drag onto the canvas. |
-| **Canvas** | Nested containers (account → region → VPC → subnet), typed arrows with labels, plan and drift overlays, minimap. Shift-drag to select several, ⌘-click to add. Drag an element into another container to move it there (refused with a message if the catalog forbids it). |
-| **Settings panel** (right) | Name, properties in sections (`Compute`, `Networking`, `Advanced`…), **Attachments** (add and configure the non-graphical resources that apply to this element), validation messages, planned resource changes, drift details, live outputs after apply (click to copy), delete. Click an arrow for the connection inspector. |
+| **Canvas** | Nested containers drawn with the official colour grammar (account → region → Availability Zone → VPC → subnet, organization → OU), generic groups, corporate data centers, actors (users, clients, internet, devices, SaaS), notes, Auto Scaling bands spanning subnets, typed arrows with labels, step callouts and styles (both ways, dashed, inactive), link lines for peering / attachments / VPN, plan and drift overlays, legend. Shift-drag to select several, ⌘-click to add. Drag an element into another container to move it there (refused with a message if the catalog forbids it); right-click for cut / copy / paste / z-order. |
+| **Settings panel** (right) | Name, **Annotation** (caption, step number), properties in sections (`Compute`, `Networking`, `Advanced`…), **Attachments** (add and configure the non-graphical resources that apply to this element), **Components** for cluster boxes, validation messages, planned resource changes, drift details, live outputs after apply (click to copy), delete. Click an arrow for the connection inspector: label, step, direction, line style, colour, and for link lines the Terraform resource and its attributes. With nothing selected: the walkthrough steps editor and the legend toggle. |
 | **Menubar and toolbar** | File (new, open, import from Terraform state, save, download, export Terraform / PNG / SVG), Edit (undo, redo, clipboard, select all), View (zoom, labels, minimap, snap, theme), Infrastructure (plan, apply, drift, destroy, log), Help (shortcuts, docs, about); quick buttons for undo/redo, zoom, labels, theme, Save, Check drift, Plan, Apply. |
 | **Log drawer** | Streams `tofu` output for plan/apply/drift; lists orphaned state that a plan would destroy. |
 
-Shortcuts: ⌘S save · ⌘Z / ⌘⇧Z undo, redo · ⌘C / ⌘V / ⌘D copy, paste, duplicate · ⌘A select all · Esc deselect · ⌫ delete · `?` shortcut list · double-click an element to focus its settings. Deep links: `?theme=dark`, `#select=<node id>`.
+Shortcuts: ⌘S save · ⌘Z / ⌘⇧Z undo, redo · ⌘X / ⌘C / ⌘V / ⌘D cut, copy, paste, duplicate · ⌘] / ⌘[ (⇧ for front/back) z-order · ⌘A select all · Esc deselect · ⌫ delete · `?` shortcut list · double-click an element to focus its settings. Deep links: `?theme=dark`, `?provider=gcp`, `?legend=1`, `#select=<node id>`.
 
 ## Commands
 
@@ -139,9 +139,13 @@ Diagram commands accept `-f FILE` and repeatable `--catalog DIR`. Environment: `
 
 | Provider | Containers | Elements |
 |---|---|---|
-| **AWS** | account, region, VPC, subnet | security group, EC2, RDS, S3, ALB, Lambda, SQS, DynamoDB, EKS, CloudFront, Route 53 |
-| **Google Cloud** | project, VPC network, subnetwork | firewall rule, Compute Engine, Cloud SQL, Cloud Storage, Cloud Run, Pub/Sub, BigQuery, GKE, Cloud DNS |
-| **Azure** | subscription, resource group, virtual network, subnet | network security group, Linux VM, storage account, PostgreSQL Flexible Server, Key Vault, Container Registry, AKS, DNS zone |
+| **AWS** | organization, organizational unit, account, region, Availability Zone, VPC, subnet, EKS cluster, Auto Scaling group (band) | security group, EC2, RDS, S3, ALB, Lambda, SQS, DynamoDB, CloudFront, Route 53, plus one palette tile per official service or resource icon (about 190) covering every resource type of the provider |
+| **Google Cloud** | project, zone, VPC network, subnetwork, GKE cluster | firewall rule, Compute Engine, Cloud SQL, Cloud Storage, Cloud Run, Pub/Sub, BigQuery, GKE, Cloud DNS |
+| **Azure** | subscription, resource group, availability zone, virtual network, subnet, AKS cluster | network security group, Linux VM, storage account, PostgreSQL Flexible Server, Key Vault, Container Registry, AKS, DNS zone |
+
+Cloud-neutral vocabulary (every tab): generic group, corporate data center, note, and actors (user, users, client, mobile, internet, SaaS, device, server, database, identity provider, documents, email); they never generate Terraform and survive conversion between clouds.
+
+Link lines (Terraform resources drawn between two boxes): VPC peering, Transit Gateway VPC and peering attachments, Site-to-Site VPN, Direct Connect gateway association, Route 53 zone association, Cloud WAN attachment, target group attachment, RAM share; GCP network peering and NCC spokes; Azure VNet peering, hub connection, private DNS link.
 
 Arrows and what they generate (examples): `routes_to` (ALB → EC2/Lambda: target groups), `protects` (security group / NSG / firewall → workload), `connects_to` (workload → database: ingress from the workload's identity group, or Cloud SQL client role), `reads_writes` / `publishes_to` / `sends_to` (workload → bucket / table / topic / queue: least-privilege IAM), `triggers` (SQS → Lambda: event source mapping), `pulls_from` (AKS → ACR), `reads_secrets` (VM → Key Vault), `serves_from` (CloudFront → S3/ALB), `resolves_to` (DNS zone → load balancer / distribution / VM).
 
@@ -241,7 +245,8 @@ Releases: tag `vX.Y.Z` and push; GoReleaser builds binaries, checksums, GHCR ima
 | 6 | Dark theme, connection inspector, `iagram destroy`, DNS/CDN elements, grouped settings | done |
 | 7 | Docker Compose, pip launcher, comprehensive docs | done |
 | 8 | `.iad` files, generated elements for every provider resource type, HCL import and lossless round trip, per-provider canvases, connection UX, cross-provider convert, menubar | done |
-| next | Visual identity; validation on real GCP/Azure accounts | |
+| 9 | Official resource and group icons, deck colour grammar, generic groups / data centers / actors / notes, walkthrough steps, captions, edge styles and legend, Availability Zone boxes, link lines (peering, attachments, VPN), Auto Scaling bands, Organizations tree and assume-role accounts (from the AWS reference-diagram gap analysis, `docs/aws-diagram-gap-analysis.md`) | done |
+| next | Visual identity; validation on real GCP/Azure accounts; Kubernetes catalog layer | |
 
 Early software: the shipped catalogs are validated against the real providers, but the first production apply should be reviewed plan by plan, as with any Terraform.
 

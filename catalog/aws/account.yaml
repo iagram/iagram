@@ -5,7 +5,7 @@ category: account
 icon: aws/groups/aws_account.svg
 kind: container
 style: {border: "#E7157B", dash: solid, label: left}
-allowed_parents: [root]
+allowed_parents: [root, aws.organization, aws.organizational_unit]
 size: {w: 1200, h: 800}
 terraform:
   role: account
@@ -13,6 +13,7 @@ terraform:
   provider_args:
     profile: ${profile}
     allowed_account_ids: ["${account_id}"]
+    assume_role: {role_arn: "${assume_role_arn}", external_id: "${external_id}"}
 props:
   type: object
   properties:
@@ -25,3 +26,14 @@ props:
       title: Account ID
       description: Optional 12-digit account id; when set, the plan refuses to run against any other account.
       pattern: "^[0-9]{12}$"
+    assume_role_arn:
+      type: string
+      group: Cross-account access
+      title: Assume role ARN
+      description: Role assumed from the local credentials before touching this account (landing zones, multi-account layouts).
+      pattern: "^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+$"
+    external_id:
+      type: string
+      group: Cross-account access
+      title: External id
+      description: Optional external id required by the assumed role's trust policy.

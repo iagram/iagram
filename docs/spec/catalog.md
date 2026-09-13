@@ -140,6 +140,25 @@ would shadow meta-arguments or the inputs the generator sets.
   `iagram apply` reads them and writes them onto `nodes[].outputs` in the
   diagram file.
 
+### Curated resource elements (`role: resource` with `attrs`)
+
+A curated entry may render a single resource block instead of a module:
+
+```yaml
+terraform:
+  role: resource
+  resource: aws_organizations_organizational_unit
+  attrs: {name: "${name}"}            # templates over the node's properties plus ${name}
+  inputs_from_parent: {parent_id: parent.id}   # resolved against the parent's Terraform address
+```
+
+`inputs_from_parent` values that cannot be resolved (the parent has no
+address, like the organization box) are left to `provides` or the drawn
+properties. Shipped: `aws.organization` (a transparent box providing
+`parent_id` from its `root_id`) and `aws.organizational_unit`; accounts may
+sit inside them and carry `assume_role_arn` / `external_id` for landing-zone
+layouts (rendered as the provider's `assume_role` block).
+
 ### Import mapping (`terraform.import`)
 
 `iagram import` walks a Terraform state and uses these mappings to rebuild

@@ -273,3 +273,49 @@ func TestSpanReferencesFillTheListAttribute(t *testing.T) {
 		t.Errorf("vpc_zone_identifier = %v", block["vpc_zone_identifier"])
 	}
 }
+
+func TestOrganizationTreeAndAssumeRole(t *testing.T) {
+	c, d := fixture(t)
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	// org root > OU workloads > OU prod > the fixture account (moved inside)
+	d.Nodes = append(d.Nodes,
+		document.Node{ID: "org", Type: "aws.organization", Name: "corp", Props: map[string]any{"root_id": "r-abcd"}},
+		document.Node{ID: "ou_w", Type: "aws.organizational_unit", Name: "workloads", Parent: "org", Props: map[string]any{}},
+		document.Node{ID: "ou_p", Type: "aws.organizational_unit", Name: "prod", Parent: "ou_w", Props: map[string]any{}},
+	)
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == "acct" {
+			d.Nodes[i].Parent = "ou_p"
+			d.Nodes[i].Props["assume_role_arn"] = "arn:aws:iam::123456789012:role/deployer"
+		}
+	}
+	res, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ous := res.Config["resource"].(map[string]map[string]map[string]any)["aws_organizations_organizational_unit"]
+	if ous["workloads"]["parent_id"] != "r-abcd" || ous["workloads"]["name"] != "workloads" {
+		t.Errorf("top-level OU = %v", ous["workloads"])
+	}
+	if ous["prod"]["parent_id"] != "${aws_organizations_organizational_unit.workloads.id}" {
+		t.Errorf("nested OU = %v", ous["prod"])
+	}
+	prov := res.Config["provider"].(map[string][]map[string]any)["aws"]
+	found := false
+	for _, p := range prov {
+		if ar, ok := p["assume_role"].(map[string]any); ok && ar["role_arn"] == "arn:aws:iam::123456789012:role/deployer" {
+			found = true
+			if _, has := ar["external_id"]; has {
+				t.Errorf("empty external_id should be dropped: %v", ar)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("assume_role missing from providers: %v", prov)
+	}
+	// The region inside the account still finds its account through the OU tree.
+	web := res.Config["module"].(map[string]map[string]any)["web"]
+	if web["providers"].(map[string]any)["aws"] != "aws.reg" {
+		t.Errorf("web providers = %v", web["providers"])
+	}
+}

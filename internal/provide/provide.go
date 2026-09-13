@@ -30,7 +30,7 @@ func Values(c *catalog.Catalog, byID map[string]*document.Node, n *document.Node
 			continue
 		}
 		for prop, tpl := range ae.Provides {
-			if _, has := e.Property(prop); !has {
+			if !accepts(e, prop) {
 				continue
 			}
 			if _, done := out[prop]; done {
@@ -118,4 +118,18 @@ func ancestors(byID map[string]*document.Node, n *document.Node) []*document.Nod
 		cur = p
 	}
 	return out
+}
+
+// accepts reports whether the element can take prop: declared in its schema,
+// or expected from its parent (inputs_from_parent) so a box may supply it.
+func accepts(e *catalog.Entry, prop string) bool {
+	if _, has := e.Property(prop); has {
+		return true
+	}
+	if e.Terraform != nil {
+		if _, has := e.Terraform.InputsFromParent[prop]; has {
+			return true
+		}
+	}
+	return false
 }

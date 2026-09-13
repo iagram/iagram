@@ -84,12 +84,24 @@ func (v *validator) structure() {
 			v.add(Problem{Level: Error, Node: n.ID, Message: fmt.Sprintf("unknown type %q", n.Type)})
 			continue
 		}
+		// Generated resources are addressed by name, so their names are unique
+		// per type across the diagram. Everything else (modules, accounts,
+		// regions) is addressed by id: names only need to be unique among
+		// siblings, so two accounts may each hold a region named eu-west-1.
+		scope := n.Type + "/"
+		if e.Terraform == nil || e.Terraform.Role != catalog.RoleResource {
+			if lp := v.logicalParent(n); lp != nil {
+				scope += lp.ID + "/"
+			} else {
+				scope += "root/"
+			}
+		}
 		if n.Name == "" {
 			v.add(Problem{Level: Error, Node: n.ID, Field: "name", Message: e.Label + " needs a name"})
-		} else if prev, dup := names[n.Type+"/"+n.Name]; dup {
+		} else if prev, dup := names[scope+n.Name]; dup {
 			v.add(Problem{Level: Error, Node: n.ID, Field: "name", Message: fmt.Sprintf("name %q already used by another %s (%s)", n.Name, e.Label, prev)})
 		} else {
-			names[n.Type+"/"+n.Name] = n.ID
+			names[scope+n.Name] = n.ID
 		}
 
 		parentType := catalog.Root

@@ -143,9 +143,12 @@ type Terraform struct {
 	// ProviderArgs (roles account/region) is a template for the provider
 	// block: any string "${prop}" is replaced by the node's property value;
 	// keys (or list items) whose property is empty are dropped.
-	ProviderArgs     map[string]any     `yaml:"provider_args,omitempty" json:"provider_args,omitempty"`
-	InputsFromParent map[string]string  `yaml:"inputs_from_parent,omitempty" json:"inputs_from_parent,omitempty"`
-	Collect          map[string]Collect `yaml:"collect,omitempty" json:"collect,omitempty"`
+	ProviderArgs     map[string]any    `yaml:"provider_args,omitempty" json:"provider_args,omitempty"`
+	InputsFromParent map[string]string `yaml:"inputs_from_parent,omitempty" json:"inputs_from_parent,omitempty"`
+	// Attrs (role resource) are attribute templates rendered from the node's
+	// properties plus "${name}" (the node name): {name: "${name}"}.
+	Attrs   map[string]string  `yaml:"attrs,omitempty" json:"attrs,omitempty"`
+	Collect map[string]Collect `yaml:"collect,omitempty" json:"collect,omitempty"`
 	// Import says how to recognise this element in an existing Terraform
 	// state (`iagram import`).
 	Import *Import `yaml:"import,omitempty" json:"import,omitempty"`
