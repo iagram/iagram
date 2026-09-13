@@ -1,0 +1,898 @@
+# Azure reference architectures: security, identity, governance, resilience and DR
+# Format: see FORMAT.md. 20 distinct official architectures. Provider: azure.
+# Management groups are modelled as top-level `group:` containers holding `subscriptions:`.
+
+- slug: alz-management-group-hierarchy
+  title: Azure landing zone management group hierarchy with platform and application subscriptions
+  category: security
+  tags: [landing zone, management groups, platform landing zone, connectivity, identity, policy, cloud adoption framework]
+  source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/
+  description: A platform landing zone (management group hierarchy plus centralized management, connectivity and identity subscriptions) provides governance and shared services for application landing zone subscriptions placed under Corp, Online or Sandbox management groups. Azure Policy assigned at management group scope is inherited by every subscription, while the connectivity hub (firewall, gateways, DDoS) and the central Log Analytics workspace serve all workloads.
+  containers:
+    - datacenter: on-premises
+    - group: platform
+      subscriptions:
+        - subscription: management
+          resource_group: {name: rg-management, location: westeurope}
+        - subscription: connectivity
+          resource_group: {name: rg-connectivity, location: westeurope}
+          vnets:
+            - name: hub
+              cidr: 10.0.0.0/16
+              subnets:
+                - {name: AzureFirewallSubnet, cidr: 10.0.1.0/26}
+                - {name: GatewaySubnet, cidr: 10.0.0.0/27}
+        - subscription: identity
+          resource_group: {name: rg-identity, location: westeurope}
+          vnets:
+            - name: vnet-identity
+              cidr: 10.10.0.0/24
+              subnets:
+                - {name: snet-adds, cidr: 10.10.0.0/26}
+    - group: landing-zones
+      subscriptions:
+        - subscription: corp-app-1
+          resource_group: {name: rg-corp-app-1, location: westeurope}
+          vnets:
+            - name: vnet-corp-app-1
+              cidr: 10.1.0.0/16
+              subnets:
+                - {name: snet-corp-app, cidr: 10.1.1.0/24}
+        - subscription: online-app-1
+          resource_group: {name: rg-online-app-1, location: westeurope}
+    - group: sandbox
+      subscriptions:
+        - subscription: sandbox-1
+          resource_group: {name: rg-sandbox, location: westeurope}
+  elements:
+    - {tf: azurerm_management_group, name: mg-platform, in: group:platform}
+    - {tf: azurerm_management_group, name: mg-landing-zones, in: group:landing-zones}
+    - {tf: azurerm_management_group, name: mg-sandbox, in: group:sandbox}
+    - {tf: azurerm_management_group_policy_assignment, name: alz-guardrails, in: group:landing-zones}
+    - {tf: azurerm_log_analytics_workspace, name: law-central, in: resource_group:rg-management}
+    - {tf: azurerm_firewall, name: hub-fw, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_virtual_network_gateway, name: hub-ergw, in: subnet:GatewaySubnet}
+    - {tf: azurerm_network_ddos_protection_plan, name: ddos-plan, in: resource_group:rg-connectivity}
+    - {tf: azurerm_windows_virtual_machine, name: adds-dc-1, in: subnet:snet-adds}
+    - {tf: azurerm_linux_virtual_machine, name: vm-corp-app, in: subnet:snet-corp-app}
+    - {tf: azurerm_linux_web_app, name: web-online-app, in: resource_group:rg-online-app-1}
+    - {tf: azurerm_linux_virtual_machine, name: vm-sandbox, in: resource_group:rg-sandbox}
+  actors: [datacenter, internet]
+  flows:
+    - {from: datacenter, to: hub-ergw, label: ExpressRoute / VPN, step: 1}
+    - {from: vnet:hub, to: vnet:vnet-corp-app-1, link: azurerm_virtual_network_peering, label: hub-spoke peering}
+    - {from: vnet:hub, to: vnet:vnet-identity, link: azurerm_virtual_network_peering, label: hub-spoke peering}
+    - {from: vm-corp-app, to: hub-fw, label: "0.0.0.0/0 via UDR", step: 2}
+    - {from: hub-fw, to: internet, label: SNAT egress, step: 3}
+    - {from: vm-corp-app, to: adds-dc-1, label: domain authentication, step: 4}
+    - {from: alz-guardrails, to: subscription:corp-app-1, label: policy inheritance}
+    - {from: alz-guardrails, to: subscription:online-app-1, label: policy inheritance}
+    - {from: hub-fw, to: law-central, label: diagnostics}
+    - {from: web-online-app, to: law-central, label: diagnostics}
+    - {from: ddos-plan, to: vnet:hub, label: DDoS Network Protection}
+
+- slug: subscription-vending
+  title: Subscription vending for application landing zones
+  category: security
+  tags: [subscription vending, landing zone, automation, management groups, budget, workload identity, ipam]
+  source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/design-area/subscription-vending
+  description: Application teams request a subscription through an ITSM front door; a platform pipeline creates the subscription programmatically with infrastructure as code, places it under the right management group, peers its virtual network to the connectivity hub from a non-overlapping IP range, and configures budgets, tags, subscription owners and workload identities before handing it over. Governance stays with the platform team through Azure Policy assigned on the management group hierarchy.
+  containers:
+    - group: landing-zones
+      subscriptions:
+        - subscription: vended-app-1
+          resource_group: {name: rg-app-1-network, location: westeurope}
+          vnets:
+            - name: vnet-app-1
+              cidr: 10.5.0.0/22
+              subnets:
+                - {name: snet-app-1, cidr: 10.5.0.0/24}
+    - subscription: connectivity
+      resource_group: {name: rg-connectivity, location: westeurope}
+      vnets:
+        - name: hub
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: AzureFirewallSubnet, cidr: 10.0.1.0/26}
+    - subscription: management
+      resource_group: {name: rg-management, location: westeurope}
+  elements:
+    - {tf: azurerm_management_group, name: mg-corp, in: group:landing-zones}
+    - {tf: azurerm_management_group_policy_assignment, name: corp-guardrails, in: group:landing-zones}
+    - {tf: azurerm_subscription, name: sub-app-1, in: group:landing-zones}
+    - {tf: azurerm_consumption_budget_subscription, name: budget-app-1, in: subscription:vended-app-1}
+    - {tf: azurerm_user_assigned_identity, name: id-app-1-deploy, in: resource_group:rg-app-1-network}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-1, in: subnet:snet-app-1}
+    - {tf: azurerm_firewall, name: hub-fw, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_log_analytics_workspace, name: law-central, in: resource_group:rg-management}
+  actors: [users, server]
+  flows:
+    - {from: users, to: sub-app-1, label: subscription request (ITSM intake), step: 1}
+    - {from: server, to: sub-app-1, label: create subscription (IaC pipeline), step: 2}
+    - {from: sub-app-1, to: mg-corp, link: azurerm_management_group_subscription_association, label: placement}
+    - {from: corp-guardrails, to: mg-corp, label: policy-driven governance}
+    - {from: vnet:hub, to: vnet:vnet-app-1, link: azurerm_virtual_network_peering, label: peer to hub (IPAM range), step: 3}
+    - {from: server, to: budget-app-1, label: budget + tags, step: 4}
+    - {from: server, to: id-app-1-deploy, label: workload identity + RBAC, step: 5}
+    - {from: users, to: vm-app-1, label: deploy workload, step: 6}
+    - {from: vm-app-1, to: hub-fw, label: egress via hub}
+    - {from: vm-app-1, to: law-central, label: diagnostics}
+
+- slug: central-log-analytics-sentinel
+  title: Centralized Log Analytics workspace with Microsoft Sentinel SIEM
+  category: security
+  tags: [log analytics, sentinel, siem, soar, azure monitor agent, data collection rules, logic apps]
+  source: https://learn.microsoft.com/en-us/azure/azure-monitor/logs/workspace-design
+  description: Operational and security data is consolidated into a single Log Analytics workspace in the management subscription, with Microsoft Sentinel enabled on the workspace so analytics rules, incidents and SOAR playbooks operate on the same data that Azure Monitor collects. Azure Monitor Agent sends VM and Arc-enabled server logs through data collection rules, PaaS resources stream diagnostic settings, and data export to Event Hubs and a storage account supports downstream SIEMs and long-term retention.
+  containers:
+    - datacenter: on-premises
+    - subscription: management
+      resource_group: {name: rg-management, location: westeurope}
+    - subscription: landing-zone-prod
+      resource_group: {name: rg-app, location: westeurope}
+      vnets:
+        - name: vnet-app
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: snet-app, cidr: 10.20.1.0/24}
+  elements:
+    - {tf: azurerm_log_analytics_workspace, name: law-security, in: resource_group:rg-management}
+    - {tf: azurerm_sentinel_log_analytics_workspace_onboarding, name: sentinel-onboarding, in: resource_group:rg-management}
+    - {tf: azurerm_monitor_data_collection_rule, name: dcr-security-events, in: resource_group:rg-management}
+    - {tf: azurerm_logic_app_workflow, name: playbook-isolate-host, in: resource_group:rg-management}
+    - {tf: azurerm_eventhub_namespace, name: evh-siem-export, in: resource_group:rg-management}
+    - {tf: azurerm_storage_account, name: st-log-archive, in: resource_group:rg-management}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app, in: subnet:snet-app}
+    - {tf: azurerm_key_vault, name: kv-app, in: resource_group:rg-app}
+    - {tf: azurerm_arc_machine, name: arc-server-onprem, in: datacenter}
+  actors: [users]
+  flows:
+    - {from: vm-app, to: dcr-security-events, label: Azure Monitor Agent, step: 1}
+    - {from: arc-server-onprem, to: dcr-security-events, label: Azure Monitor Agent, step: 1}
+    - {from: dcr-security-events, to: law-security, label: ingest, step: 2}
+    - {from: kv-app, to: law-security, label: diagnostic settings}
+    - {from: law-security, to: sentinel-onboarding, label: analytics rules -> incidents, step: 3}
+    - {from: sentinel-onboarding, to: playbook-isolate-host, label: automation rule triggers playbook, step: 4}
+    - {from: playbook-isolate-host, to: vm-app, label: isolate / remediate, step: 5}
+    - {from: law-security, to: evh-siem-export, label: data export}
+    - {from: law-security, to: st-log-archive, label: long-term archive}
+    - {from: users, to: sentinel-onboarding, label: SOC investigation}
+
+- slug: defender-for-cloud-cnapp
+  title: Microsoft Defender for Cloud posture management and workload protection
+  category: security
+  tags: [defender for cloud, cnapp, cspm, cwpp, defender plans, secure score, multicloud]
+  source: https://learn.microsoft.com/en-us/azure/defender-for-cloud/defender-for-cloud-introduction
+  description: Defender for Cloud plans are enabled per subscription (Defender for Servers, Storage, Containers, Databases and CSPM) to assess posture against the Microsoft cloud security benchmark and detect threats on VMs, storage accounts, AKS clusters and SQL servers, including Arc-enabled on-premises machines and connected AWS/GCP accounts. Alerts and recommendations flow to a Log Analytics workspace shared with Microsoft Sentinel for correlation and response.
+  containers:
+    - datacenter: on-premises
+    - subscription: management
+      resource_group: {name: rg-security, location: westeurope}
+    - subscription: landing-zone-prod
+      resource_group: {name: rg-workload, location: westeurope}
+      vnets:
+        - name: vnet-workload
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: snet-web, cidr: 10.30.1.0/24}
+            - {name: snet-aks, cidr: 10.30.8.0/21}
+  elements:
+    - {tf: azurerm_security_center_subscription_pricing, name: defender-servers-p2, in: subscription:landing-zone-prod}
+    - {tf: azurerm_security_center_subscription_pricing, name: defender-storage, in: subscription:landing-zone-prod}
+    - {tf: azurerm_security_center_subscription_pricing, name: defender-containers, in: subscription:landing-zone-prod}
+    - {tf: azurerm_subscription_policy_assignment, name: mcsb-initiative, in: subscription:landing-zone-prod}
+    - {tf: azurerm_linux_virtual_machine, name: vm-web, in: subnet:snet-web}
+    - {tf: azurerm_storage_account, name: st-data, in: resource_group:rg-workload}
+    - {tf: azurerm_kubernetes_cluster, name: aks-prod, in: subnet:snet-aks}
+    - {tf: azurerm_mssql_server, name: sql-prod, in: resource_group:rg-workload}
+    - {tf: azurerm_arc_machine, name: arc-onprem-srv, in: datacenter}
+    - {tf: azurerm_log_analytics_workspace, name: law-security, in: resource_group:rg-security}
+    - {tf: azurerm_sentinel_log_analytics_workspace_onboarding, name: sentinel-onboarding, in: resource_group:rg-security}
+  actors: [users, saas]
+  flows:
+    - {from: mcsb-initiative, to: vm-web, label: MCSB assessment -> secure score, step: 1}
+    - {from: defender-servers-p2, to: vm-web, label: agentless scanning + Defender for Endpoint, step: 2}
+    - {from: defender-servers-p2, to: arc-onprem-srv, label: hybrid server protection}
+    - {from: defender-storage, to: st-data, label: malware scanning + sensitive data threats}
+    - {from: defender-containers, to: aks-prod, label: vulnerability assessment + runtime protection}
+    - {from: sql-prod, to: law-security, label: Defender for SQL alerts}
+    - {from: saas, to: law-security, label: AWS / GCP connectors, step: 3}
+    - {from: vm-web, to: law-security, label: security alerts, step: 4}
+    - {from: law-security, to: sentinel-onboarding, label: alerts -> incidents, step: 5}
+    - {from: users, to: sentinel-onboarding, label: SOC triage}
+
+- slug: key-vault-managed-identity-app-secrets
+  title: App Service secrets with Key Vault references and managed identity over Private Link
+  category: security
+  tags: [key vault, managed identity, key vault references, private endpoint, secrets, rbac]
+  source: https://learn.microsoft.com/en-us/azure/app-service/app-service-key-vault-references
+  description: App settings hold Key Vault references instead of secret values; App Service resolves them at startup with a user-assigned managed identity that has the Key Vault Secrets User role, and refetches rotated versions every 24 hours. The vault denies public access and is reached through a private endpoint over regional VNet integration, so no credential is ever stored in configuration or code.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-web, location: westeurope}
+      vnets:
+        - name: vnet-web
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: snet-app-integration, cidr: 10.40.1.0/24}
+            - {name: snet-private-endpoints, cidr: 10.40.2.0/24}
+  elements:
+    - {tf: azurerm_service_plan, name: plan-web, in: resource_group:rg-web}
+    - {tf: azurerm_linux_web_app, name: web-app, in: subnet:snet-app-integration}
+    - {tf: azurerm_user_assigned_identity, name: id-web-app, in: resource_group:rg-web}
+    - {tf: azurerm_key_vault, name: kv-web, in: resource_group:rg-web}
+    - {tf: azurerm_private_endpoint, name: pe-kv, in: subnet:snet-private-endpoints}
+    - {tf: azurerm_private_dns_zone, name: pdz-vaultcore, in: resource_group:rg-web}
+    - {tf: azurerm_mssql_server, name: sql-web, in: resource_group:rg-web}
+    - {tf: azurerm_private_endpoint, name: pe-sql, in: subnet:snet-private-endpoints}
+    - {tf: azurerm_log_analytics_workspace, name: law-web, in: resource_group:rg-web}
+    - {tf: azurerm_application_insights, name: appi-web, in: resource_group:rg-web}
+  actors: [users]
+  flows:
+    - {from: users, to: web-app, label: HTTPS, step: 1}
+    - {from: web-app, to: id-web-app, label: keyVaultReferenceIdentity, step: 2}
+    - {from: id-web-app, to: kv-web, label: Key Vault Secrets User (RBAC), step: 3}
+    - {from: web-app, to: pe-kv, label: "@Microsoft.KeyVault(SecretUri=...) via VNet integration", step: 4}
+    - {from: pe-kv, to: kv-web, label: Private Link}
+    - {from: web-app, to: pe-sql, label: connection string from secret, step: 5}
+    - {from: pe-sql, to: sql-web, label: Private Link}
+    - {from: pdz-vaultcore, to: vnet:vnet-web, link: azurerm_private_dns_zone_virtual_network_link, label: privatelink.vaultcore.azure.net}
+    - {from: kv-web, to: law-web, label: audit logs}
+    - {from: web-app, to: appi-web, label: telemetry}
+
+- slug: entra-b2c-customer-identity
+  title: Customer identity with Azure AD B2C, custom domain and API connectors
+  category: identity
+  tags: [azure ad b2c, ciam, oidc, social identity providers, user flows, custom policies, api connectors, front door]
+  source: https://learn.microsoft.com/en-us/azure/active-directory-b2c/technical-overview
+  description: A dedicated Azure AD B2C tenant stores consumer accounts and runs sign-up/sign-in user flows or custom policies, federating with social and enterprise identity providers over OIDC, OAuth 2.0 and SAML before returning tokens to registered web and mobile applications. Azure Front Door fronts the tenant for a custom login domain, API connectors call a REST API to validate and enrich user data, and audit logs and Application Insights telemetry provide usage and security visibility.
+  containers:
+    - subscription: identity
+      resource_group: {name: rg-b2c, location: westeurope}
+    - subscription: workload
+      resource_group: {name: rg-customer-app, location: westeurope}
+  elements:
+    - {tf: azurerm_aadb2c_directory, name: b2c-tenant, in: resource_group:rg-b2c}
+    - {tf: azurerm_cdn_frontdoor_profile, name: afd-login-custom-domain, in: resource_group:rg-b2c}
+    - {tf: azurerm_application_insights, name: appi-b2c-journeys, in: resource_group:rg-b2c}
+    - {tf: azurerm_log_analytics_workspace, name: law-b2c, in: resource_group:rg-b2c}
+    - {tf: azurerm_service_plan, name: plan-customer-app, in: resource_group:rg-customer-app}
+    - {tf: azurerm_linux_web_app, name: web-customer-portal, in: resource_group:rg-customer-app}
+    - {tf: azurerm_linux_function_app, name: func-api-connector, in: resource_group:rg-customer-app}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-customer-profiles, in: resource_group:rg-customer-app}
+  actors: [users, mobile, idp]
+  flows:
+    - {from: users, to: web-customer-portal, label: browse, step: 1}
+    - {from: web-customer-portal, to: afd-login-custom-domain, label: OIDC authorize (login.contoso.com), step: 2}
+    - {from: mobile, to: afd-login-custom-domain, label: OIDC / MSAL}
+    - {from: afd-login-custom-domain, to: b2c-tenant, label: custom domain to b2clogin.com, step: 3}
+    - {from: b2c-tenant, to: idp, label: federate (OIDC / SAML), step: 4}
+    - {from: b2c-tenant, to: func-api-connector, label: API connector (validate / enrich), step: 5}
+    - {from: func-api-connector, to: cosmos-customer-profiles, label: loyalty / CRM lookup}
+    - {from: b2c-tenant, to: web-customer-portal, label: ID + access tokens, step: 6}
+    - {from: b2c-tenant, to: appi-b2c-journeys, label: custom policy telemetry}
+    - {from: b2c-tenant, to: law-b2c, label: audit logs}
+
+- slug: hybrid-identity-adds-extend-domain
+  title: Extend on-premises Active Directory Domain Services into an Azure virtual network
+  category: identity
+  tags: [active directory, ad ds, domain controllers, hybrid identity, vpn gateway, replication, bastion]
+  source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/identity/adds-extend-domain
+  description: Two domain controller VMs in a dedicated AD DS subnet, spread across availability zones with static private IPs and a restrictive NSG, replicate with on-premises domain controllers over a VPN or ExpressRoute gateway and serve authentication and DNS to workloads in Azure. Administrative access uses Azure Bastion rather than public IPs, DDoS Protection covers the perimeter, and Recovery Services backs up the domain controllers' system state.
+  containers:
+    - datacenter: on-premises
+    - subscription: identity
+      resource_group: {name: rg-identity, location: westeurope}
+      vnets:
+        - name: vnet-identity
+          cidr: 10.10.0.0/16
+          subnets:
+            - {name: GatewaySubnet, cidr: 10.10.255.0/27}
+            - {name: snet-adds, cidr: 10.10.1.0/24}
+            - {name: snet-app, cidr: 10.10.2.0/24}
+            - {name: AzureBastionSubnet, cidr: 10.10.3.0/26}
+  elements:
+    - {tf: azurerm_virtual_network_gateway, name: vpngw-identity, in: subnet:GatewaySubnet}
+    - {tf: azurerm_local_network_gateway, name: lng-onprem, in: datacenter}
+    - {tf: azurerm_windows_virtual_machine, name: dc-az-1, in: subnet:snet-adds}
+    - {tf: azurerm_windows_virtual_machine, name: dc-az-2, in: subnet:snet-adds}
+    - {tf: azurerm_network_security_group, name: nsg-adds, in: resource_group:rg-identity}
+    - {tf: azurerm_windows_virtual_machine, name: app-vm-1, in: subnet:snet-app}
+    - {tf: azurerm_bastion_host, name: bastion-identity, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_network_ddos_protection_plan, name: ddos-identity, in: resource_group:rg-identity}
+    - {tf: azurerm_recovery_services_vault, name: rsv-identity, in: resource_group:rg-identity}
+  actors: [datacenter, user]
+  flows:
+    - {from: datacenter, to: vpngw-identity, label: IPsec S2S VPN / ExpressRoute, step: 1}
+    - {from: vpngw-identity, to: lng-onprem, link: azurerm_virtual_network_gateway_connection, label: S2S connection}
+    - {from: dc-az-1, to: datacenter, label: AD DS replication (site link), step: 2}
+    - {from: app-vm-1, to: dc-az-1, label: Kerberos / LDAP authentication, step: 3}
+    - {from: app-vm-1, to: dc-az-2, label: DNS (custom DNS servers)}
+    - {from: nsg-adds, to: dc-az-1, label: AD ports only}
+    - {from: user, to: bastion-identity, label: RDP over TLS 443, step: 4}
+    - {from: bastion-identity, to: dc-az-1, label: RDP (private IP)}
+    - {from: dc-az-1, to: rsv-identity, label: system-state backup}
+    - {from: ddos-identity, to: vnet:vnet-identity, label: DDoS Network Protection}
+
+- slug: zero-trust-private-link-hub-spoke
+  title: Zero-trust PaaS access with Private Link and private DNS in a hub-and-spoke network
+  category: security
+  tags: [private link, private endpoint, private dns zone, dns private resolver, hub-spoke, zero trust, expressroute]
+  source: https://learn.microsoft.com/en-us/azure/architecture/networking/guide/private-link-hub-spoke-network
+  description: PaaS services are reached only through private endpoints; shared endpoints used from on-premises or by several workloads live in a dedicated hub subnet behind the firewall, while single-application endpoints sit in the spoke, and public endpoints are disabled. Centralized private DNS zones linked to every virtual network resolve the privatelink FQDNs, and a DNS Private Resolver inbound endpoint lets on-premises resolvers answer the same names over ExpressRoute.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-hub, location: westeurope}
+      vnets:
+        - name: hub
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: GatewaySubnet, cidr: 10.0.0.0/27}
+            - {name: AzureFirewallSubnet, cidr: 10.0.1.0/26}
+            - {name: snet-hub-private-endpoints, cidr: 10.0.2.0/24}
+            - {name: snet-dns-resolver-inbound, cidr: 10.0.3.0/28}
+    - subscription: landing-zone-app
+      resource_group: {name: rg-spoke, location: westeurope}
+      vnets:
+        - name: spoke
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: snet-app, cidr: 10.1.1.0/24}
+            - {name: snet-spoke-private-endpoints, cidr: 10.1.2.0/24}
+  elements:
+    - {tf: azurerm_virtual_network_gateway, name: ergw-hub, in: subnet:GatewaySubnet}
+    - {tf: azurerm_firewall, name: hub-fw, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_private_dns_resolver, name: dns-resolver-hub, in: subnet:snet-dns-resolver-inbound}
+    - {tf: azurerm_private_dns_zone, name: pdz-blob, in: resource_group:rg-hub}
+    - {tf: azurerm_private_dns_zone, name: pdz-sql, in: resource_group:rg-hub}
+    - {tf: azurerm_network_security_group, name: nsg-hub-pe, in: resource_group:rg-hub}
+    - {tf: azurerm_private_endpoint, name: pe-shared-storage, in: subnet:snet-hub-private-endpoints}
+    - {tf: azurerm_storage_account, name: st-shared, in: resource_group:rg-hub}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app, in: subnet:snet-app}
+    - {tf: azurerm_private_endpoint, name: pe-sql-app, in: subnet:snet-spoke-private-endpoints}
+    - {tf: azurerm_mssql_server, name: sql-app, in: resource_group:rg-spoke}
+  actors: [datacenter]
+  flows:
+    - {from: datacenter, to: ergw-hub, label: ExpressRoute private peering, step: 1}
+    - {from: vnet:hub, to: vnet:spoke, link: azurerm_virtual_network_peering, label: hub-spoke peering}
+    - {from: datacenter, to: dns-resolver-hub, label: conditional forwarder for privatelink zones, step: 2}
+    - {from: dns-resolver-hub, to: pdz-blob, label: resolve privatelink.blob.core.windows.net}
+    - {from: datacenter, to: pe-shared-storage, label: private IP over ExpressRoute, step: 3}
+    - {from: nsg-hub-pe, to: pe-shared-storage, label: inbound filtering}
+    - {from: pe-shared-storage, to: st-shared, label: Private Link (public endpoint disabled)}
+    - {from: vm-app, to: hub-fw, label: UDR to firewall (SNAT + logging), step: 4}
+    - {from: hub-fw, to: pe-shared-storage, label: inspected traffic}
+    - {from: vm-app, to: pe-sql-app, label: single-app endpoint in spoke, step: 5}
+    - {from: pe-sql-app, to: sql-app, label: Private Link}
+    - {from: pdz-blob, to: vnet:hub, link: azurerm_private_dns_zone_virtual_network_link}
+    - {from: pdz-sql, to: vnet:spoke, link: azurerm_private_dns_zone_virtual_network_link}
+
+- slug: firewall-premium-appgw-tls-inspection
+  title: Application Gateway WAF in front of Azure Firewall Premium with TLS inspection and IDPS
+  category: security
+  tags: [azure firewall premium, tls inspection, idps, application gateway, waf, hub-spoke, egress filtering]
+  source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/gateway/firewall-application-gateway
+  description: Application Gateway terminates TLS and applies WAF rules, then user-defined routes send the re-encrypted request through Azure Firewall Premium, which uses an intermediate CA certificate from Key Vault to decrypt, run IDPS signatures and URL filtering, and forward to the web tier. Outbound traffic from the workload takes the same firewall path for FQDN and category filtering with SNAT, and all firewall and WAF logs land in Log Analytics.
+  containers:
+    - subscription: connectivity
+      resource_group: {name: rg-hub, location: westeurope}
+      vnets:
+        - name: hub
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: AzureFirewallSubnet, cidr: 10.0.1.0/26}
+            - {name: snet-appgw, cidr: 10.0.2.0/24}
+    - subscription: landing-zone-web
+      resource_group: {name: rg-web, location: westeurope}
+      vnets:
+        - name: spoke-web
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: snet-web, cidr: 10.1.1.0/24}
+  elements:
+    - {tf: azurerm_public_ip, name: pip-appgw, in: resource_group:rg-hub}
+    - {tf: azurerm_application_gateway, name: appgw-waf, in: subnet:snet-appgw}
+    - {tf: azurerm_web_application_firewall_policy, name: waf-policy-owasp, in: resource_group:rg-hub}
+    - {tf: azurerm_firewall, name: fw-premium, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_firewall_policy, name: fw-policy-premium, in: resource_group:rg-hub}
+    - {tf: azurerm_key_vault, name: kv-fw-ca-cert, in: resource_group:rg-hub}
+    - {tf: azurerm_user_assigned_identity, name: id-firewall, in: resource_group:rg-hub}
+    - {tf: azurerm_log_analytics_workspace, name: law-hub, in: resource_group:rg-hub}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-web, in: subnet:snet-web}
+  actors: [internet]
+  flows:
+    - {from: internet, to: pip-appgw, label: HTTPS, step: 1}
+    - {from: pip-appgw, to: appgw-waf, label: TLS termination}
+    - {from: waf-policy-owasp, to: appgw-waf, label: OWASP CRS, prevention mode}
+    - {from: appgw-waf, to: fw-premium, label: UDR: re-encrypted HTTPS to firewall, step: 2}
+    - {from: fw-policy-premium, to: fw-premium, label: TLS inspection + IDPS + URL filtering}
+    - {from: id-firewall, to: kv-fw-ca-cert, label: fetch intermediate CA cert, step: 3}
+    - {from: fw-premium, to: vmss-web, label: inspected request, step: 4}
+    - {from: vnet:hub, to: vnet:spoke-web, link: azurerm_virtual_network_peering, label: hub-spoke peering}
+    - {from: vmss-web, to: fw-premium, label: "0.0.0.0/0 egress via UDR", step: 5}
+    - {from: fw-premium, to: internet, label: FQDN filtering + SNAT, step: 6}
+    - {from: fw-premium, to: law-hub, label: firewall logs}
+    - {from: appgw-waf, to: law-hub, label: WAF logs}
+
+- slug: ddos-waf-n-tier-web
+  title: DDoS Network Protection and Application Gateway WAF for an N-tier web application
+  category: security
+  tags: [ddos protection, waf, application gateway, n-tier, vmss, load balancer, alerts]
+  source: https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-reference-architectures
+  description: A DDoS Network Protection plan enabled on the virtual network protects every public IP in it at layers 3 and 4, while an Application Gateway WAF v2 in prevention mode blocks layer 7 attacks such as SQL injection before requests reach the web tier. Web and business tiers run as scale sets behind the gateway and an internal load balancer so they can scale out under attack, and DDoS mitigation metrics raise alerts through Azure Monitor.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-web, location: westeurope}
+      vnets:
+        - name: vnet-web
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: snet-appgw, cidr: 10.30.0.0/24}
+            - {name: snet-web, cidr: 10.30.1.0/24}
+            - {name: snet-business, cidr: 10.30.2.0/24}
+            - {name: snet-data, cidr: 10.30.3.0/24}
+  elements:
+    - {tf: azurerm_network_ddos_protection_plan, name: ddos-plan, in: resource_group:rg-web}
+    - {tf: azurerm_public_ip, name: pip-appgw, in: resource_group:rg-web}
+    - {tf: azurerm_application_gateway, name: appgw-waf, in: subnet:snet-appgw}
+    - {tf: azurerm_web_application_firewall_policy, name: waf-prevention, in: resource_group:rg-web}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-web, in: subnet:snet-web}
+    - {tf: azurerm_lb, name: ilb-business, in: subnet:snet-business}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-business, in: subnet:snet-business}
+    - {tf: azurerm_windows_virtual_machine, name: sql-vm-1, in: subnet:snet-data}
+    - {tf: azurerm_log_analytics_workspace, name: law-web, in: resource_group:rg-web}
+    - {tf: azurerm_monitor_action_group, name: ag-ddos-alerts, in: resource_group:rg-web}
+  actors: [internet]
+  flows:
+    - {from: internet, to: pip-appgw, label: HTTPS, step: 1}
+    - {from: ddos-plan, to: vnet:vnet-web, label: DDoS Network Protection (L3/L4) on all public IPs}
+    - {from: waf-prevention, to: appgw-waf, label: L7 OWASP rules, prevention mode}
+    - {from: pip-appgw, to: appgw-waf}
+    - {from: appgw-waf, to: vmss-web, label: web tier, step: 2}
+    - {from: vmss-web, to: ilb-business, label: internal LB, step: 3}
+    - {from: ilb-business, to: vmss-business, label: business tier}
+    - {from: vmss-business, to: sql-vm-1, label: data tier, step: 4}
+    - {from: ddos-plan, to: law-web, label: mitigation metrics + flow logs, step: 5}
+    - {from: law-web, to: ag-ddos-alerts, label: "DDoS attack alert"}
+
+- slug: policy-remediation-deploy-if-not-exists
+  title: Azure Policy compliance and remediation with deployIfNotExists and managed identity
+  category: security
+  tags: [azure policy, remediation, deployifnotexists, initiative, managed identity, management groups, diagnostics]
+  source: https://learn.microsoft.com/en-us/azure/governance/policy/how-to/remediate-resources
+  description: Custom policy definitions with deployIfNotExists and modify effects are grouped in an initiative and assigned at the landing zones management group with a user-assigned managed identity that holds the roles listed in each definition's roleDefinitionIds. Compliance evaluation flags existing resources as non-compliant, and remediation tasks use the assignment identity to deploy the missing configuration, such as diagnostic settings that route resource logs to the central Log Analytics workspace.
+  containers:
+    - group: landing-zones
+      subscriptions:
+        - subscription: corp-prod
+          resource_group: {name: rg-app, location: westeurope}
+          vnets:
+            - name: vnet-app
+              cidr: 10.40.0.0/16
+              subnets:
+                - {name: snet-app, cidr: 10.40.1.0/24}
+    - subscription: management
+      resource_group: {name: rg-management, location: westeurope}
+  elements:
+    - {tf: azurerm_management_group, name: mg-landing-zones, in: group:landing-zones}
+    - {tf: azurerm_policy_definition, name: pol-deploy-diagnostics, in: group:landing-zones}
+    - {tf: azurerm_policy_set_definition, name: initiative-baseline, in: group:landing-zones}
+    - {tf: azurerm_management_group_policy_assignment, name: assign-baseline, in: group:landing-zones}
+    - {tf: azurerm_management_group_policy_remediation, name: remediate-diagnostics, in: group:landing-zones}
+    - {tf: azurerm_user_assigned_identity, name: id-policy-remediation, in: resource_group:rg-management}
+    - {tf: azurerm_log_analytics_workspace, name: law-central, in: resource_group:rg-management}
+    - {tf: azurerm_storage_account, name: st-app-noncompliant, in: resource_group:rg-app}
+    - {tf: azurerm_key_vault, name: kv-app, in: resource_group:rg-app}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app, in: subnet:snet-app}
+  actors: [users]
+  flows:
+    - {from: pol-deploy-diagnostics, to: initiative-baseline, label: included definition}
+    - {from: initiative-baseline, to: assign-baseline, label: assigned at mg-landing-zones}
+    - {from: assign-baseline, to: mg-landing-zones, label: scope}
+    - {from: assign-baseline, to: id-policy-remediation, label: assignment identity (roleDefinitionIds)}
+    - {from: assign-baseline, to: st-app-noncompliant, label: "compliance evaluation: non-compliant", step: 1}
+    - {from: users, to: remediate-diagnostics, label: create remediation task, step: 2}
+    - {from: remediate-diagnostics, to: id-policy-remediation, label: runs as identity, step: 3}
+    - {from: id-policy-remediation, to: st-app-noncompliant, label: deployIfNotExists template deployment, step: 4}
+    - {from: st-app-noncompliant, to: law-central, label: diagnostic settings deployed, step: 5}
+    - {from: kv-app, to: law-central, label: diagnostic settings}
+    - {from: vm-app, to: law-central, label: diagnostic settings}
+
+- slug: bcdr-backup-site-recovery
+  title: Azure VM business continuity with Azure Backup and Site Recovery cross-region replication
+  category: resilience
+  tags: [site recovery, azure backup, recovery services vault, backup vault, replication policy, disaster recovery, cross-region]
+  source: https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-architecture
+  description: The Site Recovery Mobility service on each protected VM writes disk changes to a cache storage account in the source region, and Site Recovery replicates them to replica managed disks in the target region, creating crash-consistent recovery points every five minutes and app-consistent points per the replication policy. On failover VMs are created in the mapped target virtual network from a chosen recovery point; the same Recovery Services vault also holds daily VM backups, and a Backup vault protects blob data.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-app-primary, location: westeurope}
+      vnets:
+        - name: vnet-primary
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: snet-app-primary, cidr: 10.50.1.0/24}
+    - subscription: workload
+      resource_group: {name: rg-app-secondary-asr, location: northeurope}
+      vnets:
+        - name: vnet-secondary-asr
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: snet-app-secondary, cidr: 10.60.1.0/24}
+  elements:
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-1, in: subnet:snet-app-primary}
+    - {tf: azurerm_storage_account, name: st-asr-cache, in: resource_group:rg-app-primary}
+    - {tf: azurerm_storage_account, name: st-app-data, in: resource_group:rg-app-primary}
+    - {tf: azurerm_recovery_services_vault, name: rsv-bcdr, in: resource_group:rg-app-secondary-asr}
+    - {tf: azurerm_site_recovery_replication_policy, name: asr-policy-24h, in: resource_group:rg-app-secondary-asr}
+    - {tf: azurerm_backup_policy_vm, name: backup-policy-daily, in: resource_group:rg-app-secondary-asr}
+    - {tf: azurerm_data_protection_backup_vault, name: bv-blobs, in: resource_group:rg-app-secondary-asr}
+    - {tf: azurerm_managed_disk, name: disk-app-1-asrreplica, in: resource_group:rg-app-secondary-asr}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-1-failover, in: subnet:snet-app-secondary}
+  actors: [users]
+  flows:
+    - {from: vm-app-1, to: st-asr-cache, label: "Mobility service: disk writes to cache", step: 1}
+    - {from: st-asr-cache, to: disk-app-1-asrreplica, label: continuous replication to replica disk, step: 2}
+    - {from: asr-policy-24h, to: rsv-bcdr, label: recovery point retention + app-consistent frequency}
+    - {from: vm-app-1, to: rsv-bcdr, link: azurerm_site_recovery_replicated_vm, label: protected item}
+    - {from: vnet:vnet-primary, to: vnet:vnet-secondary-asr, link: azurerm_site_recovery_network_mapping, label: network mapping}
+    - {from: rsv-bcdr, to: vm-app-1-failover, label: "failover: create VM from recovery point", step: 3, style: {dash: dashed}}
+    - {from: backup-policy-daily, to: rsv-bcdr, label: daily schedule + retention}
+    - {from: vm-app-1, to: rsv-bcdr, link: azurerm_backup_protected_vm, label: VM backup}
+    - {from: st-app-data, to: bv-blobs, link: azurerm_data_protection_backup_instance_blob_storage, label: blob backup}
+    - {from: users, to: rsv-bcdr, label: test failover / recovery plan, step: 4}
+
+- slug: sql-failover-group-active-passive
+  title: Active-passive multi-region web app with Azure SQL failover groups and private endpoints
+  category: resilience
+  tags: [failover group, azure sql, active-passive, front door, private endpoint, geo-replication, disaster recovery]
+  source: https://learn.microsoft.com/en-us/azure/azure-sql/database/failover-group-sql-db
+  description: A failover group replicates the application's databases from the primary logical server to a secondary server in the paired region and exposes read-write and read-only listener endpoints whose DNS is updated on failover, so application connection strings never change. Front Door sends traffic to the primary region's App Service and fails over to the secondary on failed health probes; each region reaches SQL through private endpoints, and the recommended customer-managed failover policy keeps the failover decision with the operations team.
+  containers:
+    - subscription: workload
+      groups: [{label: Global}]
+      resource_group: {name: rg-app-primary, location: westeurope}
+      vnets:
+        - name: vnet-primary
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: snet-app-int-primary, cidr: 10.70.1.0/24}
+            - {name: snet-pe-primary, cidr: 10.70.2.0/24}
+    - subscription: workload
+      resource_group: {name: rg-app-secondary, location: northeurope}
+      vnets:
+        - name: vnet-secondary
+          cidr: 10.71.0.0/16
+          subnets:
+            - {name: snet-app-int-secondary, cidr: 10.71.1.0/24}
+            - {name: snet-pe-secondary, cidr: 10.71.2.0/24}
+  elements:
+    - {tf: azurerm_cdn_frontdoor_profile, name: afd-app, in: group:Global}
+    - {tf: azurerm_service_plan, name: plan-primary, in: resource_group:rg-app-primary}
+    - {tf: azurerm_linux_web_app, name: web-primary, in: subnet:snet-app-int-primary}
+    - {tf: azurerm_mssql_server, name: sql-primary, in: resource_group:rg-app-primary}
+    - {tf: azurerm_private_endpoint, name: pe-sql-primary, in: subnet:snet-pe-primary}
+    - {tf: azurerm_mssql_failover_group, name: fog-app, in: resource_group:rg-app-primary}
+    - {tf: azurerm_private_dns_zone, name: pdz-sql, in: resource_group:rg-app-primary}
+    - {tf: azurerm_service_plan, name: plan-secondary, in: resource_group:rg-app-secondary}
+    - {tf: azurerm_linux_web_app, name: web-secondary, in: subnet:snet-app-int-secondary}
+    - {tf: azurerm_mssql_server, name: sql-secondary, in: resource_group:rg-app-secondary}
+    - {tf: azurerm_private_endpoint, name: pe-sql-secondary, in: subnet:snet-pe-secondary}
+  actors: [users]
+  flows:
+    - {from: users, to: afd-app, label: HTTPS, step: 1}
+    - {from: afd-app, to: web-primary, label: priority 1 origin, step: 2}
+    - {from: afd-app, to: web-secondary, label: priority 2 origin (after failed probes), style: {dash: dashed}}
+    - {from: web-primary, to: pe-sql-primary, label: "<fog>.database.windows.net read-write listener", step: 3}
+    - {from: pe-sql-primary, to: sql-primary, label: Private Link}
+    - {from: fog-app, to: sql-primary, label: primary server}
+    - {from: fog-app, to: sql-secondary, label: secondary server}
+    - {from: sql-primary, to: sql-secondary, label: async geo-replication, step: 4}
+    - {from: web-secondary, to: pe-sql-secondary, label: "<fog>.secondary read-only listener / rw after failover", style: {dash: dashed}}
+    - {from: pe-sql-secondary, to: sql-secondary, label: Private Link}
+    - {from: pdz-sql, to: vnet:vnet-primary, link: azurerm_private_dns_zone_virtual_network_link}
+    - {from: pdz-sql, to: vnet:vnet-secondary, link: azurerm_private_dns_zone_virtual_network_link}
+    - {from: users, to: fog-app, label: customer-managed failover, step: 5, style: {dash: dashed}}
+
+- slug: mission-critical-active-active-cosmos
+  title: Mission-critical active-active regional stamps with Front Door and Cosmos DB multi-region writes
+  category: resilience
+  tags: [mission-critical, active-active, front door, cosmos db, multi-region writes, aks, event hubs, deployment stamps]
+  source: https://learn.microsoft.com/en-us/azure/well-architected/mission-critical/mission-critical-architecture-pattern
+  description: Global resources (Front Door, a Cosmos DB account with multi-region writes, Container Registry and Log Analytics) are long-lived and geo-replicated, while each region hosts a replaceable, stateless deployment stamp of AKS, Event Hubs, Key Vault and Application Insights. Front Door health-probes every stamp and routes users to the closest healthy region; each stamp reads and writes Cosmos DB locally, and any region can be redeployed or lost without a global outage.
+  containers:
+    - subscription: workload
+      groups: [{label: Global}]
+      resource_group: {name: rg-stamp-westeurope, location: westeurope}
+      vnets:
+        - name: vnet-stamp-we
+          cidr: 10.80.0.0/16
+          subnets:
+            - {name: snet-aks-we, cidr: 10.80.0.0/20}
+    - subscription: workload
+      resource_group: {name: rg-stamp-northeurope, location: northeurope}
+      vnets:
+        - name: vnet-stamp-ne
+          cidr: 10.81.0.0/16
+          subnets:
+            - {name: snet-aks-ne, cidr: 10.81.0.0/20}
+  elements:
+    - {tf: azurerm_cdn_frontdoor_profile, name: afd-global, in: group:Global}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-global, in: group:Global}
+    - {tf: azurerm_container_registry, name: acr-global, in: group:Global}
+    - {tf: azurerm_log_analytics_workspace, name: law-global, in: group:Global}
+    - {tf: azurerm_kubernetes_cluster, name: aks-we, in: subnet:snet-aks-we}
+    - {tf: azurerm_eventhub_namespace, name: evh-we, in: resource_group:rg-stamp-westeurope}
+    - {tf: azurerm_key_vault, name: kv-we, in: resource_group:rg-stamp-westeurope}
+    - {tf: azurerm_application_insights, name: appi-we, in: resource_group:rg-stamp-westeurope}
+    - {tf: azurerm_kubernetes_cluster, name: aks-ne, in: subnet:snet-aks-ne}
+    - {tf: azurerm_eventhub_namespace, name: evh-ne, in: resource_group:rg-stamp-northeurope}
+    - {tf: azurerm_key_vault, name: kv-ne, in: resource_group:rg-stamp-northeurope}
+    - {tf: azurerm_application_insights, name: appi-ne, in: resource_group:rg-stamp-northeurope}
+  actors: [users]
+  flows:
+    - {from: users, to: afd-global, label: HTTPS, step: 1}
+    - {from: afd-global, to: aks-we, label: latency routing + health probes, step: 2}
+    - {from: afd-global, to: aks-ne, label: latency routing + health probes, step: 2}
+    - {from: aks-we, to: cosmos-global, label: local reads/writes (multi-region writes), step: 3}
+    - {from: aks-ne, to: cosmos-global, label: local reads/writes (multi-region writes), step: 3}
+    - {from: aks-we, to: evh-we, label: async messaging within stamp, step: 4}
+    - {from: aks-ne, to: evh-ne, label: async messaging within stamp, step: 4}
+    - {from: acr-global, to: aks-we, label: geo-replicated image pull}
+    - {from: acr-global, to: aks-ne, label: geo-replicated image pull}
+    - {from: aks-we, to: kv-we, label: stamp secrets}
+    - {from: aks-ne, to: kv-ne, label: stamp secrets}
+    - {from: aks-we, to: appi-we, label: stamp telemetry}
+    - {from: aks-ne, to: appi-ne, label: stamp telemetry}
+    - {from: appi-we, to: law-global, label: health model aggregation, step: 5}
+    - {from: appi-ne, to: law-global, label: health model aggregation, step: 5}
+
+- slug: availability-zones-zone-redundant-web-tier
+  title: Zone-redundant web application across availability zones
+  category: resilience
+  tags: [availability zones, zone-redundant, application gateway v2, vmss, zone-redundant sql, zrs storage, high availability]
+  source: https://learn.microsoft.com/en-us/azure/well-architected/design-guides/regions-availability-zones
+  description: Every tier is spread across the region's three availability zones so the loss of one zone does not take the workload down: a zone-redundant Application Gateway v2 with a zone-redundant public IP fronts a scale set whose instances are distributed across zones, the database is a zone-redundant Azure SQL tier with replicas in each zone, and storage uses ZRS for synchronous cross-zone replication. Key Vault and Log Analytics are zone-resilient platform services.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-web-zr, location: westeurope}
+      vnets:
+        - name: vnet-web
+          cidr: 10.90.0.0/16
+          subnets:
+            - {name: snet-appgw, cidr: 10.90.0.0/24}
+            - {name: snet-web, cidr: 10.90.1.0/24}
+            - {name: snet-pe, cidr: 10.90.2.0/24}
+  elements:
+    - {tf: azurerm_public_ip, name: pip-appgw-zr, in: resource_group:rg-web-zr}
+    - {tf: azurerm_application_gateway, name: appgw-zr, in: subnet:snet-appgw}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-web-zones-1-2-3, in: subnet:snet-web}
+    - {tf: azurerm_mssql_server, name: sql-zr, in: resource_group:rg-web-zr}
+    - {tf: azurerm_private_endpoint, name: pe-sql, in: subnet:snet-pe}
+    - {tf: azurerm_storage_account, name: st-zrs, in: resource_group:rg-web-zr}
+    - {tf: azurerm_key_vault, name: kv-web, in: resource_group:rg-web-zr}
+    - {tf: azurerm_log_analytics_workspace, name: law-web, in: resource_group:rg-web-zr}
+  actors: [internet]
+  flows:
+    - {from: internet, to: pip-appgw-zr, label: HTTPS (zone-redundant public IP), step: 1}
+    - {from: pip-appgw-zr, to: appgw-zr, label: zone-redundant v2 gateway}
+    - {from: appgw-zr, to: vmss-web-zones-1-2-3, label: "instances spread across zones 1, 2, 3", step: 2}
+    - {from: vmss-web-zones-1-2-3, to: pe-sql, label: SQL over Private Link, step: 3}
+    - {from: pe-sql, to: sql-zr, label: zone-redundant database (replicas in 3 zones)}
+    - {from: vmss-web-zones-1-2-3, to: st-zrs, label: "ZRS: synchronous replication to 3 zones", step: 4}
+    - {from: vmss-web-zones-1-2-3, to: kv-web, label: secrets via managed identity}
+    - {from: appgw-zr, to: law-web, label: diagnostics}
+    - {from: vmss-web-zones-1-2-3, to: law-web, label: diagnostics}
+
+- slug: chaos-studio-resilience-testing
+  title: Resilience testing with Azure Chaos Studio experiments
+  category: resilience
+  tags: [chaos studio, chaos engineering, fault injection, game day, experiments, targets, capabilities]
+  source: https://learn.microsoft.com/en-us/azure/chaos-studio/chaos-studio-overview
+  description: Resources are onboarded as Chaos Studio targets with enabled capabilities, and an experiment with a managed identity that holds the required roles runs service-direct faults (such as shutting down scale set instances in one zone or failing over Azure SQL) and agent-based in-guest faults in sequential steps and parallel branches. Application Insights and Log Analytics capture the impact so teams can validate recovery in game days or as CI/CD gates.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-app, location: westeurope}
+      resource_groups:
+        - {name: rg-chaos, location: westeurope}
+      vnets:
+        - name: vnet-app
+          cidr: 10.100.0.0/16
+          subnets:
+            - {name: snet-app, cidr: 10.100.1.0/24}
+  elements:
+    - {tf: azurerm_chaos_studio_experiment, name: exp-zone-down, in: resource_group:rg-chaos}
+    - {tf: azurerm_user_assigned_identity, name: id-chaos, in: resource_group:rg-chaos}
+    - {tf: azurerm_chaos_studio_target, name: target-vmss-app, in: resource_group:rg-app}
+    - {tf: azurerm_chaos_studio_capability, name: cap-vmss-shutdown, in: resource_group:rg-app}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-app, in: subnet:snet-app}
+    - {tf: azurerm_lb, name: lb-app, in: subnet:snet-app}
+    - {tf: azurerm_mssql_server, name: sql-app, in: resource_group:rg-app}
+    - {tf: azurerm_application_insights, name: appi-app, in: resource_group:rg-app}
+    - {tf: azurerm_log_analytics_workspace, name: law-app, in: resource_group:rg-app}
+    - {tf: azurerm_monitor_action_group, name: ag-oncall, in: resource_group:rg-app}
+  actors: [users, server]
+  flows:
+    - {from: users, to: exp-zone-down, label: run experiment (game day), step: 1}
+    - {from: server, to: exp-zone-down, label: CI/CD gate, step: 1}
+    - {from: exp-zone-down, to: id-chaos, label: experiment identity (RBAC on targets)}
+    - {from: exp-zone-down, to: target-vmss-app, label: "service-direct fault: shutdown zone 1 instances", step: 2}
+    - {from: cap-vmss-shutdown, to: target-vmss-app, label: capability enabled}
+    - {from: target-vmss-app, to: vmss-app, label: onboarded resource}
+    - {from: exp-zone-down, to: sql-app, label: "service-direct fault: failover", step: 3}
+    - {from: lb-app, to: vmss-app, label: health probes reroute traffic, step: 4}
+    - {from: vmss-app, to: appi-app, label: latency / error telemetry, step: 5}
+    - {from: appi-app, to: law-app, label: workspace-based}
+    - {from: law-app, to: ag-oncall, label: alerts during experiment}
+
+- slug: arc-enabled-servers-governance
+  title: Govern on-premises servers with Azure Arc, Policy, Monitor and Update Manager
+  category: security
+  tags: [azure arc, arc-enabled servers, machine configuration, azure monitor agent, update manager, defender for servers, private link]
+  source: https://learn.microsoft.com/en-us/azure/azure-arc/servers/overview
+  description: The Connected Machine agent projects on-premises Windows and Linux servers into Azure as Arc-enabled server resources with their own resource IDs and managed identities, so Azure RBAC, tags and Azure Policy machine configuration apply to them like native VMs. Azure Monitor Agent sends logs through data collection rules to a central Log Analytics workspace, Update Manager schedules patching, Defender for Servers protects them, and an Arc Private Link Scope keeps agent traffic on a private endpoint reached over the site-to-site connection.
+  containers:
+    - datacenter: on-premises
+    - subscription: management
+      resource_group: {name: rg-management, location: westeurope}
+    - subscription: hybrid
+      resource_group: {name: rg-arc-servers, location: westeurope}
+      vnets:
+        - name: vnet-hybrid
+          cidr: 10.110.0.0/16
+          subnets:
+            - {name: GatewaySubnet, cidr: 10.110.0.0/27}
+            - {name: snet-pe, cidr: 10.110.1.0/24}
+  elements:
+    - {tf: azurerm_arc_machine, name: arc-srv-01, in: datacenter}
+    - {tf: azurerm_arc_machine, name: arc-srv-02, in: datacenter}
+    - {tf: azurerm_virtual_network_gateway, name: vpngw-hybrid, in: subnet:GatewaySubnet}
+    - {tf: azurerm_arc_private_link_scope, name: arc-pls, in: resource_group:rg-arc-servers}
+    - {tf: azurerm_private_endpoint, name: pe-arc, in: subnet:snet-pe}
+    - {tf: azurerm_security_center_subscription_pricing, name: defender-servers, in: subscription:hybrid}
+    - {tf: azurerm_log_analytics_workspace, name: law-hybrid, in: resource_group:rg-management}
+    - {tf: azurerm_monitor_data_collection_rule, name: dcr-vm-insights, in: resource_group:rg-management}
+    - {tf: azurerm_policy_set_definition, name: initiative-machine-config, in: subscription:management}
+    - {tf: azurerm_maintenance_configuration, name: mc-monthly-patching, in: resource_group:rg-management}
+    - {tf: azurerm_automation_account, name: aa-hybrid-runbooks, in: resource_group:rg-management}
+  actors: [datacenter, users]
+  flows:
+    - {from: datacenter, to: vpngw-hybrid, label: S2S VPN / ExpressRoute, step: 1}
+    - {from: arc-srv-01, to: pe-arc, label: Connected Machine agent over Private Link, step: 2}
+    - {from: pe-arc, to: arc-pls, label: Arc Private Link Scope}
+    - {from: arc-srv-01, to: dcr-vm-insights, label: Azure Monitor Agent, step: 3}
+    - {from: dcr-vm-insights, to: law-hybrid, label: logs + VM insights}
+    - {from: initiative-machine-config, to: arc-srv-01, label: machine configuration audit, step: 4}
+    - {from: mc-monthly-patching, to: arc-srv-01, label: Update Manager schedule, step: 5}
+    - {from: defender-servers, to: arc-srv-02, label: Defender for Endpoint + vulnerability assessment}
+    - {from: aa-hybrid-runbooks, to: arc-srv-02, label: runbooks (hybrid worker)}
+    - {from: users, to: arc-srv-01, label: manage as Azure resource (RBAC, tags)}
+
+- slug: confidential-computing-attested-workload
+  title: Confidential computing with attested AKS confidential nodes, Managed HSM and secure key release
+  category: security
+  tags: [confidential computing, sev-snp, attestation, managed hsm, secure key release, confidential containers, confidential ledger]
+  source: https://learn.microsoft.com/en-us/azure/confidential-computing/overview-azure-products
+  description: Containers run on AMD SEV-SNP confidential VM node pools in AKS (with confidential containers on Azure Container Instances for isolated jobs) so data is encrypted in memory and hidden from the cloud operator. Azure Attestation verifies the trusted execution environment and issues a token that Managed HSM checks before releasing data-encryption keys, and a confidential ledger records tamper-evident audit entries.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-confidential, location: westeurope}
+      vnets:
+        - name: vnet-cc
+          cidr: 10.120.0.0/16
+          subnets:
+            - {name: snet-aks-cc, cidr: 10.120.0.0/20}
+            - {name: snet-cvm, cidr: 10.120.16.0/24}
+            - {name: snet-pe, cidr: 10.120.17.0/24}
+  elements:
+    - {tf: azurerm_kubernetes_cluster, name: aks-confidential-nodes, in: subnet:snet-aks-cc}
+    - {tf: azurerm_container_group, name: aci-confidential-job, in: resource_group:rg-confidential}
+    - {tf: azurerm_linux_virtual_machine, name: cvm-dcasv5, in: subnet:snet-cvm}
+    - {tf: azurerm_attestation_provider, name: attest-cc, in: resource_group:rg-confidential}
+    - {tf: azurerm_key_vault_managed_hardware_security_module, name: mhsm-data-keys, in: resource_group:rg-confidential}
+    - {tf: azurerm_private_endpoint, name: pe-mhsm, in: subnet:snet-pe}
+    - {tf: azurerm_user_assigned_identity, name: id-confidential-workload, in: resource_group:rg-confidential}
+    - {tf: azurerm_container_registry, name: acr-cc, in: resource_group:rg-confidential}
+    - {tf: azurerm_storage_account, name: st-encrypted-data, in: resource_group:rg-confidential}
+    - {tf: azurerm_confidential_ledger, name: ledger-audit, in: resource_group:rg-confidential}
+  actors: [users]
+  flows:
+    - {from: acr-cc, to: aks-confidential-nodes, label: pull signed image, step: 1}
+    - {from: aks-confidential-nodes, to: attest-cc, label: SEV-SNP attestation evidence, step: 2}
+    - {from: attest-cc, to: aks-confidential-nodes, label: attestation token}
+    - {from: aks-confidential-nodes, to: pe-mhsm, label: key request with token + identity, step: 3}
+    - {from: pe-mhsm, to: mhsm-data-keys, label: Private Link}
+    - {from: id-confidential-workload, to: mhsm-data-keys, label: Managed HSM Crypto User}
+    - {from: mhsm-data-keys, to: aks-confidential-nodes, label: secure key release (policy validated), step: 4}
+    - {from: st-encrypted-data, to: aks-confidential-nodes, label: encrypted data decrypted inside TEE only, step: 5}
+    - {from: aks-confidential-nodes, to: ledger-audit, label: tamper-evident audit records, step: 6}
+    - {from: aci-confidential-job, to: attest-cc, label: CCE policy attestation}
+    - {from: cvm-dcasv5, to: attest-cc, label: guest attestation}
+    - {from: users, to: aks-confidential-nodes, label: HTTPS}
+
+- slug: immutable-blob-storage-compliance
+  title: WORM records retention with immutable Blob Storage and locked retention policies
+  category: storage
+  tags: [immutable storage, worm, time-based retention, legal hold, sec 17a-4, compliance, private endpoint, lifecycle]
+  source: https://learn.microsoft.com/en-us/azure/storage/blobs/immutable-storage-overview
+  description: Records are written as block or append blobs into a container protected by a locked time-based retention policy, so no user, including account administrators, can modify or delete them until the interval expires, and a legal hold can extend protection indefinitely with tagged holds. The account is reached only over a private endpoint, lifecycle management tiers immutable data to cool and archive, and resource logs plus the policy audit log are retained in Log Analytics and an archive account for SEC 17a-4(f), FINRA and CFTC evidence.
+  containers:
+    - subscription: compliance
+      resource_group: {name: rg-records, location: westeurope}
+      vnets:
+        - name: vnet-records
+          cidr: 10.130.0.0/16
+          subnets:
+            - {name: snet-app-integration, cidr: 10.130.1.0/24}
+            - {name: snet-pe, cidr: 10.130.2.0/24}
+  elements:
+    - {tf: azurerm_service_plan, name: plan-records, in: resource_group:rg-records}
+    - {tf: azurerm_linux_web_app, name: app-records-ingest, in: subnet:snet-app-integration}
+    - {tf: azurerm_private_endpoint, name: pe-blob, in: subnet:snet-pe}
+    - {tf: azurerm_private_dns_zone, name: pdz-blob, in: resource_group:rg-records}
+    - {tf: azurerm_storage_account, name: st-worm-records, in: resource_group:rg-records}
+    - {tf: azurerm_storage_container, name: ct-trade-records, in: resource_group:rg-records}
+    - {tf: azurerm_storage_container_immutability_policy, name: worm-7y-locked, in: resource_group:rg-records}
+    - {tf: azurerm_storage_management_policy, name: lifecycle-tiering, in: resource_group:rg-records}
+    - {tf: azurerm_log_analytics_workspace, name: law-compliance, in: resource_group:rg-records}
+    - {tf: azurerm_storage_account, name: st-audit-archive, in: resource_group:rg-records}
+  actors: [users, client]
+  flows:
+    - {from: client, to: app-records-ingest, label: submit records, step: 1}
+    - {from: app-records-ingest, to: pe-blob, label: write block / append blobs over Private Link, step: 2}
+    - {from: pe-blob, to: st-worm-records, label: public access disabled}
+    - {from: st-worm-records, to: ct-trade-records, label: versioning enabled, GRS}
+    - {from: worm-7y-locked, to: ct-trade-records, label: locked time-based retention (7 years), step: 3}
+    - {from: users, to: ct-trade-records, label: read only; overwrite / delete denied, step: 4}
+    - {from: users, to: worm-7y-locked, label: legal hold with tags, style: {dash: dashed}}
+    - {from: lifecycle-tiering, to: ct-trade-records, label: tier to cool / archive}
+    - {from: st-worm-records, to: law-compliance, label: resource logs + policy audit log, step: 5}
+    - {from: law-compliance, to: st-audit-archive, label: long-term export}
+    - {from: pdz-blob, to: vnet:vnet-records, link: azurerm_private_dns_zone_virtual_network_link}
+
+- slug: bastion-only-admin-access
+  title: Bastion-only administrative access to VMs without public IPs
+  category: security
+  tags: [azure bastion, jump host, rdp, ssh, tls 443, no public ip, session recording, hub-spoke]
+  source: https://learn.microsoft.com/en-us/azure/bastion/bastion-overview
+  description: Azure Bastion is deployed in the hub's AzureBastionSubnet with a single public IP and brokers RDP and SSH over TLS on port 443 from the Azure portal or native clients to VMs in peered spoke networks, so no VM needs a public IP, agent or open management port. Entra ID authentication with MFA and just-in-time role activation gate access, SSH keys come from Key Vault, and Bastion audit logs and Premium session recordings provide the compliance trail.
+  containers:
+    - subscription: connectivity
+      resource_group: {name: rg-hub, location: westeurope}
+      vnets:
+        - name: hub
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: AzureBastionSubnet, cidr: 10.0.4.0/26}
+    - subscription: landing-zone-prod
+      resource_group: {name: rg-prod, location: westeurope}
+      vnets:
+        - name: spoke-prod
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: snet-app, cidr: 10.1.1.0/24}
+            - {name: snet-data, cidr: 10.1.2.0/24}
+  elements:
+    - {tf: azurerm_public_ip, name: pip-bastion, in: resource_group:rg-hub}
+    - {tf: azurerm_bastion_host, name: bastion-hub, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_network_security_group, name: nsg-bastion, in: resource_group:rg-hub}
+    - {tf: azurerm_network_ddos_protection_plan, name: ddos-hub, in: resource_group:rg-hub}
+    - {tf: azurerm_key_vault, name: kv-admin-ssh-keys, in: resource_group:rg-hub}
+    - {tf: azurerm_log_analytics_workspace, name: law-hub, in: resource_group:rg-hub}
+    - {tf: azurerm_storage_account, name: st-session-recordings, in: resource_group:rg-hub}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-1, in: subnet:snet-app}
+    - {tf: azurerm_windows_virtual_machine, name: vm-sql-1, in: subnet:snet-data}
+  actors: [user, internet]
+  flows:
+    - {from: user, to: pip-bastion, label: TLS 443 (portal / native client, Entra ID + MFA + PIM), step: 1}
+    - {from: pip-bastion, to: bastion-hub}
+    - {from: nsg-bastion, to: bastion-hub, label: allow 443 in, 22/3389 out to VNet}
+    - {from: ddos-hub, to: vnet:hub, label: protects Bastion public IP}
+    - {from: vnet:hub, to: vnet:spoke-prod, link: azurerm_virtual_network_peering, label: hub-spoke peering}
+    - {from: kv-admin-ssh-keys, to: bastion-hub, label: SSH private key from Key Vault, step: 2}
+    - {from: bastion-hub, to: vm-app-1, label: SSH 22 to private IP, step: 3}
+    - {from: bastion-hub, to: vm-sql-1, label: RDP 3389 to private IP, step: 3}
+    - {from: internet, to: vm-app-1, label: no public IP; 22/3389 closed, style: {dash: dashed}}
+    - {from: bastion-hub, to: law-hub, label: BastionAuditLogs, step: 4}
+    - {from: bastion-hub, to: st-session-recordings, label: session recording (Premium)}

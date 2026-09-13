@@ -23,8 +23,8 @@ func TestShippedTemplatesAreValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) < 30 {
-		t.Errorf("expected at least 30 templates, got %d", len(list))
+	if len(list) < 500 {
+		t.Errorf("expected at least 500 templates, got %d", len(list))
 	}
 	seen := map[string]bool{}
 	for _, tpl := range list {
