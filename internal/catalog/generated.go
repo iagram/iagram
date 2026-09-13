@@ -21,6 +21,7 @@ type ResourceRegistry interface {
 func (c *Catalog) SetRegistry(r ResourceRegistry) {
 	c.registry = r
 	c.generated = map[string]*Entry{}
+	c.resolveLinkElements()
 }
 
 // GeneratedID is the element id for a Terraform resource type.
@@ -104,6 +105,9 @@ func (c *Catalog) Generated(provider string) []GeneratedSummary {
 	types := c.registry.Types(pc.LocalName())
 	out := make([]GeneratedSummary, 0, len(types))
 	for _, t := range types {
+		if c.isLink(provider, t) {
+			continue // drawn as lines, never as boxes
+		}
 		icon, _ := c.serviceIcon(provider, t)
 		attachment := c.isAttachment(provider, t)
 		out = append(out, GeneratedSummary{
@@ -158,8 +162,12 @@ func (c *Catalog) generatedEntry(id string) (*Entry, bool) {
 	kind := KindLeaf
 	size := &Size{W: 120, H: 90}
 	component := false
+	link := c.isLink(provider, tfType)
 	desc := fmt.Sprintf("Terraform resource %s, rendered as a plain resource block. Every attribute of the provider schema is available; reference other elements with arrows.", tfType)
-	if attachment {
+	if link {
+		attachment = false
+		desc = fmt.Sprintf("Terraform resource %s. Drawn as a line between the two elements it connects; configured on the line.", tfType)
+	} else if attachment {
 		if owner := c.componentOwner(provider, tfType); owner != "" {
 			// A member of a cluster: drawn inside the cluster box.
 			attachment, component = false, true
@@ -179,7 +187,7 @@ func (c *Catalog) generatedEntry(id string) (*Entry, bool) {
 		Description: desc, Icon: icon, Kind: kind, AllowedParents: parents,
 		Props: schema, Outputs: outputs, Size: size,
 		Terraform:  &Terraform{Role: RoleResource, Resource: tfType},
-		Attachment: attachment, Component: component,
+		Attachment: attachment, Component: component, Link: link,
 	}
 	c.genMu.Lock()
 	c.generated[id] = e
@@ -355,7 +363,7 @@ func (c *Catalog) AttachmentsFor(parentID string) []AttachmentOption {
 		for _, t := range c.registry.Types(local) {
 			// Only first-level types are drawn; only same-service types attach
 			// (an Amazon Connect instance_id is not an EC2 attachment).
-			if t == parentTF || !c.isAttachment(pe.Provider, t) || service(t) != service(parentTF) {
+			if t == parentTF || !c.isAttachment(pe.Provider, t) || service(t) != service(parentTF) || c.isLink(pe.Provider, t) {
 				continue
 			}
 			props, required, _, ok := c.registry.Resource(t)

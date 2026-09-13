@@ -258,11 +258,39 @@ func (v *validator) edges() {
 				}
 			}
 		}
+		if rule.Kind == catalog.LinkKind {
+			v.link(e, src, dst)
+		}
 		if e.Kind != rule.Kind {
 			v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("connection %s -> %s must be of kind %q", src.Name, dst.Name, rule.Kind)})
 		}
 		v.requires(e, src, rule.RequiresFrom, src, dst)
 		v.requires(e, dst, rule.RequiresTo, src, dst)
+	}
+}
+
+// link checks a link edge: its link element must join the two ends and its
+// required attributes (besides the ends) must be set.
+func (v *validator) link(e document.Edge, src, dst *document.Node) {
+	b, ok := v.c.LinkFor(src.Type, dst.Type, e.Type)
+	if !ok {
+		return
+	}
+	if e.Type != "" && e.Type != b.Link.ID {
+		v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("%s cannot join %s and %s; use %s", e.Type, src.Name, dst.Name, b.Link.Label)})
+		return
+	}
+	le, ok := v.c.Get(b.Link.ID)
+	if !ok {
+		return
+	}
+	for _, req := range le.Required() {
+		if req == b.SrcAttr || req == b.DstAttr {
+			continue
+		}
+		if val, set := e.Props[req]; !set || val == nil || val == "" {
+			v.add(Problem{Level: Error, Edge: e.ID, Field: req, Message: fmt.Sprintf("%s (%s -> %s): %s is required", b.Link.Label, src.Name, dst.Name, req)})
+		}
 	}
 }
 

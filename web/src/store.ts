@@ -74,7 +74,7 @@ interface State {
   connect: (c: Connection) => void
   updateNode: (id: string, patch: { name?: string; props?: Record<string, unknown>; caption?: string; step?: string }) => void
   /** Edit an edge's label, step or style (informational fields). */
-  updateEdge: (id: string, patch: { label?: string; step?: string; style?: EdgeStyle }) => void
+  updateEdge: (id: string, patch: { label?: string; step?: string; style?: EdgeStyle; type?: string; name?: string; props?: Record<string, unknown> }) => void
   setSteps: (steps: Step[]) => void
   setShowLegend: (v: boolean) => void
   removeNodes: (ids: string[]) => void
@@ -348,7 +348,8 @@ export const useStore = create<State>((set, get) => ({
     if (!rule) return
     if (edges.some((e) => e.source === c.source && e.target === c.target)) return
     get().commit()
-    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: c.source, target: c.target }, rule.label ?? (rule.kind === 'flow' ? '' : rule.kind), rule.style)
+    const link = rule.kind === 'link' ? { type: rule.type, name: `${src.data.name}-${dst.data.name}`.replace(/[^A-Za-z0-9_-]+/g, '_') } : {}
+    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: c.source, target: c.target, ...link }, rule.label ?? (rule.kind === 'flow' ? '' : rule.kind), rule.style)
     set({ edges: addEdge(edge, edges), dirty: true })
     get().validateSoon()
     // The attachment's configuration opens right away (attribute picker for references).
@@ -803,11 +804,32 @@ export const useStore = create<State>((set, get) => ({
         if (e.id !== id || !e.data) return e
         const style = patch.style !== undefined ? Object.fromEntries(Object.entries({ ...(e.data.style ?? {}), ...patch.style }).filter(([, v]) => v !== undefined && v !== '' && v !== false)) : e.data.style
         const userLabel = patch.label !== undefined ? patch.label || undefined : e.data.userLabel
-        const data = { ...e.data, userLabel, label: userLabel || e.data.ruleLabel, ...(patch.step !== undefined ? { step: patch.step || undefined } : {}), style }
+        let ruleLabel = e.data.ruleLabel
+        let ruleStyle = e.data.ruleStyle
+        if (patch.type !== undefined && patch.type !== e.data.type) {
+          // Another link resource for the same pair: relabel, restyle, reset its attributes.
+          const src = get().nodes.find((n) => n.id === e.source)
+          const dst = get().nodes.find((n) => n.id === e.target)
+          const r = src && dst ? get().rules?.linkRule(src.data.type, dst.data.type, patch.type) : undefined
+          if (r) (ruleLabel = r.label ?? ruleLabel), (ruleStyle = r.style)
+        }
+        const data = {
+          ...e.data,
+          userLabel,
+          ruleLabel,
+          ruleStyle,
+          label: userLabel || ruleLabel,
+          ...(patch.step !== undefined ? { step: patch.step || undefined } : {}),
+          ...(patch.type !== undefined ? { type: patch.type, props: patch.type !== e.data.type ? {} : e.data.props } : {}),
+          ...(patch.name !== undefined ? { name: patch.name || undefined } : {}),
+          ...(patch.props !== undefined ? { props: patch.props } : {}),
+          style,
+        }
         return withMarkers({ ...e, data })
       }),
       dirty: true,
     })
+    if (patch.type !== undefined || patch.props !== undefined || patch.name !== undefined) get().validateSoon()
   },
 
   setSteps(steps) {

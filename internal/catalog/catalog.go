@@ -58,6 +58,8 @@ type Entry struct {
 	// Component marks an owned element that is nevertheless drawn, inside its
 	// owner's box (node groups in a cluster, services in an ECS cluster).
 	Component bool `yaml:"-" json:"component,omitempty"`
+	// Link marks a link resource: drawn as a line between two elements.
+	Link bool `yaml:"-" json:"link,omitempty"`
 }
 
 // Size is the default canvas size of a node.
@@ -107,11 +109,13 @@ type ConnStyle struct {
 }
 
 type Rule struct {
-	From         string         `json:"from"`
-	To           string         `json:"to"`
-	Kind         string         `json:"kind"`
-	Label        string         `json:"label,omitempty"`
-	Style        *ConnStyle     `json:"style,omitempty"`
+	From  string     `json:"from"`
+	To    string     `json:"to"`
+	Kind  string     `json:"kind"`
+	Label string     `json:"label,omitempty"`
+	Style *ConnStyle `json:"style,omitempty"`
+	// Type is the link element (<provider>.res.<type>) a "link" edge creates.
+	Type         string         `json:"type,omitempty"`
 	Terraform    *ConnTerraform `json:"terraform,omitempty"`
 	RequiresFrom map[string]any `json:"requires_from,omitempty"`
 	RequiresTo   map[string]any `json:"requires_to,omitempty"`
@@ -236,6 +240,8 @@ type Source struct {
 
 // Catalog is the loaded, validated set of entries and compiled rules.
 type Catalog struct {
+	// Links are the link resources of every provider (catalog/<p>/_links.yaml).
+	Links     []Link              `json:"links"`
 	Entries   []Entry             `json:"entries"`
 	Rules     []Rule              `json:"connections"`
 	Providers map[string]Provider `json:"providers"`
@@ -326,6 +332,10 @@ func (c *Catalog) Connection(fromType, toType string) (Rule, bool) {
 	to, tok := c.Get(toType)
 	if fok && tok && (!c.HasTerraform(from.Provider) || !c.HasTerraform(to.Provider)) {
 		return Rule{From: fromType, To: toType, Kind: FlowKind}, true
+	}
+	if cands := c.LinkCandidates(fromType, toType); len(cands) > 0 {
+		l := cands[0].Link
+		return Rule{From: fromType, To: toType, Kind: LinkKind, Type: l.ID, Label: l.Label, Style: l.Style}, true
 	}
 	if from, ok := c.Get(fromType); ok && from.Terraform != nil && from.Terraform.Role == RoleResource {
 		if to, ok := c.Get(toType); ok && to.Provider == from.Provider {

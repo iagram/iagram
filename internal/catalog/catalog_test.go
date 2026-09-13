@@ -385,3 +385,46 @@ func TestZoneBoxes(t *testing.T) {
 		t.Error("zone boxes accept anything (validated against the zone's parent)")
 	}
 }
+
+func TestLinkResources(t *testing.T) {
+	c := load(t)
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	// VPC to VPC: peering, drawn as a plain line.
+	r, ok := c.Connection("aws.vpc", "aws.vpc")
+	if !ok || r.Kind != catalog.LinkKind || r.Type != "aws.res.aws_vpc_peering_connection" || r.Style == nil || r.Style.Direction != "none" {
+		t.Errorf("vpc -> vpc = %+v %v", r, ok)
+	}
+	b, ok := c.LinkFor("aws.vpc", "aws.vpc", "")
+	if !ok || b.SrcAttr != "vpc_id" || b.DstAttr != "peer_vpc_id" || b.SrcOutput != "vpc_id" {
+		t.Errorf("peering binding = %+v", b)
+	}
+	// Transit gateway to VPC in either orientation: the attachment.
+	for _, pair := range [][2]string{{"aws.res.aws_ec2_transit_gateway", "aws.vpc"}, {"aws.vpc", "aws.res.aws_ec2_transit_gateway"}} {
+		b, ok := c.LinkFor(pair[0], pair[1], "")
+		if !ok || b.Link.Resource != "aws_ec2_transit_gateway_vpc_attachment" {
+			t.Errorf("%v -> %+v %v", pair, b.Link.Resource, ok)
+		}
+	}
+	// Customer gateway to transit gateway: the VPN connection picks the matching alternative.
+	b, ok = c.LinkFor("aws.res.aws_customer_gateway", "aws.res.aws_ec2_transit_gateway", "")
+	if !ok || b.Link.Resource != "aws_vpn_connection" || b.SrcAttr != "customer_gateway_id" || b.DstAttr != "transit_gateway_id" {
+		t.Errorf("vpn binding = %+v %v", b, ok)
+	}
+	// Link types are neither palette tiles nor attachments.
+	e, _ := c.Get("aws.res.aws_vpc_peering_connection")
+	if e == nil || !e.Link || e.Attachment {
+		t.Errorf("peering entry = %+v", e)
+	}
+	for _, f := range c.Families("aws") {
+		for _, id := range f.Types {
+			if id == "aws.res.aws_vpc_peering_connection" || id == "aws.res.aws_ec2_transit_gateway_vpc_attachment" {
+				t.Errorf("link type %s listed in palette family %s", id, f.Label)
+			}
+		}
+	}
+	for _, o := range c.AttachmentsFor("aws.vpc") {
+		if o.Resource == "aws_vpc_peering_connection" || o.Resource == "aws_route53_zone_association" {
+			t.Errorf("link type %s offered as an attachment", o.Resource)
+		}
+	}
+}

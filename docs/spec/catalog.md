@@ -346,3 +346,43 @@ transparent, so a subnet in an Availability Zone in a VPC is still a subnet
 of that VPC. `iagram import` draws zone boxes around siblings whose zone
 values differ. Shipped: `aws.availability_zone`, `gcp.zone`, `azure.zone`
 (mapped to each other by the equivalence table).
+
+## Link resources (`catalog/<provider>/_links.yaml`)
+
+Some Terraform resources mean "connect A to B": VPC peering, Transit
+Gateway attachments, Site-to-Site VPN connections, Direct Connect gateway
+associations, Route 53 zone associations, RAM shares, target group
+attachments. Official diagrams draw them as lines. `_links.yaml` lists them:
+
+```yaml
+links:
+  aws_vpn_connection:
+    label: Site-to-Site VPN
+    from: customer_gateway_id
+    to: transit_gateway_id|vpn_gateway_id      # alternatives, picked by the target's type
+    style: {direction: none, dash: dashed, color: "#1d8bd6"}
+  aws_networkmanager_vpc_attachment:
+    from: core_network_id
+    to: {attr: vpc_arn, output: arn}           # referenced output (default id)
+  aws_lb_target_group_attachment:
+    from: {attr: target_group_arn, output: arn}
+    to: {attr: target_id, types: [aws_instance, aws_lambda_function]}   # explicit accepted types
+```
+
+Each end names the attribute receiving the reference; the accepted element
+types are derived from the attribute name (`transit_gateway_id` accepts
+`aws_ec2_transit_gateway` and the curated elements importing it) unless
+`types` lists them. Consequences:
+
+- Connecting two elements a link can join creates an edge of kind `link`
+  with `type` (the link element), `name` and `props`; the arrow's inspector
+  shows the resource's attributes (both ends excluded) and lets you switch
+  between candidate links (VPC to VPC: peering; VPC to Transit Gateway:
+  attachment).
+- The generator renders one resource block per link edge, the two end
+  attributes referencing the source and target addresses; plan results are
+  mapped back onto the line.
+- Link types never appear in the palette or as attachments. `iagram import`
+  turns link resources whose ends resolve into link edges.
+- Lines default to no arrow head (`direction: none`) because they are
+  associations, not traffic.

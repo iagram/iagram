@@ -1,6 +1,6 @@
 import { memo, useMemo, type CSSProperties } from 'react'
 import type { BoxStyle, Entry } from '../types'
-import { NodeResizer, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { useStore } from '../store'
 import { captionOf, type RFNode } from '../convert'
 import { NodeBadge, usePlanClass } from './NodeBadge'
@@ -46,6 +46,8 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
       style={css as CSSProperties}
     >
       <NodeResizer isVisible={selected} onResizeStart={() => commit()} minWidth={200} minHeight={120} lineClassName="resizer-line" handleClassName="resizer-handle" />
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
       <header>
         {data.step && <span className="step-badge">{data.step}</span>}
         {icon && <img src={`/icons/${icon}`} alt="" draggable={false} />}

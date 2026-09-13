@@ -197,3 +197,48 @@ func TestImportGroupsSubnetsIntoAvailabilityZones(t *testing.T) {
 		}
 	}
 }
+
+func TestImportTurnsAttachmentsIntoLinkEdges(t *testing.T) {
+	c, err := catalog.Load(iagram.CatalogFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	state := `{"version":4,"terraform_version":"1.9.0","resources":[
+	 {"mode":"managed","type":"aws_vpc","name":"main","instances":[{"attributes":{"id":"vpc-1","arn":"arn:aws:ec2:eu-west-1:123456789012:vpc/vpc-1","cidr_block":"10.0.0.0/16","tags":{"Name":"main"}}}]},
+	 {"mode":"managed","type":"aws_ec2_transit_gateway","name":"hub","instances":[{"attributes":{"id":"tgw-1","arn":"arn:aws:ec2:eu-west-1:123456789012:transit-gateway/tgw-1","description":"hub","amazon_side_asn":64512,"tags":{"Name":"hub"}}}]},
+	 {"mode":"managed","type":"aws_ec2_transit_gateway_vpc_attachment","name":"main","instances":[{"attributes":{"id":"tgw-attach-1","transit_gateway_id":"tgw-1","vpc_id":"vpc-1","subnet_ids":["subnet-x"],"dns_support":"enable","tags":{}}}]}
+	]}`
+	res, err := importer.ParseState([]byte(state))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := importer.Build(c, "links", res)
+	for _, n := range d.Nodes {
+		if n.Type == "aws.res.aws_ec2_transit_gateway_vpc_attachment" {
+			t.Errorf("attachment should be an edge, not a node: %+v", n)
+		}
+	}
+	var link *document.Edge
+	for i := range d.Edges {
+		if d.Edges[i].Kind == "link" {
+			link = &d.Edges[i]
+		}
+	}
+	if link == nil {
+		t.Fatalf("no link edge: %+v", d.Edges)
+	}
+	byID := d.Index()
+	if link.Type != "aws.res.aws_ec2_transit_gateway_vpc_attachment" || byID[link.Source].Type != "aws.res.aws_ec2_transit_gateway" || byID[link.Target].Type != "aws.vpc" || link.Props["dns_support"] != "enable" {
+		t.Errorf("link = %+v", link)
+	}
+	// And it generates back as the same resource.
+	gen, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := gen.Config["resource"].(map[string]map[string]map[string]any)["aws_ec2_transit_gateway_vpc_attachment"]
+	if len(blocks) != 1 {
+		t.Errorf("attachment blocks = %v", blocks)
+	}
+}

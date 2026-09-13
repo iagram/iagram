@@ -46,6 +46,9 @@ func (c *Catalog) Families(provider string) []Family {
 	owned := map[string]int{}
 	byIcon := map[string][]string{}
 	for _, t := range types {
+		if c.isLink(provider, t) {
+			continue
+		}
 		if c.isAttachment(provider, t) {
 			if o := c.ownerOf(provider, t); o != "" {
 				owned[o]++

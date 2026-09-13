@@ -78,6 +78,9 @@ func Run(c *catalog.Catalog, d *document.Document) (*Result, error) {
 	if err := g.moduleBlocks(); err != nil {
 		return nil, err
 	}
+	if err := g.linkBlocks(); err != nil {
+		return nil, err
+	}
 	if err := g.resourceBlocks(); err != nil {
 		return nil, err
 	}
@@ -286,6 +289,68 @@ func (g *gen) resourceBlocks() error {
 	return nil
 }
 
+// linkBlocks renders "link" edges: one resource block per edge, its two end
+// attributes referencing the source and target elements.
+func (g *gen) linkBlocks() error {
+	for _, ed := range g.d.Edges {
+		if ed.Kind != catalog.LinkKind {
+			continue
+		}
+		src, sok := g.nodes[ed.Source]
+		dst, dok := g.nodes[ed.Target]
+		if !sok || !dok {
+			continue
+		}
+		b, ok := g.c.LinkFor(src.Type, dst.Type, ed.Type)
+		if !ok {
+			g.res.Warnings = append(g.res.Warnings, fmt.Sprintf("link %s: no link resource joins %s and %s; skipped", ed.ID, src.Name, dst.Name))
+			continue
+		}
+		e, ok := g.c.Get(b.Link.ID)
+		if !ok {
+			continue
+		}
+		srcAddr, sok := g.address(src)
+		dstAddr, dok := g.address(dst)
+		if !sok || !dok {
+			g.res.Warnings = append(g.res.Warnings, fmt.Sprintf("link %s: an end has no Terraform address; skipped", ed.ID))
+			continue
+		}
+		tfType := b.Link.Resource
+		name := ed.Name
+		if name == "" {
+			name = ed.ID
+		}
+		name = sanitize(name)
+		if g.resources[tfType] == nil {
+			g.resources[tfType] = map[string]map[string]any{}
+		}
+		if _, dup := g.resources[tfType][name]; dup {
+			return fmt.Errorf("two %s links named %q", tfType, name)
+		}
+		block := map[string]any{}
+		for k, v := range ed.Props {
+			if v == nil || v == "" {
+				continue
+			}
+			block[k] = v
+		}
+		block[b.SrcAttr] = "${" + srcAddr + "." + b.SrcOutput + "}"
+		block[b.DstAttr] = "${" + dstAddr + "." + b.DstOutput + "}"
+		if alias := g.providerAlias(src, e.Provider); alias != "" {
+			block["provider"] = g.localName(e.Provider) + "." + alias
+		}
+		if _, hasTags := e.Property("tags"); hasTags {
+			if _, set := block["tags"]; !set {
+				block["tags"] = map[string]any{"iagram_edge": ed.ID, "iagram_diagram": g.d.Name, "managed_by": "iagram"}
+			}
+		}
+		g.resources[tfType][name] = block
+		g.res.ModuleToNode[tfType+"."+name] = ed.ID
+	}
+	return nil
+}
+
 // referenceWiring resolves "references" edges: the source attribute gets
 // "${<target address>.<output>}" (appended when the attribute is a list).
 func (g *gen) referenceWiring() {
@@ -384,7 +449,10 @@ func (g *gen) assemble() {
 
 	outputs := map[string]any{}
 	for name, id := range g.res.ModuleToNode {
-		n := g.nodes[id]
+		n, ok := g.nodes[id]
+		if !ok {
+			continue // link edges have no outputs to write back
+		}
 		e, _ := g.c.Get(n.Type)
 		if e.Terraform.Role == catalog.RoleResource {
 			// Generated elements: id (and arn when present) are enough to write back.

@@ -358,6 +358,7 @@ func BuildHCL(c *catalog.Catalog, name string, parsed *HCLResult) (*document.Doc
 	}
 	b.report.Imported = len(nodes)
 	b.report.Skipped = append(b.report.Skipped, parsed.Skipped...)
+	b.linksToEdges()
 	attachToParents(c, b.doc)
 	sort.Slice(b.doc.Nodes, func(i, j int) bool { return b.doc.Nodes[i].ID < b.doc.Nodes[j].ID })
 	sort.Slice(b.doc.Edges, func(i, j int) bool { return b.doc.Edges[i].ID < b.doc.Edges[j].ID })

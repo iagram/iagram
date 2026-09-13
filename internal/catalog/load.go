@@ -35,6 +35,12 @@ func Load(fsys fs.FS) (*Catalog, error) {
 		if err != nil {
 			return nil, err
 		}
+		if path.Base(f) == "_links.yaml" {
+			if err := c.loadLinks(path.Base(path.Dir(f)), raw); err != nil {
+				return nil, fmt.Errorf("%s: %w", f, err)
+			}
+			continue
+		}
 		if path.Base(f) == "_provider.yaml" {
 			var p Provider
 			if err := yaml.Unmarshal(raw, &p); err != nil {
@@ -78,7 +84,7 @@ func LoadLayered(builtin fs.FS, extra ...fs.FS) (*Catalog, error) {
 	if len(extra) == 0 {
 		return base, nil
 	}
-	merged := &Catalog{Providers: base.Providers, serviceIcons: base.serviceIcons, serviceDefaults: base.serviceDefaults, serviceLabels: base.serviceLabels, resourceIcons: base.resourceIcons}
+	merged := &Catalog{Links: base.Links, Providers: base.Providers, serviceIcons: base.serviceIcons, serviceDefaults: base.serviceDefaults, serviceLabels: base.serviceLabels, resourceIcons: base.resourceIcons}
 	byID := map[string]int{}
 	for _, e := range base.Entries {
 		byID[e.ID] = len(merged.Entries)

@@ -44,6 +44,10 @@ export interface EdgeData extends Record<string, unknown> {
   showLabel?: boolean
   attr?: string
   output?: string
+  /** link edges: link element id, resource name, attributes besides the ends */
+  type?: string
+  name?: string
+  props?: Record<string, unknown>
 }
 
 /** Effective style: the edge's own over the kind's default. */
@@ -74,7 +78,7 @@ export function makeNode(rules: Rules, n: DocNode): RFNode {
 }
 
 export function makeEdge(e: DocEdge, ruleLabel: string, ruleStyle?: EdgeStyle): RFEdge {
-  const data: EdgeData = { kind: e.kind, label: e.label || ruleLabel, userLabel: e.label, ruleLabel, step: e.step, style: e.style, ruleStyle, attr: e.attr, output: e.output }
+  const data: EdgeData = { kind: e.kind, label: e.label || ruleLabel, userLabel: e.label, ruleLabel, step: e.step, style: e.style, ruleStyle, attr: e.attr, output: e.output, type: e.type, name: e.name, props: e.props }
   return withMarkers({ id: e.id, source: e.source, target: e.target, type: 'iagram', data })
 }
 
@@ -107,7 +111,7 @@ export function fromDocument(rules: Rules, doc: Document): { nodes: RFNode[]; ed
   const nodes = sortByDepth(doc.nodes).map((n) => makeNode(rules, n))
   const types = new Map(doc.nodes.map((n) => [n.id, n.type]))
   const edges = doc.edges.map((e) => {
-    const rule = rules.connection(types.get(e.source) ?? '', types.get(e.target) ?? '')
+    const rule = e.kind === 'link' ? rules.linkRule(types.get(e.source) ?? '', types.get(e.target) ?? '', e.type) ?? rules.connection(types.get(e.source) ?? '', types.get(e.target) ?? '') : rules.connection(types.get(e.source) ?? '', types.get(e.target) ?? '')
     const label = e.kind === 'references' && e.attr ? e.attr : rule?.label ?? (e.kind === 'flow' ? '' : e.kind)
     return makeEdge(e, label, rule?.style)
   })
@@ -151,6 +155,9 @@ export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[], steps
       ...(e.data?.userLabel ? { label: e.data.userLabel } : {}),
       ...(e.data?.step ? { step: e.data.step } : {}),
       ...(e.data?.style && Object.keys(e.data.style).length ? { style: e.data.style } : {}),
+      ...(e.data?.type ? { type: e.data.type } : {}),
+      ...(e.data?.name ? { name: e.data.name } : {}),
+      ...(e.data?.props && Object.keys(e.data.props).length ? { props: e.data.props } : {}),
     })),
   }
 }

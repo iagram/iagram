@@ -9,6 +9,7 @@ import (
 	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
 	"github.com/iagram/iagram/internal/generate"
+	"github.com/iagram/iagram/internal/tfschema"
 )
 
 func fixture(t *testing.T) (*catalog.Catalog, *document.Document) {
@@ -227,5 +228,26 @@ func TestZoneBoxWinsOverDrawnValue(t *testing.T) {
 	}
 	if got := mods["sub_z"]["vpc_id"]; got != "${module.vpc.vpc_id}" {
 		t.Errorf("vpc_id through the zone box = %v", got)
+	}
+}
+
+func TestLinkEdgesRenderAsResources(t *testing.T) {
+	c, d := fixture(t)
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	d.Nodes = append(d.Nodes, document.Node{ID: "vpc2", Type: "aws.vpc", Name: "second", Parent: "reg", Props: map[string]any{"cidr": "10.1.0.0/16"}})
+	d.Edges = append(d.Edges, document.Edge{ID: "peer1", Kind: "link", Type: "aws.res.aws_vpc_peering_connection", Name: "main_second", Source: "vpc", Target: "vpc2", Props: map[string]any{"auto_accept": true}})
+	res, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Warnings) != 0 {
+		t.Errorf("warnings: %v", res.Warnings)
+	}
+	block := res.Config["resource"].(map[string]map[string]map[string]any)["aws_vpc_peering_connection"]["main_second"]
+	if block["vpc_id"] != "${module.vpc.vpc_id}" || block["peer_vpc_id"] != "${module.vpc2.vpc_id}" || block["auto_accept"] != true {
+		t.Errorf("peering block = %v", block)
+	}
+	if res.ModuleToNode["aws_vpc_peering_connection.main_second"] != "peer1" {
+		t.Errorf("plan mapping should point at the edge: %v", res.ModuleToNode)
 	}
 }

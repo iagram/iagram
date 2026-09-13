@@ -276,6 +276,7 @@ func (b *builder) run(resources []Resource) {
 	}
 	sort.Strings(b.report.Providers)
 	b.report.Imported = len(pend) + len(raw)
+	b.linksToEdges()
 	attachToParents(b.c, b.doc)
 	groupIntoZones(b.c, b.doc)
 	// Containers created after their children must still sort deterministically.
@@ -730,4 +731,63 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// linksToEdges turns imported link resources (peering, gateway attachments,
+// VPN connections) into "link" edges between the two elements they join,
+// dropping the node and the reference edges that carried its ends.
+func (b *builder) linksToEdges() {
+	var keepNodes []document.Node
+	dropEdges := map[string]bool{}
+	for _, n := range b.doc.Nodes {
+		e, ok := b.c.Get(n.Type)
+		if !ok || !e.Link {
+			keepNodes = append(keepNodes, n)
+			continue
+		}
+		var link *catalog.Link
+		for i := range b.c.Links {
+			if b.c.Links[i].ID == e.ID {
+				link = &b.c.Links[i]
+			}
+		}
+		if link == nil {
+			keepNodes = append(keepNodes, n)
+			continue
+		}
+		// The ends were recovered as reference edges from this node.
+		endOf := func(end catalog.LinkEnd) (target, edgeID string) {
+			for _, ed := range b.doc.Edges {
+				if ed.Source != n.ID || ed.Kind != catalog.ReferencesKind {
+					continue
+				}
+				for _, a := range strings.Split(end.Attr, "|") {
+					if ed.Attr == a {
+						return ed.Target, ed.ID
+					}
+				}
+			}
+			return "", ""
+		}
+		from, fromEdge := endOf(link.From)
+		to, toEdge := endOf(link.To)
+		if from == "" || to == "" {
+			keepNodes = append(keepNodes, n)
+			continue
+		}
+		dropEdges[fromEdge], dropEdges[toEdge] = true, true
+		props := map[string]any{}
+		for k, v := range n.Props {
+			props[k] = v
+		}
+		b.doc.Edges = append(b.doc.Edges, document.Edge{ID: "l-" + n.ID, Kind: catalog.LinkKind, Type: e.ID, Name: n.Name, Source: from, Target: to, Props: props})
+	}
+	b.doc.Nodes = keepNodes
+	var edges []document.Edge
+	for _, ed := range b.doc.Edges {
+		if !dropEdges[ed.ID] {
+			edges = append(edges, ed)
+		}
+	}
+	b.doc.Edges = edges
 }

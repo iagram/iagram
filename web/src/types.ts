@@ -38,6 +38,7 @@ export interface Entry {
   terraform?: { role?: string; resource?: string; module?: string }
   attachment?: boolean
   component?: boolean
+  link?: boolean
   transparent?: boolean
   id: string
   label: string
@@ -60,14 +61,36 @@ export interface Rule {
   kind: string
   label?: string
   style?: Omit<EdgeStyle, 'inactive'>
+  /** link edges: the link element this rule creates */
+  type?: string
   terraform?: { set: 'from' | 'to'; input: string; value: string }
   requires_from?: Record<string, unknown>
   requires_to?: Record<string, unknown>
 }
 
+export interface LinkEnd {
+  attr: string
+  output?: string
+  types?: string[]
+  /** catalog element ids accepted at this end */
+  elements: string[]
+}
+
+/** A Terraform resource drawn as a line between two elements (peering, attachment, VPN). */
+export interface Link {
+  id: string
+  resource: string
+  provider: string
+  label: string
+  from: LinkEnd
+  to: LinkEnd
+  style?: Omit<EdgeStyle, 'inactive'>
+}
+
 export interface Catalog {
   entries: Entry[]
   connections: Rule[]
+  links?: Link[]
 }
 
 export interface Layout {
@@ -110,6 +133,10 @@ export interface DocEdge {
   label?: string
   step?: string
   style?: EdgeStyle
+  /** link edges: link element, resource name and attributes besides the ends */
+  type?: string
+  name?: string
+  props?: Record<string, unknown>
 }
 
 export interface Step {
@@ -180,6 +207,8 @@ export const COMMON = 'common'
 export const ANY_PARENT = '*'
 /** Informational edge to or from an actor or note. */
 export const FLOW_KIND = 'flow'
+/** A Terraform link resource drawn as a line. */
+export const LINK_KIND = 'link'
 
 export type PlanAction = 'no-op' | 'read' | 'create' | 'update' | 'replace' | 'delete'
 

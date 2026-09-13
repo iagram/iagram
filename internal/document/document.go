@@ -84,6 +84,12 @@ type Edge struct {
 	Label string     `json:"label,omitempty"`
 	Step  string     `json:"step,omitempty"`
 	Style *EdgeStyle `json:"style,omitempty"`
+	// Link edges (kind "link") are Terraform resources drawn as a line: Type
+	// is the link element, Name the resource name, Props its attributes
+	// besides the two ends.
+	Type  string         `json:"type,omitempty"`
+	Name  string         `json:"name,omitempty"`
+	Props map[string]any `json:"props,omitempty"`
 }
 
 // New returns an empty document.

@@ -29,6 +29,11 @@ export function PropertyPanel() {
   const setSteps = useStore((s) => s.setSteps)
   const showLegend = useStore((s) => s.showLegend)
   const setShowLegend = useStore((s) => s.setShowLegend)
+  const ensureEntry = useStore((s) => s.ensureEntry)
+  const linkType = edge?.data?.kind === 'link' ? edge.data.type : undefined
+  useEffect(() => {
+    if (linkType) void ensureEntry(linkType)
+  }, [linkType, ensureEntry])
   const linkAttribute = useStore((s) => s.linkAttribute)
   useStore((s) => s.catalogVersion)
   const loadAttachments = useStore((s) => s.loadAttachments)
@@ -69,6 +74,9 @@ export function PropertyPanel() {
           {rules.entry(src?.data.type ?? '')?.label} <i>{rule?.label ?? edge.data?.kind}</i> {rules.entry(dst?.data.type ?? '')?.label}
         </p>
         <p className="muted mono">kind: {edge.data?.kind}</p>
+        {edge.data?.kind === 'link' && src && dst && (
+          <LinkSection edgeId={edge.id} sourceType={src.data.type} targetType={dst.data.type} type={edge.data.type} name={edge.data.name ?? ''} props={edge.data.props ?? {}} problems={problems.filter((p) => p.edge === edge.id)} />
+        )}
         {edge.data?.kind === 'references' && src && dst && (
           <ReferenceBinding
             sourceType={src.data.type}
@@ -85,7 +93,7 @@ export function PropertyPanel() {
               Adds <span className="mono">{tf.value}</span> to the <span className="mono">{tf.input}</span> input of the {tf.set === 'from' ? 'source' : 'target'} module.
             </p>
           </details>
-        ) : edge.data?.kind !== 'references' ? (
+        ) : edge.data?.kind !== 'references' && edge.data?.kind !== 'link' ? (
           <p className="muted">This arrow is documentation only; it does not change the generated Terraform.</p>
         ) : null}
         {reqs.length > 0 && (
@@ -740,5 +748,68 @@ function FieldProblems({ problems }: { problems?: Problem[] }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+
+/** A link edge is a Terraform resource: pick which one joins the pair, name it, set its attributes. */
+function LinkSection({ edgeId, sourceType, targetType, type, name, props, problems }: { edgeId: string; sourceType: string; targetType: string; type?: string; name: string; props: Record<string, unknown>; problems: Problem[] }) {
+  const rules = useStore((s) => s.rules)
+  const updateEdge = useStore((s) => s.updateEdge)
+  useStore((s) => s.catalogVersion)
+  if (!rules) return null
+  const candidates = rules.linkCandidates(sourceType, targetType)
+  const link = candidates.find((l) => l.id === type) ?? candidates[0]
+  const entry = link ? rules.entry(link.id) : undefined
+  const ends = new Set([...(link?.from.attr.split('|') ?? []), ...(link?.to.attr.split('|') ?? [])])
+  const schema: JSONSchema = entry?.props ?? {}
+  const required = new Set(schema.required ?? [])
+  const byField: Record<string, Problem[]> = {}
+  for (const p of problems) if (p.field) (byField[p.field] ??= []).push(p)
+  const setProp = (k: string, v: unknown) => {
+    const next = { ...props }
+    if (v === '' || v === undefined) delete next[k]
+    else next[k] = v
+    updateEdge(edgeId, { props: next })
+  }
+  return (
+    <details open className="section">
+      <summary>Link resource</summary>
+      <p className="muted">
+        This line is a Terraform resource joining the two elements. <span className="mono">{link?.resource}</span>
+      </p>
+      {candidates.length > 1 && (
+        <label className="field">
+          <span>Resource</span>
+          <select value={link?.id ?? ''} onChange={(e) => updateEdge(edgeId, { type: e.target.value })}>
+            {candidates.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label} ({c.resource})
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label className="field">
+        <span>
+          Name <em>*</em>
+        </span>
+        <input value={name} onChange={(e) => updateEdge(edgeId, { name: e.target.value })} />
+      </label>
+      {!entry && <p className="muted">Loading attributes…</p>}
+      {entry &&
+        groupFields(schema).map(({ title, fields, advanced }) => {
+          const shown = fields.filter(([k]) => !ends.has(k))
+          if (shown.length === 0) return null
+          return (
+            <details key={title} open={!advanced} className="section">
+              <summary>{title}</summary>
+              {shown.map(([k, sch]) => (
+                <Field key={k} name={k} schema={sch} required={required.has(k)} value={props[k]} onChange={(v) => setProp(k, v)} problems={byField[k]} />
+              ))}
+            </details>
+          )
+        })}
+    </details>
   )
 }

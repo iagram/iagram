@@ -39,6 +39,7 @@ indent, trailing newline) so that diffs and code review work. Commit it.
 | `edges[]` | Typed connections; `kind` must match the catalog rule for the pair of node types. For `references` edges from generated elements, `attr` is the source attribute receiving the reference and `output` the referenced target attribute (default `id`). |
 | `edges[].label`, `edges[].step` | Optional label overriding the kind's default ("mTLS", "Private VIF") and callout number. Informational. |
 | `edges[].style` | Optional drawing: `direction` `one` (default) / `both` / `none` (plain association line), `dash` `solid` / `dashed` / `dotted`, `color` (CSS), `inactive` (greyed standby path). The catalog rule of the kind provides defaults. Informational. |
+| `edges[]` of kind `link` | A Terraform link resource drawn as a line (peering, gateway attachment, VPN connection): `type` is the link element (`<provider>.res.<terraform type>`), `name` the resource name, `props` its attributes besides the two ends, which the generator fills from the source and target. See the catalog spec, *Link resources*. |
 | `steps[]` | Optional walkthrough text: `{n, text}` per callout number, shown in the legend. Informational. |
 | `nodes[].type` for generated elements | `<provider>.res.<terraform type>`, e.g. `aws.res.aws_kms_key`; properties are the resource's attributes as in Terraform, nested blocks as arrays/objects. |
 

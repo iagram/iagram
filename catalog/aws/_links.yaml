@@ -1,0 +1,56 @@
+# Link resources: Terraform resources whose meaning is "connect A to B". They
+# are drawn as lines between the two elements (as in the official diagrams)
+# and configured on the line, never as boxes. `from`/`to` name the attribute
+# receiving each end; "a|b" offers alternatives picked by the target's type;
+# an object form sets the referenced output or restricts the accepted types.
+links:
+  aws_vpc_peering_connection:
+    label: VPC peering
+    from: vpc_id
+    to: peer_vpc_id
+    style: {direction: none}
+  aws_ec2_transit_gateway_vpc_attachment:
+    label: VPC attachment
+    from: transit_gateway_id
+    to: vpc_id
+    style: {direction: none, color: "#7AA116"}
+  aws_ec2_transit_gateway_peering_attachment:
+    label: Transit Gateway peering
+    from: transit_gateway_id
+    to: peer_transit_gateway_id
+    style: {direction: none}
+  aws_vpn_connection:
+    label: Site-to-Site VPN
+    from: customer_gateway_id
+    to: transit_gateway_id|vpn_gateway_id
+    style: {direction: none, dash: dashed, color: "#1d8bd6"}
+  aws_dx_gateway_association:
+    label: Direct Connect gateway association
+    from: dx_gateway_id
+    to: associated_gateway_id
+    style: {direction: none, color: "#8C4FFF"}
+  aws_dx_connection_association:
+    label: LAG association
+    from: connection_id
+    to: lag_id
+    style: {direction: none}
+  aws_route53_zone_association:
+    label: VPC association
+    from: zone_id
+    to: vpc_id
+    style: {direction: none, dash: dashed}
+  aws_networkmanager_vpc_attachment:
+    label: Core network attachment
+    from: core_network_id
+    to: {attr: vpc_arn, output: arn}
+    style: {direction: none, color: "#7AA116"}
+  aws_lb_target_group_attachment:
+    label: target
+    from: {attr: target_group_arn, output: arn}
+    to: {attr: target_id, types: [aws_instance, aws_lambda_function, aws_lb]}
+    style: {dash: dotted}
+  aws_ram_resource_association:
+    label: shared via RAM
+    from: {attr: resource_share_arn, output: arn}
+    to: {attr: resource_arn, output: arn, types: [aws_subnet, aws_ec2_transit_gateway, aws_route53_resolver_rule, aws_ec2_capacity_reservation, aws_networkmanager_core_network]}
+    style: {direction: none, dash: dashed}
