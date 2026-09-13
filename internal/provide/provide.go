@@ -59,6 +59,9 @@ func render(tpl string, from []*document.Node) (string, bool) {
 			if v, has := a.Props[key]; has && v != nil && v != "" {
 				return toString(v)
 			}
+			if key == "name" && a.Name != "" {
+				return a.Name // the box's own name (a resource group's)
+			}
 		}
 		ok = false
 		return ""

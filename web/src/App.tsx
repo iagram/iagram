@@ -8,6 +8,7 @@ import { Toolbar } from './components/Toolbar'
 import { CanvasTabs } from './components/CanvasTabs'
 import { ProblemsBar } from './components/ProblemsBar'
 import { LogDrawer } from './components/LogDrawer'
+import { Gallery } from './components/Gallery'
 import { ConfirmApply } from './components/ConfirmApply'
 import { InfoModals } from './components/InfoModals'
 
@@ -42,6 +43,7 @@ export function App() {
       const prov = params.get('provider')
       if (prov) useStore.getState().setActiveProvider(prov)
       if (params.get('legend') === '1') useStore.getState().setShowLegend(true)
+      if (params.get('gallery') === '1') useStore.getState().setShowGallery(true)
       const m = /select=([^&]+)/.exec(location.hash)
       if (m) useStore.getState().requestSelect(decodeURIComponent(m[1]))
     })
@@ -126,6 +128,7 @@ export function App() {
           </div>
           <PropertyPanel />
         </div>
+        <Gallery />
         <LogDrawer />
         <ConfirmApply />
         <InfoModals />

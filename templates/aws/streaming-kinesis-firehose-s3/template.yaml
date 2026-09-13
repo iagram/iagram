@@ -1,0 +1,40 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/streaming-data-solution-for-amazon-kinesis/option3.html); edit freely.
+title: Streaming ingestion with Kinesis Data Streams and Firehose to S3
+category: data
+tags:
+- kinesis
+- firehose
+- streaming
+- s3
+- lambda transform
+- athena
+source: https://docs.aws.amazon.com/solutions/latest/streaming-data-solution-for-amazon-kinesis/option3.html
+description: Producers write records to a Kinesis data stream; a Firehose delivery stream reads the stream, optionally invokes a Lambda transform, converts records to Parquet, and buffers them into S3 by
+  size or time. Glue and Athena make the landed data queryable, and CloudWatch alarms watch stream throughput.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: server, type: common.server, name: server}
+- {id: device, type: common.device, name: device}
+- {id: events-stream, type: aws.res.aws_kinesis_stream, name: events-stream, parent: reg-us-east-1, props: {name: changeme}}
+- {id: events-to-s3, type: aws.res.aws_kinesis_firehose_delivery_stream, name: events-to-s3, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
+- {id: record-transformer, type: aws.lambda_function, name: record-transformer, parent: reg-us-east-1}
+- {id: streaming-landing, type: aws.s3_bucket, name: streaming-landing, parent: reg-us-east-1}
+- {id: events-db, type: aws.res.aws_glue_catalog_database, name: events-db, parent: reg-us-east-1, props: {name: changeme}}
+- {id: streaming-wg, type: aws.res.aws_athena_workgroup, name: streaming-wg, parent: reg-us-east-1, props: {name: changeme}}
+- {id: iterator-age-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: iterator-age-alarm, parent: reg-us-east-1, props: {alarm_name: changeme}}
+edges:
+- {from: server, to: events-stream, label: PutRecords, step: '1'}
+- {from: device, to: events-stream, label: PutRecords, step: '1'}
+- {from: events-stream, to: events-to-s3, label: Kinesis source, step: '2'}
+- {from: events-to-s3, to: record-transformer, label: transform batch, step: '3'}
+- {from: events-to-s3, to: streaming-landing, label: Parquet, step: '4'}
+- {from: events-to-s3, to: events-db, label: schema for format conversion}
+- {from: streaming-wg, to: streaming-landing, label: SQL over landed data, step: '5'}
+- {from: events-stream, to: iterator-age-alarm, label: GetRecords.IteratorAgeMilliseconds}
+steps:
+- {n: '1', text: 'server → events-stream: PutRecords'}
+- {n: '2', text: 'events-stream → events-to-s3: Kinesis source'}
+- {n: '3', text: 'events-to-s3 → record-transformer: transform batch'}
+- {n: '4', text: 'events-to-s3 → streaming-landing: Parquet'}
+- {n: '5', text: 'streaming-wg → streaming-landing: SQL over landed data'}

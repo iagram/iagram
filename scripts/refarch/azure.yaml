@@ -1,0 +1,532 @@
+- slug: hub-spoke-firewall
+  title: Hub-spoke network topology with Azure Firewall
+  category: networking
+  tags: [hub-spoke, firewall, peering, bastion, vpn-gateway, udr]
+  source: https://learn.microsoft.com/en-us/azure/architecture/networking/architecture/hub-spoke
+  description: A customer-managed hub virtual network hosts shared services (Azure Firewall, Azure Bastion, VPN/ExpressRoute gateway) and is peered to isolated spoke virtual networks that hold workloads. Spoke egress and spoke-to-spoke traffic are forced through the hub firewall with user-defined routes, and the hub gateway provides cross-premises connectivity for every spoke.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-hub, location: westeurope}
+      vnets:
+        - name: hub
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: AzureFirewallSubnet, cidr: 10.0.0.0/26}
+            - {name: GatewaySubnet, cidr: 10.0.1.0/26}
+            - {name: AzureBastionSubnet, cidr: 10.0.2.0/26}
+    - subscription: landing-zone-prod
+      resource_group: {name: rg-spoke-prod, location: westeurope}
+      vnets:
+        - name: spoke-prod
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: snet-workload-prod, cidr: 10.1.0.0/24}
+    - subscription: landing-zone-nonprod
+      resource_group: {name: rg-spoke-nonprod, location: westeurope}
+      vnets:
+        - name: spoke-nonprod
+          cidr: 10.2.0.0/16
+          subnets:
+            - {name: snet-workload-nonprod, cidr: 10.2.0.0/24}
+  elements:
+    - {tf: azurerm_firewall, name: hub-fw, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_virtual_network_gateway, name: hub-vpngw, in: subnet:GatewaySubnet}
+    - {tf: azurerm_bastion_host, name: hub-bastion, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_linux_virtual_machine, name: vm-prod-1, in: subnet:snet-workload-prod}
+    - {tf: azurerm_linux_virtual_machine, name: vm-nonprod-1, in: subnet:snet-workload-nonprod}
+    - {tf: azurerm_log_analytics_workspace, name: law-hub, in: resource_group:rg-hub}
+  actors: [datacenter, internet, user]
+  flows:
+    - {from: datacenter, to: hub-vpngw, label: IPsec VPN / ExpressRoute, step: 1}
+    - {from: vnet:hub, to: vnet:spoke-prod, link: azurerm_virtual_network_peering, label: peering (gateway transit)}
+    - {from: vnet:hub, to: vnet:spoke-nonprod, link: azurerm_virtual_network_peering, label: peering (gateway transit)}
+    - {from: vm-prod-1, to: hub-fw, label: "0.0.0.0/0 via UDR", step: 2}
+    - {from: hub-fw, to: internet, label: SNAT egress, step: 3}
+    - {from: vm-prod-1, to: vm-nonprod-1, label: spoke-to-spoke via firewall, step: 4}
+    - {from: user, to: hub-bastion, label: RDP/SSH over TLS}
+    - {from: hub-bastion, to: vm-prod-1, label: RDP/SSH}
+    - {from: hub-fw, to: law-hub, label: diagnostics}
+
+- slug: virtual-wan-hub-spoke
+  title: Hub-spoke network topology using Azure Virtual WAN
+  category: networking
+  tags: [virtual-wan, secured-hub, sd-wan, branch, expressroute, routing-intent]
+  source: https://learn.microsoft.com/en-us/azure/architecture/networking/architecture/hub-spoke-virtual-wan-architecture
+  description: Microsoft-managed Virtual WAN hubs replace self-managed hub virtual networks and provide any-to-any transit between spoke virtual networks, branch VPN sites, ExpressRoute circuits and point-to-site users, with hub-to-hub connectivity across regions. Azure Firewall in a secured virtual hub inspects private and internet-bound traffic through routing intent, so spokes need no user-defined routes.
+  containers:
+    - datacenter: branch
+    - subscription: connectivity
+      resource_group: {name: rg-vwan, location: westeurope}
+    - subscription: landing-zone-shared
+      resource_group: {name: rg-shared-services, location: westeurope}
+      vnets:
+        - name: vnet-shared-services
+          cidr: 10.1.0.0/24
+          subnets: [{name: snet-shared, cidr: 10.1.0.0/25}]
+    - subscription: landing-zone-app
+      resource_group: {name: rg-app-region1, location: westeurope}
+      vnets:
+        - name: vnet-app-1
+          cidr: 10.2.0.0/24
+          subnets: [{name: snet-app-1, cidr: 10.2.0.0/25}]
+  elements:
+    - {tf: azurerm_virtual_wan, name: vwan-contoso, in: resource_group:rg-vwan}
+    - {tf: azurerm_virtual_hub, name: vhub-westeurope, in: resource_group:rg-vwan}
+    - {tf: azurerm_virtual_hub, name: vhub-northeurope, in: resource_group:rg-vwan}
+    - {tf: azurerm_vpn_gateway, name: vpngw-vhub-we, in: resource_group:rg-vwan}
+    - {tf: azurerm_express_route_gateway, name: ergw-vhub-we, in: resource_group:rg-vwan}
+    - {tf: azurerm_firewall, name: fw-vhub-we, in: resource_group:rg-vwan}
+    - {tf: azurerm_express_route_circuit, name: er-circuit-1, in: resource_group:rg-vwan}
+    - {tf: azurerm_linux_virtual_machine, name: vm-shared-dns, in: subnet:snet-shared}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-1, in: subnet:snet-app-1}
+  actors: [datacenter, users, internet]
+  flows:
+    - {from: datacenter, to: vpngw-vhub-we, label: S2S IPsec (branch), step: 1}
+    - {from: datacenter, to: er-circuit-1, label: ExpressRoute private peering, step: 1}
+    - {from: er-circuit-1, to: ergw-vhub-we}
+    - {from: vwan-contoso, to: vhub-westeurope}
+    - {from: vwan-contoso, to: vhub-northeurope}
+    - {from: vhub-westeurope, to: vnet:vnet-shared-services, link: azurerm_virtual_hub_connection, label: vnetconn1}
+    - {from: vhub-westeurope, to: vnet:vnet-app-1, link: azurerm_virtual_hub_connection, label: vnetconn2}
+    - {from: vhub-westeurope, to: vhub-northeurope, label: hub-to-hub (Microsoft backbone), step: 2}
+    - {from: vm-app-1, to: fw-vhub-we, label: private routing intent, step: 3}
+    - {from: fw-vhub-we, to: internet, label: internet routing intent (SNAT), step: 4}
+
+- slug: expressroute-vpn-failover
+  title: ExpressRoute with site-to-site VPN failover
+  category: networking
+  tags: [hybrid, expressroute, vpn-gateway, failover, bgp]
+  source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/hybrid-networking/expressroute-vpn-failover
+  description: An on-premises network connects to an Azure virtual network through ExpressRoute private peering as the primary path, with an IPsec site-to-site VPN over the internet as a backup path terminating on a coexisting VPN gateway in the same GatewaySubnet. On-premises BGP local preference favors ExpressRoute, and traffic converges onto the VPN tunnel when the circuit or peering location fails.
+  containers:
+    - datacenter: on-premises
+    - subscription: connectivity
+      resource_group: {name: rg-hybrid, location: westeurope}
+      vnets:
+        - name: vnet-hybrid
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: GatewaySubnet, cidr: 10.0.255.0/27}
+            - {name: snet-workload, cidr: 10.0.1.0/24}
+  elements:
+    - {tf: azurerm_express_route_circuit, name: er-circuit, in: resource_group:rg-hybrid}
+    - {tf: azurerm_virtual_network_gateway, name: ergw, in: subnet:GatewaySubnet}
+    - {tf: azurerm_virtual_network_gateway, name: vpngw, in: subnet:GatewaySubnet}
+    - {tf: azurerm_local_network_gateway, name: lng-onprem, in: datacenter}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-1, in: subnet:snet-workload}
+  actors: [datacenter, internet]
+  flows:
+    - {from: datacenter, to: er-circuit, label: primary path (partner edge, BGP), step: 1}
+    - {from: er-circuit, to: ergw, label: private peering, step: 2}
+    - {from: lng-onprem, to: internet, label: backup path, step: 3}
+    - {from: internet, to: vpngw, label: IPsec S2S tunnel, step: 4}
+    - {from: ergw, to: vm-app-1, label: steady-state traffic, step: 5}
+    - {from: vpngw, to: vm-app-1, label: traffic after failover, step: 6}
+
+- slug: vm-baseline-multitier
+  title: Virtual Machines baseline multi-tier web application
+  category: web
+  tags: [vmss, application-gateway, waf, internal-load-balancer, availability-zones, bastion]
+  source: https://learn.microsoft.com/en-us/azure/architecture/virtual-machines/baseline
+  description: An internet-facing multi-tier web application runs on separate front-end and back-end Virtual Machine Scale Sets spread across availability zones, fronted by a zone-redundant Application Gateway with WAF and an internal load balancer between tiers. Key Vault supplies TLS certificates over Private Link, Azure Bastion provides operator access, and a public load balancer with outbound rules handles SNAT egress.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-vm-baseline, location: westeurope}
+      vnets:
+        - name: vnet-workload
+          cidr: 10.240.0.0/16
+          subnets:
+            - {name: snet-appgateway, cidr: 10.240.1.0/24}
+            - {name: snet-frontend, cidr: 10.240.2.0/24}
+            - {name: snet-ilb, cidr: 10.240.3.0/26}
+            - {name: snet-backend, cidr: 10.240.4.0/24}
+            - {name: snet-privateendpoints, cidr: 10.240.5.0/27}
+            - {name: AzureBastionSubnet, cidr: 10.240.6.0/26}
+  elements:
+    - {tf: azurerm_application_gateway, name: appgw-waf, in: subnet:snet-appgateway}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-frontend, in: subnet:snet-frontend}
+    - {tf: azurerm_lb, name: ilb-backend, in: subnet:snet-ilb}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-backend, in: subnet:snet-backend}
+    - {tf: azurerm_lb, name: lb-outbound, in: vnet:vnet-workload}
+    - {tf: azurerm_bastion_host, name: bastion, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_key_vault, name: kv-certs, in: resource_group:rg-vm-baseline}
+    - {tf: azurerm_private_endpoint, name: pe-keyvault, in: subnet:snet-privateendpoints}
+    - {tf: azurerm_network_security_group, name: nsg-frontend, in: vnet:vnet-workload}
+    - {tf: azurerm_log_analytics_workspace, name: law-workload, in: resource_group:rg-vm-baseline}
+  actors: [users, user, internet]
+  flows:
+    - {from: users, to: appgw-waf, label: HTTPS (app.contoso.com), step: 1}
+    - {from: appgw-waf, to: vmss-frontend, label: HTTPS (internal wildcard cert), step: 2}
+    - {from: vmss-frontend, to: ilb-backend, label: HTTPS to ILB private IP, step: 3}
+    - {from: ilb-backend, to: vmss-backend, label: HTTPS, step: 4}
+    - {from: appgw-waf, to: pe-keyvault, label: fetch TLS certificate}
+    - {from: pe-keyvault, to: kv-certs, label: private link}
+    - {from: vmss-backend, to: lb-outbound, label: SNAT egress}
+    - {from: lb-outbound, to: internet, label: outbound}
+    - {from: user, to: bastion, label: operator SSH/RDP}
+    - {from: bastion, to: vmss-backend, label: SSH}
+    - {from: nsg-frontend, to: vmss-frontend}
+
+- slug: app-service-zone-redundant-sql
+  title: Zone-redundant App Service web app with Azure SQL
+  category: web
+  tags: [app-service, application-gateway, waf, private-link, azure-sql, zone-redundant]
+  source: https://learn.microsoft.com/en-us/azure/architecture/web-apps/app-service/architectures/baseline-zone-redundant
+  description: Application Gateway with WAF is the single public entry point and forwards requests over a private endpoint to a zone-redundant App Service plan; the app uses virtual network integration to reach Azure SQL Database, Key Vault and Storage exclusively through private endpoints and private DNS zones. SQL Database runs in a zone-redundant tier and all PaaS public endpoints are disabled.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-app-baseline, location: westeurope}
+      vnets:
+        - name: vnet-app
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: AppServiceSubnet, cidr: 10.0.0.0/24}
+            - {name: GatewaySubnet, cidr: 10.0.1.0/24}
+            - {name: PrivateEndpointsSubnet, cidr: 10.0.2.0/27}
+  elements:
+    - {tf: azurerm_application_gateway, name: appgw-waf, in: subnet:GatewaySubnet}
+    - {tf: azurerm_service_plan, name: plan-premium-zr, in: resource_group:rg-app-baseline}
+    - {tf: azurerm_linux_web_app, name: web-app, in: subnet:AppServiceSubnet}
+    - {tf: azurerm_private_endpoint, name: pe-webapp, in: subnet:PrivateEndpointsSubnet}
+    - {tf: azurerm_mssql_server, name: sql-server, in: resource_group:rg-app-baseline}
+    - {tf: azurerm_private_endpoint, name: pe-sql, in: subnet:PrivateEndpointsSubnet}
+    - {tf: azurerm_key_vault, name: kv-app, in: resource_group:rg-app-baseline}
+    - {tf: azurerm_storage_account, name: st-deploy-zrs, in: resource_group:rg-app-baseline}
+    - {tf: azurerm_private_dns_zone, name: privatelink.azurewebsites.net, in: resource_group:rg-app-baseline}
+    - {tf: azurerm_application_insights, name: appi-web, in: resource_group:rg-app-baseline}
+  actors: [users, idp]
+  flows:
+    - {from: users, to: appgw-waf, label: HTTPS, step: 1}
+    - {from: appgw-waf, to: pe-webapp, label: HTTPS via private endpoint, step: 2}
+    - {from: pe-webapp, to: web-app, label: private link, step: 3}
+    - {from: web-app, to: pe-sql, label: TDS 1433 via vnet integration, step: 4}
+    - {from: pe-sql, to: sql-server, label: private link}
+    - {from: web-app, to: kv-app, label: Key Vault references}
+    - {from: web-app, to: st-deploy-zrs, label: WEBSITE_RUN_FROM_PACKAGE}
+    - {from: plan-premium-zr, to: web-app, label: hosts}
+    - {from: users, to: idp, label: Microsoft Entra ID sign-in}
+    - {from: web-app, to: appi-web, label: telemetry}
+
+- slug: static-website-front-door
+  title: Static website on Azure Storage with Azure Front Door
+  category: web
+  tags: [static-website, blob-storage, front-door, cdn, waf, private-link]
+  source: https://learn.microsoft.com/en-us/azure/frontdoor/scenario-storage-blobs
+  description: Static content is hosted in an Azure Storage account and delivered through Azure Front Door Premium, which terminates TLS on a custom domain, applies WAF managed rules, caches responses at edge points of presence and connects to the origin over Private Link. The storage firewall blocks all direct internet access so every request is processed by Front Door.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-static-site, location: westeurope}
+      groups:
+        - {label: Global edge}
+  elements:
+    - {tf: azurerm_cdn_frontdoor_profile, name: afd-premium, in: group:Global edge}
+    - {tf: azurerm_cdn_frontdoor_firewall_policy, name: afd-waf-policy, in: group:Global edge}
+    - {tf: azurerm_storage_account, name: ststaticsite, in: resource_group:rg-static-site}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: afd-premium, label: HTTPS custom domain (TLS at PoP), step: 1}
+    - {from: afd-waf-policy, to: afd-premium, label: WAF inspection, step: 2}
+    - {from: afd-premium, to: ststaticsite, label: cache miss, Private Link to $web, step: 3}
+    - {from: internet, to: ststaticsite, label: direct access blocked by storage firewall, style: {dash: dashed, inactive: true}}
+
+- slug: event-driven-fanout-functions
+  title: Event-driven fan-out with Event Grid, Service Bus and Azure Functions
+  category: serverless
+  tags: [event-grid, service-bus, functions, pub-sub, fan-out, competing-consumers]
+  source: https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/event-driven
+  description: Producers publish events to an Event Grid custom topic; subscriptions fan the same event out to Azure Functions and to a Service Bus topic whose subscriptions feed further Functions for queue-based load leveling and competing consumers. Consumers are decoupled from producers and from each other, persist results to Cosmos DB and dead-letter failed messages.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-events, location: westeurope}
+      groups:
+        - {label: Event ingestion}
+        - {label: Event consumers}
+  elements:
+    - {tf: azurerm_eventgrid_topic, name: egt-orders, in: group:Event ingestion}
+    - {tf: azurerm_servicebus_namespace, name: sb-orders, in: group:Event ingestion}
+    - {tf: azurerm_servicebus_topic, name: sbt-order-events, in: group:Event ingestion}
+    - {tf: azurerm_service_plan, name: plan-functions, in: group:Event consumers}
+    - {tf: azurerm_linux_function_app, name: func-notify, in: group:Event consumers}
+    - {tf: azurerm_linux_function_app, name: func-inventory, in: group:Event consumers}
+    - {tf: azurerm_linux_function_app, name: func-billing, in: group:Event consumers}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-orders, in: resource_group:rg-events}
+    - {tf: azurerm_application_insights, name: appi-events, in: resource_group:rg-events}
+  actors: [client, saas]
+  flows:
+    - {from: client, to: egt-orders, label: publish OrderCreated (HTTPS), step: 1}
+    - {from: egt-orders, to: func-notify, label: Event Grid trigger (push), step: 2}
+    - {from: egt-orders, to: sbt-order-events, label: Event Grid subscription, step: 2}
+    - {from: sbt-order-events, to: func-inventory, label: Service Bus trigger (PeekLock), step: 3}
+    - {from: sbt-order-events, to: func-billing, label: Service Bus trigger (PeekLock), step: 3}
+    - {from: func-inventory, to: cosmos-orders, label: write inventory state, step: 4}
+    - {from: func-billing, to: saas, label: invoke billing SaaS API, step: 4}
+    - {from: func-notify, to: saas, label: send notification, step: 4}
+    - {from: func-billing, to: appi-events, label: telemetry with correlation ID}
+
+- slug: apim-functions-cosmos-api
+  title: API Management landing zone with Application Gateway, Functions and Cosmos DB
+  category: serverless
+  tags: [api-management, application-gateway, functions, cosmos-db, private-endpoint, waf]
+  source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/integration/app-gateway-internal-api-management-function
+  description: Application Gateway with WAF is the public entry point and routes to an API Management instance deployed in internal virtual network mode, which exposes Azure Functions back ends reachable only through private endpoints. Key Vault holds the gateway TLS certificates, private DNS zones resolve the internal endpoints, and Cosmos DB is the serverless data store behind the API.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-apim-lz, location: westeurope}
+      vnets:
+        - name: vnet-apim
+          cidr: 10.2.0.0/16
+          subnets:
+            - {name: snet-appgateway, cidr: 10.2.1.0/24}
+            - {name: snet-apim, cidr: 10.2.2.0/24}
+            - {name: snet-privateendpoints, cidr: 10.2.3.0/24}
+            - {name: snet-functions-integration, cidr: 10.2.4.0/24}
+  elements:
+    - {tf: azurerm_application_gateway, name: appgw-apim, in: subnet:snet-appgateway}
+    - {tf: azurerm_api_management, name: apim-premium-internal, in: subnet:snet-apim}
+    - {tf: azurerm_linux_function_app, name: func-orders-api, in: subnet:snet-functions-integration}
+    - {tf: azurerm_private_endpoint, name: pe-func-orders, in: subnet:snet-privateendpoints}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-orders, in: resource_group:rg-apim-lz}
+    - {tf: azurerm_private_endpoint, name: pe-cosmos, in: subnet:snet-privateendpoints}
+    - {tf: azurerm_key_vault, name: kv-apim, in: resource_group:rg-apim-lz}
+    - {tf: azurerm_private_dns_zone, name: azure-api.net, in: resource_group:rg-apim-lz}
+    - {tf: azurerm_application_insights, name: appi-apim, in: resource_group:rg-apim-lz}
+  actors: [client, mobile]
+  flows:
+    - {from: client, to: appgw-apim, label: HTTPS api.contoso.com, step: 1}
+    - {from: mobile, to: appgw-apim, label: HTTPS, step: 1}
+    - {from: appgw-apim, to: apim-premium-internal, label: WAF-inspected, private IP, step: 2}
+    - {from: apim-premium-internal, to: pe-func-orders, label: policy-governed backend call, step: 3}
+    - {from: pe-func-orders, to: func-orders-api, label: private link}
+    - {from: func-orders-api, to: pe-cosmos, label: Cosmos DB SDK via vnet integration, step: 4}
+    - {from: pe-cosmos, to: cosmos-orders, label: private link}
+    - {from: appgw-apim, to: kv-apim, label: TLS certificate}
+    - {from: apim-premium-internal, to: appi-apim, label: telemetry}
+
+- slug: aks-baseline-microservices
+  title: AKS baseline cluster with microservices behind Application Gateway
+  category: containers
+  tags: [aks, microservices, application-gateway, hub-spoke, private-cluster, acr, key-vault, ingress]
+  source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/containers/aks/baseline-aks
+  description: A private AKS cluster runs in a spoke virtual network peered to a hub that provides Azure Firewall egress and Azure Bastion access; Application Gateway with WAF terminates public TLS and forwards to an internal load balancer fronting the ingress that routes to microservice pods. Container Registry and Key Vault are reached only through private endpoints and all egress is forced through the hub firewall by user-defined routes.
+  containers:
+    - subscription: connectivity
+      resource_group: {name: rg-enterprise-networking-hubs, location: westeurope}
+      vnets:
+        - name: vnet-hub
+          cidr: 10.200.0.0/24
+          subnets:
+            - {name: AzureFirewallSubnet, cidr: 10.200.0.0/26}
+            - {name: AzureBastionSubnet, cidr: 10.200.0.96/27}
+    - subscription: workload
+      resource_group: {name: rg-bu0001a0008, location: westeurope}
+      vnets:
+        - name: vnet-spoke-bu0001a0008
+          cidr: 10.240.0.0/16
+          subnets:
+            - {name: snet-clusternodes, cidr: 10.240.0.0/22}
+            - {name: snet-clusteringressservices, cidr: 10.240.4.0/28}
+            - {name: snet-privatelinkendpoints, cidr: 10.240.4.32/28}
+            - {name: snet-applicationgateway, cidr: 10.240.5.0/24}
+  elements:
+    - {tf: azurerm_firewall, name: fw-hub, in: subnet:AzureFirewallSubnet}
+    - {tf: azurerm_bastion_host, name: bastion-hub, in: subnet:AzureBastionSubnet}
+    - {tf: azurerm_application_gateway, name: appgw-waf, in: subnet:snet-applicationgateway}
+    - {tf: azurerm_lb, name: ilb-ingress, in: subnet:snet-clusteringressservices}
+    - {tf: azurerm_kubernetes_cluster, name: aks-private, in: subnet:snet-clusternodes}
+    - {tf: azurerm_container_registry, name: acr-premium, in: resource_group:rg-bu0001a0008}
+    - {tf: azurerm_private_endpoint, name: pe-acr, in: subnet:snet-privatelinkendpoints}
+    - {tf: azurerm_key_vault, name: kv-aks, in: resource_group:rg-bu0001a0008}
+    - {tf: azurerm_log_analytics_workspace, name: law-aks, in: resource_group:rg-bu0001a0008}
+  actors: [users, user, internet]
+  flows:
+    - {from: users, to: appgw-waf, label: HTTPS bicycle.contoso.com, step: 1}
+    - {from: appgw-waf, to: ilb-ingress, label: HTTPS *.aks-ingress.contoso.com, step: 2}
+    - {from: ilb-ingress, to: aks-private, label: ingress controller, step: 3}
+    - {from: vnet:vnet-hub, to: vnet:vnet-spoke-bu0001a0008, link: azurerm_virtual_network_peering, label: peering}
+    - {from: aks-private, to: fw-hub, label: egress via UDR, step: 4}
+    - {from: fw-hub, to: internet, label: allowed FQDNs only}
+    - {from: aks-private, to: pe-acr, label: image pull (private link)}
+    - {from: pe-acr, to: acr-premium}
+    - {from: aks-private, to: kv-aks, label: Secrets Store CSI driver}
+    - {from: user, to: bastion-hub, label: operator tunnel to private API server}
+    - {from: aks-private, to: law-aks, label: Container Insights}
+
+- slug: databricks-lakehouse-data-lake
+  title: Modern analytics with Azure Databricks and Data Lake Storage
+  category: data
+  tags: [data-lake, databricks, delta-lake, medallion, event-hubs, data-factory, power-bi]
+  source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/azure-databricks-modern-analytics-architecture
+  description: Batch data lands in Data Lake Storage through Data Factory and streaming data arrives via Event Hubs; Azure Databricks curates both into Bronze, Silver and Gold Delta Lake layers, trains models tracked in MLflow and serves SQL warehouses to Power BI. Unity Catalog and Microsoft Purview govern the lake, Key Vault holds non-identity credentials and Azure Monitor observes the platform.
+  containers:
+    - subscription: data-platform
+      resource_group: {name: rg-lakehouse, location: westeurope}
+      groups:
+        - {label: Ingest}
+        - {label: Store}
+        - {label: Process and serve}
+        - {label: Governance}
+  elements:
+    - {tf: azurerm_eventhub_namespace, name: evhns-telemetry, in: group:Ingest}
+    - {tf: azurerm_data_factory, name: adf-batch-ingest, in: group:Ingest}
+    - {tf: azurerm_storage_account, name: stdatalake, in: group:Store}
+    - {tf: azurerm_databricks_workspace, name: dbw-lakehouse, in: group:Process and serve}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-serving, in: group:Process and serve}
+    - {tf: azurerm_purview_account, name: pview-governance, in: group:Governance}
+    - {tf: azurerm_key_vault, name: kv-lakehouse, in: group:Governance}
+    - {tf: azurerm_log_analytics_workspace, name: law-lakehouse, in: group:Governance}
+  actors: [database, saas, device, users]
+  flows:
+    - {from: device, to: evhns-telemetry, label: streaming events (AMQP/Kafka), step: 1}
+    - {from: evhns-telemetry, to: dbw-lakehouse, label: streaming pipeline, step: 2}
+    - {from: database, to: adf-batch-ingest, label: batch extract, step: 1}
+    - {from: adf-batch-ingest, to: stdatalake, label: raw load (bronze), step: 2}
+    - {from: dbw-lakehouse, to: stdatalake, label: silver / gold Delta tables, step: 3}
+    - {from: dbw-lakehouse, to: mlw-serving, label: MLflow model deploy, step: 4}
+    - {from: dbw-lakehouse, to: saas, label: SQL warehouse to Power BI, step: 5}
+    - {from: pview-governance, to: stdatalake, label: scan and classify}
+    - {from: dbw-lakehouse, to: kv-lakehouse, label: secret scope}
+
+- slug: stream-analytics-event-hubs
+  title: Stream processing with Event Hubs and Stream Analytics
+  category: data
+  tags: [streaming, event-hubs, stream-analytics, cosmos-db, real-time, power-bi]
+  source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/data/stream-processing-stream-analytics
+  description: Two device streams (taxi ride and fare data) are ingested into separate event hubs partitioned by the same key, joined and aggregated over a hopping window by a Stream Analytics job, and the results are written as JSON documents to Cosmos DB for Power BI analysis. Azure Monitor dashboards track throttling and streaming-unit utilization to trigger scale-out.
+  containers:
+    - subscription: data-platform
+      resource_group: {name: rg-stream-processing, location: westeurope}
+      groups:
+        - {label: Ingestion}
+        - {label: Processing}
+        - {label: Serving}
+  elements:
+    - {tf: azurerm_eventhub_namespace, name: evhns-taxi, in: group:Ingestion}
+    - {tf: azurerm_eventhub, name: evh-taxi-ride, in: group:Ingestion}
+    - {tf: azurerm_eventhub, name: evh-taxi-fare, in: group:Ingestion}
+    - {tf: azurerm_stream_analytics_job, name: asa-taxi-tips, in: group:Processing}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-taxi, in: group:Serving}
+    - {tf: azurerm_log_analytics_workspace, name: law-stream, in: resource_group:rg-stream-processing}
+  actors: [device, saas]
+  flows:
+    - {from: device, to: evh-taxi-ride, label: ride events (JSON), step: 1}
+    - {from: device, to: evh-taxi-fare, label: fare events (CSV), step: 1}
+    - {from: evh-taxi-ride, to: asa-taxi-tips, label: PARTITION BY PartitionId, step: 2}
+    - {from: evh-taxi-fare, to: asa-taxi-tips, label: PARTITION BY PartitionId, step: 2}
+    - {from: asa-taxi-tips, to: cosmos-taxi, label: hopping window 5m/1m results, step: 3}
+    - {from: cosmos-taxi, to: saas, label: Power BI, step: 4}
+    - {from: asa-taxi-tips, to: law-stream, label: SU% and throttling metrics}
+
+- slug: foundry-rag-chat-baseline
+  title: Baseline chat with Azure OpenAI and AI Search (RAG)
+  category: ml
+  tags: [rag, azure-openai, ai-search, app-service, private-endpoint, firewall]
+  source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-microsoft-foundry-chat
+  description: A chat UI on zone-redundant App Service behind Application Gateway with WAF invokes an agent that grounds Azure OpenAI model calls with vector search results from Azure AI Search and persists conversation state in Cosmos DB and Storage. All PaaS dependencies are reached over private endpoints from a segmented virtual network, and agent egress to external tools passes through Azure Firewall FQDN rules.
+  containers:
+    - subscription: workload
+      resource_group: {name: rg-chat-baseline, location: westeurope}
+      vnets:
+        - name: vnet-chat
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: snet-appServicePlan, cidr: 10.0.0.0/24}
+            - {name: snet-appGateway, cidr: 10.0.1.0/24}
+            - {name: snet-privateEndpoints, cidr: 10.0.2.0/27}
+            - {name: AzureFirewallSubnet, cidr: 10.0.5.0/26}
+  elements:
+    - {tf: azurerm_application_gateway, name: appgw-waf, in: subnet:snet-appGateway}
+    - {tf: azurerm_linux_web_app, name: web-chat-ui, in: subnet:snet-appServicePlan}
+    - {tf: azurerm_cognitive_account, name: azure-openai, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_private_endpoint, name: pe-openai, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_search_service, name: srch-grounding, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_private_endpoint, name: pe-search, in: subnet:snet-privateEndpoints}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-agent-threads, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_storage_account, name: stagentfiles, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_key_vault, name: kv-chat, in: resource_group:rg-chat-baseline}
+    - {tf: azurerm_firewall, name: fw-egress, in: subnet:AzureFirewallSubnet}
+  actors: [users, internet, idp]
+  flows:
+    - {from: users, to: appgw-waf, label: HTTPS, step: 1}
+    - {from: appgw-waf, to: web-chat-ui, label: HTTPS via private endpoint, step: 2}
+    - {from: web-chat-ui, to: pe-openai, label: chat completion (managed identity), step: 3}
+    - {from: pe-openai, to: azure-openai, label: private link}
+    - {from: web-chat-ui, to: pe-search, label: vector / semantic retrieval, step: 4}
+    - {from: pe-search, to: srch-grounding, label: private link}
+    - {from: web-chat-ui, to: cosmos-agent-threads, label: persist conversation, step: 5}
+    - {from: web-chat-ui, to: stagentfiles, label: uploaded files}
+    - {from: web-chat-ui, to: fw-egress, label: external tool calls, step: 6}
+    - {from: fw-egress, to: internet, label: allowed FQDNs}
+    - {from: appgw-waf, to: kv-chat, label: TLS certificate}
+    - {from: users, to: idp, label: Microsoft Entra ID authentication}
+
+- slug: multi-region-active-passive-web
+  title: Multi-region active-passive App Service with Front Door and geo-replicated SQL
+  category: resilience
+  tags: [multi-region, active-passive, front-door, app-service, sql-failover-group, disaster-recovery]
+  source: https://learn.microsoft.com/en-us/azure/architecture/web-apps/guides/multi-region-app-service/multi-region-app-service
+  description: Identical App Service deployments run in a primary and a secondary region; Azure Front Door routes all traffic to the priority-1 primary origin and fails over to the priority-2 secondary origin when health probes detect an outage. Azure SQL Database replicates asynchronously to the secondary region through a failover group so the app always connects via the read-write listener.
+  containers:
+    - subscription: workload
+      groups:
+        - {label: Global}
+      resource_groups:
+        - {name: rg-web-primary, location: westeurope}
+        - {name: rg-web-secondary, location: northeurope}
+  elements:
+    - {tf: azurerm_cdn_frontdoor_profile, name: afd-web, in: group:Global}
+    - {tf: azurerm_cdn_frontdoor_firewall_policy, name: afd-waf, in: group:Global}
+    - {tf: azurerm_service_plan, name: plan-primary, in: resource_group:rg-web-primary}
+    - {tf: azurerm_linux_web_app, name: web-primary, in: resource_group:rg-web-primary}
+    - {tf: azurerm_mssql_server, name: sql-primary, in: resource_group:rg-web-primary}
+    - {tf: azurerm_service_plan, name: plan-secondary, in: resource_group:rg-web-secondary}
+    - {tf: azurerm_linux_web_app, name: web-secondary, in: resource_group:rg-web-secondary}
+    - {tf: azurerm_mssql_server, name: sql-secondary, in: resource_group:rg-web-secondary}
+    - {tf: azurerm_mssql_failover_group, name: fog-app, in: resource_group:rg-web-primary}
+  actors: [users]
+  flows:
+    - {from: users, to: afd-web, label: HTTPS (WAF at edge), step: 1}
+    - {from: afd-waf, to: afd-web, label: WAF policy}
+    - {from: afd-web, to: web-primary, label: priority 1 (normal operations), step: 2}
+    - {from: afd-web, to: web-secondary, label: priority 2 (after failed health probes), step: 3, style: {dash: dashed}}
+    - {from: web-primary, to: fog-app, label: read-write listener, step: 4}
+    - {from: web-secondary, to: fog-app, label: read-write listener after failover, style: {dash: dashed}}
+    - {from: fog-app, to: sql-primary, label: primary}
+    - {from: fog-app, to: sql-secondary, label: async geo-replication, step: 5}
+
+- slug: aks-cicd-azure-pipelines-helm
+  title: Microservices CI/CD to AKS with Azure Pipelines, Container Registry and Helm
+  category: devops
+  tags: [ci-cd, azure-pipelines, azure-devops, helm, aks, acr, key-vault]
+  source: https://learn.microsoft.com/en-us/azure/architecture/microservices/ci-cd-kubernetes
+  description: Commits and pull requests trigger Azure Pipelines that build and scan container images, push them and versioned Helm charts to Azure Container Registry, then a release pipeline deploys the chart to a dev/QA cluster, waits for approval, retags the image for production and deploys to the production AKS cluster. Key Vault supplies runtime secrets via the Secrets Store CSI driver, and Azure Monitor observes clusters and applications.
+  containers:
+    - subscription: workload
+      groups:
+        - {label: Azure DevOps}
+      resource_groups:
+        - {name: rg-shared-registry, location: westeurope}
+      vnets:
+        - name: vnet-nonprod
+          cidr: 10.1.0.0/16
+          subnets: [{name: snet-aks-nonprod, cidr: 10.1.0.0/22}]
+        - name: vnet-prod
+          cidr: 10.2.0.0/16
+          subnets: [{name: snet-aks-prod, cidr: 10.2.0.0/22}]
+  elements:
+    - {tf: azurerm_container_registry, name: acr-shared, in: resource_group:rg-shared-registry}
+    - {tf: azurerm_kubernetes_cluster, name: aks-dev-qa, in: subnet:snet-aks-nonprod}
+    - {tf: azurerm_kubernetes_cluster, name: aks-prod, in: subnet:snet-aks-prod}
+    - {tf: azurerm_key_vault, name: kv-microservices, in: resource_group:rg-shared-registry}
+    - {tf: azurerm_log_analytics_workspace, name: law-aks, in: resource_group:rg-shared-registry}
+    - {tf: azurerm_application_insights, name: appi-delivery, in: resource_group:rg-shared-registry}
+  actors: [user, users, saas]
+  flows:
+    - {from: user, to: saas, label: push feature branch / open PR to Azure Repos, step: 1}
+    - {from: saas, to: acr-shared, label: "CI: push image and Helm chart (versioned", signed), step: 2}
+    - {from: saas, to: aks-dev-qa, label: "CD: helm upgrade --install (QA)", step: 3}
+    - {from: users, to: saas, label: approver sign-off, step: 4}
+    - {from: saas, to: aks-prod, label: helm upgrade (production), step: 5}
+    - {from: aks-prod, to: acr-shared, label: image pull (AcrPull identity)}
+    - {from: aks-prod, to: kv-microservices, label: Secrets Store CSI driver}
+    - {from: aks-prod, to: law-aks, label: Container Insights / Prometheus}

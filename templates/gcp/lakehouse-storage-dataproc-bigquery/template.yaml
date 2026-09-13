@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.cloud.google.com/dataproc/docs/guides/create-lakehouse); edit freely.
+title: Data lakehouse with Cloud Storage, Dataproc Spark and BigQuery
+category: data
+tags:
+- data lake
+- lakehouse
+- iceberg
+- dataproc
+- bigquery
+- biglake
+- cloud storage
+source: https://docs.cloud.google.com/dataproc/docs/guides/create-lakehouse
+description: Raw and curated data land in Cloud Storage as Apache Iceberg tables, processed by Spark on a Dataproc cluster and catalogued through the BigLake Iceberg REST catalog so BigQuery can query the
+  same tables directly. Cloud Composer orchestrates batch ingestion and Storage Transfer Service moves on-premises files into the landing bucket.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-lake-prj, type: gcp.project, name: lake-prj, props: {project_id: lake-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-lake-vpc, type: gcp.vpc, name: lake-vpc, parent: prj-lake-prj}
+- {id: sub-dataproc-sub, type: gcp.subnetwork, name: dataproc-sub, parent: vpc-lake-vpc, props: {cidr: 10.50.0.0/22, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: raw-landing-bucket, type: gcp.storage_bucket, name: raw-landing-bucket, parent: prj-lake-prj}
+- {id: iceberg-warehouse-bucket, type: gcp.storage_bucket, name: iceberg-warehouse-bucket, parent: prj-lake-prj}
+- {id: onprem-file-transfer, type: gcp.res.google_storage_transfer_job, name: onprem-file-transfer, parent: prj-lake-prj, props: {description: changeme}}
+- {id: spark-cluster, type: gcp.res.google_dataproc_cluster, name: spark-cluster, parent: sub-dataproc-sub, props: {name: changeme}}
+- {id: analytics-ds, type: gcp.bigquery_dataset, name: analytics_ds, parent: prj-lake-prj}
+- {id: lake-orchestrator, type: gcp.res.google_composer_environment, name: lake-orchestrator, parent: sub-dataproc-sub, props: {name: changeme}}
+- {id: enterprise-lake, type: gcp.res.google_dataplex_lake, name: enterprise-lake, parent: prj-lake-prj, props: {location: westeurope, name: changeme}}
+edges:
+- {from: dc-on-premises, to: onprem-file-transfer, label: on-prem files, step: '1'}
+- {from: onprem-file-transfer, to: raw-landing-bucket, label: land raw objects, step: '2'}
+- {from: lake-orchestrator, to: spark-cluster, label: schedule Spark jobs, step: '3'}
+- {from: spark-cluster, to: raw-landing-bucket, label: read raw, step: '4'}
+- {from: spark-cluster, to: iceberg-warehouse-bucket, label: write Iceberg tables, step: '5'}
+- {from: analytics-ds, to: iceberg-warehouse-bucket, label: BigLake Iceberg tables, step: '6'}
+- {from: users, to: analytics-ds, label: BigQuery SQL, step: '7'}
+- {from: enterprise-lake, to: iceberg-warehouse-bucket, label: govern / discover}
+steps:
+- {n: '1', text: 'datacenter → onprem-file-transfer: on-prem files'}
+- {n: '2', text: 'onprem-file-transfer → raw-landing-bucket: land raw objects'}
+- {n: '3', text: 'lake-orchestrator → spark-cluster: schedule Spark jobs'}
+- {n: '4', text: 'spark-cluster → raw-landing-bucket: read raw'}
+- {n: '5', text: 'spark-cluster → iceberg-warehouse-bucket: write Iceberg tables'}
+- {n: '6', text: 'analytics_ds → iceberg-warehouse-bucket: BigLake Iceberg tables'}
+- {n: '7', text: 'users → analytics_ds: BigQuery SQL'}

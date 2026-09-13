@@ -90,7 +90,7 @@ func LoadLayered(builtin fs.FS, extra ...fs.FS) (*Catalog, error) {
 	if len(extra) == 0 {
 		return base, nil
 	}
-	merged := &Catalog{Links: base.Links, Spans: base.Spans, Providers: base.Providers, serviceIcons: base.serviceIcons, serviceDefaults: base.serviceDefaults, serviceLabels: base.serviceLabels, resourceIcons: base.resourceIcons}
+	merged := &Catalog{Links: base.Links, Spans: base.Spans, Providers: base.Providers, serviceIcons: base.serviceIcons, serviceDefaults: base.serviceDefaults, serviceLabels: base.serviceLabels, resourceIcons: base.resourceIcons, firstLevel: base.firstLevel}
 	byID := map[string]int{}
 	for _, e := range base.Entries {
 		byID[e.ID] = len(merged.Entries)
@@ -176,6 +176,7 @@ func (c *Catalog) loadServiceIcons(fsys fs.FS) {
 	c.serviceDefaults = map[string]map[string]string{}
 	c.serviceLabels = map[string]map[string]string{}
 	c.resourceIcons = map[string]map[string]string{}
+	c.firstLevel = map[string]map[string]bool{}
 	dirs, err := fs.ReadDir(fsys, "catalog/icons")
 	if err != nil {
 		return
@@ -189,16 +190,22 @@ func (c *Catalog) loadServiceIcons(fsys fs.FS) {
 			continue
 		}
 		var doc struct {
-			Prefixes  map[string]string `yaml:"prefixes"`
-			Defaults  map[string]string `yaml:"defaults"`
-			Labels    map[string]string `yaml:"labels"`
-			Resources map[string]string `yaml:"resources"`
+			Prefixes   map[string]string `yaml:"prefixes"`
+			Defaults   map[string]string `yaml:"defaults"`
+			Labels     map[string]string `yaml:"labels"`
+			Resources  map[string]string `yaml:"resources"`
+			FirstLevel []string          `yaml:"first_level"`
 		}
 		if yaml.Unmarshal(raw, &doc) == nil {
 			c.serviceIcons[d.Name()] = doc.Prefixes
 			c.serviceDefaults[d.Name()] = doc.Defaults
 			c.serviceLabels[d.Name()] = doc.Labels
 			c.resourceIcons[d.Name()] = doc.Resources
+			fl := map[string]bool{}
+			for _, t := range doc.FirstLevel {
+				fl[t] = true
+			}
+			c.firstLevel[d.Name()] = fl
 		}
 	}
 }

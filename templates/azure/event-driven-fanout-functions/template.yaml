@@ -1,0 +1,67 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/event-driven); edit freely.
+title: Event-driven fan-out with Event Grid, Service Bus and Azure Functions
+category: serverless
+tags:
+- event-grid
+- service-bus
+- functions
+- pub-sub
+- fan-out
+- competing-consumers
+source: https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/event-driven
+description: Producers publish events to an Event Grid custom topic; subscriptions fan the same event out to Azure Functions and to a Service Bus topic whose subscriptions feed further Functions for queue-based
+  load leveling and competing consumers. Consumers are decoupled from producers and from each other, persist results to Cosmos DB and dead-letter failed messages.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-events, type: azure.resource_group, name: rg-events, parent: sub-workload, props: {location: westeurope}}
+- {id: grp-event-ingestion, type: common.group, name: Event ingestion, parent: rg-rg-events}
+- {id: grp-event-consumers, type: common.group, name: Event consumers, parent: rg-rg-events}
+- {id: client, type: common.client, name: client}
+- {id: saas, type: common.saas, name: saas}
+- {id: egt-orders, type: azure.res.azurerm_eventgrid_topic, name: egt-orders, parent: grp-event-ingestion, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: sb-orders, type: azure.res.azurerm_servicebus_namespace, name: sb-orders, parent: grp-event-ingestion, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: sbt-order-events, type: azure.res.azurerm_servicebus_topic, name: sbt-order-events, parent: grp-event-ingestion, props: {name: changeme, namespace_id: changeme}}
+- {id: plan-functions, type: azure.res.azurerm_service_plan, name: plan-functions, parent: grp-event-consumers, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: func-notify
+  type: azure.res.azurerm_linux_function_app
+  name: func-notify
+  parent: grp-event-consumers
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: func-inventory
+  type: azure.res.azurerm_linux_function_app
+  name: func-inventory
+  parent: grp-event-consumers
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: func-billing
+  type: azure.res.azurerm_linux_function_app
+  name: func-billing
+  parent: grp-event-consumers
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: cosmos-orders
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-orders
+  parent: rg-rg-events
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: appi-events, type: azure.res.azurerm_application_insights, name: appi-events, parent: rg-rg-events, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: client, to: egt-orders, label: publish OrderCreated (HTTPS), step: '1'}
+- {from: egt-orders, to: func-notify, label: Event Grid trigger (push), step: '2'}
+- {from: egt-orders, to: sbt-order-events, label: Event Grid subscription, step: '2'}
+- {from: sbt-order-events, to: func-inventory, label: Service Bus trigger (PeekLock), step: '3'}
+- {from: sbt-order-events, to: func-billing, label: Service Bus trigger (PeekLock), step: '3'}
+- {from: func-inventory, to: cosmos-orders, label: write inventory state, step: '4'}
+- {from: func-billing, to: saas, label: invoke billing SaaS API, step: '4'}
+- {from: func-notify, to: saas, label: send notification, step: '4'}
+- {from: func-billing, to: appi-events, label: telemetry with correlation ID}
+steps:
+- {n: '1', text: 'client → egt-orders: publish OrderCreated (HTTPS)'}
+- {n: '2', text: 'egt-orders → func-notify: Event Grid trigger (push)'}
+- {n: '3', text: 'sbt-order-events → func-inventory: Service Bus trigger (PeekLock)'}
+- {n: '4', text: 'func-inventory → cosmos-orders: write inventory state'}

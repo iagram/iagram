@@ -1,0 +1,33 @@
+# Generated from the official reference (https://docs.aws.amazon.com/vpc/latest/peering/peering-scenarios.html); edit freely.
+title: VPC peering to a central shared-services VPC
+category: networking
+tags:
+- vpc peering
+- shared services
+- hub
+- private routing
+source: https://docs.aws.amazon.com/vpc/latest/peering/peering-scenarios.html
+description: Two application VPCs each peer with a central VPC that hosts shared resources such as directory and monitoring servers. Peering is not transitive, so the spokes cannot reach each other through
+  the hub; each VPC route table carries a route for the peer CIDR through its peering connection.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-shared, type: aws.vpc, name: shared, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-shared-a, type: aws.availability_zone, name: a, parent: vpc-shared, props: {zone: a}}
+- {id: sub-shared-private-a, type: aws.subnet, name: shared-private-a, parent: az-shared-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: vpc-app-a, type: aws.vpc, name: app-a, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-app-a-a, type: aws.availability_zone, name: a, parent: vpc-app-a, props: {zone: a}}
+- {id: sub-app-a-private-a, type: aws.subnet, name: app-a-private-a, parent: az-app-a-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-app-b, type: aws.vpc, name: app-b, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}}
+- {id: az-app-b-a, type: aws.availability_zone, name: a, parent: vpc-app-b, props: {zone: a}}
+- {id: sub-app-b-private-a, type: aws.subnet, name: app-b-private-a, parent: az-app-b-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
+- {id: directory-server, type: aws.ec2_instance, name: directory-server, parent: sub-shared-private-a}
+- {id: app-a-server, type: aws.ec2_instance, name: app-a-server, parent: sub-app-a-private-a}
+- {id: app-b-server, type: aws.ec2_instance, name: app-b-server, parent: sub-app-b-private-a}
+edges:
+- {from: app-a-server, to: directory-server, label: 10.0.0.0/16 via pcx-shared-a}
+- {from: app-b-server, to: directory-server, label: 10.0.0.0/16 via pcx-shared-b}
+- {from: vpc-app-a, to: vpc-shared, label: requester, step: '1', link: aws_vpc_peering_connection}
+- {from: vpc-app-b, to: vpc-shared, label: requester, link: aws_vpc_peering_connection}
+steps:
+- {n: '1', text: 'vpc:app-a → vpc:shared: requester'}

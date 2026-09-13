@@ -1,0 +1,82 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/integration/app-gateway-internal-api-management-function); edit freely.
+title: API Management landing zone with Application Gateway, Functions and Cosmos DB
+category: serverless
+tags:
+- api-management
+- application-gateway
+- functions
+- cosmos-db
+- private-endpoint
+- waf
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/integration/app-gateway-internal-api-management-function
+description: Application Gateway with WAF is the public entry point and routes to an API Management instance deployed in internal virtual network mode, which exposes Azure Functions back ends reachable
+  only through private endpoints. Key Vault holds the gateway TLS certificates, private DNS zones resolve the internal endpoints, and Cosmos DB is the serverless data store behind the API.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-apim-lz, type: azure.resource_group, name: rg-apim-lz, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-apim, type: azure.vnet, name: vnet-apim, parent: rg-rg-apim-lz, props: {cidr: 10.2.0.0/16}}
+- {id: sub-snet-appgateway, type: azure.subnet, name: snet-appgateway, parent: vpc-vnet-apim, props: {cidr: 10.2.1.0/24}}
+- {id: sub-snet-apim, type: azure.subnet, name: snet-apim, parent: vpc-vnet-apim, props: {cidr: 10.2.2.0/24}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateendpoints, parent: vpc-vnet-apim, props: {cidr: 10.2.3.0/24}}
+- {id: sub-snet-functions-integration, type: azure.subnet, name: snet-functions-integration, parent: vpc-vnet-apim, props: {cidr: 10.2.4.0/24}}
+- {id: client, type: common.client, name: client}
+- {id: mobile, type: common.mobile, name: mobile}
+- id: appgw-apim
+  type: azure.res.azurerm_application_gateway
+  name: appgw-apim
+  parent: sub-snet-appgateway
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: apim-premium-internal, type: azure.res.azurerm_api_management, name: apim-premium-internal, parent: sub-snet-apim, props: {location: westeurope, name: changeme, publisher_email: changeme, publisher_name: changeme,
+    resource_group_name: changeme, sku_name: changeme}}
+- id: func-orders-api
+  type: azure.res.azurerm_linux_function_app
+  name: func-orders-api
+  parent: sub-snet-functions-integration
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: pe-func-orders
+  type: azure.res.azurerm_private_endpoint
+  name: pe-func-orders
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: cosmos-orders
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-orders
+  parent: rg-rg-apim-lz
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- id: pe-cosmos
+  type: azure.res.azurerm_private_endpoint
+  name: pe-cosmos
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: kv-apim, type: azure.key_vault, name: kv-apim, parent: rg-rg-apim-lz}
+- {id: azure-api-net, type: azure.res.azurerm_private_dns_zone, name: azure-api.net, parent: rg-rg-apim-lz, props: {name: changeme, resource_group_name: changeme}}
+- {id: appi-apim, type: azure.res.azurerm_application_insights, name: appi-apim, parent: rg-rg-apim-lz, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: client, to: appgw-apim, label: HTTPS api.contoso.com, step: '1'}
+- {from: mobile, to: appgw-apim, label: HTTPS, step: '1'}
+- {from: appgw-apim, to: apim-premium-internal, label: WAF-inspected, step: '2'}
+- {from: apim-premium-internal, to: pe-func-orders, label: policy-governed backend call, step: '3'}
+- {from: pe-func-orders, to: func-orders-api, label: private link}
+- {from: func-orders-api, to: pe-cosmos, label: Cosmos DB SDK via vnet integration, step: '4'}
+- {from: pe-cosmos, to: cosmos-orders, label: private link}
+- {from: appgw-apim, to: kv-apim, label: TLS certificate}
+- {from: apim-premium-internal, to: appi-apim, label: telemetry}
+steps:
+- {n: '1', text: 'client → appgw-apim: HTTPS api.contoso.com'}
+- {n: '2', text: 'appgw-apim → apim-premium-internal: WAF-inspected'}
+- {n: '3', text: 'apim-premium-internal → pe-func-orders: policy-governed backend call'}
+- {n: '4', text: 'func-orders-api → pe-cosmos: Cosmos DB SDK via vnet integration'}

@@ -1,0 +1,62 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/web-apps/guides/multi-region-app-service/multi-region-app-service); edit freely.
+title: Multi-region active-passive App Service with Front Door and geo-replicated SQL
+category: resilience
+tags:
+- multi-region
+- active-passive
+- front-door
+- app-service
+- sql-failover-group
+- disaster-recovery
+source: https://learn.microsoft.com/en-us/azure/architecture/web-apps/guides/multi-region-app-service/multi-region-app-service
+description: Identical App Service deployments run in a primary and a secondary region; Azure Front Door routes all traffic to the priority-1 primary origin and fails over to the priority-2 secondary origin
+  when health probes detect an outage. Azure SQL Database replicates asynchronously to the secondary region through a failover group so the app always connects via the read-write listener.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-workload, type: azure.resource_group, name: rg-workload, parent: sub-workload, props: {location: westeurope}}
+- {id: rg-rg-web-primary, type: azure.resource_group, name: rg-web-primary, parent: sub-workload, props: {location: westeurope}}
+- {id: rg-rg-web-secondary, type: azure.resource_group, name: rg-web-secondary, parent: sub-workload, props: {location: northeurope}}
+- {id: grp-global, type: common.group, name: Global, parent: sub-workload}
+- {id: users, type: common.users, name: users}
+- {id: afd-web, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-web, parent: grp-global, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: afd-waf, type: azure.res.azurerm_cdn_frontdoor_firewall_policy, name: afd-waf, parent: grp-global, props: {mode: changeme, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: plan-primary, type: azure.res.azurerm_service_plan, name: plan-primary, parent: rg-rg-web-primary, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-primary
+  type: azure.res.azurerm_linux_web_app
+  name: web-primary
+  parent: rg-rg-web-primary
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: sql-primary, type: azure.res.azurerm_mssql_server, name: sql-primary, parent: rg-rg-web-primary, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: plan-secondary, type: azure.res.azurerm_service_plan, name: plan-secondary, parent: rg-rg-web-secondary, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-secondary
+  type: azure.res.azurerm_linux_web_app
+  name: web-secondary
+  parent: rg-rg-web-secondary
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: sql-secondary, type: azure.res.azurerm_mssql_server, name: sql-secondary, parent: rg-rg-web-secondary, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- id: fog-app
+  type: azure.res.azurerm_mssql_failover_group
+  name: fog-app
+  parent: rg-rg-web-primary
+  props:
+    name: changeme
+    partner_server: []
+    read_write_endpoint_failover_policy: {}
+    server_id: changeme
+edges:
+- {from: users, to: afd-web, label: HTTPS (WAF at edge), step: '1'}
+- {from: afd-waf, to: afd-web, label: WAF policy}
+- {from: afd-web, to: web-primary, label: priority 1 (normal operations), step: '2'}
+- {from: afd-web, to: web-secondary, label: priority 2 (after failed health probes), step: '3'}
+- {from: web-primary, to: fog-app, label: read-write listener, step: '4'}
+- {from: web-secondary, to: fog-app, label: read-write listener after failover}
+- {from: fog-app, to: sql-primary, label: primary}
+- {from: fog-app, to: sql-secondary, label: async geo-replication, step: '5'}
+steps:
+- {n: '1', text: 'users → afd-web: HTTPS (WAF at edge)'}
+- {n: '2', text: 'afd-web → web-primary: priority 1 (normal operations)'}
+- {n: '3', text: 'afd-web → web-secondary: priority 2 (after failed health probes)'}
+- {n: '4', text: 'web-primary → fog-app: read-write listener'}
+- {n: '5', text: 'fog-app → sql-secondary: async geo-replication'}

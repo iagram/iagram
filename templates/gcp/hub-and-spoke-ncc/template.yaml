@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/deploy-hub-spoke-vpc-network-topology); edit freely.
+title: Hub-and-spoke network with Network Connectivity Center
+category: networking
+tags:
+- ncc
+- hub and spoke
+- vpc spokes
+- cloud nat
+- hybrid
+source: https://docs.cloud.google.com/architecture/deploy-hub-spoke-vpc-network-topology
+description: A central hub VPC hosts shared services and terminates on-premises connectivity, while per-business-unit workload VPCs attach as Network Connectivity Center spokes for transitive, full-bandwidth
+  routing. Each network keeps its own Cloud NAT gateway for outbound internet and DNS peering zones resolve names across the hub.
+nodes:
+- {id: prj-hub-prj, type: gcp.project, name: hub-prj, props: {project_id: hub-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-hub, type: gcp.vpc, name: hub, parent: prj-hub-prj}
+- {id: sub-hub-sub, type: gcp.subnetwork, name: hub-sub, parent: vpc-hub, props: {cidr: 10.0.1.0/24, region: europe-west1}}
+- {id: prj-spoke-a-prj, type: gcp.project, name: spoke-a-prj, props: {project_id: spoke-a-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-spoke-a-prj}
+- {id: sub-spoke-a-sub, type: gcp.subnetwork, name: spoke-a-sub, parent: vpc-spoke-a, props: {cidr: 10.1.1.0/24, region: europe-west1}}
+- {id: prj-spoke-b-prj, type: gcp.project, name: spoke-b-prj, props: {project_id: spoke-b-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-spoke-b, type: gcp.vpc, name: spoke-b, parent: prj-spoke-b-prj}
+- {id: sub-spoke-b-sub, type: gcp.subnetwork, name: spoke-b-sub, parent: vpc-spoke-b, props: {cidr: 10.2.1.0/24, region: europe-west1}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: internet, type: common.internet, name: internet}
+- {id: ncc-hub, type: gcp.res.google_network_connectivity_hub, name: ncc-hub, parent: prj-hub-prj}
+- {id: hub-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: hub-vpn-gw, parent: vpc-hub, props: {name: changeme, network: changeme}}
+- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub, props: {name: changeme, network: changeme}}
+- {id: hub-nat, type: gcp.res.google_compute_router_nat, name: hub-nat, parent: vpc-hub, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+- {id: shared-svc-vm, type: gcp.compute_instance, name: shared-svc-vm, parent: sub-hub-sub}
+- {id: workload-a-vm, type: gcp.compute_instance, name: workload-a-vm, parent: sub-spoke-a-sub}
+- {id: workload-b-vm, type: gcp.compute_instance, name: workload-b-vm, parent: sub-spoke-b-sub}
+- {id: corp-private-zone, type: gcp.cloud_dns_zone, name: corp-private-zone, parent: prj-hub-prj, props: {domain: example.com}}
+edges:
+- {from: dc-on-premises, to: hub-vpn-gw, label: HA VPN / IPsec, step: '1'}
+- {from: hub-vpn-gw, to: hub-router, label: BGP routes, step: '2'}
+- {from: ncc-hub, to: vpc-spoke-a, link: google_network_connectivity_spoke}
+- {from: ncc-hub, to: vpc-spoke-b, link: google_network_connectivity_spoke}
+- {from: workload-a-vm, to: workload-b-vm, label: transitive via NCC, step: '3'}
+- {from: workload-a-vm, to: shared-svc-vm, label: shared services, step: '4'}
+- {from: hub-nat, to: internet, label: outbound NAT, step: '5'}
+steps:
+- {n: '1', text: 'datacenter → hub-vpn-gw: HA VPN / IPsec'}
+- {n: '2', text: 'hub-vpn-gw → hub-router: BGP routes'}
+- {n: '3', text: 'workload-a-vm → workload-b-vm: transitive via NCC'}
+- {n: '4', text: 'workload-a-vm → shared-svc-vm: shared services'}
+- {n: '5', text: 'hub-nat → internet: outbound NAT'}

@@ -1,0 +1,38 @@
+title: Enterprise landing zone with organization, folders and Shared VPC
+category: security
+tags: [landing zone, resource hierarchy, folders, org policy, shared vpc, enterprise foundations]
+source: https://docs.cloud.google.com/architecture/landing-zones
+description: The organization node holds bootstrap, common, network, production and non-production folders with dedicated projects for Terraform seeding, centralized logging, organization policy and the Shared VPC network hub. Cloud Identity federates the identity provider, organization policy constraints enforce guardrails, and aggregated log sinks stream audit logs into the logging project.
+nodes:
+  - {id: idp, type: common.idp, name: identity provider, props: {caption: Cloud Identity federation}}
+  - {id: org, type: common.group, name: org example.com, props: {color: "#5f6368", solid: true}}
+  - {id: f-boot, type: common.group, name: fldr-bootstrap, parent: org}
+  - {id: f-common, type: common.group, name: fldr-common, parent: org}
+  - {id: f-net, type: common.group, name: fldr-network, parent: org}
+  - {id: f-prod, type: common.group, name: fldr-production, parent: org}
+  - {id: f-nonprod, type: common.group, name: fldr-nonproduction, parent: org}
+  - {id: prj-seed, type: project, name: prj-seed-terraform, parent: f-boot, props: {project_id: prj-seed-123456, region: europe-west1}}
+  - {id: tf-state, type: storage_bucket, name: tf-state, parent: prj-seed}
+  - {id: prj-log, type: project, name: prj-logging, parent: f-common, props: {project_id: prj-logging-123456, region: europe-west1}}
+  - {id: sink-bucket, type: storage_bucket, name: org-audit-logs, parent: prj-log}
+  - {id: sink-bq, type: bigquery_dataset, name: audit_logs, parent: prj-log}
+  - {id: prj-policy, type: project, name: prj-org-policy, parent: f-common, props: {project_id: prj-policy-123456, region: europe-west1}}
+  - {id: org-policy, tf: google_org_policy_policy, name: restrict-external-ips, parent: prj-policy, props: {name: "organizations/000000000000/policies/compute.vmExternalIpAccess", parent: "organizations/000000000000"}}
+  - {id: prj-net, type: project, name: prj-net-hub, parent: f-net, props: {project_id: prj-net-hub-123456, region: europe-west1}}
+  - {id: vpc-shared, type: vpc, name: vpc-shared-base, parent: prj-net}
+  - {id: sb-prod, type: subnetwork, name: sb-prod-ew1, parent: vpc-shared, props: {cidr: 10.100.0.0/20, region: europe-west1}}
+  - {id: prj-app, type: project, name: prj-app-prod, parent: f-prod, props: {project_id: prj-app-prod-123456, region: europe-west1}}
+  - {id: app-assets, type: storage_bucket, name: app-assets, parent: prj-app}
+  - {id: prj-app-dev, type: project, name: prj-app-dev, parent: f-nonprod, props: {project_id: prj-app-dev-123456, region: europe-west1}}
+edges:
+  - {from: idp, to: org, label: SSO, step: "1"}
+  - {from: prj-seed, to: org, label: Terraform deploys the hierarchy, step: "2"}
+  - {from: org-policy, to: f-prod, label: org policy constraint inherited, step: "3"}
+  - {from: prj-app, to: sink-bucket, label: aggregated audit logs, step: "4"}
+  - {from: prj-app, to: vpc-shared, label: Shared VPC service project, step: "5", style: {direction: none}}
+steps:
+  - {n: "1", text: "Cloud Identity federates the corporate identity provider; groups are bound with IAM at folder level."}
+  - {n: "2", text: "The seed project runs Terraform (Cloud Build) that creates folders, projects and policies."}
+  - {n: "3", text: "Organization policy constraints set in the policy project are inherited by production folders."}
+  - {n: "4", text: "An aggregated log sink at the organization streams audit logs into the logging project."}
+  - {n: "5", text: "Application projects attach to the Shared VPC host and consume its subnets."}

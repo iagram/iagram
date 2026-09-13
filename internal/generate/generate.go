@@ -271,6 +271,11 @@ func (g *gen) resourceBlocks() error {
 		for k, v := range provide.Values(g.c, g.nodes, n) {
 			block[k] = v
 		}
+		if _, has := e.Property("name"); has {
+			if _, set := block["name"]; !set {
+				block["name"] = n.Name // generated resources take the element's name
+			}
+		}
 		withName := map[string]any{"name": n.Name}
 		for k, v := range n.Props {
 			withName[k] = v

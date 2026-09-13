@@ -1,0 +1,74 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/global-deployment-compute-engine-spanner); edit freely.
+title: Global multi-region deployment with Compute Engine and Spanner
+category: resilience
+tags:
+- multi region
+- spanner
+- global load balancer
+- active active
+- managed instance groups
+source: https://docs.cloud.google.com/architecture/global-deployment-compute-engine-spanner
+description: A global external Application Load Balancer sends users to the nearest healthy region, where regional managed instance groups spanning three zones run the web tier and a cross-region internal
+  load balancer forwards to application-tier MIGs. All regions read and write a synchronously replicated multi-region Spanner instance, so a full regional outage fails over without data loss.
+nodes:
+- {id: prj-global-app-prj, type: gcp.project, name: global-app-prj, props: {project_id: global-app-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-global-vpc, type: gcp.vpc, name: global-vpc, parent: prj-global-app-prj}
+- {id: sub-web-sub-ew1, type: gcp.subnetwork, name: web-sub-ew1, parent: vpc-global-vpc, props: {cidr: 10.80.1.0/24, region: europe-west1}}
+- {id: sub-app-sub-ew1, type: gcp.subnetwork, name: app-sub-ew1, parent: vpc-global-vpc, props: {cidr: 10.80.2.0/24, region: europe-west1}}
+- {id: sub-web-sub-ew4, type: gcp.subnetwork, name: web-sub-ew4, parent: vpc-global-vpc, props: {cidr: 10.81.1.0/24, region: europe-west4}}
+- {id: sub-app-sub-ew4, type: gcp.subnetwork, name: app-sub-ew4, parent: vpc-global-vpc, props: {cidr: 10.81.2.0/24, region: europe-west4}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: global-https-lb, type: gcp.res.google_compute_global_forwarding_rule, name: global-https-lb, parent: prj-global-app-prj, props: {name: changeme, target: changeme}}
+- id: web-mig-ew1
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: web-mig-ew1
+  parent: sub-web-sub-ew1
+  props:
+    base_instance_name: changeme
+    name: changeme
+    version: []
+- id: web-mig-ew4
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: web-mig-ew4
+  parent: sub-web-sub-ew4
+  props:
+    base_instance_name: changeme
+    name: changeme
+    version: []
+- {id: app-internal-lb, type: gcp.res.google_compute_forwarding_rule, name: app-internal-lb, parent: vpc-global-vpc, props: {name: changeme}}
+- id: app-mig-ew1
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: app-mig-ew1
+  parent: sub-app-sub-ew1
+  props:
+    base_instance_name: changeme
+    name: changeme
+    version: []
+- id: app-mig-ew4
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: app-mig-ew4
+  parent: sub-app-sub-ew4
+  props:
+    base_instance_name: changeme
+    name: changeme
+    version: []
+- {id: global-spanner, type: gcp.res.google_spanner_instance, name: global-spanner, parent: prj-global-app-prj, props: {config: changeme, display_name: changeme}}
+- {id: nat-ew1, type: gcp.res.google_compute_router_nat, name: nat-ew1, parent: vpc-global-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+edges:
+- {from: users, to: global-https-lb, label: anycast HTTPS, step: '1'}
+- {from: global-https-lb, to: web-mig-ew1, label: nearest region, step: '2'}
+- {from: global-https-lb, to: web-mig-ew4, label: failover region, step: '2'}
+- {from: web-mig-ew1, to: app-internal-lb, label: internal HTTP, step: '3'}
+- {from: web-mig-ew4, to: app-internal-lb, label: internal HTTP, step: '3'}
+- {from: app-internal-lb, to: app-mig-ew1, label: cross-region ILB, step: '4'}
+- {from: app-internal-lb, to: app-mig-ew4, label: cross-region ILB, step: '4'}
+- {from: app-mig-ew1, to: global-spanner, label: read/write, step: '5'}
+- {from: app-mig-ew4, to: global-spanner, label: read/write, step: '5'}
+- {from: nat-ew1, to: internet, label: egress}
+steps:
+- {n: '1', text: 'users → global-https-lb: anycast HTTPS'}
+- {n: '2', text: 'global-https-lb → web-mig-ew1: nearest region'}
+- {n: '3', text: 'web-mig-ew1 → app-internal-lb: internal HTTP'}
+- {n: '4', text: 'app-internal-lb → app-mig-ew1: cross-region ILB'}
+- {n: '5', text: 'app-mig-ew1 → global-spanner: read/write'}

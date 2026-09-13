@@ -24,6 +24,7 @@ links:
     from: customer_gateway_id
     to: transit_gateway_id|vpn_gateway_id
     style: {direction: none, dash: dashed, color: "#1d8bd6"}
+    defaults: {type: ipsec.1}
   aws_dx_gateway_association:
     label: Direct Connect gateway association
     from: dx_gateway_id
@@ -54,3 +55,24 @@ links:
     from: {attr: resource_share_arn, output: arn}
     to: {attr: resource_arn, output: arn, types: [aws_subnet, aws_ec2_transit_gateway, aws_route53_resolver_rule, aws_ec2_capacity_reservation, aws_networkmanager_core_network]}
     style: {direction: none, dash: dashed}
+  aws_sns_topic_subscription:
+    label: subscription
+    from: {attr: topic_arn, output: arn}
+    to: {attr: endpoint, output: arn, types: [aws_sqs_queue, aws_lambda_function, aws_kinesis_firehose_delivery_stream]}
+    style: {dash: dashed}
+    defaults: {protocol: sqs}
+  aws_lambda_event_source_mapping:
+    label: event source
+    from: {attr: event_source_arn, output: arn, types: [aws_sqs_queue, aws_kinesis_stream, aws_dynamodb_table, aws_msk_cluster, aws_mq_broker]}
+    to: {attr: function_name, output: arn, types: [aws_lambda_function]}
+    style: {dash: dashed}
+  aws_cloudwatch_event_target:
+    label: target
+    from: {attr: rule, output: name, types: [aws_cloudwatch_event_rule]}
+    to: {attr: arn, output: arn, types: [aws_lambda_function, aws_sqs_queue, aws_sns_topic, aws_sfn_state_machine, aws_kinesis_stream, aws_kinesis_firehose_delivery_stream, aws_ecs_cluster, aws_cloudwatch_event_bus, aws_cloudwatch_log_group]}
+    style: {dash: dashed}
+  aws_organizations_policy_attachment:
+    label: policy attachment
+    from: {attr: policy_id, types: [aws_organizations_policy]}
+    to: {attr: target_id, types: [aws_organizations_organizational_unit, aws_organizations_account, aws_organizations_organization]}
+    style: {direction: none, dash: dotted}

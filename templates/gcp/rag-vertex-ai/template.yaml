@@ -1,0 +1,49 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/rag-capable-gen-ai-app-using-vertex-ai); edit freely.
+title: RAG for generative AI with Vertex AI, Vector Search and Cloud Run
+category: ml
+tags:
+- rag
+- vertex ai
+- vector search
+- embeddings
+- gemini
+- cloud run
+- alloydb
+source: https://docs.cloud.google.com/architecture/rag-capable-gen-ai-app-using-vertex-ai
+description: Documents uploaded to Cloud Storage trigger Pub/Sub-driven Cloud Run functions that chunk the text, generate Vertex AI embeddings and store vectors in a Vertex AI Vector Search index and AlloyDB
+  pgvector. A Cloud Run serving service embeds each user query, retrieves nearest neighbours, grounds a Gemini prompt with the results, and logs request, response and evaluation scores to BigQuery.
+nodes:
+- {id: prj-genai-prj, type: gcp.project, name: genai-prj, props: {project_id: genai-prj-123456, project: changeme, region: europe-west4}}
+- {id: vpc-genai-vpc, type: gcp.vpc, name: genai-vpc, parent: prj-genai-prj}
+- {id: sub-genai-sub, type: gcp.subnetwork, name: genai-sub, parent: vpc-genai-vpc, props: {cidr: 10.70.0.0/22, region: europe-west4}}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: docs-ingest-bucket, type: gcp.storage_bucket, name: docs-ingest-bucket, parent: prj-genai-prj}
+- {id: new-document-topic, type: gcp.pubsub_topic, name: new-document-topic, parent: prj-genai-prj}
+- {id: chunk-embed-fn, type: gcp.res.google_cloudfunctions2_function, name: chunk-embed-fn, parent: prj-genai-prj, props: {location: westeurope, name: changeme}}
+- {id: docs-vector-index, type: gcp.res.google_vertex_ai_index, name: docs-vector-index, parent: prj-genai-prj, props: {display_name: changeme}}
+- {id: docs-index-endpoint, type: gcp.res.google_vertex_ai_index_endpoint, name: docs-index-endpoint, parent: prj-genai-prj, props: {display_name: changeme}}
+- {id: rag-alloydb, type: gcp.res.google_alloydb_cluster, name: rag-alloydb, parent: sub-genai-sub, props: {cluster_id: changeme, location: westeurope}}
+- {id: rag-serving-svc, type: gcp.cloud_run_service, name: rag-serving-svc, parent: prj-genai-prj}
+- {id: quality-eval-svc, type: gcp.cloud_run_service, name: quality-eval-svc, parent: prj-genai-prj}
+- {id: rag-logs-ds, type: gcp.bigquery_dataset, name: rag_logs_ds, parent: prj-genai-prj}
+edges:
+- {from: client, to: docs-ingest-bucket, label: upload documents, step: '1'}
+- {from: docs-ingest-bucket, to: new-document-topic, label: object notification, step: '2'}
+- {from: new-document-topic, to: chunk-embed-fn, label: trigger, step: '3'}
+- {from: chunk-embed-fn, to: docs-vector-index, label: Vertex AI embeddings, step: '4'}
+- {from: chunk-embed-fn, to: rag-alloydb, label: store chunks + pgvector, step: '4'}
+- {from: docs-vector-index, to: docs-index-endpoint, label: deployed index}
+- {from: users, to: rag-serving-svc, label: HTTPS prompt, step: '5'}
+- {from: rag-serving-svc, to: docs-index-endpoint, label: nearest-neighbour query, step: '6'}
+- {from: rag-serving-svc, to: quality-eval-svc, label: Gemini answer, step: '7'}
+- {from: quality-eval-svc, to: rag-logs-ds, label: scores and logs, step: '8'}
+steps:
+- {n: '1', text: 'client → docs-ingest-bucket: upload documents'}
+- {n: '2', text: 'docs-ingest-bucket → new-document-topic: object notification'}
+- {n: '3', text: 'new-document-topic → chunk-embed-fn: trigger'}
+- {n: '4', text: 'chunk-embed-fn → docs-vector-index: Vertex AI embeddings'}
+- {n: '5', text: 'users → rag-serving-svc: HTTPS prompt'}
+- {n: '6', text: 'rag-serving-svc → docs-index-endpoint: nearest-neighbour query'}
+- {n: '7', text: 'rag-serving-svc → quality-eval-svc: Gemini answer'}
+- {n: '8', text: 'quality-eval-svc → rag_logs_ds: scores and logs'}

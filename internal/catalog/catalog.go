@@ -265,6 +265,7 @@ type Catalog struct {
 	serviceDefaults map[string]map[string]string // provider -> prefix -> default tf type of the family
 	serviceLabels   map[string]map[string]string // provider -> icon file -> palette label
 	resourceIcons   map[string]map[string]string // provider -> prefix -> resource (line-art) icon, drawing only
+	firstLevel      map[string]map[string]bool   // provider -> tf type forced first-level (services.yaml first_level)
 	attachCache     map[string][]AttachmentOption
 	attachKinds     map[string]map[string]bool // provider -> tf type -> is attachment
 }
@@ -348,6 +349,11 @@ func (c *Catalog) Connection(fromType, toType string) (Rule, bool) {
 		if to, ok := c.Get(toType); ok && to.Provider == from.Provider {
 			return Rule{From: fromType, To: toType, Kind: ReferencesKind, Label: "references", Style: &ConnStyle{Dash: "dotted"}}, true
 		}
+	}
+	// Anything else within one provider is a documentation arrow, as in the
+	// official diagrams: drawn, never generated.
+	if fok && tok && from.Provider == to.Provider {
+		return Rule{From: fromType, To: toType, Kind: FlowKind}, true
 	}
 	return Rule{}, false
 }

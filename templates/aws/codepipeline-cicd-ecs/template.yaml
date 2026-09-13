@@ -1,0 +1,64 @@
+# Generated from the official reference (https://docs.aws.amazon.com/codepipeline/latest/userguide/ecs-cd-pipeline.html); edit freely.
+title: CI/CD pipeline with CodePipeline, CodeBuild, and ECR deploying to ECS
+category: devops
+tags:
+- codepipeline
+- codebuild
+- ecr
+- ecs
+- ci/cd
+- continuous deployment
+source: https://docs.aws.amazon.com/codepipeline/latest/userguide/ecs-cd-pipeline.html
+description: A push to the source repository starts a CodePipeline execution whose build stage runs CodeBuild to build the container image, push it to ECR, and emit an imagedefinitions.json artifact. The
+  deploy stage updates the ECS service with the new task definition revision, and the service performs a rolling replacement behind its load balancer.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-east-1}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-app-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-app-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: github-connection, type: aws.res.aws_codestarconnections_connection, name: github-connection, parent: grp-pipeline, props: {name: changeme}}
+- id: app-pipeline
+  type: aws.res.aws_codepipeline
+  name: app-pipeline
+  parent: grp-pipeline
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: grp-pipeline}
+- id: docker-build
+  type: aws.res.aws_codebuild_project
+  name: docker-build
+  parent: grp-pipeline
+  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
+- {id: app-image, type: aws.res.aws_ecr_repository, name: app-image, parent: grp-pipeline, props: {name: changeme}}
+- {id: app-cluster, type: aws.res.aws_ecs_cluster, name: app-cluster, parent: vpc-app, props: {name: changeme}}
+- {id: app-alb, type: aws.alb, name: app-alb, parent: vpc-app}
+edges:
+- {from: user, to: github-connection, label: git push, step: '1'}
+- {from: github-connection, to: app-pipeline, label: Source stage trigger, step: '2'}
+- {from: app-pipeline, to: pipeline-artifacts, label: source artifact, step: '3'}
+- {from: app-pipeline, to: docker-build, label: Build stage, step: '4'}
+- {from: docker-build, to: app-image, label: 'docker push :commit-sha', step: '5'}
+- {from: docker-build, to: pipeline-artifacts, label: imagedefinitions.json, step: '6'}
+- {from: app-pipeline, to: app-cluster, label: Deploy stage (ECS action), step: '7'}
+- {from: app-image, to: app-cluster, label: pull image, step: '8'}
+- {from: users, to: app-alb, label: HTTPS}
+- {from: app-alb, to: app-cluster, label: rolling update}
+steps:
+- {n: '1', text: 'user → github-connection: git push'}
+- {n: '2', text: 'github-connection → app-pipeline: Source stage trigger'}
+- {n: '3', text: 'app-pipeline → pipeline-artifacts: source artifact'}
+- {n: '4', text: 'app-pipeline → docker-build: Build stage'}
+- {n: '5', text: 'docker-build → app-image: docker push :commit-sha'}
+- {n: '6', text: 'docker-build → pipeline-artifacts: imagedefinitions.json'}
+- {n: '7', text: 'app-pipeline → app-cluster: Deploy stage (ECS action)'}
+- {n: '8', text: 'app-image → app-cluster: pull image'}

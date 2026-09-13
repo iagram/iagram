@@ -137,6 +137,7 @@ export function MenuBar() {
   const menus: Record<string, Item[]> = {
     File: [
       { label: 'New diagram', onClick: () => (s.nodes.length === 0 || confirm('Clear the canvas? The file is not touched until you save.')) && s.newDiagram() },
+      { label: 'Reference architectures…', onClick: () => s.setShowGallery(true) },
       { label: 'Open .iad file…', onClick: () => fileInput.current?.click() },
       { label: 'Import from Terraform configuration (.tf)…', onClick: () => hclInput.current?.click() },
       { label: 'Import from Terraform state…', onClick: () => stateInput.current?.click() },

@@ -1,0 +1,73 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/web-apps/app-service/architectures/baseline-zone-redundant); edit freely.
+title: Zone-redundant App Service web app with Azure SQL
+category: web
+tags:
+- app-service
+- application-gateway
+- waf
+- private-link
+- azure-sql
+- zone-redundant
+source: https://learn.microsoft.com/en-us/azure/architecture/web-apps/app-service/architectures/baseline-zone-redundant
+description: Application Gateway with WAF is the single public entry point and forwards requests over a private endpoint to a zone-redundant App Service plan; the app uses virtual network integration to
+  reach Azure SQL Database, Key Vault and Storage exclusively through private endpoints and private DNS zones. SQL Database runs in a zone-redundant tier and all PaaS public endpoints are disabled.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-app-baseline, type: azure.resource_group, name: rg-app-baseline, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-app, type: azure.vnet, name: vnet-app, parent: rg-rg-app-baseline, props: {cidr: 10.0.0.0/16}}
+- {id: sub-appservicesubnet, type: azure.subnet, name: AppServiceSubnet, parent: vpc-vnet-app, props: {cidr: 10.0.0.0/24}}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-app, props: {cidr: 10.0.1.0/24}}
+- {id: sub-privateendpointssubnet, type: azure.subnet, name: PrivateEndpointsSubnet, parent: vpc-vnet-app, props: {cidr: 10.0.2.0/27}}
+- {id: users, type: common.users, name: users}
+- {id: idp, type: common.idp, name: idp}
+- id: appgw-waf
+  type: azure.res.azurerm_application_gateway
+  name: appgw-waf
+  parent: sub-gatewaysubnet
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: plan-premium-zr, type: azure.res.azurerm_service_plan, name: plan-premium-zr, parent: rg-rg-app-baseline, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-app
+  type: azure.res.azurerm_linux_web_app
+  name: web-app
+  parent: sub-appservicesubnet
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: pe-webapp
+  type: azure.res.azurerm_private_endpoint
+  name: pe-webapp
+  parent: sub-privateendpointssubnet
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: sql-server, type: azure.res.azurerm_mssql_server, name: sql-server, parent: rg-rg-app-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- id: pe-sql
+  type: azure.res.azurerm_private_endpoint
+  name: pe-sql
+  parent: sub-privateendpointssubnet
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: kv-app, type: azure.key_vault, name: kv-app, parent: rg-rg-app-baseline}
+- {id: st-deploy-zrs, type: azure.storage_account, name: st-deploy-zrs, parent: rg-rg-app-baseline}
+- {id: privatelink-azurewebsites-net, type: azure.res.azurerm_private_dns_zone, name: privatelink.azurewebsites.net, parent: rg-rg-app-baseline, props: {name: changeme, resource_group_name: changeme}}
+- {id: appi-web, type: azure.res.azurerm_application_insights, name: appi-web, parent: rg-rg-app-baseline, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: appgw-waf, label: HTTPS, step: '1'}
+- {from: appgw-waf, to: pe-webapp, label: HTTPS via private endpoint, step: '2'}
+- {from: pe-webapp, to: web-app, label: private link, step: '3'}
+- {from: web-app, to: pe-sql, label: TDS 1433 via vnet integration, step: '4'}
+- {from: pe-sql, to: sql-server, label: private link}
+- {from: web-app, to: kv-app, label: Key Vault references}
+- {from: web-app, to: st-deploy-zrs, label: WEBSITE_RUN_FROM_PACKAGE}
+- {from: plan-premium-zr, to: web-app, label: hosts}
+- {from: users, to: idp, label: Microsoft Entra ID sign-in}
+- {from: web-app, to: appi-web, label: telemetry}
+steps:
+- {n: '1', text: 'users → appgw-waf: HTTPS'}
+- {n: '2', text: 'appgw-waf → pe-webapp: HTTPS via private endpoint'}
+- {n: '3', text: 'pe-webapp → web-app: private link'}
+- {n: '4', text: 'web-app → pe-sql: TDS 1433 via vnet integration'}

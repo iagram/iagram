@@ -1,0 +1,40 @@
+title: Multi-account landing zone with AWS Organizations
+category: security
+tags: [organizations, landing zone, control tower, log archive, audit, organizational units, scp]
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/designing-control-tower-landing-zone/account-structure.html
+description: The management account owns the organization and its OUs. The Security OU holds a Log Archive account that centralizes CloudTrail and Config logs in immutable S3 buckets and an Audit account for Security Hub and GuardDuty findings; the Infrastructure OU holds shared networking; the Workloads OU holds application accounts under prod and dev.
+nodes:
+  - {id: idp, type: common.idp, name: corporate IdP, props: {caption: IAM Identity Center federation}}
+  - {id: org, type: organization, name: corp, props: {root_id: r-ab12}}
+  - {id: ou-sec, type: organizational_unit, name: Security, parent: org}
+  - {id: ou-infra, type: organizational_unit, name: Infrastructure, parent: org}
+  - {id: ou-work, type: organizational_unit, name: Workloads, parent: org}
+  - {id: ou-prod, type: organizational_unit, name: Prod, parent: ou-work}
+  - {id: ou-dev, type: organizational_unit, name: Dev, parent: ou-work}
+  - {id: acct-log, type: account, name: log-archive, parent: ou-sec, props: {assume_role_arn: "arn:aws:iam::111111111111:role/OrganizationAccountAccessRole"}}
+  - {id: reg-log, type: region, name: eu-west-1, parent: acct-log, props: {region: eu-west-1}}
+  - {id: trail-logs, type: s3_bucket, name: central-cloudtrail-logs, parent: reg-log, props: {versioning: true}}
+  - {id: config-logs, type: s3_bucket, name: central-config-logs, parent: reg-log, props: {versioning: true}}
+  - {id: acct-audit, type: account, name: audit, parent: ou-sec, props: {assume_role_arn: "arn:aws:iam::222222222222:role/OrganizationAccountAccessRole"}}
+  - {id: reg-audit, type: region, name: eu-west-1, parent: acct-audit, props: {region: eu-west-1}}
+  - {id: sechub, tf: aws_securityhub_account, name: security-hub-admin, parent: reg-audit}
+  - {id: guardduty, tf: aws_guardduty_detector, name: guardduty-admin, parent: reg-audit}
+  - {id: acct-net, type: account, name: network, parent: ou-infra, props: {assume_role_arn: "arn:aws:iam::333333333333:role/OrganizationAccountAccessRole"}}
+  - {id: reg-net, type: region, name: eu-west-1, parent: acct-net, props: {region: eu-west-1}}
+  - {id: tgw, tf: aws_ec2_transit_gateway, name: shared-tgw, parent: reg-net, props: {description: shared transit gateway}}
+  - {id: acct-prod, type: account, name: shop-prod, parent: ou-prod, props: {assume_role_arn: "arn:aws:iam::444444444444:role/deployer"}}
+  - {id: reg-prod, type: region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+  - {id: trail-prod, tf: aws_cloudtrail, name: org-trail, parent: reg-prod, props: {name: org-trail, s3_bucket_name: central-cloudtrail-logs}}
+  - {id: acct-dev, type: account, name: shop-dev, parent: ou-dev, props: {assume_role_arn: "arn:aws:iam::555555555555:role/deployer"}}
+edges:
+  - {from: idp, to: org, label: SSO federation, step: "1"}
+  - {from: trail-prod, to: trail-logs, label: org-wide API logs, step: "2"}
+  - {from: acct-prod, to: config-logs, label: AWS Config snapshots, step: "3"}
+  - {from: acct-prod, to: sechub, label: findings, step: "4"}
+  - {from: acct-prod, to: guardduty, label: threat findings}
+  - {from: tgw, to: acct-prod, label: shared via RAM, style: {dash: dashed, direction: none}}
+steps:
+  - {n: "1", text: "Workforce users federate through IAM Identity Center into permission sets in each account."}
+  - {n: "2", text: "An organization trail in every account writes to the Log Archive bucket."}
+  - {n: "3", text: "AWS Config delivers snapshots to the Log Archive; the Audit account aggregates compliance."}
+  - {n: "4", text: "Security Hub and GuardDuty findings flow to the delegated administrator in the Audit account."}

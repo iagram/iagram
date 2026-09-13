@@ -1,0 +1,47 @@
+title: Azure landing zone with management groups and platform subscriptions
+category: security
+tags: [landing-zone, management-groups, governance, azure-policy, connectivity, identity, hub-spoke]
+source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/
+description: A management group hierarchy under an intermediate root separates Platform (Identity, Management, Connectivity) from application Landing zones (Corp, Online) and Sandbox, and Azure Policy assignments at each level enforce guardrails inherited by every subscription. Platform subscriptions host centralized logging, domain services and a hub network with Azure Firewall and hybrid gateways.
+nodes:
+  - {id: dc, type: common.datacenter, name: on-premises, props: {cidr: 172.16.0.0/16}}
+  - {id: idp, type: common.idp, name: Microsoft Entra ID}
+  - {id: root, type: common.group, name: Contoso (intermediate root), props: {color: "#5f6368", solid: true}}
+  - {id: mg-platform, type: common.group, name: Platform, parent: root}
+  - {id: mg-lz, type: common.group, name: Landing zones, parent: root}
+  - {id: mg-sandbox, type: common.group, name: Sandbox, parent: root}
+  - {id: sub-identity, type: subscription, name: identity, parent: mg-platform}
+  - {id: rg-identity, type: resource_group, name: rg-identity, parent: sub-identity, props: {location: westeurope}}
+  - {id: vnet-identity, type: vnet, name: vnet-identity, parent: rg-identity, props: {cidr: 10.10.0.0/24}}
+  - {id: snet-adds, type: subnet, name: snet-adds, parent: vnet-identity, props: {cidr: 10.10.0.0/26}}
+  - {id: adds, type: virtual_machine, name: vm-adds-1, parent: snet-adds}
+  - {id: sub-mgmt, type: subscription, name: management, parent: mg-platform}
+  - {id: rg-mgmt, type: resource_group, name: rg-management, parent: sub-mgmt, props: {location: westeurope}}
+  - {id: policy, tf: azurerm_management_group_policy_assignment, name: alz-guardrails, parent: rg-mgmt, props: {management_group_id: "/providers/Microsoft.Management/managementGroups/contoso", policy_definition_id: "/providers/Microsoft.Authorization/policySetDefinitions/alz"}}
+  - {id: law, tf: azurerm_log_analytics_workspace, name: law-platform, parent: rg-mgmt}
+  - {id: sub-conn, type: subscription, name: connectivity, parent: mg-platform}
+  - {id: rg-conn, type: resource_group, name: rg-connectivity, parent: sub-conn, props: {location: westeurope}}
+  - {id: vnet-hub, type: vnet, name: vnet-hub-westeurope, parent: rg-conn, props: {cidr: 10.0.0.0/16}}
+  - {id: snet-fw, type: subnet, name: AzureFirewallSubnet, parent: vnet-hub, props: {cidr: 10.0.0.0/26}}
+  - {id: fw, tf: azurerm_firewall, name: fw-hub, parent: snet-fw, props: {sku_name: AZFW_VNet, sku_tier: Standard}}
+  - {id: snet-gw, type: subnet, name: GatewaySubnet, parent: vnet-hub, props: {cidr: 10.0.1.0/27}}
+  - {id: ergw, tf: azurerm_virtual_network_gateway, name: gw-expressroute, parent: snet-gw, props: {type: ExpressRoute, sku: Standard}}
+  - {id: sub-corp, type: subscription, name: lz-corp-app-a1, parent: mg-lz}
+  - {id: rg-corp, type: resource_group, name: rg-corp-app-a1, parent: sub-corp, props: {location: westeurope}}
+  - {id: vnet-corp, type: vnet, name: vnet-corp-app-a1, parent: rg-corp, props: {cidr: 10.1.0.0/16}}
+  - {id: sub-online, type: subscription, name: lz-online-app-p1, parent: mg-lz}
+  - {id: rg-online, type: resource_group, name: rg-online-app-p1, parent: sub-online, props: {location: westeurope}}
+  - {id: st-online, type: storage_account, name: stonlineapp, parent: rg-online}
+  - {id: sub-sandbox, type: subscription, name: sandbox-1, parent: mg-sandbox}
+edges:
+  - {from: idp, to: sub-identity, label: Microsoft Entra ID / AD DS, step: "1"}
+  - {from: dc, to: ergw, label: ExpressRoute / VPN, step: "2"}
+  - {from: vnet-hub, to: vnet-corp, link: azurerm_virtual_network_peering, label: hub to landing-zone spoke}
+  - {from: vnet-corp, to: fw, label: egress inspection, step: "3"}
+  - {from: st-online, to: law, label: diagnostics to central Log Analytics, step: "4"}
+  - {from: policy, to: mg-lz, label: Azure Policy assignment (deny/audit), style: {dash: dotted, direction: none}}
+steps:
+  - {n: "1", text: "Identity: Microsoft Entra ID with domain controllers in the identity subscription."}
+  - {n: "2", text: "Connectivity: the hub virtual network terminates ExpressRoute or VPN from on-premises."}
+  - {n: "3", text: "Corp landing zones peer to the hub and egress through Azure Firewall."}
+  - {n: "4", text: "Every subscription sends diagnostics to the central Log Analytics workspace."}

@@ -1,0 +1,54 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/data-lakes-on-aws/); edit freely.
+title: Data lake with S3, Glue, Lake Formation, and Athena
+category: data
+tags:
+- data lake
+- s3
+- glue
+- athena
+- lake formation
+- etl
+source: https://docs.aws.amazon.com/solutions/data-lakes-on-aws/
+description: Source data lands in a raw S3 bucket, Glue crawlers register its schema in the Glue Data Catalog, and Glue ETL jobs transform it into partitioned Parquet in a curated bucket. Lake Formation
+  governs table and column access, and analysts query the curated zone in place with Athena.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-storage-zones, type: common.group, name: storage zones, parent: reg-us-east-1}
+- {id: grp-catalog-and-governance, type: common.group, name: catalog and governance, parent: reg-us-east-1}
+- {id: grp-processing, type: common.group, name: processing, parent: reg-us-east-1}
+- {id: grp-consumption, type: common.group, name: consumption, parent: reg-us-east-1}
+- {id: server, type: common.server, name: server}
+- {id: users, type: common.users, name: users}
+- {id: raw-zone, type: aws.s3_bucket, name: raw-zone, parent: grp-storage-zones}
+- {id: curated-zone, type: aws.s3_bucket, name: curated-zone, parent: grp-storage-zones}
+- {id: raw-crawler, type: aws.res.aws_glue_crawler, name: raw-crawler, parent: grp-catalog-and-governance, props: {database_name: changeme, name: changeme, role: changeme}}
+- {id: lake-catalog, type: aws.res.aws_glue_catalog_database, name: lake-catalog, parent: grp-catalog-and-governance, props: {name: changeme}}
+- id: raw-to-curated-etl
+  type: aws.res.aws_glue_job
+  name: raw-to-curated-etl
+  parent: grp-processing
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: analytics-wg, type: aws.res.aws_athena_workgroup, name: analytics-wg, parent: grp-consumption, props: {name: changeme}}
+- {id: athena-results, type: aws.s3_bucket, name: athena-results, parent: grp-consumption}
+edges:
+- {from: server, to: raw-zone, label: batch/stream ingest, step: '1'}
+- {from: raw-crawler, to: raw-zone, label: crawl, step: '2'}
+- {from: raw-crawler, to: lake-catalog, label: register tables, step: '3'}
+- {from: raw-to-curated-etl, to: raw-zone, label: read, step: '4'}
+- {from: raw-to-curated-etl, to: curated-zone, label: write Parquet partitions, step: '5'}
+- {from: raw-to-curated-etl, to: lake-catalog, label: update curated tables, step: '6'}
+- {from: users, to: analytics-wg, label: SQL, step: '7'}
+- {from: analytics-wg, to: lake-catalog, label: schema lookup, step: '8'}
+- {from: analytics-wg, to: curated-zone, label: scan, step: '9'}
+- {from: analytics-wg, to: athena-results, label: query results}
+steps:
+- {n: '1', text: 'server → raw-zone: batch/stream ingest'}
+- {n: '2', text: 'raw-crawler → raw-zone: crawl'}
+- {n: '3', text: 'raw-crawler → lake-catalog: register tables'}
+- {n: '4', text: 'raw-to-curated-etl → raw-zone: read'}
+- {n: '5', text: 'raw-to-curated-etl → curated-zone: write Parquet partitions'}
+- {n: '6', text: 'raw-to-curated-etl → lake-catalog: update curated tables'}
+- {n: '7', text: 'users → analytics-wg: SQL'}
+- {n: '8', text: 'analytics-wg → lake-catalog: schema lookup'}
+- {n: '9', text: 'analytics-wg → curated-zone: scan'}

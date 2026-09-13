@@ -1,0 +1,48 @@
+# Generated from the official reference (https://docs.cloud.google.com/kubernetes-engine/docs/tutorials/gitops-cloud-build); edit freely.
+title: GitOps CI/CD with Cloud Build, Artifact Registry and GKE
+category: devops
+tags:
+- ci cd
+- cloud build
+- gitops
+- artifact registry
+- gke
+- kubectl
+source: https://docs.cloud.google.com/kubernetes-engine/docs/tutorials/gitops-cloud-build
+description: A commit to the app repository triggers a Cloud Build pipeline that runs tests, builds the container, pushes it to Artifact Registry and writes an updated Kubernetes manifest to the candidate
+  branch of a separate env repository. A second Cloud Build trigger on the env repo applies the manifest to the GKE cluster with kubectl and promotes it to the production branch on success, so build history
+  doubles as deployment history.
+nodes:
+- {id: prj-cicd-prj, type: gcp.project, name: cicd-prj, props: {project_id: cicd-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-cicd-vpc, type: gcp.vpc, name: cicd-vpc, parent: prj-cicd-prj}
+- {id: sub-gke-sub, type: gcp.subnetwork, name: gke-sub, parent: vpc-cicd-vpc, props: {cidr: 10.90.0.0/20, region: europe-west1}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: hello-cloudbuild-app, type: gcp.res.google_sourcerepo_repository, name: hello-cloudbuild-app, parent: prj-cicd-prj, props: {name: changeme}}
+- {id: hello-cloudbuild-env, type: gcp.res.google_sourcerepo_repository, name: hello-cloudbuild-env, parent: prj-cicd-prj, props: {name: changeme}}
+- {id: app-ci-trigger, type: gcp.res.google_cloudbuild_trigger, name: app-ci-trigger, parent: prj-cicd-prj}
+- {id: env-cd-trigger, type: gcp.res.google_cloudbuild_trigger, name: env-cd-trigger, parent: prj-cicd-prj}
+- {id: my-repository, type: gcp.res.google_artifact_registry_repository, name: my-repository, parent: prj-cicd-prj, props: {format: changeme, repository_id: changeme}}
+- {id: hello-cloudbuild-cluster, type: gcp.gke_cluster, name: hello-cloudbuild-cluster, parent: sub-gke-sub}
+- {id: hello-app-lb, type: gcp.res.google_compute_global_forwarding_rule, name: hello-app-lb, parent: prj-cicd-prj, props: {name: changeme, target: changeme}}
+edges:
+- {from: user, to: hello-cloudbuild-app, label: git push, step: '1'}
+- {from: hello-cloudbuild-app, to: app-ci-trigger, label: commit event, step: '2'}
+- {from: app-ci-trigger, to: my-repository, label: docker build + push, step: '3'}
+- {from: app-ci-trigger, to: hello-cloudbuild-env, label: commit manifest to candidate branch, step: '4'}
+- {from: hello-cloudbuild-env, to: env-cd-trigger, label: candidate branch event, step: '5'}
+- {from: env-cd-trigger, to: hello-cloudbuild-cluster, label: kubectl apply, step: '6'}
+- {from: env-cd-trigger, to: hello-cloudbuild-env, label: copy manifest to production branch, step: '7'}
+- {from: my-repository, to: hello-cloudbuild-cluster, label: image pull}
+- {from: users, to: hello-app-lb, label: HTTPS, step: '8'}
+- {from: hello-app-lb, to: hello-cloudbuild-cluster, label: Ingress to Deployment, step: '9'}
+steps:
+- {n: '1', text: 'user → hello-cloudbuild-app: git push'}
+- {n: '2', text: 'hello-cloudbuild-app → app-ci-trigger: commit event'}
+- {n: '3', text: 'app-ci-trigger → my-repository: docker build + push'}
+- {n: '4', text: 'app-ci-trigger → hello-cloudbuild-env: commit manifest to candidate branch'}
+- {n: '5', text: 'hello-cloudbuild-env → env-cd-trigger: candidate branch event'}
+- {n: '6', text: 'env-cd-trigger → hello-cloudbuild-cluster: kubectl apply'}
+- {n: '7', text: 'env-cd-trigger → hello-cloudbuild-env: copy manifest to production branch'}
+- {n: '8', text: 'users → hello-app-lb: HTTPS'}
+- {n: '9', text: 'hello-app-lb → hello-cloudbuild-cluster: Ingress to Deployment'}

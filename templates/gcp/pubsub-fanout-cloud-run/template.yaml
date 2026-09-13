@@ -1,0 +1,51 @@
+# Generated from the official reference (https://docs.cloud.google.com/run/docs/tutorials/pubsub); edit freely.
+title: Event-driven fan-out with Pub/Sub, Eventarc and Cloud Run
+category: serverless
+tags:
+- pubsub
+- cloud run
+- eventarc
+- fan out
+- push subscription
+- cloud functions
+source: https://docs.cloud.google.com/run/docs/tutorials/pubsub
+description: Producers publish to a Pub/Sub topic whose push subscriptions deliver each message to Cloud Run services and a Cloud Run function in parallel, authenticated with OIDC tokens from a dedicated
+  invoker service account. An Eventarc trigger adds Cloud Storage object-finalized events to the same topic-driven flow, so uploads and application events share one serverless processing path.
+nodes:
+- {id: prj-events-prj, type: gcp.project, name: events-prj, props: {project_id: events-prj-123456, project: changeme, region: europe-west1}}
+- {id: client, type: common.client, name: client}
+- {id: users, type: common.users, name: users}
+- {id: orders-topic, type: gcp.pubsub_topic, name: orders-topic, parent: prj-events-prj}
+- {id: orders-push-billing, type: gcp.res.google_pubsub_subscription, name: orders-push-billing, parent: prj-events-prj, props: {name: changeme, topic: changeme}}
+- {id: orders-push-notify, type: gcp.res.google_pubsub_subscription, name: orders-push-notify, parent: prj-events-prj, props: {name: changeme, topic: changeme}}
+- {id: billing-svc, type: gcp.cloud_run_service, name: billing-svc, parent: prj-events-prj}
+- {id: notify-svc, type: gcp.cloud_run_service, name: notify-svc, parent: prj-events-prj}
+- {id: audit-fn, type: gcp.res.google_cloudfunctions2_function, name: audit-fn, parent: prj-events-prj, props: {location: westeurope, name: changeme}}
+- id: upload-finalized-trigger
+  type: gcp.res.google_eventarc_trigger
+  name: upload-finalized-trigger
+  parent: prj-events-prj
+  props:
+    destination: {}
+    location: westeurope
+    matching_criteria: []
+    name: changeme
+- {id: uploads-bucket, type: gcp.storage_bucket, name: uploads-bucket, parent: prj-events-prj}
+- {id: images-repo, type: gcp.res.google_artifact_registry_repository, name: images-repo, parent: prj-events-prj, props: {format: changeme, repository_id: changeme}}
+edges:
+- {from: client, to: orders-topic, label: publish message, step: '1'}
+- {from: orders-topic, to: orders-push-billing, label: fan-out, step: '2'}
+- {from: orders-topic, to: orders-push-notify, label: fan-out, step: '2'}
+- {from: orders-push-billing, to: billing-svc, label: HTTPS push + OIDC, step: '3'}
+- {from: orders-push-notify, to: notify-svc, label: HTTPS push + OIDC, step: '3'}
+- {from: users, to: uploads-bucket, label: upload object, step: '4'}
+- {from: uploads-bucket, to: upload-finalized-trigger, label: object.finalized event, step: '5'}
+- {from: upload-finalized-trigger, to: audit-fn, label: CloudEvent, step: '6'}
+- {from: images-repo, to: billing-svc, label: container image}
+steps:
+- {n: '1', text: 'client → orders-topic: publish message'}
+- {n: '2', text: 'orders-topic → orders-push-billing: fan-out'}
+- {n: '3', text: 'orders-push-billing → billing-svc: HTTPS push + OIDC'}
+- {n: '4', text: 'users → uploads-bucket: upload object'}
+- {n: '5', text: 'uploads-bucket → upload-finalized-trigger: object.finalized event'}
+- {n: '6', text: 'upload-finalized-trigger → audit-fn: CloudEvent'}

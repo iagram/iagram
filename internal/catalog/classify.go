@@ -117,6 +117,11 @@ func (c *Catalog) classify(provider string) map[string]bool {
 			}
 		}
 	}
+	// services.yaml first_level: types the heuristics would hide but that
+	// reference diagrams draw as elements of their own.
+	for t := range c.firstLevel[provider] {
+		delete(out, t)
+	}
 	return out
 }
 

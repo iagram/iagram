@@ -102,6 +102,12 @@ iagram.json ──validate──▶ generate ──▶ .iagram/tf/main.tf.json +
 - **Generation** emits one `module` block per curated node and one `resource` block per generated node (named after the node id, `source = ./modules/<provider>/<type>`), provider blocks from account/region nodes (aliased per region, so one diagram can span regions and clouds), inputs wired from the containment chain and the arrows, and root outputs per node. Modules are embedded in the binary and materialised next to the config, so `.iagram/tf/` is plain Terraform you can inspect or eject to at any time.
 - **Execution** is OpenTofu, run as a subprocess that inherits your shell environment. Plan and apply stream over a local job API; the plan JSON is mapped back to nodes by module name. State is local under `.iagram/tf/` by default, like a fresh Terraform project (configure a remote backend there if you want one).
 
+## Reference architectures
+
+The front page of the editor is a gallery of official reference architectures from AWS, Google Cloud and Azure (hub and spoke, three-tier web, fan-out, data lake, RAG, multi-region DR, landing zones, CI/CD...), redrawn as `.iad` diagrams that validate and generate Terraform. Filter by cloud, category or text, read the source page, and open one in the editor with everything pre-configured; then adapt the names, ids and sizes and plan. The gallery opens automatically when the diagram is empty and from File > Reference architectures.
+
+Each template is a compact spec under `templates/<provider>/<slug>/template.yaml` (see `docs/spec/templates.md`). `iagram templates list` prints them, `iagram templates build DIR` writes their `.iad` files, and `iagram init --template aws/tgw-hub-and-spoke` starts a project from one. Placeholders such as `changeme`, the all-zero subscription id or `my-project-123456` mark the values you must set.
+
 ## The editor
 
 | Area | What it does |
@@ -118,7 +124,8 @@ Shortcuts: ⌘S save · ⌘Z / ⌘⇧Z undo, redo · ⌘X / ⌘C / ⌘V / ⌘D c
 ## Commands
 
 ```
-iagram init [name]            create iagram.json and .iagram/ in the current directory
+iagram init [name] [--template P/SLUG]
+                              create iagram.iad (optionally from a reference architecture) and .iagram/
 iagram up [-p PORT] [--host ADDR] [--no-open]
                               open the canvas (127.0.0.1 by default; 0.0.0.0 only inside Docker)
 iagram validate               check the diagram against the catalog; exit 1 on errors
@@ -129,6 +136,8 @@ iagram drift                  refresh-only plan; exit 1 if infrastructure drifte
 iagram destroy [--yes]        plan the teardown, ask for the diagram name, apply; clear outputs
 iagram import --state FILE    build a diagram from a terraform.tfstate or `tofu show -json`
 iagram catalog check DIR      validate an external catalog directory
+iagram templates list         list the shipped reference architectures
+iagram templates build DIR    write them as DIR/<provider>/<slug>/iagram.iad
 iagram telemetry on|off|status
 iagram version
 ```

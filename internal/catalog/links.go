@@ -50,6 +50,9 @@ type Link struct {
 	From     LinkEnd    `yaml:"from" json:"from"`
 	To       LinkEnd    `yaml:"to" json:"to"`
 	Style    *ConnStyle `yaml:"style,omitempty" json:"style,omitempty"`
+	// Defaults are attribute values a new link edge starts with (a VPN
+	// connection's type = ipsec.1, an SNS subscription's protocol = sqs).
+	Defaults map[string]any `yaml:"defaults,omitempty" json:"defaults,omitempty"`
 }
 
 // LinkBinding is a link resolved for a concrete pair of elements: which

@@ -1,0 +1,34 @@
+# Generated from the official reference (https://docs.cloud.google.com/api-gateway/docs/get-started-cloud-run); edit freely.
+title: Serverless API with API Gateway, Cloud Run and Firestore
+category: serverless
+tags:
+- api gateway
+- cloud run
+- firestore
+- openapi
+- serverless api
+source: https://docs.cloud.google.com/api-gateway/docs/get-started-cloud-run
+description: An API front door (API Gateway in the reference; drawn here as the global load balancer, API Gateway being google-beta only) validates API keys and JWTs and routes requests to a Cloud Run service
+  that it invokes with a service account holding run.invoker. The Cloud Run backend persists documents in a Firestore native-mode database and emits structured logs and metrics to Cloud Logging and Monitoring.
+nodes:
+- {id: prj-api-prj, type: gcp.project, name: api-prj, props: {project_id: api-prj-123456, project: changeme, region: europe-west1}}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: client, type: common.client, name: client}
+- {id: idp, type: common.idp, name: idp}
+- {id: orders-gateway, type: gcp.res.google_compute_global_forwarding_rule, name: orders-gateway, parent: prj-api-prj, props: {name: changeme, target: changeme}}
+- {id: orders-backend, type: gcp.cloud_run_service, name: orders-backend, parent: prj-api-prj}
+- {id: gateway-invoker-sa, type: gcp.res.google_service_account, name: gateway-invoker-sa, parent: prj-api-prj, props: {account_id: changeme}}
+- {id: orders-db, type: gcp.res.google_firestore_database, name: orders-db, parent: prj-api-prj, props: {location_id: changeme, name: changeme, type: changeme}}
+- {id: api-images, type: gcp.res.google_artifact_registry_repository, name: api-images, parent: prj-api-prj, props: {format: changeme, repository_id: changeme}}
+edges:
+- {from: mobile, to: orders-gateway, label: HTTPS + API key / JWT, step: '1'}
+- {from: client, to: orders-gateway, label: HTTPS, step: '1'}
+- {from: idp, to: orders-gateway, label: JWT validation (JWKS)}
+- {from: orders-gateway, to: orders-backend, label: x-google-backend, step: '3'}
+- {from: gateway-invoker-sa, to: orders-backend, label: run.invoker}
+- {from: orders-backend, to: orders-db, label: Firestore reads/writes, step: '4'}
+- {from: api-images, to: orders-backend, label: container image}
+steps:
+- {n: '1', text: 'mobile → orders-gateway: HTTPS + API key / JWT'}
+- {n: '3', text: 'orders-gateway → orders-backend: x-google-backend'}
+- {n: '4', text: 'orders-backend → orders-db: Firestore reads/writes'}

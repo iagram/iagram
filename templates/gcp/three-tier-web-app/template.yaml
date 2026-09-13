@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.cloud.google.com/application-design-center/docs/three-tier-web-app); edit freely.
+title: Three-tier web app with global load balancer, Cloud Run and Cloud SQL
+category: web
+tags:
+- three tier
+- application load balancer
+- cloud run
+- cloud sql
+- memorystore
+source: https://docs.cloud.google.com/application-design-center/docs/three-tier-web-app
+description: A global external Application Load Balancer fronts a Cloud Run web frontend, which calls a Cloud Run API service that reads through a Memorystore for Redis cache and falls back to a Cloud SQL
+  for PostgreSQL database. Secrets live in Secret Manager and the serverless tiers reach the private data tier through VPC egress into a dedicated subnet.
+nodes:
+- {id: prj-web-app-prj, type: gcp.project, name: web-app-prj, props: {project_id: web-app-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-web-app-prj}
+- {id: sub-app-sub, type: gcp.subnetwork, name: app-sub, parent: vpc-app-vpc, props: {cidr: 10.30.0.0/24, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: https-fwd-rule, type: gcp.res.google_compute_global_forwarding_rule, name: https-fwd-rule, parent: prj-web-app-prj, props: {name: changeme, target: changeme}}
+- {id: frontend-backend, type: gcp.res.google_compute_backend_service, name: frontend-backend, parent: prj-web-app-prj, props: {name: changeme}}
+- {id: web-frontend, type: gcp.cloud_run_service, name: web-frontend, parent: prj-web-app-prj}
+- {id: api-service, type: gcp.cloud_run_service, name: api-service, parent: prj-web-app-prj}
+- {id: cache, type: gcp.res.google_redis_instance, name: cache, parent: sub-app-sub, props: {memory_size_gb: 1, name: changeme}}
+- {id: postgres-db, type: gcp.cloud_sql_instance, name: postgres-db, parent: vpc-app-vpc}
+- id: db-credentials
+  type: gcp.res.google_secret_manager_secret
+  name: db-credentials
+  parent: prj-web-app-prj
+  props: {replication: {}, secret_id: changeme}
+edges:
+- {from: users, to: https-fwd-rule, label: HTTPS, step: '1'}
+- {from: https-fwd-rule, to: frontend-backend, label: serverless NEG, step: '2'}
+- {from: frontend-backend, to: web-frontend, label: HTTP, step: '3'}
+- {from: web-frontend, to: api-service, label: REST/JSON, step: '4'}
+- {from: api-service, to: cache, label: Redis read-through, step: '5'}
+- {from: api-service, to: postgres-db, label: SQL on cache miss, step: '6'}
+- {from: api-service, to: db-credentials, label: fetch secret, step: '7'}
+steps:
+- {n: '1', text: 'users → https-fwd-rule: HTTPS'}
+- {n: '2', text: 'https-fwd-rule → frontend-backend: serverless NEG'}
+- {n: '3', text: 'frontend-backend → web-frontend: HTTP'}
+- {n: '4', text: 'web-frontend → api-service: REST/JSON'}
+- {n: '5', text: 'api-service → cache: Redis read-through'}
+- {n: '6', text: 'api-service → postgres-db: SQL on cache miss'}
+- {n: '7', text: 'api-service → db-credentials: fetch secret'}

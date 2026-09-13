@@ -59,6 +59,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		err = runConvert(args[1:], stdout)
 	case "catalog":
 		err = runCatalog(args[1:], stdout)
+	case "templates":
+		err = runTemplates(args[1:], stdout)
 	case "schemas":
 		err = runSchemas(args[1:], stdout)
 	case "telemetry":
@@ -129,7 +131,7 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `iagram: infrastructure as diagram.
 
 Usage:
-  iagram init [name]           create iagram.iad in the current directory
+  iagram init [name] [--template P/SLUG]           create iagram.iad in the current directory
   iagram up [flags]            open the canvas at http://localhost:7777
   iagram validate [flags]      check iagram.json against the catalog
   iagram generate [flags]      write Terraform to .iagram/tf/main.tf.json
@@ -142,6 +144,8 @@ Usage:
   iagram convert --to PROVIDER rewrite the diagram for another cloud (aws, gcp, azure)
   iagram schemas [update]      show or refresh the embedded provider schema snapshots
   iagram catalog check DIR     validate an external catalog directory
+  iagram templates list        list the shipped reference architectures
+  iagram templates build DIR   write them as DIR/<provider>/<slug>/iagram.iad
   iagram telemetry on|off|status
   iagram version
 

@@ -65,7 +65,11 @@ export class Rules {
     if (link) return link
     // A generated element (<provider>.res.<type>) may reference anything of its provider.
     if (fromType.includes('.res.') && fromType.split('.')[0] === toType.split('.')[0]) {
-      return { from: fromType, to: toType, kind: 'references', label: 'references' }
+      return { from: fromType, to: toType, kind: 'references', label: 'references', style: { dash: 'dotted' } }
+    }
+    // Anything else within one provider is a documentation arrow: drawn, never generated.
+    if (this.byId[fromType] && this.byId[toType] && fromType.split('.')[0] === toType.split('.')[0]) {
+      return { from: fromType, to: toType, kind: FLOW_KIND, label: '' }
     }
     return undefined
   }

@@ -1,0 +1,47 @@
+# Generated from the official reference (https://docs.aws.amazon.com/wellarchitected/latest/iot-lens/workload-architecture.html); edit freely.
+title: IoT telemetry pipeline with IoT Core, Kinesis, and S3
+category: iot
+tags:
+- iot core
+- mqtt
+- rules engine
+- kinesis
+- firehose
+- s3
+- telemetry
+source: https://docs.aws.amazon.com/wellarchitected/latest/iot-lens/workload-architecture.html
+description: Devices publish MQTT telemetry to the IoT Core message broker, where a topic rule forwards matching messages into a Kinesis data stream that decouples ingestion rate from processing. A Lambda
+  consumer serves real-time alerts and hot state, while Firehose batches the same stream into S3 for durable storage and Athena analytics.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: grp-connectivity, type: common.group, name: connectivity, parent: reg-eu-west-1}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-eu-west-1}
+- {id: grp-processing-and-storage, type: common.group, name: processing and storage, parent: reg-eu-west-1}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: sensor-fleet, type: aws.res.aws_iot_thing, name: sensor-fleet, parent: grp-connectivity, props: {name: changeme}}
+- {id: telemetry-to-kinesis, type: aws.res.aws_iot_topic_rule, name: telemetry-to-kinesis, parent: grp-connectivity, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: telemetry-stream, type: aws.res.aws_kinesis_stream, name: telemetry-stream, parent: grp-ingestion, props: {name: changeme}}
+- {id: anomaly-detector, type: aws.lambda_function, name: anomaly-detector, parent: grp-processing-and-storage}
+- {id: device-latest-state, type: aws.dynamodb_table, name: device-latest-state, parent: grp-processing-and-storage}
+- {id: telemetry-to-s3, type: aws.res.aws_kinesis_firehose_delivery_stream, name: telemetry-to-s3, parent: grp-processing-and-storage, props: {destination: changeme, name: changeme}}
+- {id: telemetry-archive, type: aws.s3_bucket, name: telemetry-archive, parent: grp-processing-and-storage}
+- {id: telemetry-wg, type: aws.res.aws_athena_workgroup, name: telemetry-wg, parent: grp-processing-and-storage, props: {name: changeme}}
+edges:
+- {from: device, to: sensor-fleet, label: MQTT over TLS, step: '1'}
+- {from: sensor-fleet, to: telemetry-to-kinesis, label: SELECT * FROM 'sensors/+/telemetry', step: '2'}
+- {from: telemetry-to-kinesis, to: telemetry-stream, label: kinesis action, step: '3'}
+- {from: telemetry-stream, to: anomaly-detector, step: '4', link: aws_lambda_event_source_mapping}
+- {from: anomaly-detector, to: device-latest-state, label: UpdateItem, step: '5'}
+- {from: telemetry-stream, to: telemetry-to-s3, label: Kinesis source, step: '4'}
+- {from: telemetry-to-s3, to: telemetry-archive, label: buffered Parquet by date partition, step: '5'}
+- {from: users, to: telemetry-wg, label: SQL over archive, step: '6'}
+- {from: telemetry-wg, to: telemetry-archive, label: scan}
+steps:
+- {n: '1', text: 'device → sensor-fleet: MQTT over TLS'}
+- {n: '2', text: 'sensor-fleet → telemetry-to-kinesis: SELECT * FROM ''sensors/+/telemetry'''}
+- {n: '3', text: 'telemetry-to-kinesis → telemetry-stream: kinesis action'}
+- {n: '4', text: telemetry-stream → anomaly-detector}
+- {n: '5', text: 'anomaly-detector → device-latest-state: UpdateItem'}
+- {n: '6', text: 'users → telemetry-wg: SQL over archive'}

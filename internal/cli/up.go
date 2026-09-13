@@ -46,6 +46,7 @@ func runUp(args []string, stdout io.Writer, tel *telemetry.Client) error {
 		return err
 	}
 	srv := server.New(cat, c.file, web.FS(), icons, Version)
+	srv.TemplatesFS = iagram.TemplatesFS
 	srv.OnEvent = func(name string, props map[string]any, d *document.Document) {
 		if d != nil {
 			props["nodes"] = telemetry.Bucket(len(d.Nodes))

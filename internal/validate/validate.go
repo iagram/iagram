@@ -177,9 +177,17 @@ func (v *validator) props() {
 		if !ok {
 			continue
 		}
+		provided := provide.Values(v.c, v.nodes, n)
+		autoNamed := e.Terraform != nil && e.Terraform.Role == catalog.RoleResource
 		for _, req := range e.Required() {
 			if bound[n.ID][req] {
 				continue
+			}
+			if _, given := provided[req]; given {
+				continue // the box it is drawn in supplies it (resource group, project, zone)
+			}
+			if req == "name" && autoNamed {
+				continue // generated resources take the element's name
 			}
 			if val, ok := n.Props[req]; !ok || val == "" || val == nil {
 				v.add(Problem{Level: Error, Node: n.ID, Field: req, Message: fmt.Sprintf("%s is required", req)})
@@ -270,8 +278,18 @@ func (v *validator) edges() {
 				}
 			}
 		}
-		if rule.Kind == catalog.LinkKind {
+		if e.Kind == catalog.LinkKind {
+			// A link resource is a legitimate alternative to a curated arrow
+			// when a link joins the pair (checked inside).
+			if _, ok := v.c.LinkFor(src.Type, dst.Type, e.Type); !ok {
+				v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("no link resource joins %s and %s", src.Name, dst.Name)})
+				continue
+			}
 			v.link(e, src, dst)
+			continue
+		}
+		if e.Kind == catalog.FlowKind {
+			continue // a documentation arrow is always welcome, whatever else the pair allows
 		}
 		if e.Kind != rule.Kind {
 			v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("connection %s -> %s must be of kind %q", src.Name, dst.Name, rule.Kind)})

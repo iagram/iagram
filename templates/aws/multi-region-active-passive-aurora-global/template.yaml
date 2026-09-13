@@ -1,0 +1,58 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html); edit freely.
+title: Multi-Region active/passive with Route 53 failover and Aurora Global Database
+category: resilience
+tags:
+- disaster recovery
+- multi-region
+- warm standby
+- route 53 failover
+- aurora global database
+source: https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html
+description: The primary Region serves all traffic while a scaled-down copy of the stack runs in a secondary Region as a warm standby. Aurora Global Database replicates data cross-Region with sub-second
+  lag, S3 replicates objects, and a Route 53 failover record backed by a health check redirects users when the primary fails.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: primary}
+- {id: vpc-primary-vpc, type: aws.vpc, name: primary-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-primary-vpc-a, type: aws.availability_zone, name: a, parent: vpc-primary-vpc, props: {zone: a}}
+- {id: sub-p-public-a, type: aws.subnet, name: p-public-a, parent: az-primary-vpc-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-primary-vpc-b, type: aws.availability_zone, name: b, parent: vpc-primary-vpc, props: {zone: b}}
+- {id: sub-p-public-b, type: aws.subnet, name: p-public-b, parent: az-primary-vpc-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-p-private-a, type: aws.subnet, name: p-private-a, parent: az-primary-vpc-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: secondary}
+- {id: vpc-secondary-vpc, type: aws.vpc, name: secondary-vpc, parent: reg-us-west-2, props: {cidr: 10.1.0.0/16}}
+- {id: az-secondary-vpc-a, type: aws.availability_zone, name: a, parent: vpc-secondary-vpc, props: {zone: a}}
+- {id: sub-s-public-a, type: aws.subnet, name: s-public-a, parent: az-secondary-vpc-a, props: {cidr: 10.1.0.0/24, az: a, public: true}}
+- {id: az-secondary-vpc-b, type: aws.availability_zone, name: b, parent: vpc-secondary-vpc, props: {zone: b}}
+- {id: sub-s-public-b, type: aws.subnet, name: s-public-b, parent: az-secondary-vpc-b, props: {cidr: 10.1.1.0/24, az: b, public: true}}
+- {id: sub-s-private-a, type: aws.subnet, name: s-private-a, parent: az-secondary-vpc-a, props: {cidr: 10.1.10.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: example-com, type: aws.route53_zone, name: example-com, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: primary-health, type: aws.res.aws_route53_health_check, name: primary-health, parent: reg-us-east-1, props: {type: changeme}}
+- {id: primary-alb, type: aws.alb, name: primary-alb, parent: vpc-primary-vpc}
+- {id: primary-asg, type: aws.res.aws_autoscaling_group, name: primary-asg, parent: vpc-primary-vpc, props: {max_size: 1, min_size: 1}}
+- {id: global-db, type: aws.res.aws_rds_global_cluster, name: global-db, parent: reg-us-east-1, props: {global_cluster_identifier: changeme}}
+- {id: aurora-primary, type: aws.res.aws_rds_cluster, name: aurora-primary, parent: sub-p-private-a, props: {engine: changeme}}
+- {id: assets-primary, type: aws.s3_bucket, name: assets-primary, parent: reg-us-east-1}
+- {id: secondary-alb, type: aws.alb, name: secondary-alb, parent: vpc-secondary-vpc}
+- {id: secondary-asg, type: aws.res.aws_autoscaling_group, name: secondary-asg, parent: vpc-secondary-vpc, props: {max_size: 1, min_size: 1}}
+- {id: aurora-secondary, type: aws.res.aws_rds_cluster, name: aurora-secondary, parent: sub-s-private-a, props: {engine: changeme}}
+- {id: assets-secondary, type: aws.s3_bucket, name: assets-secondary, parent: reg-us-west-2}
+edges:
+- {from: users, to: example-com, label: DNS, step: '1'}
+- {from: example-com, to: primary-alb, label: PRIMARY record, step: '2'}
+- {from: example-com, to: secondary-alb, label: SECONDARY record (on health check failure)}
+- {from: primary-health, to: primary-alb, label: HTTPS health check}
+- {from: primary-alb, to: primary-asg, step: '3'}
+- {from: primary-asg, to: aurora-primary, label: read/write, step: '4'}
+- {from: global-db, to: aurora-primary, label: primary cluster}
+- {from: global-db, to: aurora-secondary, label: secondary cluster}
+- {from: aurora-primary, to: aurora-secondary, label: storage-level replication (< 1s lag)}
+- {from: assets-primary, to: assets-secondary, label: S3 cross-Region replication}
+- {from: secondary-alb, to: secondary-asg, label: scaled-down standby}
+- {from: secondary-asg, to: aurora-secondary, label: read-only until promoted}
+steps:
+- {n: '1', text: 'users → example-com: DNS'}
+- {n: '2', text: 'example-com → primary-alb: PRIMARY record'}
+- {n: '3', text: primary-alb → primary-asg}
+- {n: '4', text: 'primary-asg → aurora-primary: read/write'}

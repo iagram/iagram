@@ -1,0 +1,56 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/networking/architecture/hub-spoke-virtual-wan-architecture); edit freely.
+title: Hub-spoke network topology using Azure Virtual WAN
+category: networking
+tags:
+- virtual-wan
+- secured-hub
+- sd-wan
+- branch
+- expressroute
+- routing-intent
+source: https://learn.microsoft.com/en-us/azure/architecture/networking/architecture/hub-spoke-virtual-wan-architecture
+description: Microsoft-managed Virtual WAN hubs replace self-managed hub virtual networks and provide any-to-any transit between spoke virtual networks, branch VPN sites, ExpressRoute circuits and point-to-site
+  users, with hub-to-hub connectivity across regions. Azure Firewall in a secured virtual hub inspects private and internet-bound traffic through routing intent, so spokes need no user-defined routes.
+nodes:
+- {id: dc-branch, type: common.datacenter, name: branch}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-vwan, type: azure.resource_group, name: rg-vwan, parent: sub-connectivity, props: {location: westeurope}}
+- {id: sub-landing-zone-shared, type: azure.subscription, name: landing-zone-shared, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-shared-services, type: azure.resource_group, name: rg-shared-services, parent: sub-landing-zone-shared, props: {location: westeurope}}
+- {id: vpc-vnet-shared-services, type: azure.vnet, name: vnet-shared-services, parent: rg-rg-shared-services, props: {cidr: 10.1.0.0/24}}
+- {id: sub-snet-shared, type: azure.subnet, name: snet-shared, parent: vpc-vnet-shared-services, props: {cidr: 10.1.0.0/25}}
+- {id: sub-landing-zone-app, type: azure.subscription, name: landing-zone-app, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-app-region1, type: azure.resource_group, name: rg-app-region1, parent: sub-landing-zone-app, props: {location: westeurope}}
+- {id: vpc-vnet-app-1, type: azure.vnet, name: vnet-app-1, parent: rg-rg-app-region1, props: {cidr: 10.2.0.0/24}}
+- {id: sub-snet-app-1, type: azure.subnet, name: snet-app-1, parent: vpc-vnet-app-1, props: {cidr: 10.2.0.0/25}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: vwan-contoso, type: azure.res.azurerm_virtual_wan, name: vwan-contoso, parent: rg-rg-vwan, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vhub-westeurope, type: azure.res.azurerm_virtual_hub, name: vhub-westeurope, parent: rg-rg-vwan, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vhub-northeurope, type: azure.res.azurerm_virtual_hub, name: vhub-northeurope, parent: rg-rg-vwan, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vpngw-vhub-we, type: azure.res.azurerm_vpn_gateway, name: vpngw-vhub-we, parent: rg-rg-vwan, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_hub_id: changeme}}
+- {id: ergw-vhub-we, type: azure.res.azurerm_express_route_gateway, name: ergw-vhub-we, parent: rg-rg-vwan, props: {location: westeurope, name: changeme, resource_group_name: changeme, scale_units: 1, virtual_hub_id: changeme}}
+- {id: fw-vhub-we, type: azure.res.azurerm_firewall, name: fw-vhub-we, parent: rg-rg-vwan, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- id: er-circuit-1
+  type: azure.res.azurerm_express_route_circuit
+  name: er-circuit-1
+  parent: rg-rg-vwan
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: vm-shared-dns, type: azure.virtual_machine, name: vm-shared-dns, parent: sub-snet-shared}
+- {id: vm-app-1, type: azure.virtual_machine, name: vm-app-1, parent: sub-snet-app-1}
+edges:
+- {from: dc-branch, to: vpngw-vhub-we, label: S2S IPsec (branch), step: '1'}
+- {from: dc-branch, to: er-circuit-1, label: ExpressRoute private peering, step: '1'}
+- {from: er-circuit-1, to: ergw-vhub-we}
+- {from: vwan-contoso, to: vhub-westeurope}
+- {from: vwan-contoso, to: vhub-northeurope}
+- {from: vhub-westeurope, to: vpc-vnet-shared-services, label: vnetconn1, link: azurerm_virtual_hub_connection}
+- {from: vhub-westeurope, to: vpc-vnet-app-1, label: vnetconn2, link: azurerm_virtual_hub_connection}
+- {from: vhub-westeurope, to: vhub-northeurope, label: hub-to-hub (Microsoft backbone), step: '2'}
+- {from: vm-app-1, to: fw-vhub-we, label: private routing intent, step: '3'}
+- {from: fw-vhub-we, to: internet, label: internet routing intent (SNAT), step: '4'}
+steps:
+- {n: '1', text: 'datacenter → vpngw-vhub-we: S2S IPsec (branch)'}
+- {n: '2', text: 'vhub-westeurope → vhub-northeurope: hub-to-hub (Microsoft backbone)'}
+- {n: '3', text: 'vm-app-1 → fw-vhub-we: private routing intent'}
+- {n: '4', text: 'fw-vhub-we → internet: internet routing intent (SNAT)'}

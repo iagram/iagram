@@ -87,6 +87,7 @@ export interface Link {
   from: LinkEnd
   to: LinkEnd
   style?: Omit<EdgeStyle, 'inactive'>
+  defaults?: Record<string, unknown>
 }
 
 export interface Span {
@@ -286,4 +287,19 @@ export interface ImportReport {
   skipped?: string[]
   unplaced?: string[]
   providers?: string[]
+}
+
+/** A shipped reference architecture (GET /api/templates). */
+export interface TemplateItem {
+  id: string
+  provider: string
+  slug: string
+  title: string
+  category: string
+  tags: string[]
+  source: string
+  description: string
+  elements: number
+  document: Document
+  types: Record<string, { icon?: string; container?: boolean; border?: string; dash?: string }>
 }

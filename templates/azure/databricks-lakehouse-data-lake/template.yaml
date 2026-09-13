@@ -1,0 +1,57 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/azure-databricks-modern-analytics-architecture); edit freely.
+title: Modern analytics with Azure Databricks and Data Lake Storage
+category: data
+tags:
+- data-lake
+- databricks
+- delta-lake
+- medallion
+- event-hubs
+- data-factory
+- power-bi
+source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/azure-databricks-modern-analytics-architecture
+description: Batch data lands in Data Lake Storage through Data Factory and streaming data arrives via Event Hubs; Azure Databricks curates both into Bronze, Silver and Gold Delta Lake layers, trains models
+  tracked in MLflow and serves SQL warehouses to Power BI. Unity Catalog and Microsoft Purview govern the lake, Key Vault holds non-identity credentials and Azure Monitor observes the platform.
+nodes:
+- {id: sub-data-platform, type: azure.subscription, name: data-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-lakehouse, type: azure.resource_group, name: rg-lakehouse, parent: sub-data-platform, props: {location: westeurope}}
+- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-lakehouse}
+- {id: grp-store, type: common.group, name: Store, parent: rg-rg-lakehouse}
+- {id: grp-process-and-serve, type: common.group, name: Process and serve, parent: rg-rg-lakehouse}
+- {id: grp-governance, type: common.group, name: Governance, parent: rg-rg-lakehouse}
+- {id: database, type: common.database, name: database}
+- {id: saas, type: common.saas, name: saas}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: evhns-telemetry, type: azure.res.azurerm_eventhub_namespace, name: evhns-telemetry, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: adf-batch-ingest, type: azure.res.azurerm_data_factory, name: adf-batch-ingest, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stdatalake, type: azure.storage_account, name: stdatalake, parent: grp-store}
+- {id: dbw-lakehouse, type: azure.res.azurerm_databricks_workspace, name: dbw-lakehouse, parent: grp-process-and-serve, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- id: mlw-serving
+  type: azure.res.azurerm_machine_learning_workspace
+  name: mlw-serving
+  parent: grp-process-and-serve
+  props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+- id: pview-governance
+  type: azure.res.azurerm_purview_account
+  name: pview-governance
+  parent: grp-governance
+  props: {identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: kv-lakehouse, type: azure.key_vault, name: kv-lakehouse, parent: grp-governance}
+- {id: law-lakehouse, type: azure.res.azurerm_log_analytics_workspace, name: law-lakehouse, parent: grp-governance, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: device, to: evhns-telemetry, label: streaming events (AMQP/Kafka), step: '1'}
+- {from: evhns-telemetry, to: dbw-lakehouse, label: streaming pipeline, step: '2'}
+- {from: database, to: adf-batch-ingest, label: batch extract, step: '1'}
+- {from: adf-batch-ingest, to: stdatalake, label: raw load (bronze), step: '2'}
+- {from: dbw-lakehouse, to: stdatalake, label: silver / gold Delta tables, step: '3'}
+- {from: dbw-lakehouse, to: mlw-serving, label: MLflow model deploy, step: '4'}
+- {from: dbw-lakehouse, to: saas, label: SQL warehouse to Power BI, step: '5'}
+- {from: pview-governance, to: stdatalake, label: scan and classify}
+- {from: dbw-lakehouse, to: kv-lakehouse, label: secret scope}
+steps:
+- {n: '1', text: 'device → evhns-telemetry: streaming events (AMQP/Kafka)'}
+- {n: '2', text: 'evhns-telemetry → dbw-lakehouse: streaming pipeline'}
+- {n: '3', text: 'dbw-lakehouse → stdatalake: silver / gold Delta tables'}
+- {n: '4', text: 'dbw-lakehouse → mlw-serving: MLflow model deploy'}
+- {n: '5', text: 'dbw-lakehouse → saas: SQL warehouse to Power BI'}

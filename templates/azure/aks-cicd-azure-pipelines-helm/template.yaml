@@ -1,0 +1,48 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/microservices/ci-cd-kubernetes); edit freely.
+title: Microservices CI/CD to AKS with Azure Pipelines, Container Registry and Helm
+category: devops
+tags:
+- ci-cd
+- azure-pipelines
+- azure-devops
+- helm
+- aks
+- acr
+- key-vault
+source: https://learn.microsoft.com/en-us/azure/architecture/microservices/ci-cd-kubernetes
+description: Commits and pull requests trigger Azure Pipelines that build and scan container images, push them and versioned Helm charts to Azure Container Registry, then a release pipeline deploys the
+  chart to a dev/QA cluster, waits for approval, retags the image for production and deploys to the production AKS cluster. Key Vault supplies runtime secrets via the Secrets Store CSI driver, and Azure
+  Monitor observes clusters and applications.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-workload, type: azure.resource_group, name: rg-workload, parent: sub-workload, props: {location: westeurope}}
+- {id: rg-rg-shared-registry, type: azure.resource_group, name: rg-shared-registry, parent: sub-workload, props: {location: westeurope}}
+- {id: grp-azure-devops, type: common.group, name: Azure DevOps, parent: sub-workload}
+- {id: vpc-vnet-nonprod, type: azure.vnet, name: vnet-nonprod, parent: rg-rg-workload, props: {cidr: 10.1.0.0/16}}
+- {id: sub-snet-aks-nonprod, type: azure.subnet, name: snet-aks-nonprod, parent: vpc-vnet-nonprod, props: {cidr: 10.1.0.0/22}}
+- {id: vpc-vnet-prod, type: azure.vnet, name: vnet-prod, parent: rg-rg-workload, props: {cidr: 10.2.0.0/16}}
+- {id: sub-snet-aks-prod, type: azure.subnet, name: snet-aks-prod, parent: vpc-vnet-prod, props: {cidr: 10.2.0.0/22}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: acr-shared, type: azure.container_registry, name: acr-shared, parent: rg-rg-shared-registry}
+- {id: aks-dev-qa, type: azure.aks_cluster, name: aks-dev-qa, parent: sub-snet-aks-nonprod}
+- {id: aks-prod, type: azure.aks_cluster, name: aks-prod, parent: sub-snet-aks-prod}
+- {id: kv-microservices, type: azure.key_vault, name: kv-microservices, parent: rg-rg-shared-registry}
+- {id: law-aks, type: azure.res.azurerm_log_analytics_workspace, name: law-aks, parent: rg-rg-shared-registry, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: appi-delivery, type: azure.res.azurerm_application_insights, name: appi-delivery, parent: rg-rg-shared-registry, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: saas, label: push feature branch / open PR to Azure Repos, step: '1'}
+- {from: saas, to: acr-shared, label: 'CI: push image and Helm chart (versioned', step: '2'}
+- {from: saas, to: aks-dev-qa, label: 'CD: helm upgrade --install (QA)', step: '3'}
+- {from: users, to: saas, label: approver sign-off, step: '4'}
+- {from: saas, to: aks-prod, label: helm upgrade (production), step: '5'}
+- {from: aks-prod, to: acr-shared, label: image pull (AcrPull identity)}
+- {from: aks-prod, to: kv-microservices, label: Secrets Store CSI driver}
+- {from: aks-prod, to: law-aks, label: Container Insights / Prometheus}
+steps:
+- {n: '1', text: 'user → saas: push feature branch / open PR to Azure Repos'}
+- {n: '2', text: 'saas → acr-shared: CI: push image and Helm chart (versioned'}
+- {n: '3', text: 'saas → aks-dev-qa: CD: helm upgrade --install (QA)'}
+- {n: '4', text: 'users → saas: approver sign-off'}
+- {n: '5', text: 'saas → aks-prod: helm upgrade (production)'}

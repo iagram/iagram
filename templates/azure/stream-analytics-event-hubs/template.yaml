@@ -1,0 +1,50 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/data/stream-processing-stream-analytics); edit freely.
+title: Stream processing with Event Hubs and Stream Analytics
+category: data
+tags:
+- streaming
+- event-hubs
+- stream-analytics
+- cosmos-db
+- real-time
+- power-bi
+source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/data/stream-processing-stream-analytics
+description: Two device streams (taxi ride and fare data) are ingested into separate event hubs partitioned by the same key, joined and aggregated over a hopping window by a Stream Analytics job, and the
+  results are written as JSON documents to Cosmos DB for Power BI analysis. Azure Monitor dashboards track throttling and streaming-unit utilization to trigger scale-out.
+nodes:
+- {id: sub-data-platform, type: azure.subscription, name: data-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-stream-processing, type: azure.resource_group, name: rg-stream-processing, parent: sub-data-platform, props: {location: westeurope}}
+- {id: grp-ingestion, type: common.group, name: Ingestion, parent: rg-rg-stream-processing}
+- {id: grp-processing, type: common.group, name: Processing, parent: rg-rg-stream-processing}
+- {id: grp-serving, type: common.group, name: Serving, parent: rg-rg-stream-processing}
+- {id: device, type: common.device, name: device}
+- {id: saas, type: common.saas, name: saas}
+- {id: evhns-taxi, type: azure.res.azurerm_eventhub_namespace, name: evhns-taxi, parent: grp-ingestion, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-taxi-ride, type: azure.res.azurerm_eventhub, name: evh-taxi-ride, parent: grp-ingestion, props: {name: changeme, partition_count: 1}}
+- {id: evh-taxi-fare, type: azure.res.azurerm_eventhub, name: evh-taxi-fare, parent: grp-ingestion, props: {name: changeme, partition_count: 1}}
+- {id: asa-taxi-tips, type: azure.res.azurerm_stream_analytics_job, name: asa-taxi-tips, parent: grp-processing, props: {location: westeurope, name: changeme, resource_group_name: changeme, transformation_query: changeme}}
+- id: cosmos-taxi
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-taxi
+  parent: grp-serving
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: law-stream, type: azure.res.azurerm_log_analytics_workspace, name: law-stream, parent: rg-rg-stream-processing, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: device, to: evh-taxi-ride, label: ride events (JSON), step: '1'}
+- {from: device, to: evh-taxi-fare, label: fare events (CSV), step: '1'}
+- {from: evh-taxi-ride, to: asa-taxi-tips, label: PARTITION BY PartitionId, step: '2'}
+- {from: evh-taxi-fare, to: asa-taxi-tips, label: PARTITION BY PartitionId, step: '2'}
+- {from: asa-taxi-tips, to: cosmos-taxi, label: hopping window 5m/1m results, step: '3'}
+- {from: cosmos-taxi, to: saas, label: Power BI, step: '4'}
+- {from: asa-taxi-tips, to: law-stream, label: SU% and throttling metrics}
+steps:
+- {n: '1', text: 'device → evh-taxi-ride: ride events (JSON)'}
+- {n: '2', text: 'evh-taxi-ride → asa-taxi-tips: PARTITION BY PartitionId'}
+- {n: '3', text: 'asa-taxi-tips → cosmos-taxi: hopping window 5m/1m results'}
+- {n: '4', text: 'cosmos-taxi → saas: Power BI'}

@@ -1,0 +1,46 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/building-an-event-driven-application-with-amazon-eventbridge/); edit freely.
+title: Event-driven application with EventBridge
+category: serverless
+tags:
+- eventbridge
+- event bus
+- rules
+- event-driven
+- step functions
+- choreography
+source: https://aws.amazon.com/blogs/compute/building-an-event-driven-application-with-amazon-eventbridge/
+description: Producers put domain events onto a custom EventBridge event bus; rules match event patterns and route each event to one or more targets such as Lambda functions, Step Functions workflows, and
+  SQS queues. An event archive enables replay, and producers and consumers stay decoupled because nobody addresses anyone directly.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: client, type: common.client, name: client}
+- {id: ingest-api, type: aws.res.aws_api_gateway_rest_api, name: ingest-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: order-producer, type: aws.lambda_function, name: order-producer, parent: reg-us-east-1}
+- {id: orders-bus, type: aws.res.aws_cloudwatch_event_bus, name: orders-bus, parent: reg-us-east-1, props: {name: changeme}}
+- {id: order-created-rule, type: aws.res.aws_cloudwatch_event_rule, name: order-created-rule, parent: reg-us-east-1}
+- {id: order-shipped-rule, type: aws.res.aws_cloudwatch_event_rule, name: order-shipped-rule, parent: reg-us-east-1}
+- {id: fulfillment-workflow, type: aws.res.aws_sfn_state_machine, name: fulfillment-workflow, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: inventory-updater, type: aws.lambda_function, name: inventory-updater, parent: reg-us-east-1}
+- {id: notifications-queue, type: aws.sqs_queue, name: notifications-queue, parent: reg-us-east-1}
+- {id: orders, type: aws.dynamodb_table, name: orders, parent: reg-us-east-1}
+edges:
+- {from: client, to: ingest-api, label: POST /orders, step: '1'}
+- {from: ingest-api, to: order-producer, step: '2'}
+- {from: order-producer, to: orders-bus, label: PutEvents OrderCreated, step: '3'}
+- {from: orders-bus, to: order-created-rule, label: pattern match, step: '4'}
+- {from: order-created-rule, to: fulfillment-workflow, step: '5', link: aws_cloudwatch_event_target}
+- {from: order-created-rule, to: inventory-updater, step: '5', link: aws_cloudwatch_event_target}
+- {from: fulfillment-workflow, to: orders-bus, label: PutEvents OrderShipped, step: '6'}
+- {from: orders-bus, to: order-shipped-rule, step: '7'}
+- {from: order-shipped-rule, to: notifications-queue, step: '8', link: aws_cloudwatch_event_target}
+- {from: inventory-updater, to: orders, label: UpdateItem}
+steps:
+- {n: '1', text: 'client → ingest-api: POST /orders'}
+- {n: '2', text: ingest-api → order-producer}
+- {n: '3', text: 'order-producer → orders-bus: PutEvents OrderCreated'}
+- {n: '4', text: 'orders-bus → order-created-rule: pattern match'}
+- {n: '5', text: order-created-rule → fulfillment-workflow}
+- {n: '6', text: 'fulfillment-workflow → orders-bus: PutEvents OrderShipped'}
+- {n: '7', text: orders-bus → order-shipped-rule}
+- {n: '8', text: order-shipped-rule → notifications-queue}

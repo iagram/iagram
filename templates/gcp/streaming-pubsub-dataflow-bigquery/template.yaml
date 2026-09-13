@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.cloud.google.com/dataflow/docs/tutorials/dataflow-stream-to-bigquery); edit freely.
+title: Streaming analytics with Pub/Sub, Dataflow and BigQuery
+category: data
+tags:
+- streaming
+- pubsub
+- dataflow
+- bigquery
+- apache beam
+- real time
+source: https://docs.cloud.google.com/dataflow/docs/tutorials/dataflow-stream-to-bigquery
+description: Event producers publish JSON to a Pub/Sub topic, a Dataflow streaming job built from the Pub/Sub Subscription to BigQuery template reads the subscription, applies optional UDF transforms and
+  streams rows into a BigQuery table. Failed records go to a dead-letter table, a Cloud Storage bucket holds temp and staging files, and Looker Studio dashboards query the warehouse.
+nodes:
+- {id: prj-stream-prj, type: gcp.project, name: stream-prj, props: {project_id: stream-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-stream-vpc, type: gcp.vpc, name: stream-vpc, parent: prj-stream-prj}
+- {id: sub-dataflow-sub, type: gcp.subnetwork, name: dataflow-sub, parent: vpc-stream-vpc, props: {cidr: 10.60.0.0/22, region: europe-west1}}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: clickstream-topic, type: gcp.pubsub_topic, name: clickstream-topic, parent: prj-stream-prj}
+- {id: clickstream-sub, type: gcp.res.google_pubsub_subscription, name: clickstream-sub, parent: prj-stream-prj, props: {name: changeme, topic: changeme}}
+- {id: pubsub-to-bq-stream, type: gcp.res.google_dataflow_job, name: pubsub-to-bq-stream, parent: sub-dataflow-sub, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: dataflow-temp-bucket, type: gcp.storage_bucket, name: dataflow-temp-bucket, parent: prj-stream-prj}
+- {id: events-ds, type: gcp.bigquery_dataset, name: events_ds, parent: prj-stream-prj}
+- {id: sample-publisher, type: gcp.res.google_cloud_scheduler_job, name: sample-publisher, parent: prj-stream-prj, props: {name: changeme}}
+edges:
+- {from: device, to: clickstream-topic, label: publish events, step: '1'}
+- {from: sample-publisher, to: clickstream-topic, label: synthetic messages}
+- {from: clickstream-topic, to: clickstream-sub, label: pull subscription, step: '2'}
+- {from: clickstream-sub, to: pubsub-to-bq-stream, label: PubsubIO read, step: '3'}
+- {from: pubsub-to-bq-stream, to: dataflow-temp-bucket, label: temp / staging}
+- {from: pubsub-to-bq-stream, to: events-ds, label: streaming inserts + dead-letter table, step: '4'}
+- {from: users, to: events-ds, label: BI queries, step: '5'}
+steps:
+- {n: '1', text: 'device → clickstream-topic: publish events'}
+- {n: '2', text: 'clickstream-topic → clickstream-sub: pull subscription'}
+- {n: '3', text: 'clickstream-sub → pubsub-to-bq-stream: PubsubIO read'}
+- {n: '4', text: 'pubsub-to-bq-stream → events_ds: streaming inserts + dead-letter table'}
+- {n: '5', text: 'users → events_ds: BI queries'}

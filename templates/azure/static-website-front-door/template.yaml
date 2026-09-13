@@ -1,0 +1,31 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/frontdoor/scenario-storage-blobs); edit freely.
+title: Static website on Azure Storage with Azure Front Door
+category: web
+tags:
+- static-website
+- blob-storage
+- front-door
+- cdn
+- waf
+- private-link
+source: https://learn.microsoft.com/en-us/azure/frontdoor/scenario-storage-blobs
+description: Static content is hosted in an Azure Storage account and delivered through Azure Front Door Premium, which terminates TLS on a custom domain, applies WAF managed rules, caches responses at
+  edge points of presence and connects to the origin over Private Link. The storage firewall blocks all direct internet access so every request is processed by Front Door.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-static-site, type: azure.resource_group, name: rg-static-site, parent: sub-workload, props: {location: westeurope}}
+- {id: grp-global-edge, type: common.group, name: Global edge, parent: rg-rg-static-site}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: afd-premium, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-premium, parent: grp-global-edge, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: afd-waf-policy, type: azure.res.azurerm_cdn_frontdoor_firewall_policy, name: afd-waf-policy, parent: grp-global-edge, props: {mode: changeme, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: ststaticsite, type: azure.storage_account, name: ststaticsite, parent: rg-rg-static-site}
+edges:
+- {from: users, to: afd-premium, label: HTTPS custom domain (TLS at PoP), step: '1'}
+- {from: afd-waf-policy, to: afd-premium, label: WAF inspection, step: '2'}
+- {from: afd-premium, to: ststaticsite, label: cache miss, step: '3'}
+- {from: internet, to: ststaticsite, label: direct access blocked by storage firewall}
+steps:
+- {n: '1', text: 'users → afd-premium: HTTPS custom domain (TLS at PoP)'}
+- {n: '2', text: 'afd-waf-policy → afd-premium: WAF inspection'}
+- {n: '3', text: 'afd-premium → ststaticsite: cache miss'}

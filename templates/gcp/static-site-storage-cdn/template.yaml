@@ -1,0 +1,37 @@
+# Generated from the official reference (https://docs.cloud.google.com/storage/docs/hosting-static-website); edit freely.
+title: Static website with Cloud Storage, Cloud CDN and HTTPS load balancer
+category: web
+tags:
+- static site
+- cloud storage
+- cloud cdn
+- backend bucket
+- cloud dns
+source: https://docs.cloud.google.com/storage/docs/hosting-static-website
+description: Static assets sit in a Cloud Storage bucket exposed through an external Application Load Balancer backend bucket with Cloud CDN enabled, because Cloud Storage alone cannot serve custom domains
+  over HTTPS. A Google-managed SSL certificate terminates TLS and a Cloud DNS A record points the domain at the load balancer anycast IP.
+nodes:
+- {id: prj-static-site-prj, type: gcp.project, name: static-site-prj, props: {project_id: static-site-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: www-site-bucket, type: gcp.storage_bucket, name: www-site-bucket, parent: prj-static-site-prj}
+- {id: site-backend-bucket, type: gcp.res.google_compute_backend_bucket, name: site-backend-bucket, parent: prj-static-site-prj, props: {bucket_name: changeme, name: changeme}}
+- {id: site-url-map, type: gcp.res.google_compute_url_map, name: site-url-map, parent: prj-static-site-prj, props: {name: changeme}}
+- {id: site-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: site-cert, parent: prj-static-site-prj}
+- {id: site-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: site-https-proxy, parent: prj-static-site-prj, props: {name: changeme, url_map: changeme}}
+- {id: site-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: site-https-rule, parent: prj-static-site-prj, props: {name: changeme, target: changeme}}
+- {id: example-zone, type: gcp.cloud_dns_zone, name: example-zone, parent: prj-static-site-prj, props: {domain: example.com}}
+edges:
+- {from: users, to: example-zone, label: DNS lookup, step: '1'}
+- {from: users, to: site-https-rule, label: HTTPS 443, step: '2'}
+- {from: site-https-rule, to: site-https-proxy, label: TLS termination, step: '3'}
+- {from: site-cert, to: site-https-proxy, label: managed certificate}
+- {from: site-https-proxy, to: site-url-map, label: route, step: '4'}
+- {from: site-url-map, to: site-backend-bucket, label: Cloud CDN cache, step: '5'}
+- {from: site-backend-bucket, to: www-site-bucket, label: origin fetch on miss, step: '6'}
+steps:
+- {n: '1', text: 'users → example-zone: DNS lookup'}
+- {n: '2', text: 'users → site-https-rule: HTTPS 443'}
+- {n: '3', text: 'site-https-rule → site-https-proxy: TLS termination'}
+- {n: '4', text: 'site-https-proxy → site-url-map: route'}
+- {n: '5', text: 'site-url-map → site-backend-bucket: Cloud CDN cache'}
+- {n: '6', text: 'site-backend-bucket → www-site-bucket: origin fetch on miss'}

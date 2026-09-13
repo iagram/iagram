@@ -13,7 +13,7 @@ import { Rules } from './rules'
 import { fromDocument, makeEdge, withMarkers, makeNode, newId, toDocument, zIndexFor, type RFEdge, type RFNode } from './convert'
 import type { Document } from './types'
 import { rfStore } from './rf'
-import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, EdgeStyle, Entry, Family, GeneratedSummary, Job, PlanResult, Problem, Step } from './types'
+import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, EdgeStyle, Entry, Family, GeneratedSummary, Job, PlanResult, Problem, Step, TemplateItem } from './types'
 import { COMMON, ROOT } from './types'
 
 interface State {
@@ -23,6 +23,9 @@ interface State {
   /** numbered walkthrough text, keyed by step number */
   steps: Step[]
   showLegend: boolean
+  /** The reference-architecture gallery (front page). */
+  showGallery: boolean
+  templates: TemplateItem[] | null
   nodes: RFNode[]
   edges: RFEdge[]
   selectedId: string | null
@@ -77,6 +80,10 @@ interface State {
   updateEdge: (id: string, patch: { label?: string; step?: string; style?: EdgeStyle; type?: string; name?: string; props?: Record<string, unknown> }) => void
   setSteps: (steps: Step[]) => void
   setShowLegend: (v: boolean) => void
+  setShowGallery: (v: boolean) => void
+  loadTemplates: () => Promise<void>
+  /** Open a reference architecture in the editor (replaces the unsaved canvas after confirmation). */
+  useTemplate: (t: TemplateItem) => Promise<void>
   removeNodes: (ids: string[]) => void
   select: (id: string | null) => void
   requestSelect: (id: string | null) => void
@@ -196,6 +203,8 @@ export const useStore = create<State>((set, get) => ({
   docName: '',
   steps: [],
   showLegend: stored('iagram.legend', false),
+  showGallery: false,
+  templates: null,
   nodes: [],
   edges: [],
   selectedId: null,
@@ -249,7 +258,7 @@ export const useStore = create<State>((set, get) => ({
       const used = [...new Set(res.document.nodes.map((n) => n.type.split('.')[0]))].filter((p) => p !== COMMON)
       const current = get().activeProvider
       const activeProvider = providers.includes(current) ? current : used.find((p) => providers.includes(p)) ?? providers[0] ?? ''
-      set({ catalog, rules, nodes, edges, steps: res.document.steps ?? [], docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
+      set({ catalog, rules, nodes, edges, steps: res.document.steps ?? [], showGallery: nodes.length === 0 && new URLSearchParams(location.search).get('gallery') !== '0', docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
       void get().refreshProjection()
       api.latestPlan().then((r) => set({ ...(r.plan ? { plan: r.plan, planStale: false } : {}), drift: r.drift })).catch(() => undefined)
       api.health().then((h) => set({ version: h.version })).catch(() => undefined)
@@ -360,7 +369,7 @@ export const useStore = create<State>((set, get) => ({
     if (!rule) return
     if (edges.some((e) => e.source === c.source && e.target === c.target)) return
     get().commit()
-    const link = rule.kind === 'link' ? { type: rule.type, name: `${src.data.name}-${dst.data.name}`.replace(/[^A-Za-z0-9_-]+/g, '_') } : {}
+    const link = rule.kind === 'link' ? { type: rule.type, name: `${src.data.name}-${dst.data.name}`.replace(/[^A-Za-z0-9_-]+/g, '_'), props: { ...(rules.links.find((l) => l.id === rule.type)?.defaults ?? {}) } } : {}
     const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: c.source, target: c.target, ...link }, rule.label ?? (rule.kind === 'flow' ? '' : rule.kind), rule.style)
     set({ edges: addEdge(edge, edges), dirty: true })
     get().validateSoon()
@@ -848,6 +857,35 @@ export const useStore = create<State>((set, get) => ({
     if (get().isProjected()) get().materialize()
     get().commit('steps')
     set({ steps, dirty: true })
+  },
+
+  setShowGallery(v) {
+    set({ showGallery: v })
+  },
+
+  async loadTemplates() {
+    if (get().templates) return
+    try {
+      const r = await api.templates()
+      set({ templates: r.templates })
+    } catch (e) {
+      set({ templates: [] })
+      get().showToast((e as Error).message)
+    }
+  },
+
+  async useTemplate(t) {
+    if (get().nodes.length > 0 && !confirm(`Replace the current canvas with "${t.title}"? Your file is not touched until you save.`)) return
+    // Generated element types need their schemas before the canvas can draw them.
+    const missing = [...new Set(t.document.nodes.map((n) => n.type).filter((x) => !get().rules?.entry(x)))]
+    if (missing.length && get().rules) {
+      const r = await api.resolve(missing).catch(() => ({ entries: {} }))
+      for (const e of Object.values(r.entries)) get().rules!.register(e)
+    }
+    get().loadDocument(t.document)
+    set({ showGallery: false, activeProvider: t.provider, docName: get().docName || t.title })
+    void get().refreshProjection()
+    get().showToast(`Opened "${t.title}". Adapt it, then Save.`)
   },
 
   setShowLegend(v) {

@@ -1,0 +1,45 @@
+# Generated from the official reference (https://docs.aws.amazon.com/sns/latest/dg/sns-sqs-as-subscriber.html); edit freely.
+title: SNS to SQS fan-out with Lambda consumers
+category: serverless
+tags:
+- fanout
+- sns
+- sqs
+- lambda
+- pub/sub
+- dead-letter queue
+source: https://docs.aws.amazon.com/sns/latest/dg/sns-sqs-as-subscriber.html
+description: A producer publishes each order event once to an SNS topic, which replicates the message to several subscribed SQS queues so downstream services process it independently and at their own pace.
+  Lambda functions poll each queue via event source mappings, and a dead-letter queue captures messages that repeatedly fail.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: client, type: common.client, name: client}
+- {id: orders-api, type: aws.res.aws_api_gateway_rest_api, name: orders-api, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: order-publisher, type: aws.lambda_function, name: order-publisher, parent: reg-eu-west-1}
+- {id: order-events, type: aws.res.aws_sns_topic, name: order-events, parent: reg-eu-west-1}
+- {id: fulfillment-queue, type: aws.sqs_queue, name: fulfillment-queue, parent: reg-eu-west-1}
+- {id: analytics-queue, type: aws.sqs_queue, name: analytics-queue, parent: reg-eu-west-1}
+- {id: fulfillment-dlq, type: aws.sqs_queue, name: fulfillment-dlq, parent: reg-eu-west-1}
+- {id: fulfillment-worker, type: aws.lambda_function, name: fulfillment-worker, parent: reg-eu-west-1}
+- {id: analytics-worker, type: aws.lambda_function, name: analytics-worker, parent: reg-eu-west-1}
+- {id: shipments, type: aws.dynamodb_table, name: shipments, parent: reg-eu-west-1}
+- {id: order-archive, type: aws.s3_bucket, name: order-archive, parent: reg-eu-west-1}
+edges:
+- {from: client, to: orders-api, label: POST /orders, step: '1'}
+- {from: orders-api, to: order-publisher, step: '2'}
+- {from: order-publisher, to: order-events, label: Publish, step: '3'}
+- {from: order-events, to: fulfillment-queue, step: '4', link: aws_sns_topic_subscription}
+- {from: order-events, to: analytics-queue, step: '4', link: aws_sns_topic_subscription}
+- {from: fulfillment-queue, to: fulfillment-worker, step: '5', link: aws_lambda_event_source_mapping}
+- {from: analytics-queue, to: analytics-worker, step: '5', link: aws_lambda_event_source_mapping}
+- {from: fulfillment-worker, to: shipments, label: PutItem, step: '6'}
+- {from: analytics-worker, to: order-archive, label: PutObject, step: '6'}
+- {from: fulfillment-queue, to: fulfillment-dlq, label: redrive after maxReceiveCount}
+steps:
+- {n: '1', text: 'client → orders-api: POST /orders'}
+- {n: '2', text: orders-api → order-publisher}
+- {n: '3', text: 'order-publisher → order-events: Publish'}
+- {n: '4', text: order-events → fulfillment-queue}
+- {n: '5', text: fulfillment-queue → fulfillment-worker}
+- {n: '6', text: 'fulfillment-worker → shipments: PutItem'}

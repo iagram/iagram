@@ -101,7 +101,7 @@ func TestEdgeProblems(t *testing.T) {
 		document.Edge{ID: "e5", Kind: "routes_to", Source: "lb", Target: "ghost"},
 	)
 	r := validate.Run(c, d)
-	expectProblem(t, r, "web cannot connect to lb")
+	expectProblem(t, r, `connection web -> lb must be of kind "flow"`)
 	expectProblem(t, r, `must be of kind "routes_to"`)
 	expectProblem(t, r, "duplicate connection lb -> web")
 	expectProblem(t, r, "missing node")

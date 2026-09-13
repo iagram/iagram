@@ -1,0 +1,45 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prescriptive-guidance/latest/retrieval-augmented-generation-options/rag-fully-managed-bedrock.html); edit freely.
+title: RAG with Amazon Bedrock Knowledge Bases and OpenSearch Serverless
+category: ml
+tags:
+- rag
+- bedrock
+- knowledge base
+- opensearch serverless
+- vector search
+- generative ai
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/retrieval-augmented-generation-options/rag-fully-managed-bedrock.html
+description: Documents in S3 are chunked and embedded by a Bedrock Knowledge Base, which stores vectors in an OpenSearch Serverless collection. At query time an orchestrating Lambda behind API Gateway calls
+  RetrieveAndGenerate, so the knowledge base fetches the most similar chunks and a Bedrock foundation model composes a grounded answer.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-retrieval-and-generation, type: common.group, name: retrieval and generation, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: knowledge-docs, type: aws.s3_bucket, name: knowledge-docs, parent: grp-ingestion}
+- {id: enterprise-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: enterprise-kb, parent: grp-ingestion, props: {name: changeme, role_arn: changeme}}
+- {id: kb-vectors, type: aws.res.aws_opensearchserverless_collection, name: kb-vectors, parent: grp-ingestion, props: {name: changeme}}
+- {id: app-users, type: aws.res.aws_cognito_user_pool, name: app-users, parent: grp-retrieval-and-generation, props: {name: changeme}}
+- {id: chat-api, type: aws.res.aws_api_gateway_rest_api, name: chat-api, parent: grp-retrieval-and-generation, props: {name: changeme}}
+- {id: rag-orchestrator, type: aws.lambda_function, name: rag-orchestrator, parent: grp-retrieval-and-generation}
+- {id: claude-generation, type: aws.res.aws_bedrock_inference_profile, name: claude-generation, parent: grp-retrieval-and-generation, props: {name: changeme}}
+edges:
+- {from: knowledge-docs, to: enterprise-kb, label: sync, step: '1'}
+- {from: enterprise-kb, to: kb-vectors, label: index vectors, step: '2'}
+- {from: users, to: chat-api, label: question (JWT from Cognito), step: '3'}
+- {from: app-users, to: chat-api, label: authorizer}
+- {from: chat-api, to: rag-orchestrator, step: '4'}
+- {from: rag-orchestrator, to: enterprise-kb, label: RetrieveAndGenerate, step: '5'}
+- {from: enterprise-kb, to: kb-vectors, label: k-NN similarity search, step: '6'}
+- {from: enterprise-kb, to: claude-generation, label: augmented prompt, step: '7'}
+- {from: rag-orchestrator, to: users, label: grounded answer + citations, step: '8'}
+steps:
+- {n: '1', text: 'knowledge-docs → enterprise-kb: sync'}
+- {n: '2', text: 'enterprise-kb → kb-vectors: index vectors'}
+- {n: '3', text: 'users → chat-api: question (JWT from Cognito)'}
+- {n: '4', text: chat-api → rag-orchestrator}
+- {n: '5', text: 'rag-orchestrator → enterprise-kb: RetrieveAndGenerate'}
+- {n: '6', text: 'enterprise-kb → kb-vectors: k-NN similarity search'}
+- {n: '7', text: 'enterprise-kb → claude-generation: augmented prompt'}
+- {n: '8', text: 'rag-orchestrator → users: grounded answer + citations'}

@@ -1,0 +1,385 @@
+- slug: hub-and-spoke-ncc
+  title: Hub-and-spoke network with Network Connectivity Center
+  category: networking
+  tags: [ncc, hub and spoke, vpc spokes, cloud nat, hybrid]
+  source: https://docs.cloud.google.com/architecture/deploy-hub-spoke-vpc-network-topology
+  description: A central hub VPC hosts shared services and terminates on-premises connectivity, while per-business-unit workload VPCs attach as Network Connectivity Center spokes for transitive, full-bandwidth routing. Each network keeps its own Cloud NAT gateway for outbound internet and DNS peering zones resolve names across the hub.
+  containers:
+    - project: hub-prj
+      region: europe-west1
+      vpcs:
+        - name: hub
+          subnets: [{name: hub-sub, cidr: 10.0.1.0/24, region: europe-west1}]
+    - project: spoke-a-prj
+      region: europe-west1
+      vpcs:
+        - name: spoke-a
+          subnets: [{name: spoke-a-sub, cidr: 10.1.1.0/24, region: europe-west1}]
+    - project: spoke-b-prj
+      region: europe-west1
+      vpcs:
+        - name: spoke-b
+          subnets: [{name: spoke-b-sub, cidr: 10.2.1.0/24, region: europe-west1}]
+  elements:
+    - {tf: google_network_connectivity_hub, name: ncc-hub, in: project:hub-prj}
+    - {tf: google_compute_ha_vpn_gateway, name: hub-vpn-gw, in: vpc:hub}
+    - {tf: google_compute_router, name: hub-router, in: vpc:hub}
+    - {tf: google_compute_router_nat, name: hub-nat, in: vpc:hub}
+    - {tf: google_compute_instance, name: shared-svc-vm, in: subnet:hub-sub}
+    - {tf: google_compute_instance, name: workload-a-vm, in: subnet:spoke-a-sub}
+    - {tf: google_compute_instance, name: workload-b-vm, in: subnet:spoke-b-sub}
+    - {tf: google_dns_managed_zone, name: corp-private-zone, in: vpc:hub}
+  actors: [datacenter, internet]
+  flows:
+    - {from: datacenter, to: hub-vpn-gw, label: HA VPN / IPsec, step: 1}
+    - {from: hub-vpn-gw, to: hub-router, label: BGP routes, step: 2}
+    - {from: ncc-hub, to: vpc:spoke-a, link: google_network_connectivity_spoke}
+    - {from: ncc-hub, to: vpc:spoke-b, link: google_network_connectivity_spoke}
+    - {from: workload-a-vm, to: workload-b-vm, label: transitive via NCC, step: 3}
+    - {from: workload-a-vm, to: shared-svc-vm, label: shared services, step: 4}
+    - {from: hub-nat, to: internet, label: outbound NAT, step: 5}
+
+- slug: hybrid-interconnect-shared-vpc
+  title: Hybrid connectivity with Cloud Interconnect, HA VPN and Shared VPC
+  category: networking
+  tags: [cloud interconnect, ha vpn, shared vpc, cloud router, bgp, hybrid]
+  source: https://docs.cloud.google.com/architecture/network-hybrid-multicloud
+  description: An on-premises data center connects to a Shared VPC host project over redundant Dedicated or Partner Interconnect VLAN attachments, with HA VPN as an encrypted backup path, and Cloud Router exchanges routes over BGP. Service projects attach to the Shared VPC so workloads consume the hybrid link and centrally managed subnets without owning network resources.
+  containers:
+    - datacenter: on-prem-dc
+    - project: net-host-prj
+      region: europe-west1
+      vpcs:
+        - name: shared-vpc
+          subnets:
+            - {name: prod-sub-ew1, cidr: 10.10.0.0/20, region: europe-west1}
+            - {name: prod-sub-ew4, cidr: 10.20.0.0/20, region: europe-west4}
+    - project: app-svc-prj
+      region: europe-west1
+  elements:
+    - {tf: google_compute_interconnect_attachment, name: vlan-attach-1, in: vpc:shared-vpc}
+    - {tf: google_compute_interconnect_attachment, name: vlan-attach-2, in: vpc:shared-vpc}
+    - {tf: google_compute_router, name: hybrid-router, in: vpc:shared-vpc}
+    - {tf: google_compute_ha_vpn_gateway, name: backup-vpn-gw, in: vpc:shared-vpc}
+    - {tf: google_compute_external_vpn_gateway, name: onprem-vpn-peer, in: datacenter:on-prem-dc}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:prod-sub-ew1}
+    - {tf: google_dns_managed_zone, name: onprem-forwarding-zone, in: vpc:shared-vpc}
+  actors: [datacenter, users]
+  flows:
+    - {from: datacenter, to: vlan-attach-1, label: Dedicated Interconnect 10G, step: 1}
+    - {from: datacenter, to: vlan-attach-2, label: redundant VLAN attachment, step: 1}
+    - {from: onprem-vpn-peer, to: backup-vpn-gw, label: HA VPN backup, step: 2}
+    - {from: vlan-attach-1, to: hybrid-router, label: BGP, step: 3}
+    - {from: hybrid-router, to: app-vm, label: dynamic routes to subnets, step: 4}
+    - {from: project:app-svc-prj, to: vpc:shared-vpc, label: Shared VPC service project}
+    - {from: app-vm, to: onprem-forwarding-zone, label: DNS forwarding to on-prem, step: 5}
+
+- slug: three-tier-web-app
+  title: Three-tier web app with global load balancer, Cloud Run and Cloud SQL
+  category: web
+  tags: [three tier, application load balancer, cloud run, cloud sql, memorystore]
+  source: https://docs.cloud.google.com/application-design-center/docs/three-tier-web-app
+  description: A global external Application Load Balancer fronts a Cloud Run web frontend, which calls a Cloud Run API service that reads through a Memorystore for Redis cache and falls back to a Cloud SQL for PostgreSQL database. Secrets live in Secret Manager and the serverless tiers reach the private data tier through VPC egress into a dedicated subnet.
+  containers:
+    - project: web-app-prj
+      region: europe-west1
+      vpcs:
+        - name: app-vpc
+          subnets: [{name: app-sub, cidr: 10.30.0.0/24, region: europe-west1}]
+  elements:
+    - {tf: google_compute_global_forwarding_rule, name: https-fwd-rule, in: project:web-app-prj}
+    - {tf: google_compute_backend_service, name: frontend-backend, in: project:web-app-prj}
+    - {tf: google_cloud_run_v2_service, name: web-frontend, in: project:web-app-prj}
+    - {tf: google_cloud_run_v2_service, name: api-service, in: project:web-app-prj}
+    - {tf: google_redis_instance, name: cache, in: subnet:app-sub}
+    - {tf: google_sql_database_instance, name: postgres-db, in: subnet:app-sub}
+    - {tf: google_secret_manager_secret, name: db-credentials, in: project:web-app-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: https-fwd-rule, label: HTTPS, step: 1}
+    - {from: https-fwd-rule, to: frontend-backend, label: serverless NEG, step: 2}
+    - {from: frontend-backend, to: web-frontend, label: HTTP, step: 3}
+    - {from: web-frontend, to: api-service, label: REST/JSON, step: 4}
+    - {from: api-service, to: cache, label: Redis read-through, step: 5}
+    - {from: api-service, to: postgres-db, label: SQL on cache miss, step: 6}
+    - {from: api-service, to: db-credentials, label: fetch secret, step: 7}
+
+- slug: static-site-storage-cdn
+  title: Static website with Cloud Storage, Cloud CDN and HTTPS load balancer
+  category: web
+  tags: [static site, cloud storage, cloud cdn, backend bucket, cloud dns]
+  source: https://docs.cloud.google.com/storage/docs/hosting-static-website
+  description: Static assets sit in a Cloud Storage bucket exposed through an external Application Load Balancer backend bucket with Cloud CDN enabled, because Cloud Storage alone cannot serve custom domains over HTTPS. A Google-managed SSL certificate terminates TLS and a Cloud DNS A record points the domain at the load balancer anycast IP.
+  containers:
+    - project: static-site-prj
+      region: europe-west1
+  elements:
+    - {tf: google_storage_bucket, name: www-site-bucket, in: project:static-site-prj}
+    - {tf: google_compute_backend_bucket, name: site-backend-bucket, in: project:static-site-prj}
+    - {tf: google_compute_url_map, name: site-url-map, in: project:static-site-prj}
+    - {tf: google_compute_managed_ssl_certificate, name: site-cert, in: project:static-site-prj}
+    - {tf: google_compute_target_https_proxy, name: site-https-proxy, in: project:static-site-prj}
+    - {tf: google_compute_global_forwarding_rule, name: site-https-rule, in: project:static-site-prj}
+    - {tf: google_dns_managed_zone, name: example-zone, in: project:static-site-prj}
+  actors: [users]
+  flows:
+    - {from: users, to: example-zone, label: DNS lookup, step: 1}
+    - {from: users, to: site-https-rule, label: HTTPS 443, step: 2}
+    - {from: site-https-rule, to: site-https-proxy, label: TLS termination, step: 3}
+    - {from: site-cert, to: site-https-proxy, label: managed certificate}
+    - {from: site-https-proxy, to: site-url-map, label: route, step: 4}
+    - {from: site-url-map, to: site-backend-bucket, label: Cloud CDN cache, step: 5}
+    - {from: site-backend-bucket, to: www-site-bucket, label: origin fetch on miss, step: 6}
+
+- slug: pubsub-fanout-cloud-run
+  title: Event-driven fan-out with Pub/Sub, Eventarc and Cloud Run
+  category: serverless
+  tags: [pubsub, cloud run, eventarc, fan out, push subscription, cloud functions]
+  source: https://docs.cloud.google.com/run/docs/tutorials/pubsub
+  description: Producers publish to a Pub/Sub topic whose push subscriptions deliver each message to Cloud Run services and a Cloud Run function in parallel, authenticated with OIDC tokens from a dedicated invoker service account. An Eventarc trigger adds Cloud Storage object-finalized events to the same topic-driven flow, so uploads and application events share one serverless processing path.
+  containers:
+    - project: events-prj
+      region: europe-west1
+  elements:
+    - {tf: google_pubsub_topic, name: orders-topic, in: project:events-prj}
+    - {tf: google_pubsub_subscription, name: orders-push-billing, in: project:events-prj}
+    - {tf: google_pubsub_subscription, name: orders-push-notify, in: project:events-prj}
+    - {tf: google_cloud_run_v2_service, name: billing-svc, in: project:events-prj}
+    - {tf: google_cloud_run_v2_service, name: notify-svc, in: project:events-prj}
+    - {tf: google_cloudfunctions2_function, name: audit-fn, in: project:events-prj}
+    - {tf: google_eventarc_trigger, name: upload-finalized-trigger, in: project:events-prj}
+    - {tf: google_storage_bucket, name: uploads-bucket, in: project:events-prj}
+    - {tf: google_artifact_registry_repository, name: images-repo, in: project:events-prj}
+  actors: [client, users]
+  flows:
+    - {from: client, to: orders-topic, label: publish message, step: 1}
+    - {from: orders-topic, to: orders-push-billing, label: fan-out, step: 2}
+    - {from: orders-topic, to: orders-push-notify, label: fan-out, step: 2}
+    - {from: orders-push-billing, to: billing-svc, label: HTTPS push + OIDC, step: 3}
+    - {from: orders-push-notify, to: notify-svc, label: HTTPS push + OIDC, step: 3}
+    - {from: users, to: uploads-bucket, label: upload object, step: 4}
+    - {from: uploads-bucket, to: upload-finalized-trigger, label: object.finalized event, step: 5}
+    - {from: upload-finalized-trigger, to: audit-fn, label: CloudEvent, step: 6}
+    - {from: images-repo, to: billing-svc, label: container image}
+
+- slug: api-gateway-cloud-run-firestore
+  title: Serverless API with API Gateway, Cloud Run and Firestore
+  category: serverless
+  tags: [api gateway, cloud run, firestore, openapi, serverless api]
+  source: https://docs.cloud.google.com/api-gateway/docs/get-started-cloud-run
+  description: An API front door (API Gateway in the reference; drawn here as the global load balancer, API Gateway being google-beta only) validates API keys and JWTs and routes requests to a Cloud Run service that it invokes with a service account holding run.invoker. The Cloud Run backend persists documents in a Firestore native-mode database and emits structured logs and metrics to Cloud Logging and Monitoring.
+  containers:
+    - project: api-prj
+      region: europe-west1
+  elements:
+    - {tf: google_compute_global_forwarding_rule, name: orders-gateway, in: project:api-prj}
+    - {tf: google_cloud_run_v2_service, name: orders-backend, in: project:api-prj}
+    - {tf: google_service_account, name: gateway-invoker-sa, in: project:api-prj}
+    - {tf: google_firestore_database, name: orders-db, in: project:api-prj}
+    - {tf: google_artifact_registry_repository, name: api-images, in: project:api-prj}
+  actors: [mobile, client, idp]
+  flows:
+    - {from: mobile, to: orders-gateway, label: HTTPS + API key / JWT, step: 1}
+    - {from: client, to: orders-gateway, label: HTTPS, step: 1}
+    - {from: idp, to: orders-gateway, label: JWT validation (JWKS)}
+    - {from: orders-gateway, to: orders-backend, label: x-google-backend, OIDC invoker, step: 3}
+    - {from: gateway-invoker-sa, to: orders-backend, label: run.invoker}
+    - {from: orders-backend, to: orders-db, label: Firestore reads/writes, step: 4}
+    - {from: api-images, to: orders-backend, label: container image}
+
+- slug: gke-microservices-gateway
+  title: Microservices on GKE exposed through GKE Gateway and Cloud Service Mesh
+  category: containers
+  tags: [gke, microservices, gateway api, service mesh, cloud armor, online boutique]
+  source: https://docs.cloud.google.com/architecture/exposing-service-mesh-apps-through-gke-ingress
+  description: The Online Boutique microservices run on a GKE cluster inside Cloud Service Mesh, and a global external Application Load Balancer provisioned by GKE Gateway sends traffic to the mesh ingress gateway. Cloud Armor and Certificate Manager provide edge security and TLS at the load balancer, while the mesh handles mTLS and application-level routing between services.
+  containers:
+    - project: gke-prj
+      region: europe-west1
+      vpcs:
+        - name: gke-vpc
+          subnets: [{name: gke-sub, cidr: 10.40.0.0/20, region: europe-west1}]
+  elements:
+    - {tf: google_container_cluster, name: boutique-cluster, in: subnet:gke-sub}
+    - {tf: google_compute_security_policy, name: edge-armor-policy, in: project:gke-prj}
+    - {tf: google_compute_global_forwarding_rule, name: gke-gateway-lb, in: project:gke-prj}
+    - {tf: google_compute_backend_service, name: mesh-ingress-backend, in: project:gke-prj}
+    - {tf: google_artifact_registry_repository, name: boutique-images, in: project:gke-prj}
+    - {tf: google_redis_instance, name: cart-redis, in: subnet:gke-sub}
+    - {tf: google_compute_router_nat, name: gke-nat, in: vpc:gke-vpc}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: gke-gateway-lb, label: HTTPS, step: 1}
+    - {from: edge-armor-policy, to: gke-gateway-lb, label: WAF / DDoS filter}
+    - {from: gke-gateway-lb, to: mesh-ingress-backend, label: container NEG, step: 2}
+    - {from: mesh-ingress-backend, to: boutique-cluster, label: mesh ingress gateway, step: 3}
+    - {from: boutique-cluster, to: cart-redis, label: cartservice state, step: 4}
+    - {from: boutique-images, to: boutique-cluster, label: pull images}
+    - {from: gke-nat, to: internet, label: private nodes egress}
+
+- slug: lakehouse-storage-dataproc-bigquery
+  title: Data lakehouse with Cloud Storage, Dataproc Spark and BigQuery
+  category: data
+  tags: [data lake, lakehouse, iceberg, dataproc, bigquery, biglake, cloud storage]
+  source: https://docs.cloud.google.com/dataproc/docs/guides/create-lakehouse
+  description: Raw and curated data land in Cloud Storage as Apache Iceberg tables, processed by Spark on a Dataproc cluster and catalogued through the BigLake Iceberg REST catalog so BigQuery can query the same tables directly. Cloud Composer orchestrates batch ingestion and Storage Transfer Service moves on-premises files into the landing bucket.
+  containers:
+    - datacenter: on-premises
+    - project: lake-prj
+      region: europe-west1
+      vpcs:
+        - name: lake-vpc
+          subnets: [{name: dataproc-sub, cidr: 10.50.0.0/22, region: europe-west1}]
+  elements:
+    - {tf: google_storage_bucket, name: raw-landing-bucket, in: project:lake-prj}
+    - {tf: google_storage_bucket, name: iceberg-warehouse-bucket, in: project:lake-prj}
+    - {tf: google_storage_transfer_job, name: onprem-file-transfer, in: project:lake-prj}
+    - {tf: google_dataproc_cluster, name: spark-cluster, in: subnet:dataproc-sub}
+    - {tf: google_bigquery_dataset, name: analytics_ds, in: project:lake-prj}
+    - {tf: google_composer_environment, name: lake-orchestrator, in: subnet:dataproc-sub}
+    - {tf: google_dataplex_lake, name: enterprise-lake, in: project:lake-prj}
+  actors: [datacenter, users]
+  flows:
+    - {from: datacenter, to: onprem-file-transfer, label: on-prem files, step: 1}
+    - {from: onprem-file-transfer, to: raw-landing-bucket, label: land raw objects, step: 2}
+    - {from: lake-orchestrator, to: spark-cluster, label: schedule Spark jobs, step: 3}
+    - {from: spark-cluster, to: raw-landing-bucket, label: read raw, step: 4}
+    - {from: spark-cluster, to: iceberg-warehouse-bucket, label: write Iceberg tables, step: 5}
+    - {from: analytics_ds, to: iceberg-warehouse-bucket, label: BigLake Iceberg tables, step: 6}
+    - {from: users, to: analytics_ds, label: BigQuery SQL, step: 7}
+    - {from: enterprise-lake, to: iceberg-warehouse-bucket, label: govern / discover}
+
+- slug: streaming-pubsub-dataflow-bigquery
+  title: Streaming analytics with Pub/Sub, Dataflow and BigQuery
+  category: data
+  tags: [streaming, pubsub, dataflow, bigquery, apache beam, real time]
+  source: https://docs.cloud.google.com/dataflow/docs/tutorials/dataflow-stream-to-bigquery
+  description: Event producers publish JSON to a Pub/Sub topic, a Dataflow streaming job built from the Pub/Sub Subscription to BigQuery template reads the subscription, applies optional UDF transforms and streams rows into a BigQuery table. Failed records go to a dead-letter table, a Cloud Storage bucket holds temp and staging files, and Looker Studio dashboards query the warehouse.
+  containers:
+    - project: stream-prj
+      region: europe-west1
+      vpcs:
+        - name: stream-vpc
+          subnets: [{name: dataflow-sub, cidr: 10.60.0.0/22, region: europe-west1}]
+  elements:
+    - {tf: google_pubsub_topic, name: clickstream-topic, in: project:stream-prj}
+    - {tf: google_pubsub_subscription, name: clickstream-sub, in: project:stream-prj}
+    - {tf: google_dataflow_job, name: pubsub-to-bq-stream, in: subnet:dataflow-sub}
+    - {tf: google_storage_bucket, name: dataflow-temp-bucket, in: project:stream-prj}
+    - {tf: google_bigquery_dataset, name: events_ds, in: project:stream-prj}
+    - {tf: google_cloud_scheduler_job, name: sample-publisher, in: project:stream-prj}
+  actors: [device, users]
+  flows:
+    - {from: device, to: clickstream-topic, label: publish events, step: 1}
+    - {from: sample-publisher, to: clickstream-topic, label: synthetic messages}
+    - {from: clickstream-topic, to: clickstream-sub, label: pull subscription, step: 2}
+    - {from: clickstream-sub, to: pubsub-to-bq-stream, label: PubsubIO read, step: 3}
+    - {from: pubsub-to-bq-stream, to: dataflow-temp-bucket, label: temp / staging}
+    - {from: pubsub-to-bq-stream, to: events_ds, label: streaming inserts + dead-letter table, step: 4}
+    - {from: users, to: events_ds, label: BI queries, step: 5}
+
+- slug: rag-vertex-ai
+  title: RAG for generative AI with Vertex AI, Vector Search and Cloud Run
+  category: ml
+  tags: [rag, vertex ai, vector search, embeddings, gemini, cloud run, alloydb]
+  source: https://docs.cloud.google.com/architecture/rag-capable-gen-ai-app-using-vertex-ai
+  description: Documents uploaded to Cloud Storage trigger Pub/Sub-driven Cloud Run functions that chunk the text, generate Vertex AI embeddings and store vectors in a Vertex AI Vector Search index and AlloyDB pgvector. A Cloud Run serving service embeds each user query, retrieves nearest neighbours, grounds a Gemini prompt with the results, and logs request, response and evaluation scores to BigQuery.
+  containers:
+    - project: genai-prj
+      region: europe-west4
+      vpcs:
+        - name: genai-vpc
+          subnets: [{name: genai-sub, cidr: 10.70.0.0/22, region: europe-west4}]
+  elements:
+    - {tf: google_storage_bucket, name: docs-ingest-bucket, in: project:genai-prj}
+    - {tf: google_pubsub_topic, name: new-document-topic, in: project:genai-prj}
+    - {tf: google_cloudfunctions2_function, name: chunk-embed-fn, in: project:genai-prj}
+    - {tf: google_vertex_ai_index, name: docs-vector-index, in: project:genai-prj}
+    - {tf: google_vertex_ai_index_endpoint, name: docs-index-endpoint, in: project:genai-prj}
+    - {tf: google_alloydb_cluster, name: rag-alloydb, in: subnet:genai-sub}
+    - {tf: google_cloud_run_v2_service, name: rag-serving-svc, in: project:genai-prj}
+    - {tf: google_cloud_run_v2_service, name: quality-eval-svc, in: project:genai-prj}
+    - {tf: google_bigquery_dataset, name: rag_logs_ds, in: project:genai-prj}
+  actors: [users, client]
+  flows:
+    - {from: client, to: docs-ingest-bucket, label: upload documents, step: 1}
+    - {from: docs-ingest-bucket, to: new-document-topic, label: object notification, step: 2}
+    - {from: new-document-topic, to: chunk-embed-fn, label: trigger, step: 3}
+    - {from: chunk-embed-fn, to: docs-vector-index, label: Vertex AI embeddings, upsert vectors, step: 4}
+    - {from: chunk-embed-fn, to: rag-alloydb, label: store chunks + pgvector, step: 4}
+    - {from: docs-vector-index, to: docs-index-endpoint, label: deployed index}
+    - {from: users, to: rag-serving-svc, label: HTTPS prompt, step: 5}
+    - {from: rag-serving-svc, to: docs-index-endpoint, label: nearest-neighbour query, step: 6}
+    - {from: rag-serving-svc, to: quality-eval-svc, label: Gemini answer, async evaluation, step: 7}
+    - {from: quality-eval-svc, to: rag_logs_ds, label: scores and logs, step: 8}
+
+- slug: global-multi-region-spanner
+  title: Global multi-region deployment with Compute Engine and Spanner
+  category: resilience
+  tags: [multi region, spanner, global load balancer, active active, managed instance groups]
+  source: https://docs.cloud.google.com/architecture/global-deployment-compute-engine-spanner
+  description: A global external Application Load Balancer sends users to the nearest healthy region, where regional managed instance groups spanning three zones run the web tier and a cross-region internal load balancer forwards to application-tier MIGs. All regions read and write a synchronously replicated multi-region Spanner instance, so a full regional outage fails over without data loss.
+  containers:
+    - project: global-app-prj
+      region: europe-west1
+      vpcs:
+        - name: global-vpc
+          subnets:
+            - {name: web-sub-ew1, cidr: 10.80.1.0/24, region: europe-west1}
+            - {name: app-sub-ew1, cidr: 10.80.2.0/24, region: europe-west1}
+            - {name: web-sub-ew4, cidr: 10.81.1.0/24, region: europe-west4}
+            - {name: app-sub-ew4, cidr: 10.81.2.0/24, region: europe-west4}
+  elements:
+    - {tf: google_compute_global_forwarding_rule, name: global-https-lb, in: project:global-app-prj}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-ew1, in: subnet:web-sub-ew1}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-ew4, in: subnet:web-sub-ew4}
+    - {tf: google_compute_forwarding_rule, name: app-internal-lb, in: vpc:global-vpc}
+    - {tf: google_compute_region_instance_group_manager, name: app-mig-ew1, in: subnet:app-sub-ew1}
+    - {tf: google_compute_region_instance_group_manager, name: app-mig-ew4, in: subnet:app-sub-ew4}
+    - {tf: google_spanner_instance, name: global-spanner, in: project:global-app-prj}
+    - {tf: google_compute_router_nat, name: nat-ew1, in: vpc:global-vpc}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: global-https-lb, label: anycast HTTPS, step: 1}
+    - {from: global-https-lb, to: web-mig-ew1, label: nearest region, step: 2}
+    - {from: global-https-lb, to: web-mig-ew4, label: failover region, step: 2}
+    - {from: web-mig-ew1, to: app-internal-lb, label: internal HTTP, step: 3}
+    - {from: web-mig-ew4, to: app-internal-lb, label: internal HTTP, step: 3}
+    - {from: app-internal-lb, to: app-mig-ew1, label: cross-region ILB, step: 4}
+    - {from: app-internal-lb, to: app-mig-ew4, label: cross-region ILB, step: 4}
+    - {from: app-mig-ew1, to: global-spanner, label: read/write, step: 5}
+    - {from: app-mig-ew4, to: global-spanner, label: read/write, step: 5}
+    - {from: nat-ew1, to: internet, label: egress}
+
+- slug: gitops-cloud-build-gke
+  title: GitOps CI/CD with Cloud Build, Artifact Registry and GKE
+  category: devops
+  tags: [ci cd, cloud build, gitops, artifact registry, gke, kubectl]
+  source: https://docs.cloud.google.com/kubernetes-engine/docs/tutorials/gitops-cloud-build
+  description: A commit to the app repository triggers a Cloud Build pipeline that runs tests, builds the container, pushes it to Artifact Registry and writes an updated Kubernetes manifest to the candidate branch of a separate env repository. A second Cloud Build trigger on the env repo applies the manifest to the GKE cluster with kubectl and promotes it to the production branch on success, so build history doubles as deployment history.
+  containers:
+    - project: cicd-prj
+      region: europe-west1
+      vpcs:
+        - name: cicd-vpc
+          subnets: [{name: gke-sub, cidr: 10.90.0.0/20, region: europe-west1}]
+  elements:
+    - {tf: google_sourcerepo_repository, name: hello-cloudbuild-app, in: project:cicd-prj}
+    - {tf: google_sourcerepo_repository, name: hello-cloudbuild-env, in: project:cicd-prj}
+    - {tf: google_cloudbuild_trigger, name: app-ci-trigger, in: project:cicd-prj}
+    - {tf: google_cloudbuild_trigger, name: env-cd-trigger, in: project:cicd-prj}
+    - {tf: google_artifact_registry_repository, name: my-repository, in: project:cicd-prj}
+    - {tf: google_container_cluster, name: hello-cloudbuild-cluster, in: subnet:gke-sub}
+    - {tf: google_compute_global_forwarding_rule, name: hello-app-lb, in: project:cicd-prj}
+  actors: [user, users]
+  flows:
+    - {from: user, to: hello-cloudbuild-app, label: git push, step: 1}
+    - {from: hello-cloudbuild-app, to: app-ci-trigger, label: commit event, step: 2}
+    - {from: app-ci-trigger, to: my-repository, label: docker build + push, step: 3}
+    - {from: app-ci-trigger, to: hello-cloudbuild-env, label: commit manifest to candidate branch, step: 4}
+    - {from: hello-cloudbuild-env, to: env-cd-trigger, label: candidate branch event, step: 5}
+    - {from: env-cd-trigger, to: hello-cloudbuild-cluster, label: kubectl apply, step: 6}
+    - {from: env-cd-trigger, to: hello-cloudbuild-env, label: copy manifest to production branch, step: 7}
+    - {from: my-repository, to: hello-cloudbuild-cluster, label: image pull}
+    - {from: users, to: hello-app-lb, label: HTTPS, step: 8}
+    - {from: hello-app-lb, to: hello-cloudbuild-cluster, label: Ingress to Deployment, step: 9}

@@ -1,0 +1,42 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/network-hybrid-multicloud); edit freely.
+title: Hybrid connectivity with Cloud Interconnect, HA VPN and Shared VPC
+category: networking
+tags:
+- cloud interconnect
+- ha vpn
+- shared vpc
+- cloud router
+- bgp
+- hybrid
+source: https://docs.cloud.google.com/architecture/network-hybrid-multicloud
+description: An on-premises data center connects to a Shared VPC host project over redundant Dedicated or Partner Interconnect VLAN attachments, with HA VPN as an encrypted backup path, and Cloud Router
+  exchanges routes over BGP. Service projects attach to the Shared VPC so workloads consume the hybrid link and centrally managed subnets without owning network resources.
+nodes:
+- {id: dc-on-prem-dc, type: common.datacenter, name: on-prem-dc}
+- {id: prj-net-host-prj, type: gcp.project, name: net-host-prj, props: {project_id: net-host-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-shared-vpc, type: gcp.vpc, name: shared-vpc, parent: prj-net-host-prj}
+- {id: sub-prod-sub-ew1, type: gcp.subnetwork, name: prod-sub-ew1, parent: vpc-shared-vpc, props: {cidr: 10.10.0.0/20, region: europe-west1}}
+- {id: sub-prod-sub-ew4, type: gcp.subnetwork, name: prod-sub-ew4, parent: vpc-shared-vpc, props: {cidr: 10.20.0.0/20, region: europe-west4}}
+- {id: prj-app-svc-prj, type: gcp.project, name: app-svc-prj, props: {project_id: app-svc-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: vlan-attach-1, type: gcp.res.google_compute_interconnect_attachment, name: vlan-attach-1, parent: vpc-shared-vpc, props: {name: changeme, router: changeme}}
+- {id: vlan-attach-2, type: gcp.res.google_compute_interconnect_attachment, name: vlan-attach-2, parent: vpc-shared-vpc, props: {name: changeme, router: changeme}}
+- {id: hybrid-router, type: gcp.res.google_compute_router, name: hybrid-router, parent: vpc-shared-vpc, props: {name: changeme, network: changeme}}
+- {id: backup-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: backup-vpn-gw, parent: vpc-shared-vpc, props: {name: changeme, network: changeme}}
+- {id: onprem-vpn-peer, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-vpn-peer, parent: prj-net-host-prj, props: {name: changeme}}
+- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-prod-sub-ew1}
+- {id: onprem-forwarding-zone, type: gcp.cloud_dns_zone, name: onprem-forwarding-zone, parent: prj-net-host-prj, props: {domain: example.com}}
+edges:
+- {from: dc-on-prem-dc, to: vlan-attach-1, label: Dedicated Interconnect 10G, step: '1'}
+- {from: dc-on-prem-dc, to: vlan-attach-2, label: redundant VLAN attachment, step: '1'}
+- {from: onprem-vpn-peer, to: backup-vpn-gw, label: HA VPN backup, step: '2'}
+- {from: vlan-attach-1, to: hybrid-router, label: BGP, step: '3'}
+- {from: hybrid-router, to: app-vm, label: dynamic routes to subnets, step: '4'}
+- {from: prj-app-svc-prj, to: vpc-shared-vpc, label: Shared VPC service project}
+- {from: app-vm, to: onprem-forwarding-zone, label: DNS forwarding to on-prem, step: '5'}
+steps:
+- {n: '1', text: 'datacenter → vlan-attach-1: Dedicated Interconnect 10G'}
+- {n: '2', text: 'onprem-vpn-peer → backup-vpn-gw: HA VPN backup'}
+- {n: '3', text: 'vlan-attach-1 → hybrid-router: BGP'}
+- {n: '4', text: 'hybrid-router → app-vm: dynamic routes to subnets'}
+- {n: '5', text: 'app-vm → onprem-forwarding-zone: DNS forwarding to on-prem'}

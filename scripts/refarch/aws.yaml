@@ -1,0 +1,474 @@
+- slug: tgw-hub-and-spoke
+  title: Transit Gateway hub and spoke
+  category: networking
+  tags: [transit gateway, hub and spoke, multi-vpc, centralized egress]
+  source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/transit-gateway.html
+  description: A regional Transit Gateway acts as the hub; each spoke VPC attaches once and reaches the others and the internet through TGW route tables. A shared egress VPC with NAT gateways centralizes outbound traffic so spokes hold no internet gateway of their own.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: egress
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: egress-public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: egress-public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: egress-tgw-a, cidr: 10.0.10.0/28, az: a, public: false}
+        - name: spoke-a
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: app-a, cidr: 10.1.1.0/24, az: a, public: false}
+        - name: spoke-b
+          cidr: 10.2.0.0/16
+          subnets:
+            - {name: app-b, cidr: 10.2.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
+    - {tf: aws_ec2_transit_gateway_route_table, name: spoke-rt, in: region}
+    - {tf: aws_ec2_transit_gateway_route_table, name: egress-rt, in: region}
+    - {tf: aws_internet_gateway, name: egress-igw, in: vpc:egress}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:egress-public-a}
+    - {tf: aws_nat_gateway, name: nat-b, in: subnet:egress-public-b}
+    - {tf: aws_instance, name: app-a, in: subnet:app-a}
+    - {tf: aws_instance, name: app-b, in: subnet:app-b}
+  actors: [internet]
+  flows:
+    - {from: hub-tgw, to: vpc:spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:egress, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: app-a, to: hub-tgw, label: 0.0.0.0/0 via TGW, step: 1}
+    - {from: hub-tgw, to: nat-a, label: egress-rt default route, step: 2}
+    - {from: nat-a, to: egress-igw, step: 3}
+    - {from: egress-igw, to: internet, step: 4}
+    - {from: app-a, to: app-b, label: east-west via spoke-rt}
+
+- slug: vpc-peering-shared-services
+  title: VPC peering to a central shared-services VPC
+  category: networking
+  tags: [vpc peering, shared services, hub, private routing]
+  source: https://docs.aws.amazon.com/vpc/latest/peering/peering-scenarios.html
+  description: Two application VPCs each peer with a central VPC that hosts shared resources such as directory and monitoring servers. Peering is not transitive, so the spokes cannot reach each other through the hub; each VPC route table carries a route for the peer CIDR through its peering connection.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: shared
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: shared-private-a, cidr: 10.0.1.0/24, az: a, public: false}
+        - name: app-a
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: app-a-private-a, cidr: 10.1.1.0/24, az: a, public: false}
+        - name: app-b
+          cidr: 10.2.0.0/16
+          subnets:
+            - {name: app-b-private-a, cidr: 10.2.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_vpc_peering_connection, name: pcx-shared-a, in: region}
+    - {tf: aws_vpc_peering_connection, name: pcx-shared-b, in: region}
+    - {tf: aws_instance, name: directory-server, in: subnet:shared-private-a}
+    - {tf: aws_instance, name: app-a-server, in: subnet:app-a-private-a}
+    - {tf: aws_instance, name: app-b-server, in: subnet:app-b-private-a}
+  actors: []
+  flows:
+    - {from: vpc:app-a, to: pcx-shared-a, label: requester, step: 1}
+    - {from: pcx-shared-a, to: vpc:shared, label: accepter, step: 2}
+    - {from: vpc:app-b, to: pcx-shared-b, label: requester}
+    - {from: pcx-shared-b, to: vpc:shared, label: accepter}
+    - {from: app-a-server, to: directory-server, label: 10.0.0.0/16 via pcx-shared-a}
+    - {from: app-b-server, to: directory-server, label: 10.0.0.0/16 via pcx-shared-b}
+
+- slug: hybrid-dx-primary-vpn-backup
+  title: Hybrid connectivity with Direct Connect primary and Site-to-Site VPN backup
+  category: networking
+  tags: [direct connect, site-to-site vpn, hybrid, transit gateway, bgp failover]
+  source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/hybrid-connectivity-transit-gateway/hybrid-dx-primary-vpn-backup.html
+  description: The on-premises data center reaches AWS over a Direct Connect connection with a transit virtual interface into a Direct Connect gateway, which associates with a Transit Gateway. A Site-to-Site VPN terminating on the same Transit Gateway provides an encrypted backup path over the internet; BGP prefers the Direct Connect route and fails over when it withdraws.
+  containers:
+    - datacenter: on-premises
+    - region: eu-central-1
+      vpcs:
+        - name: prod
+          cidr: 10.10.0.0/16
+          subnets:
+            - {name: prod-private-a, cidr: 10.10.1.0/24, az: a, public: false}
+            - {name: prod-private-b, cidr: 10.10.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_customer_gateway, name: onprem-router, in: datacenter}
+    - {tf: aws_dx_connection, name: dx-1g, in: region}
+    - {tf: aws_dx_gateway, name: dxgw, in: region}
+    - {tf: aws_ec2_transit_gateway, name: tgw, in: region}
+    - {tf: aws_instance, name: app-1, in: subnet:prod-private-a}
+    - {tf: aws_instance, name: app-2, in: subnet:prod-private-b}
+  actors: [datacenter, internet]
+  flows:
+    - {from: onprem-router, to: dx-1g, label: primary path (dedicated fibre), step: 1}
+    - {from: dx-1g, to: dxgw, label: transit VIF + BGP, step: 2}
+    - {from: dxgw, to: tgw, link: aws_dx_gateway_association, step: 3}
+    - {from: onprem-router, to: internet, label: backup path, step: 4}
+    - {from: onprem-router, to: tgw, link: aws_vpn_connection, label: IPsec tunnels x2, step: 5}
+    - {from: tgw, to: vpc:prod, link: aws_ec2_transit_gateway_vpc_attachment, step: 6}
+
+- slug: static-site-s3-cloudfront-route53
+  title: Secure static website with S3, CloudFront, and Route 53
+  category: web
+  tags: [static website, s3, cloudfront, route 53, acm, origin access control]
+  source: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/getting-started-secure-static-website-cloudformation-template.html
+  description: Static assets live in a private S3 bucket that only CloudFront can read through origin access control. Route 53 alias records point the apex and www names at the CloudFront distribution, which terminates TLS with an ACM certificate issued in us-east-1 and caches content at edge locations worldwide.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+  elements:
+    - {tf: aws_route53_zone, name: example-com, in: region}
+    - {tf: aws_acm_certificate, name: site-cert, in: region}
+    - {tf: aws_cloudfront_distribution, name: site-cdn, in: group:global edge}
+    - {tf: aws_s3_bucket, name: site-content, in: region}
+    - {tf: aws_s3_bucket, name: cdn-logs, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: example-com, label: DNS lookup, step: 1}
+    - {from: example-com, to: site-cdn, label: alias A/AAAA, step: 2}
+    - {from: users, to: site-cdn, label: HTTPS (ACM cert), step: 3}
+    - {from: site-cdn, to: site-content, label: origin fetch via OAC on cache miss, step: 4}
+    - {from: site-cdn, to: cdn-logs, label: access logs}
+    - {from: site-cert, to: site-cdn, label: TLS certificate}
+
+- slug: sns-sqs-fanout-lambda
+  title: SNS to SQS fan-out with Lambda consumers
+  category: serverless
+  tags: [fanout, sns, sqs, lambda, pub/sub, dead-letter queue]
+  source: https://docs.aws.amazon.com/sns/latest/dg/sns-sqs-as-subscriber.html
+  description: A producer publishes each order event once to an SNS topic, which replicates the message to several subscribed SQS queues so downstream services process it independently and at their own pace. Lambda functions poll each queue via event source mappings, and a dead-letter queue captures messages that repeatedly fail.
+  containers:
+    - region: eu-west-1
+  elements:
+    - {tf: aws_api_gateway_rest_api, name: orders-api, in: region}
+    - {tf: aws_lambda_function, name: order-publisher, in: region}
+    - {tf: aws_sns_topic, name: order-events, in: region}
+    - {tf: aws_sqs_queue, name: fulfillment-queue, in: region}
+    - {tf: aws_sqs_queue, name: analytics-queue, in: region}
+    - {tf: aws_sqs_queue, name: fulfillment-dlq, in: region}
+    - {tf: aws_lambda_function, name: fulfillment-worker, in: region}
+    - {tf: aws_lambda_function, name: analytics-worker, in: region}
+    - {tf: aws_dynamodb_table, name: shipments, in: region}
+    - {tf: aws_s3_bucket, name: order-archive, in: region}
+  actors: [client]
+  flows:
+    - {from: client, to: orders-api, label: POST /orders, step: 1}
+    - {from: orders-api, to: order-publisher, step: 2}
+    - {from: order-publisher, to: order-events, label: Publish, step: 3}
+    - {from: order-events, to: fulfillment-queue, link: aws_sns_topic_subscription, step: 4}
+    - {from: order-events, to: analytics-queue, link: aws_sns_topic_subscription, step: 4}
+    - {from: fulfillment-queue, to: fulfillment-worker, link: aws_lambda_event_source_mapping, step: 5}
+    - {from: analytics-queue, to: analytics-worker, link: aws_lambda_event_source_mapping, step: 5}
+    - {from: fulfillment-worker, to: shipments, label: PutItem, step: 6}
+    - {from: analytics-worker, to: order-archive, label: PutObject, step: 6}
+    - {from: fulfillment-queue, to: fulfillment-dlq, label: redrive after maxReceiveCount}
+
+- slug: apigw-lambda-dynamodb-rest
+  title: Serverless REST microservice with API Gateway, Lambda, and DynamoDB
+  category: serverless
+  tags: [api gateway, lambda, dynamodb, rest, crud, serverless]
+  source: https://docs.aws.amazon.com/lambda/latest/dg/services-apigateway-tutorial.html
+  description: An API Gateway REST API exposes CRUD routes and proxies each request to a single Lambda function that reads and writes a DynamoDB table. IAM roles scope the function to the table, and CloudWatch Logs captures execution and access logs, with no servers to manage at any tier.
+  containers:
+    - region: us-east-1
+  elements:
+    - {tf: aws_api_gateway_rest_api, name: items-api, in: region}
+    - {tf: aws_lambda_function, name: items-crud, in: region}
+    - {tf: aws_iam_role, name: items-crud-role, in: region}
+    - {tf: aws_dynamodb_table, name: items, in: region}
+    - {tf: aws_cloudwatch_log_group, name: items-crud-logs, in: region}
+  actors: [client, mobile]
+  flows:
+    - {from: client, to: items-api, label: HTTPS GET/POST/PUT/DELETE /items, step: 1}
+    - {from: mobile, to: items-api, label: HTTPS, step: 1}
+    - {from: items-api, to: items-crud, label: Lambda proxy integration, step: 2}
+    - {from: items-crud, to: items, label: GetItem / PutItem / UpdateItem / DeleteItem, step: 3}
+    - {from: items-crud, to: items-crud-logs, label: logs}
+    - {from: items-crud-role, to: items-crud, label: execution role}
+
+- slug: eventbridge-event-driven
+  title: Event-driven application with EventBridge
+  category: serverless
+  tags: [eventbridge, event bus, rules, event-driven, step functions, choreography]
+  source: https://aws.amazon.com/blogs/compute/building-an-event-driven-application-with-amazon-eventbridge/
+  description: Producers put domain events onto a custom EventBridge event bus; rules match event patterns and route each event to one or more targets such as Lambda functions, Step Functions workflows, and SQS queues. An event archive enables replay, and producers and consumers stay decoupled because nobody addresses anyone directly.
+  containers:
+    - region: us-east-1
+  elements:
+    - {tf: aws_api_gateway_rest_api, name: ingest-api, in: region}
+    - {tf: aws_lambda_function, name: order-producer, in: region}
+    - {tf: aws_cloudwatch_event_bus, name: orders-bus, in: region}
+    - {tf: aws_cloudwatch_event_rule, name: order-created-rule, in: region}
+    - {tf: aws_cloudwatch_event_rule, name: order-shipped-rule, in: region}
+    - {tf: aws_sfn_state_machine, name: fulfillment-workflow, in: region}
+    - {tf: aws_lambda_function, name: inventory-updater, in: region}
+    - {tf: aws_sqs_queue, name: notifications-queue, in: region}
+    - {tf: aws_dynamodb_table, name: orders, in: region}
+  actors: [client]
+  flows:
+    - {from: client, to: ingest-api, label: POST /orders, step: 1}
+    - {from: ingest-api, to: order-producer, step: 2}
+    - {from: order-producer, to: orders-bus, label: PutEvents OrderCreated, step: 3}
+    - {from: orders-bus, to: order-created-rule, label: pattern match, step: 4}
+    - {from: order-created-rule, to: fulfillment-workflow, link: aws_cloudwatch_event_target, step: 5}
+    - {from: order-created-rule, to: inventory-updater, link: aws_cloudwatch_event_target, step: 5}
+    - {from: fulfillment-workflow, to: orders-bus, label: PutEvents OrderShipped, step: 6}
+    - {from: orders-bus, to: order-shipped-rule, step: 7}
+    - {from: order-shipped-rule, to: notifications-queue, link: aws_cloudwatch_event_target, step: 8}
+    - {from: inventory-updater, to: orders, label: UpdateItem}
+
+- slug: ecs-fargate-microservices-alb
+  title: ECS Fargate microservices behind an Application Load Balancer
+  category: containers
+  tags: [ecs, fargate, microservices, alb, path-based routing, ecr]
+  source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/deploy-java-microservices-on-amazon-ecs-using-amazon-ecr-and-load-balancing.html
+  description: An internet-facing ALB in public subnets uses path-based listener rules to send /orders and /payments traffic to separate target groups, each backed by an ECS service running Fargate tasks in private subnets across two Availability Zones. Container images are pulled from ECR, and NAT gateways provide tasks with outbound access.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: main
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:main}
+    - {tf: aws_lb, name: services-alb, in: vpc:main}
+    - {tf: aws_lb_target_group, name: orders-tg, in: vpc:main}
+    - {tf: aws_lb_target_group, name: payments-tg, in: vpc:main}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_ecs_cluster, name: services-cluster, in: vpc:main}
+    - {tf: aws_ecr_repository, name: orders-image, in: region}
+    - {tf: aws_ecr_repository, name: payments-image, in: region}
+    - {tf: aws_db_instance, name: orders-db, in: subnet:private-b}
+  actors: [users]
+  flows:
+    - {from: users, to: igw, label: HTTPS, step: 1}
+    - {from: igw, to: services-alb, step: 2}
+    - {from: services-alb, to: orders-tg, label: path /orders/*, step: 3}
+    - {from: services-alb, to: payments-tg, label: path /payments/*, step: 3}
+    - {from: orders-tg, to: services-cluster, label: HTTP :8080 to orders service, step: 4}
+    - {from: payments-tg, to: services-cluster, label: HTTP :8080 to payments service, step: 4}
+    - {from: services-cluster, to: orders-db, label: SQL, step: 5}
+    - {from: orders-image, to: services-cluster, label: image pull}
+    - {from: payments-image, to: services-cluster, label: image pull}
+    - {from: services-cluster, to: nat-a, label: outbound}
+
+- slug: data-lake-s3-glue-athena
+  title: Data lake with S3, Glue, Lake Formation, and Athena
+  category: data
+  tags: [data lake, s3, glue, athena, lake formation, etl]
+  source: https://docs.aws.amazon.com/solutions/data-lakes-on-aws/
+  description: Source data lands in a raw S3 bucket, Glue crawlers register its schema in the Glue Data Catalog, and Glue ETL jobs transform it into partitioned Parquet in a curated bucket. Lake Formation governs table and column access, and analysts query the curated zone in place with Athena.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: storage zones}
+        - {label: catalog and governance}
+        - {label: processing}
+        - {label: consumption}
+  elements:
+    - {tf: aws_s3_bucket, name: raw-zone, in: group:storage zones}
+    - {tf: aws_s3_bucket, name: curated-zone, in: group:storage zones}
+    - {tf: aws_glue_crawler, name: raw-crawler, in: group:catalog and governance}
+    - {tf: aws_glue_catalog_database, name: lake-catalog, in: group:catalog and governance}
+    - {tf: aws_glue_job, name: raw-to-curated-etl, in: group:processing}
+    - {tf: aws_athena_workgroup, name: analytics-wg, in: group:consumption}
+    - {tf: aws_s3_bucket, name: athena-results, in: group:consumption}
+  actors: [server, users]
+  flows:
+    - {from: server, to: raw-zone, label: batch/stream ingest, step: 1}
+    - {from: raw-crawler, to: raw-zone, label: crawl, step: 2}
+    - {from: raw-crawler, to: lake-catalog, label: register tables, step: 3}
+    - {from: raw-to-curated-etl, to: raw-zone, label: read, step: 4}
+    - {from: raw-to-curated-etl, to: curated-zone, label: write Parquet partitions, step: 5}
+    - {from: raw-to-curated-etl, to: lake-catalog, label: update curated tables, step: 6}
+    - {from: users, to: analytics-wg, label: SQL, step: 7}
+    - {from: analytics-wg, to: lake-catalog, label: schema lookup, step: 8}
+    - {from: analytics-wg, to: curated-zone, label: scan, step: 9}
+    - {from: analytics-wg, to: athena-results, label: query results}
+
+- slug: streaming-kinesis-firehose-s3
+  title: Streaming ingestion with Kinesis Data Streams and Firehose to S3
+  category: data
+  tags: [kinesis, firehose, streaming, s3, lambda transform, athena]
+  source: https://docs.aws.amazon.com/solutions/latest/streaming-data-solution-for-amazon-kinesis/option3.html
+  description: Producers write records to a Kinesis data stream; a Firehose delivery stream reads the stream, optionally invokes a Lambda transform, converts records to Parquet, and buffers them into S3 by size or time. Glue and Athena make the landed data queryable, and CloudWatch alarms watch stream throughput.
+  containers:
+    - region: us-east-1
+  elements:
+    - {tf: aws_kinesis_stream, name: events-stream, in: region}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: events-to-s3, in: region}
+    - {tf: aws_lambda_function, name: record-transformer, in: region}
+    - {tf: aws_s3_bucket, name: streaming-landing, in: region}
+    - {tf: aws_glue_catalog_database, name: events-db, in: region}
+    - {tf: aws_athena_workgroup, name: streaming-wg, in: region}
+    - {tf: aws_cloudwatch_metric_alarm, name: iterator-age-alarm, in: region}
+  actors: [server, device]
+  flows:
+    - {from: server, to: events-stream, label: PutRecords, step: 1}
+    - {from: device, to: events-stream, label: PutRecords, step: 1}
+    - {from: events-stream, to: events-to-s3, label: Kinesis source, step: 2}
+    - {from: events-to-s3, to: record-transformer, label: transform batch, step: 3}
+    - {from: events-to-s3, to: streaming-landing, label: Parquet, buffered 60s/128MB, step: 4}
+    - {from: events-to-s3, to: events-db, label: schema for format conversion}
+    - {from: streaming-wg, to: streaming-landing, label: SQL over landed data, step: 5}
+    - {from: events-stream, to: iterator-age-alarm, label: GetRecords.IteratorAgeMilliseconds}
+
+- slug: rag-bedrock-knowledge-base-opensearch
+  title: RAG with Amazon Bedrock Knowledge Bases and OpenSearch Serverless
+  category: ml
+  tags: [rag, bedrock, knowledge base, opensearch serverless, vector search, generative ai]
+  source: https://docs.aws.amazon.com/prescriptive-guidance/latest/retrieval-augmented-generation-options/rag-fully-managed-bedrock.html
+  description: Documents in S3 are chunked and embedded by a Bedrock Knowledge Base, which stores vectors in an OpenSearch Serverless collection. At query time an orchestrating Lambda behind API Gateway calls RetrieveAndGenerate, so the knowledge base fetches the most similar chunks and a Bedrock foundation model composes a grounded answer.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: ingestion}
+        - {label: retrieval and generation}
+  elements:
+    - {tf: aws_s3_bucket, name: knowledge-docs, in: group:ingestion}
+    - {tf: aws_bedrockagent_knowledge_base, name: enterprise-kb, in: group:ingestion}
+    - {tf: aws_opensearchserverless_collection, name: kb-vectors, in: group:ingestion}
+    - {tf: aws_cognito_user_pool, name: app-users, in: group:retrieval and generation}
+    - {tf: aws_api_gateway_rest_api, name: chat-api, in: group:retrieval and generation}
+    - {tf: aws_lambda_function, name: rag-orchestrator, in: group:retrieval and generation}
+    - {tf: aws_bedrock_inference_profile, name: claude-generation, in: group:retrieval and generation}
+  actors: [users]
+  flows:
+    - {from: knowledge-docs, to: enterprise-kb, label: sync, chunk + Titan embeddings, step: 1}
+    - {from: enterprise-kb, to: kb-vectors, label: index vectors, step: 2}
+    - {from: users, to: chat-api, label: question (JWT from Cognito), step: 3}
+    - {from: app-users, to: chat-api, label: authorizer}
+    - {from: chat-api, to: rag-orchestrator, step: 4}
+    - {from: rag-orchestrator, to: enterprise-kb, label: RetrieveAndGenerate, step: 5}
+    - {from: enterprise-kb, to: kb-vectors, label: k-NN similarity search, step: 6}
+    - {from: enterprise-kb, to: claude-generation, label: augmented prompt, step: 7}
+    - {from: rag-orchestrator, to: users, label: grounded answer + citations, step: 8}
+
+- slug: multi-region-active-passive-aurora-global
+  title: Multi-Region active/passive with Route 53 failover and Aurora Global Database
+  category: resilience
+  tags: [disaster recovery, multi-region, warm standby, route 53 failover, aurora global database]
+  source: https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html
+  description: The primary Region serves all traffic while a scaled-down copy of the stack runs in a secondary Region as a warm standby. Aurora Global Database replicates data cross-Region with sub-second lag, S3 replicates objects, and a Route 53 failover record backed by a health check redirects users when the primary fails.
+  containers:
+    - region: us-east-1
+      label: primary
+      vpcs:
+        - name: primary-vpc
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: p-public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: p-public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: p-private-a, cidr: 10.0.10.0/24, az: a, public: false}
+    - region: us-west-2
+      label: secondary
+      vpcs:
+        - name: secondary-vpc
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: s-public-a, cidr: 10.1.0.0/24, az: a, public: true}
+            - {name: s-public-b, cidr: 10.1.1.0/24, az: b, public: true}
+            - {name: s-private-a, cidr: 10.1.10.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: example-com, in: region:us-east-1}
+    - {tf: aws_route53_health_check, name: primary-health, in: region:us-east-1}
+    - {tf: aws_lb, name: primary-alb, in: vpc:primary-vpc}
+    - {tf: aws_autoscaling_group, name: primary-asg, in: vpc:primary-vpc}
+    - {tf: aws_rds_global_cluster, name: global-db, in: region:us-east-1}
+    - {tf: aws_rds_cluster, name: aurora-primary, in: subnet:p-private-a}
+    - {tf: aws_s3_bucket, name: assets-primary, in: region:us-east-1}
+    - {tf: aws_lb, name: secondary-alb, in: vpc:secondary-vpc}
+    - {tf: aws_autoscaling_group, name: secondary-asg, in: vpc:secondary-vpc}
+    - {tf: aws_rds_cluster, name: aurora-secondary, in: subnet:s-private-a}
+    - {tf: aws_s3_bucket, name: assets-secondary, in: region:us-west-2}
+  actors: [users]
+  flows:
+    - {from: users, to: example-com, label: DNS, step: 1}
+    - {from: example-com, to: primary-alb, label: PRIMARY record, step: 2}
+    - {from: example-com, to: secondary-alb, label: SECONDARY record (on health check failure)}
+    - {from: primary-health, to: primary-alb, label: HTTPS health check}
+    - {from: primary-alb, to: primary-asg, step: 3}
+    - {from: primary-asg, to: aurora-primary, label: read/write, step: 4}
+    - {from: global-db, to: aurora-primary, label: primary cluster}
+    - {from: global-db, to: aurora-secondary, label: secondary cluster}
+    - {from: aurora-primary, to: aurora-secondary, label: storage-level replication (< 1s lag)}
+    - {from: assets-primary, to: assets-secondary, label: S3 cross-Region replication}
+    - {from: secondary-alb, to: secondary-asg, label: scaled-down standby}
+    - {from: secondary-asg, to: aurora-secondary, label: read-only until promoted}
+
+- slug: iot-core-kinesis-s3
+  title: IoT telemetry pipeline with IoT Core, Kinesis, and S3
+  category: iot
+  tags: [iot core, mqtt, rules engine, kinesis, firehose, s3, telemetry]
+  source: https://docs.aws.amazon.com/wellarchitected/latest/iot-lens/workload-architecture.html
+  description: Devices publish MQTT telemetry to the IoT Core message broker, where a topic rule forwards matching messages into a Kinesis data stream that decouples ingestion rate from processing. A Lambda consumer serves real-time alerts and hot state, while Firehose batches the same stream into S3 for durable storage and Athena analytics.
+  containers:
+    - region: eu-west-1
+      groups:
+        - {label: connectivity}
+        - {label: ingestion}
+        - {label: processing and storage}
+  elements:
+    - {tf: aws_iot_thing, name: sensor-fleet, in: group:connectivity}
+    - {tf: aws_iot_topic_rule, name: telemetry-to-kinesis, in: group:connectivity}
+    - {tf: aws_kinesis_stream, name: telemetry-stream, in: group:ingestion}
+    - {tf: aws_lambda_function, name: anomaly-detector, in: group:processing and storage}
+    - {tf: aws_dynamodb_table, name: device-latest-state, in: group:processing and storage}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: telemetry-to-s3, in: group:processing and storage}
+    - {tf: aws_s3_bucket, name: telemetry-archive, in: group:processing and storage}
+    - {tf: aws_athena_workgroup, name: telemetry-wg, in: group:processing and storage}
+  actors: [device, users]
+  flows:
+    - {from: device, to: sensor-fleet, label: MQTT over TLS, step: 1}
+    - {from: sensor-fleet, to: telemetry-to-kinesis, label: SELECT * FROM 'sensors/+/telemetry', step: 2}
+    - {from: telemetry-to-kinesis, to: telemetry-stream, label: kinesis action, step: 3}
+    - {from: telemetry-stream, to: anomaly-detector, link: aws_lambda_event_source_mapping, step: 4}
+    - {from: anomaly-detector, to: device-latest-state, label: UpdateItem, step: 5}
+    - {from: telemetry-stream, to: telemetry-to-s3, label: Kinesis source, step: 4}
+    - {from: telemetry-to-s3, to: telemetry-archive, label: buffered Parquet by date partition, step: 5}
+    - {from: users, to: telemetry-wg, label: SQL over archive, step: 6}
+    - {from: telemetry-wg, to: telemetry-archive, label: scan}
+
+- slug: codepipeline-cicd-ecs
+  title: CI/CD pipeline with CodePipeline, CodeBuild, and ECR deploying to ECS
+  category: devops
+  tags: [codepipeline, codebuild, ecr, ecs, ci/cd, continuous deployment]
+  source: https://docs.aws.amazon.com/codepipeline/latest/userguide/ecs-cd-pipeline.html
+  description: A push to the source repository starts a CodePipeline execution whose build stage runs CodeBuild to build the container image, push it to ECR, and emit an imagedefinitions.json artifact. The deploy stage updates the ECS service with the new task definition revision, and the service performs a rolling replacement behind its load balancer.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: pipeline}
+      vpcs:
+        - name: app
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_codestarconnections_connection, name: github-connection, in: group:pipeline}
+    - {tf: aws_codepipeline, name: app-pipeline, in: group:pipeline}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: docker-build, in: group:pipeline}
+    - {tf: aws_ecr_repository, name: app-image, in: group:pipeline}
+    - {tf: aws_ecs_cluster, name: app-cluster, in: vpc:app}
+    - {tf: aws_lb, name: app-alb, in: vpc:app}
+  actors: [user, users]
+  flows:
+    - {from: user, to: github-connection, label: git push, step: 1}
+    - {from: github-connection, to: app-pipeline, label: Source stage trigger, step: 2}
+    - {from: app-pipeline, to: pipeline-artifacts, label: source artifact, step: 3}
+    - {from: app-pipeline, to: docker-build, label: Build stage, step: 4}
+    - {from: docker-build, to: app-image, label: docker push :commit-sha, step: 5}
+    - {from: docker-build, to: pipeline-artifacts, label: imagedefinitions.json, step: 6}
+    - {from: app-pipeline, to: app-cluster, label: Deploy stage (ECS action), step: 7}
+    - {from: app-image, to: app-cluster, label: pull image, step: 8}
+    - {from: users, to: app-alb, label: HTTPS}
+    - {from: app-alb, to: app-cluster, label: rolling update, min healthy 100%}

@@ -1,0 +1,50 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/deploy-java-microservices-on-amazon-ecs-using-amazon-ecr-and-load-balancing.html); edit freely.
+title: ECS Fargate microservices behind an Application Load Balancer
+category: containers
+tags:
+- ecs
+- fargate
+- microservices
+- alb
+- path-based routing
+- ecr
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/deploy-java-microservices-on-amazon-ecs-using-amazon-ecr-and-load-balancing.html
+description: An internet-facing ALB in public subnets uses path-based listener rules to send /orders and /payments traffic to separate target groups, each backed by an ECS service running Fargate tasks
+  in private subnets across two Availability Zones. Container images are pulled from ECR, and NAT gateways provide tasks with outbound access.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-main-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-main}
+- {id: services-alb, type: aws.alb, name: services-alb, parent: vpc-main}
+- {id: orders-tg, type: aws.res.aws_lb_target_group, name: orders-tg, parent: vpc-main}
+- {id: payments-tg, type: aws.res.aws_lb_target_group, name: payments-tg, parent: vpc-main}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: services-cluster, type: aws.res.aws_ecs_cluster, name: services-cluster, parent: vpc-main, props: {name: changeme}}
+- {id: orders-image, type: aws.res.aws_ecr_repository, name: orders-image, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: payments-image, type: aws.res.aws_ecr_repository, name: payments-image, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: orders-db, type: aws.rds_instance, name: orders-db, parent: sub-private-b}
+edges:
+- {from: users, to: igw, label: HTTPS, step: '1'}
+- {from: igw, to: services-alb, step: '2'}
+- {from: services-alb, to: orders-tg, label: path /orders/*, step: '3'}
+- {from: services-alb, to: payments-tg, label: path /payments/*, step: '3'}
+- {from: orders-tg, to: services-cluster, label: 'HTTP :8080 to orders service', step: '4'}
+- {from: payments-tg, to: services-cluster, label: 'HTTP :8080 to payments service', step: '4'}
+- {from: services-cluster, to: orders-db, label: SQL, step: '5'}
+- {from: orders-image, to: services-cluster, label: image pull}
+- {from: payments-image, to: services-cluster, label: image pull}
+- {from: services-cluster, to: nat-a, label: outbound}
+steps:
+- {n: '1', text: 'users → igw: HTTPS'}
+- {n: '2', text: igw → services-alb}
+- {n: '3', text: 'services-alb → orders-tg: path /orders/*'}
+- {n: '4', text: 'orders-tg → services-cluster: HTTP :8080 to orders service'}
+- {n: '5', text: 'services-cluster → orders-db: SQL'}

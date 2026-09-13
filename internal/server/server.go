@@ -16,19 +16,25 @@ import (
 	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
 	"github.com/iagram/iagram/internal/jobs"
+	"github.com/iagram/iagram/internal/templates"
 	"github.com/iagram/iagram/internal/validate"
 	"github.com/iagram/iagram/internal/workspace"
 )
 
 // Server serves the API and the embedded web UI.
 type Server struct {
-	Catalog   *catalog.Catalog
-	DocPath   string
-	WebFS     fs.FS // built frontend, rooted at index.html
-	IconsFS   fs.FS // catalog/icons
-	Version   string
-	Workspace *workspace.Workspace
-	Jobs      *jobs.Manager
+	Catalog *catalog.Catalog
+	DocPath string
+	WebFS   fs.FS // built frontend, rooted at index.html
+	IconsFS fs.FS // catalog/icons
+	Version string
+	// TemplatesFS holds templates/<provider>/<slug>/template.yaml (nil: none).
+	TemplatesFS fs.FS
+	tplOnce     sync.Once
+	tpl         []templates.Template
+	tplErr      error
+	Workspace   *workspace.Workspace
+	Jobs        *jobs.Manager
 	// OnEvent receives telemetry events; nil disables. The document is passed
 	// so the caller can derive bucketed counts, never content.
 	OnEvent func(name string, props map[string]any, d *document.Document)
@@ -46,6 +52,8 @@ func New(c *catalog.Catalog, docPath string, webFS, iconsFS fs.FS, version strin
 	m := http.NewServeMux()
 	m.HandleFunc("GET /api/health", s.health)
 	m.HandleFunc("GET /api/catalog", s.catalog)
+	m.HandleFunc("GET /api/templates", s.listTemplates)
+	m.HandleFunc("GET /api/templates/{provider}/{slug}", s.getTemplate)
 	m.HandleFunc("GET /api/document", s.getDocument)
 	m.HandleFunc("PUT /api/document", s.putDocument)
 	m.HandleFunc("POST /api/validate", s.validateDocument)
@@ -79,6 +87,42 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// listTemplates lists the shipped reference architectures with their documents
+// (small enough to preview client-side).
+func (s *Server) listTemplates(w http.ResponseWriter, _ *http.Request) {
+	list, err := s.templates()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"templates": list})
+}
+
+func (s *Server) getTemplate(w http.ResponseWriter, r *http.Request) {
+	list, err := s.templates()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	id := r.PathValue("provider") + "/" + r.PathValue("slug")
+	for _, t := range list {
+		if t.ID == id {
+			writeJSON(w, http.StatusOK, t)
+			return
+		}
+	}
+	http.NotFound(w, r)
+}
+
+func (s *Server) templates() ([]templates.Template, error) {
+	s.tplOnce.Do(func() {
+		if s.TemplatesFS != nil {
+			s.tpl, s.tplErr = templates.Load(s.TemplatesFS, s.Catalog)
+		}
+	})
+	return s.tpl, s.tplErr
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

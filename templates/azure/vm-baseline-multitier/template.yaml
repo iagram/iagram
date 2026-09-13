@@ -1,0 +1,92 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/virtual-machines/baseline); edit freely.
+title: Virtual Machines baseline multi-tier web application
+category: web
+tags:
+- vmss
+- application-gateway
+- waf
+- internal-load-balancer
+- availability-zones
+- bastion
+source: https://learn.microsoft.com/en-us/azure/architecture/virtual-machines/baseline
+description: An internet-facing multi-tier web application runs on separate front-end and back-end Virtual Machine Scale Sets spread across availability zones, fronted by a zone-redundant Application Gateway
+  with WAF and an internal load balancer between tiers. Key Vault supplies TLS certificates over Private Link, Azure Bastion provides operator access, and a public load balancer with outbound rules handles
+  SNAT egress.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-vm-baseline, type: azure.resource_group, name: rg-vm-baseline, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-workload, type: azure.vnet, name: vnet-workload, parent: rg-rg-vm-baseline, props: {cidr: 10.240.0.0/16}}
+- {id: sub-snet-appgateway, type: azure.subnet, name: snet-appgateway, parent: vpc-vnet-workload, props: {cidr: 10.240.1.0/24}}
+- {id: sub-snet-frontend, type: azure.subnet, name: snet-frontend, parent: vpc-vnet-workload, props: {cidr: 10.240.2.0/24}}
+- {id: sub-snet-ilb, type: azure.subnet, name: snet-ilb, parent: vpc-vnet-workload, props: {cidr: 10.240.3.0/26}}
+- {id: sub-snet-backend, type: azure.subnet, name: snet-backend, parent: vpc-vnet-workload, props: {cidr: 10.240.4.0/24}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateendpoints, parent: vpc-vnet-workload, props: {cidr: 10.240.5.0/27}}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-workload, props: {cidr: 10.240.6.0/26}}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: internet, type: common.internet, name: internet}
+- id: appgw-waf
+  type: azure.res.azurerm_application_gateway
+  name: appgw-waf
+  parent: sub-snet-appgateway
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- id: vmss-frontend
+  type: azure.res.azurerm_linux_virtual_machine_scale_set
+  name: vmss-frontend
+  parent: sub-snet-frontend
+  props:
+    admin_username: changeme
+    location: westeurope
+    name: changeme
+    network_interface: []
+    os_disk: {}
+    resource_group_name: changeme
+    sku: changeme
+- {id: ilb-backend, type: azure.res.azurerm_lb, name: ilb-backend, parent: sub-snet-ilb, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: vmss-backend
+  type: azure.res.azurerm_linux_virtual_machine_scale_set
+  name: vmss-backend
+  parent: sub-snet-backend
+  props:
+    admin_username: changeme
+    location: westeurope
+    name: changeme
+    network_interface: []
+    os_disk: {}
+    resource_group_name: changeme
+    sku: changeme
+- {id: lb-outbound, type: azure.res.azurerm_lb, name: lb-outbound, parent: vpc-vnet-workload, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: bastion, type: azure.res.azurerm_bastion_host, name: bastion, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: kv-certs, type: azure.key_vault, name: kv-certs, parent: rg-rg-vm-baseline}
+- id: pe-keyvault
+  type: azure.res.azurerm_private_endpoint
+  name: pe-keyvault
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: nsg-frontend, type: azure.network_security_group, name: nsg-frontend, parent: vpc-vnet-workload}
+- {id: law-workload, type: azure.res.azurerm_log_analytics_workspace, name: law-workload, parent: rg-rg-vm-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: appgw-waf, label: HTTPS (app.contoso.com), step: '1'}
+- {from: appgw-waf, to: vmss-frontend, label: HTTPS (internal wildcard cert), step: '2'}
+- {from: vmss-frontend, to: ilb-backend, label: HTTPS to ILB private IP, step: '3'}
+- {from: ilb-backend, to: vmss-backend, label: HTTPS, step: '4'}
+- {from: appgw-waf, to: pe-keyvault, label: fetch TLS certificate}
+- {from: pe-keyvault, to: kv-certs, label: private link}
+- {from: vmss-backend, to: lb-outbound, label: SNAT egress}
+- {from: lb-outbound, to: internet, label: outbound}
+- {from: user, to: bastion, label: operator SSH/RDP}
+- {from: bastion, to: vmss-backend, label: SSH}
+- {from: nsg-frontend, to: vmss-frontend}
+steps:
+- {n: '1', text: 'users → appgw-waf: HTTPS (app.contoso.com)'}
+- {n: '2', text: 'appgw-waf → vmss-frontend: HTTPS (internal wildcard cert)'}
+- {n: '3', text: 'vmss-frontend → ilb-backend: HTTPS to ILB private IP'}
+- {n: '4', text: 'ilb-backend → vmss-backend: HTTPS'}
