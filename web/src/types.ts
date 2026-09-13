@@ -33,6 +33,8 @@ export interface Entry {
   style?: BoxStyle
   style_variants?: Record<string, BoxStyle>
   caption_prop?: string
+  /** child property -> template ("${zone}", "${region}${zone}") given to elements drawn inside */
+  provides?: Record<string, string>
   terraform?: { role?: string; resource?: string; module?: string }
   attachment?: boolean
   component?: boolean

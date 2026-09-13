@@ -13,6 +13,7 @@ import (
 
 	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
+	"github.com/iagram/iagram/internal/provide"
 )
 
 // Result is the generated configuration plus the module→node map the plan
@@ -199,6 +200,9 @@ func (g *gen) moduleBlocks() error {
 			}
 			block[k] = v
 		}
+		for k, v := range provide.Values(g.c, g.nodes, n) {
+			block[k] = v // the box an element is drawn in wins (Availability Zone)
+		}
 		for input, ref := range e.Terraform.InputsFromParent {
 			// "[parent.x]" yields a one-element list (or [] when unresolved) so a
 			// module can branch on length(), which is known at plan time, rather
@@ -259,6 +263,9 @@ func (g *gen) resourceBlocks() error {
 			if v == nil || v == "" {
 				continue
 			}
+			block[k] = v
+		}
+		for k, v := range provide.Values(g.c, g.nodes, n) {
 			block[k] = v
 		}
 		if alias := g.providerAlias(n, e.Provider); alias != "" {

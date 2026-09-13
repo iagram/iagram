@@ -369,3 +369,19 @@ func TestCommonVocabulary(t *testing.T) {
 		t.Errorf("element -> actor should be a flow edge: %+v %v", r, ok)
 	}
 }
+
+func TestZoneBoxes(t *testing.T) {
+	c := load(t)
+	for _, id := range []string{"aws.availability_zone", "gcp.zone", "azure.zone"} {
+		e, ok := c.Get(id)
+		if !ok || e.Kind != catalog.KindContainer || !e.Transparent || len(e.Provides) == 0 {
+			t.Errorf("%s should be a transparent container that provides values: %+v", id, e)
+		}
+	}
+	if !c.CanContain("aws.vpc", "aws.availability_zone") || !c.CanContain("aws.region", "aws.availability_zone") {
+		t.Error("availability zones live in regions and VPCs")
+	}
+	if !c.CanContain("aws.availability_zone", "aws.subnet") || !c.CanContain("aws.availability_zone", "aws.ec2_instance") {
+		t.Error("zone boxes accept anything (validated against the zone's parent)")
+	}
+}

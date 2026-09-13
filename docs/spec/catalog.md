@@ -320,3 +320,29 @@ Rules that make them cloud-neutral:
   arrow, sets no Terraform input, always valid.
 - The generator ignores `common.*` nodes silently; `iagram convert` and the
   mirror tabs copy them unchanged.
+
+## Zone boxes and provided properties (`provides`)
+
+A container may give properties to everything drawn inside it:
+
+```yaml
+id: aws.availability_zone
+kind: container
+transparent: true
+allowed_parents: [aws.region, aws.vpc]
+provides:
+  az: "${zone}"                      # curated subnet property
+  availability_zone: "${region}${zone}"   # generated resources (EC2, EBS...)
+props: {type: object, properties: {zone: {type: string, enum: [a, b, c]}}}
+```
+
+`provides` maps a child property to a template; `${x}` is the providing
+node's property `x`, or the nearest ancestor's when the box lacks it (the
+Region's `region` above). Only properties the child's schema declares are
+given. The canvas fills them in when an element is dropped or moved into the
+box and shows them read-only; the generator lets the box win over any drawn
+value; the validator warns when a file disagrees with its box. Zone boxes are
+transparent, so a subnet in an Availability Zone in a VPC is still a subnet
+of that VPC. `iagram import` draws zone boxes around siblings whose zone
+values differ. Shipped: `aws.availability_zone`, `gcp.zone`, `azure.zone`
+(mapped to each other by the equivalence table).

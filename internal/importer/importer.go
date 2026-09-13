@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -276,6 +277,7 @@ func (b *builder) run(resources []Resource) {
 	sort.Strings(b.report.Providers)
 	b.report.Imported = len(pend) + len(raw)
 	attachToParents(b.c, b.doc)
+	groupIntoZones(b.c, b.doc)
 	// Containers created after their children must still sort deterministically.
 	sort.Slice(b.doc.Nodes, func(i, j int) bool { return b.doc.Nodes[i].ID < b.doc.Nodes[j].ID })
 }
@@ -589,4 +591,143 @@ func attachToParents(c *catalog.Catalog, d *document.Document) {
 			n.Parent = fallback
 		}
 	}
+}
+
+// groupIntoZones draws zone boxes (Availability Zone, GCP zone) around
+// imported siblings that carry a zone value, when a parent holds at least two
+// distinct zones: the layout every reference diagram uses.
+func groupIntoZones(c *catalog.Catalog, d *document.Document) {
+	byID := d.Index()
+	for _, ze := range c.Entries {
+		if ze.Kind != catalog.KindContainer || len(ze.Provides) == 0 {
+			continue
+		}
+		zoneProp := ""
+		if props, _ := ze.Props["properties"].(map[string]any); props != nil {
+			for k := range props {
+				zoneProp = k
+			}
+		}
+		if zoneProp == "" {
+			continue
+		}
+		type key struct{ parent, zone string }
+		groups := map[key][]int{}
+		perParent := map[string]map[string]bool{}
+		for i := range d.Nodes {
+			n := &d.Nodes[i]
+			p, ok := byID[n.Parent]
+			if !ok || !contains(ze.AllowedParents, p.Type) {
+				continue
+			}
+			e, ok := c.Get(n.Type)
+			if !ok || e.Transparent {
+				continue
+			}
+			zone := ""
+			for prop, tpl := range ze.Provides {
+				v, _ := n.Props[prop].(string)
+				if v == "" {
+					continue
+				}
+				if _, has := e.Property(prop); !has {
+					continue
+				}
+				if z, ok := invertTemplate(tpl, zoneProp, v, ancestorsOf(byID, n)); ok {
+					zone = z
+					break
+				}
+			}
+			if zone == "" {
+				continue
+			}
+			groups[key{n.Parent, zone}] = append(groups[key{n.Parent, zone}], i)
+			if perParent[n.Parent] == nil {
+				perParent[n.Parent] = map[string]bool{}
+			}
+			perParent[n.Parent][zone] = true
+		}
+		for k, idxs := range groups {
+			if len(perParent[k.parent]) < 2 {
+				continue
+			}
+			id := strings.TrimPrefix(ze.ID, ze.Provider+".") + "-" + sanitizeID(k.parent) + "-" + sanitizeID(k.zone)
+			d.Nodes = append(d.Nodes, document.Node{ID: id, Type: ze.ID, Name: k.zone, Parent: k.parent, Props: map[string]any{zoneProp: k.zone}})
+			for _, i := range idxs {
+				d.Nodes[i].Parent = id
+			}
+		}
+		byID = d.Index()
+	}
+}
+
+// invertTemplate recovers the zone from a rendered value: every placeholder
+// but zoneProp is resolved from the ancestors, the rest must be the zone.
+func invertTemplate(tpl, zoneProp, value string, ancestors []*document.Node) (string, bool) {
+	re := regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
+	prefix, suffix, seen := "", "", false
+	ok := true
+	pos := 0
+	for _, m := range re.FindAllStringSubmatchIndex(tpl, -1) {
+		lit := tpl[pos:m[0]]
+		name := tpl[m[2]:m[3]]
+		pos = m[1]
+		var piece string
+		if name == zoneProp {
+			seen = true
+			piece = ""
+		} else {
+			found := false
+			for _, a := range ancestors {
+				if v, has := a.Props[name].(string); has && v != "" {
+					piece, found = v, true
+					break
+				}
+			}
+			if !found {
+				ok = false
+			}
+		}
+		if !seen {
+			prefix += lit + piece
+		} else if name == zoneProp {
+			prefix += lit
+		} else {
+			suffix += lit + piece
+		}
+	}
+	suffix += tpl[pos:]
+	if !ok || !seen || !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, suffix) || len(value) < len(prefix)+len(suffix) {
+		return "", false
+	}
+	z := value[len(prefix) : len(value)-len(suffix)]
+	return z, z != ""
+}
+
+func ancestorsOf(byID map[string]*document.Node, n *document.Node) []*document.Node {
+	var out []*document.Node
+	seen := map[string]bool{n.ID: true}
+	for cur := n; cur.Parent != "" && !seen[cur.Parent]; {
+		seen[cur.Parent] = true
+		p, ok := byID[cur.Parent]
+		if !ok {
+			break
+		}
+		out = append(out, p)
+		cur = p
+	}
+	return out
+}
+
+func sanitizeID(s string) string {
+	return regexp.MustCompile(`[^A-Za-z0-9_-]+`).ReplaceAllString(s, "_")
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

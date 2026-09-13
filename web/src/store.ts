@@ -134,6 +134,10 @@ interface State {
   /** Provider of the real nodes (the source tab); '' when empty. */
   /** Type of the nearest non-transparent ancestor (groups do not count), or ROOT. */
   logicalParentType: (parentId: string | null | undefined) => string
+  /** Properties an element placed under parentId inherits from zone boxes (prop -> value), limited to props the type declares. */
+  providedProps: (type: string, parentId: string | null | undefined) => Record<string, string>
+  /** Re-apply zone-box values to a node and everything inside it. */
+  applyProvided: (rootId: string) => void
   primaryProvider: () => string
   setMirror: (v: boolean) => void
   refreshProjection: () => Promise<void>
@@ -325,7 +329,7 @@ export const useStore = create<State>((set, get) => ({
       type,
       name: `${entry.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${count}`,
       parent: parentId ?? undefined,
-      props: rules.defaults(type),
+      props: { ...rules.defaults(type), ...get().providedProps(type, parentId) },
       layout: { x: Math.round(position.x), y: Math.round(position.y) },
     })
     set({ nodes: [...nodes, node], dirty: true, selectedId: id })
@@ -594,6 +598,40 @@ export const useStore = create<State>((set, get) => ({
     void get().refreshProjection()
   },
 
+  providedProps(type, parentId) {
+    const { rules, nodes } = get()
+    const entry = rules?.entry(type)
+    if (!rules || !entry) return {}
+    const declared = entry.props?.properties ?? {}
+    const chain: RFNode[] = []
+    const seen = new Set<string>()
+    let cur = parentId ? nodes.find((n) => n.id === parentId) : undefined
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id)
+      chain.push(cur)
+      cur = cur.parentId ? nodes.find((n) => n.id === cur!.parentId) : undefined
+    }
+    const out: Record<string, string> = {}
+    chain.forEach((anc, i) => {
+      const provides = rules.entry(anc.data.type)?.provides
+      if (!provides) return
+      for (const [prop, tpl] of Object.entries(provides)) {
+        if (!(prop in declared) || prop in out) continue
+        let ok = true
+        const v = tpl.replace(/\$\{([A-Za-z0-9_]+)\}/g, (_, key: string) => {
+          for (const a of chain.slice(i)) {
+            const val = a.data.props[key]
+            if (val !== undefined && val !== null && val !== '') return String(val)
+          }
+          ok = false
+          return ''
+        })
+        if (ok) out[prop] = v
+      }
+    })
+    return out
+  },
+
   logicalParentType(parentId) {
     const { rules, nodes } = get()
     let cur = parentId ? nodes.find((n) => n.id === parentId) : undefined
@@ -820,7 +858,31 @@ export const useStore = create<State>((set, get) => ({
       nodes: get().nodes.map((n) => (n.id === id ? { ...n, parentId: parentId ?? undefined, position } : n)),
       dirty: true,
     })
+    get().applyProvided(id)
     get().validateSoon()
+  },
+
+  applyProvided(rootId) {
+    // Zone boxes give their value to everything drawn inside: refresh the
+    // moved node and its descendants.
+    const nodes = get().nodes
+    const inside = new Set<string>([rootId])
+    let grew = true
+    while (grew) {
+      grew = false
+      for (const n of nodes) if (n.parentId && inside.has(n.parentId) && !inside.has(n.id)) (inside.add(n.id), (grew = true))
+    }
+    let changed = false
+    const next = nodes.map((n) => {
+      if (!inside.has(n.id)) return n
+      const given = get().providedProps(n.data.type, n.parentId)
+      const patch: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(given)) if (n.data.props[k] !== v) patch[k] = v
+      if (Object.keys(patch).length === 0) return n
+      changed = true
+      return { ...n, data: { ...n.data, props: { ...n.data.props, ...patch } } }
+    })
+    if (changed) set({ nodes: next, dirty: true })
   },
 
   selectedIds() {

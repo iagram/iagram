@@ -39,6 +39,8 @@ export function PropertyPanel() {
     return (s.familiesByProvider[n.data.type.split('.')[0]] ?? []).find((f) => f.types.includes(n.data.type))
   })
   const addAttachment = useStore((s) => s.addAttachment)
+  const providedProps = useStore((s) => s.providedProps)
+  const provided = useMemo(() => (node ? providedProps(node.data.type, node.parentId) : {}), [node, providedProps, allNodes])
   const attachmentOptions = useStore((s) => (s.selectedId ? s.attachmentsByType[s.nodes.find((n) => n.id === s.selectedId)?.data.type ?? ''] : undefined))
   const attachedNodes = useMemo(() => (selectedId ? allNodes.filter((n) => n.parentId === selectedId && !!rules?.entry(n.data.type)?.attachment) : []), [allNodes, selectedId, rules])
   useEffect(() => {
@@ -255,6 +257,7 @@ export function PropertyPanel() {
               linkable={rules.isGenerated(node.data.type) && (s.type === 'string' || s.type === 'array') && !s['x-json']}
               onLink={(targetId, output) => linkAttribute(node.id, k, targetId, output)}
               nodeId={node.id}
+              provided={provided[k]}
             />
           ))}
         </details>
@@ -436,6 +439,7 @@ function Field({
   linkable,
   onLink,
   nodeId,
+  provided,
 }: {
   name: string
   schema: JSONSchema
@@ -446,8 +450,22 @@ function Field({
   linkable?: boolean
   onLink?: (targetId: string, output: string) => void
   nodeId?: string
+  /** value given by the zone box the element is drawn in; the field is read-only */
+  provided?: string
 }) {
   const title = schema.title ?? name
+  if (provided !== undefined) {
+    return (
+      <label className="field">
+        <span>
+          {title} {required && <em>*</em>}
+        </span>
+        <input value={provided} readOnly disabled />
+        <small>Set by the box this element is drawn in. Move it to another zone to change it.</small>
+        <FieldProblems problems={problems} />
+      </label>
+    )
+  }
   const [linking, setLinking] = useState(false)
   const [jsonText, setJsonText] = useState<string | null>(null)
   const [jsonError, setJsonError] = useState<string | null>(null)

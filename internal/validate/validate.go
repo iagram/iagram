@@ -11,6 +11,7 @@ import (
 
 	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
+	"github.com/iagram/iagram/internal/provide"
 )
 
 // Level of a problem.
@@ -114,6 +115,11 @@ func (v *validator) structure() {
 		}
 		if v.hasCycle(n) {
 			v.add(Problem{Level: Error, Node: n.ID, Message: "containment cycle"})
+		}
+		for prop, want := range provide.Values(v.c, v.nodes, n) {
+			if got, set := n.Props[prop]; set && got != nil && got != "" && fmt.Sprint(got) != want {
+				v.add(Problem{Level: Warning, Node: n.ID, Field: prop, Message: fmt.Sprintf("%s is %v but the box it is drawn in gives %s; the box wins when generating", prop, got, want)})
+			}
 		}
 	}
 }
@@ -414,15 +420,21 @@ func (v *validator) collects() {
 func (v *validator) ancestorAt(n *document.Node, path string) *document.Node {
 	depth := strings.Count(path, "parent")
 	cur := n
+	// Transparent containers (groups, zone boxes) do not count as a level.
 	for i := 0; i < depth; i++ {
-		if cur.Parent == "" {
-			return nil
+		for {
+			if cur.Parent == "" {
+				return nil
+			}
+			p, ok := v.nodes[cur.Parent]
+			if !ok {
+				return nil
+			}
+			cur = p
+			if pe, ok := v.c.Get(p.Type); !ok || !pe.Transparent {
+				break
+			}
 		}
-		p, ok := v.nodes[cur.Parent]
-		if !ok {
-			return nil
-		}
-		cur = p
 	}
 	if cur == n {
 		return nil

@@ -1,6 +1,7 @@
 package importer_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/iagram/iagram"
@@ -74,8 +75,10 @@ func TestImportRebuildsContainmentFromState(t *testing.T) {
 	}
 	for _, id := range byType["aws.subnet"] {
 		n := byID[id]
-		if n.Parent != vpc.ID || (n.Props["az"] != "a" && n.Props["az"] != "b") {
-			t.Errorf("subnet = %+v", n)
+		// Two zones in the VPC: the importer draws Availability Zone boxes.
+		az := byID[n.Parent]
+		if az == nil || az.Type != "aws.availability_zone" || az.Parent != vpc.ID || az.Props["zone"] != n.Props["az"] || (n.Props["az"] != "a" && n.Props["az"] != "b") {
+			t.Errorf("subnet = %+v (parent %+v)", n, az)
 		}
 	}
 	lb := byID[byType["aws.alb"][0]]
@@ -164,5 +167,33 @@ func TestStateImportFallsBackToGeneratedElementsAndRecoversReferences(t *testing
 	r := out.Config["resource"].(map[string]map[string]map[string]any)
 	if r["aws_sns_topic"]["alerts"]["kms_master_key_id"] != "${aws_kms_key.data.id}" {
 		t.Errorf("rendered = %v", r["aws_sns_topic"]["alerts"])
+	}
+}
+
+func TestImportGroupsSubnetsIntoAvailabilityZones(t *testing.T) {
+	c, err := catalog.Load(iagram.CatalogFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := importer.ParseState([]byte(tfstate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := importer.Build(c, "imported", res)
+	zones := map[string]string{}
+	for _, n := range d.Nodes {
+		if n.Type == "aws.availability_zone" {
+			zones[n.ID] = fmt.Sprint(n.Props["zone"])
+		}
+	}
+	if len(zones) != 2 {
+		t.Fatalf("expected two availability zone boxes, got %v", zones)
+	}
+	for _, n := range d.Nodes {
+		if n.Type == "aws.subnet" {
+			if z, ok := zones[n.Parent]; !ok || z != fmt.Sprint(n.Props["az"]) {
+				t.Errorf("subnet %s should sit in the AZ box of zone %v (parent %s)", n.Name, n.Props["az"], n.Parent)
+			}
+		}
 	}
 }

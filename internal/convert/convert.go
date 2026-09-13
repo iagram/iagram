@@ -152,13 +152,13 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 			idMap[n.ID] = n.ID
 			continue
 		}
-		if e.Terraform == nil {
+		if e.Terraform == nil && findRow(t, n.Type) == nil {
 			continue
 		}
-		if e.Terraform.Role == catalog.RoleAccount || e.Terraform.Role == catalog.RoleRegion {
+		if e.Terraform != nil && (e.Terraform.Role == catalog.RoleAccount || e.Terraform.Role == catalog.RoleRegion) {
 			continue // collapsed into the target chain
 		}
-		if e.Terraform.Role == catalog.RoleResource {
+		if e.Terraform != nil && e.Terraform.Role == catalog.RoleResource {
 			rep.Dropped = append(rep.Dropped, fmt.Sprintf("%s (%s): generated elements are provider-specific", n.Name, e.Terraform.Resource))
 			continue
 		}

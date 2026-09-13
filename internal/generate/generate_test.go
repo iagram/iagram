@@ -210,3 +210,22 @@ func TestGroupsAreTransparentForParentInputs(t *testing.T) {
 		t.Errorf("provider alias should come through the group: %v", mods["sub_g"]["providers"])
 	}
 }
+
+func TestZoneBoxWinsOverDrawnValue(t *testing.T) {
+	c, d := fixture(t)
+	d.Nodes = append(d.Nodes,
+		document.Node{ID: "az_b", Type: "aws.availability_zone", Name: "b", Parent: "vpc", Props: map[string]any{"zone": "b"}},
+		document.Node{ID: "sub_z", Type: "aws.subnet", Name: "zoned", Parent: "az_b", Props: map[string]any{"cidr": "10.0.9.0/24", "az": "a"}},
+	)
+	res, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mods := res.Config["module"].(map[string]map[string]any)
+	if got := mods["sub_z"]["az"]; got != "b" {
+		t.Errorf("subnet drawn in AZ b should get az=b, got %v", got)
+	}
+	if got := mods["sub_z"]["vpc_id"]; got != "${module.vpc.vpc_id}" {
+		t.Errorf("vpc_id through the zone box = %v", got)
+	}
+}

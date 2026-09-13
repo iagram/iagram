@@ -45,6 +45,10 @@ type Entry struct {
 	// StyleVariants override Style when the named boolean property is true
 	// (public subnets are green, private ones teal).
 	StyleVariants map[string]Style `yaml:"style_variants,omitempty" json:"style_variants,omitempty"`
+	// Provides declares properties given to every element drawn inside this
+	// container: child property -> template ("${zone}", "${region}${zone}").
+	// See internal/provide.
+	Provides map[string]string `yaml:"provides,omitempty" json:"provides,omitempty"`
 	// Transparent containers have no Terraform meaning (generic groups, data
 	// centers): their children behave as if placed in the container's parent.
 	Transparent bool `yaml:"transparent,omitempty" json:"transparent,omitempty"`
