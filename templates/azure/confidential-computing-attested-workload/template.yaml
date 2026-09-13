@@ -1,0 +1,70 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/confidential-computing/overview-azure-products); edit freely.
+title: Confidential computing with attested AKS confidential nodes, Managed HSM and secure key release
+category: security
+tags:
+- confidential computing
+- sev-snp
+- attestation
+- managed hsm
+- secure key release
+- confidential containers
+- confidential ledger
+source: https://learn.microsoft.com/en-us/azure/confidential-computing/overview-azure-products
+description: Containers run on AMD SEV-SNP confidential VM node pools in AKS (with confidential containers on Azure Container Instances for isolated jobs) so data is encrypted in memory and hidden from
+  the cloud operator. Azure Attestation verifies the trusted execution environment and issues a token that Managed HSM checks before releasing data-encryption keys, and a confidential ledger records tamper-evident
+  audit entries.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-confidential, type: azure.resource_group, name: rg-confidential, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-cc, type: azure.vnet, name: vnet-cc, parent: rg-rg-confidential, props: {cidr: 10.120.0.0/16}}
+- {id: sub-snet-aks-cc, type: azure.subnet, name: snet-aks-cc, parent: vpc-vnet-cc, props: {cidr: 10.120.0.0/20}}
+- {id: sub-snet-cvm, type: azure.subnet, name: snet-cvm, parent: vpc-vnet-cc, props: {cidr: 10.120.16.0/24}}
+- {id: sub-snet-pe, type: azure.subnet, name: snet-pe, parent: vpc-vnet-cc, props: {cidr: 10.120.17.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: aks-confidential-nodes, type: azure.aks_cluster, name: aks-confidential-nodes, parent: sub-snet-aks-cc}
+- id: aci-confidential-job
+  type: azure.res.azurerm_container_group
+  name: aci-confidential-job
+  parent: rg-rg-confidential
+  props:
+    container: []
+    location: westeurope
+    name: changeme
+    os_type: changeme
+    resource_group_name: changeme
+- {id: cvm-dcasv5, type: azure.virtual_machine, name: cvm-dcasv5, parent: sub-snet-cvm}
+- {id: attest-cc, type: azure.res.azurerm_attestation_provider, name: attest-cc, parent: rg-rg-confidential, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: pe-mhsm
+  type: azure.res.azurerm_private_endpoint
+  name: pe-mhsm
+  parent: sub-snet-pe
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: id-confidential-workload, type: azure.res.azurerm_user_assigned_identity, name: id-confidential-workload, parent: rg-rg-confidential, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: acr-cc, type: azure.container_registry, name: acr-cc, parent: rg-rg-confidential}
+- {id: st-encrypted-data, type: azure.storage_account, name: st-encrypted-data, parent: rg-rg-confidential}
+- id: ledger-audit
+  type: azure.res.azurerm_confidential_ledger
+  name: ledger-audit
+  parent: rg-rg-confidential
+  props:
+    azuread_based_service_principal: []
+    ledger_type: changeme
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+edges:
+- {from: acr-cc, to: aks-confidential-nodes, label: pull signed image, step: '1'}
+- {from: aks-confidential-nodes, to: attest-cc, label: SEV-SNP attestation evidence, step: '2'}
+- {from: attest-cc, to: aks-confidential-nodes, label: attestation token}
+- {from: aks-confidential-nodes, to: pe-mhsm, label: key request with token + identity, step: '3'}
+- {from: st-encrypted-data, to: aks-confidential-nodes, label: encrypted data decrypted inside TEE only, step: '5'}
+- {from: aks-confidential-nodes, to: ledger-audit, label: tamper-evident audit records, step: '6'}
+- {from: aci-confidential-job, to: attest-cc, label: CCE policy attestation}
+- {from: cvm-dcasv5, to: attest-cc, label: guest attestation}
+- {from: users, to: aks-confidential-nodes, label: HTTPS}
+steps:
+- {n: '1', text: 'acr-cc → aks-confidential-nodes: pull signed image'}
+- {n: '2', text: 'aks-confidential-nodes → attest-cc: SEV-SNP attestation evidence'}
+- {n: '3', text: 'aks-confidential-nodes → pe-mhsm: key request with token + identity'}
+- {n: '5', text: 'st-encrypted-data → aks-confidential-nodes: encrypted data decrypted inside TEE only'}
+- {n: '6', text: 'aks-confidential-nodes → ledger-audit: tamper-evident audit records'}

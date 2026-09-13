@@ -1,0 +1,70 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/well-architected/mission-critical/mission-critical-architecture-pattern); edit freely.
+title: Mission-critical active-active regional stamps with Front Door and Cosmos DB multi-region writes
+category: resilience
+tags:
+- mission-critical
+- active-active
+- front door
+- cosmos db
+- multi-region writes
+- aks
+- event hubs
+- deployment stamps
+source: https://learn.microsoft.com/en-us/azure/well-architected/mission-critical/mission-critical-architecture-pattern
+description: Global resources (Front Door, a Cosmos DB account with multi-region writes, Container Registry and Log Analytics) are long-lived and geo-replicated, while each region hosts a replaceable, stateless
+  deployment stamp of AKS, Event Hubs, Key Vault and Application Insights. Front Door health-probes every stamp and routes users to the closest healthy region; each stamp reads and writes Cosmos DB locally,
+  and any region can be redeployed or lost without a global outage.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-stamp-westeurope, type: azure.resource_group, name: rg-stamp-westeurope, parent: sub-workload, props: {location: westeurope}}
+- {id: grp-global, type: common.group, name: Global, parent: rg-rg-stamp-westeurope}
+- {id: vpc-vnet-stamp-we, type: azure.vnet, name: vnet-stamp-we, parent: rg-rg-stamp-westeurope, props: {cidr: 10.80.0.0/16}}
+- {id: sub-snet-aks-we, type: azure.subnet, name: snet-aks-we, parent: vpc-vnet-stamp-we, props: {cidr: 10.80.0.0/20}}
+- {id: rg-rg-stamp-northeurope, type: azure.resource_group, name: rg-stamp-northeurope, parent: sub-workload, props: {location: northeurope}}
+- {id: vpc-vnet-stamp-ne, type: azure.vnet, name: vnet-stamp-ne, parent: rg-rg-stamp-northeurope, props: {cidr: 10.81.0.0/16}}
+- {id: sub-snet-aks-ne, type: azure.subnet, name: snet-aks-ne, parent: vpc-vnet-stamp-ne, props: {cidr: 10.81.0.0/20}}
+- {id: users, type: common.users, name: users}
+- {id: afd-global, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-global, parent: grp-global, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: cosmos-global
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-global
+  parent: grp-global
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: acr-global, type: azure.container_registry, name: acr-global, parent: grp-global}
+- {id: law-global, type: azure.res.azurerm_log_analytics_workspace, name: law-global, parent: grp-global, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: aks-we, type: azure.aks_cluster, name: aks-we, parent: sub-snet-aks-we}
+- {id: evh-we, type: azure.res.azurerm_eventhub_namespace, name: evh-we, parent: rg-rg-stamp-westeurope, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: kv-we, type: azure.key_vault, name: kv-we, parent: rg-rg-stamp-westeurope}
+- {id: appi-we, type: azure.res.azurerm_application_insights, name: appi-we, parent: rg-rg-stamp-westeurope, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: aks-ne, type: azure.aks_cluster, name: aks-ne, parent: sub-snet-aks-ne}
+- {id: evh-ne, type: azure.res.azurerm_eventhub_namespace, name: evh-ne, parent: rg-rg-stamp-northeurope, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: kv-ne, type: azure.key_vault, name: kv-ne, parent: rg-rg-stamp-northeurope}
+- {id: appi-ne, type: azure.res.azurerm_application_insights, name: appi-ne, parent: rg-rg-stamp-northeurope, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: afd-global, label: HTTPS, step: '1'}
+- {from: afd-global, to: aks-we, label: latency routing + health probes, step: '2'}
+- {from: afd-global, to: aks-ne, label: latency routing + health probes, step: '2'}
+- {from: aks-we, to: cosmos-global, label: local reads/writes (multi-region writes), step: '3'}
+- {from: aks-ne, to: cosmos-global, label: local reads/writes (multi-region writes), step: '3'}
+- {from: aks-we, to: evh-we, label: async messaging within stamp, step: '4'}
+- {from: aks-ne, to: evh-ne, label: async messaging within stamp, step: '4'}
+- {from: acr-global, to: aks-we, label: geo-replicated image pull}
+- {from: acr-global, to: aks-ne, label: geo-replicated image pull}
+- {from: aks-we, to: kv-we, label: stamp secrets}
+- {from: aks-ne, to: kv-ne, label: stamp secrets}
+- {from: aks-we, to: appi-we, label: stamp telemetry}
+- {from: aks-ne, to: appi-ne, label: stamp telemetry}
+- {from: appi-we, to: law-global, label: health model aggregation, step: '5'}
+- {from: appi-ne, to: law-global, label: health model aggregation, step: '5'}
+steps:
+- {n: '1', text: 'users → afd-global: HTTPS'}
+- {n: '2', text: 'afd-global → aks-we: latency routing + health probes'}
+- {n: '3', text: 'aks-we → cosmos-global: local reads/writes (multi-region writes)'}
+- {n: '4', text: 'aks-we → evh-we: async messaging within stamp'}
+- {n: '5', text: 'appi-we → law-global: health model aggregation'}

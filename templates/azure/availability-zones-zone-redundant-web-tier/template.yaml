@@ -1,0 +1,69 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/well-architected/design-guides/regions-availability-zones); edit freely.
+title: Zone-redundant web application across availability zones
+category: resilience
+tags:
+- availability zones
+- zone-redundant
+- application gateway v2
+- vmss
+- zone-redundant sql
+- zrs storage
+- high availability
+source: https://learn.microsoft.com/en-us/azure/well-architected/design-guides/regions-availability-zones
+description: Every tier is spread across the region's three availability zones so the loss of one zone does not take the workload down; a zone-redundant Application Gateway v2 with a zone-redundant public
+  IP fronts a scale set whose instances are distributed across zones, the database is a zone-redundant Azure SQL tier with replicas in each zone, and storage uses ZRS for synchronous cross-zone replication.
+  Key Vault and Log Analytics are zone-resilient platform services.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-web-zr, type: azure.resource_group, name: rg-web-zr, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-web, type: azure.vnet, name: vnet-web, parent: rg-rg-web-zr, props: {cidr: 10.90.0.0/16}}
+- {id: sub-snet-appgw, type: azure.subnet, name: snet-appgw, parent: vpc-vnet-web, props: {cidr: 10.90.0.0/24}}
+- {id: sub-snet-web, type: azure.subnet, name: snet-web, parent: vpc-vnet-web, props: {cidr: 10.90.1.0/24}}
+- {id: sub-snet-pe, type: azure.subnet, name: snet-pe, parent: vpc-vnet-web, props: {cidr: 10.90.2.0/24}}
+- {id: internet, type: common.internet, name: internet}
+- id: appgw-zr
+  type: azure.res.azurerm_application_gateway
+  name: appgw-zr
+  parent: sub-snet-appgw
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- id: vmss-web-zones-1-2-3
+  type: azure.res.azurerm_linux_virtual_machine_scale_set
+  name: vmss-web-zones-1-2-3
+  parent: sub-snet-web
+  props:
+    admin_username: changeme
+    location: westeurope
+    name: changeme
+    network_interface: []
+    os_disk: {}
+    resource_group_name: changeme
+    sku: changeme
+- {id: sql-zr, type: azure.res.azurerm_mssql_server, name: sql-zr, parent: rg-rg-web-zr, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- id: pe-sql
+  type: azure.res.azurerm_private_endpoint
+  name: pe-sql
+  parent: sub-snet-pe
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: st-zrs, type: azure.storage_account, name: st-zrs, parent: rg-rg-web-zr}
+- {id: kv-web, type: azure.key_vault, name: kv-web, parent: rg-rg-web-zr}
+- {id: law-web, type: azure.res.azurerm_log_analytics_workspace, name: law-web, parent: rg-rg-web-zr, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: appgw-zr, to: vmss-web-zones-1-2-3, label: 'instances spread across zones 1, 2, 3', step: '2'}
+- {from: vmss-web-zones-1-2-3, to: pe-sql, label: SQL over Private Link, step: '3'}
+- {from: pe-sql, to: sql-zr, label: zone-redundant database (replicas in 3 zones)}
+- {from: vmss-web-zones-1-2-3, to: st-zrs, label: 'ZRS: synchronous replication to 3 zones', step: '4'}
+- {from: vmss-web-zones-1-2-3, to: kv-web, label: secrets via managed identity}
+- {from: appgw-zr, to: law-web, label: diagnostics}
+- {from: vmss-web-zones-1-2-3, to: law-web, label: diagnostics}
+steps:
+- {n: '2', text: 'appgw-zr → vmss-web-zones-1-2-3: instances spread across zones 1, 2, 3'}
+- {n: '3', text: 'vmss-web-zones-1-2-3 → pe-sql: SQL over Private Link'}
+- {n: '4', text: 'vmss-web-zones-1-2-3 → st-zrs: ZRS: synchronous replication to 3 zones'}

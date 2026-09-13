@@ -1,0 +1,59 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/governance/policy/how-to/remediate-resources); edit freely.
+title: Azure Policy compliance and remediation with deployIfNotExists and managed identity
+category: security
+tags:
+- azure policy
+- remediation
+- deployifnotexists
+- initiative
+- managed identity
+- management groups
+- diagnostics
+source: https://learn.microsoft.com/en-us/azure/governance/policy/how-to/remediate-resources
+description: Custom policy definitions with deployIfNotExists and modify effects are grouped in an initiative and assigned at the landing zones management group with a user-assigned managed identity that
+  holds the roles listed in each definition's roleDefinitionIds. Compliance evaluation flags existing resources as non-compliant, and remediation tasks use the assignment identity to deploy the missing
+  configuration, such as diagnostic settings that route resource logs to the central Log Analytics workspace.
+nodes:
+- {id: sub-prod, type: azure.subscription, name: prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-prod, type: azure.resource_group, name: rg-prod, parent: sub-prod, props: {location: westeurope}}
+- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-management, type: azure.resource_group, name: rg-management, parent: sub-management, props: {location: westeurope}}
+- {id: users, type: common.users, name: users}
+- {id: mg-landing-zones, type: azure.res.azurerm_management_group, name: mg-landing-zones, parent: rg-rg-prod}
+- {id: pol-deploy-diagnostics, type: azure.res.azurerm_policy_definition, name: pol-deploy-diagnostics, parent: rg-rg-prod, props: {display_name: changeme, mode: changeme, name: changeme, policy_type: changeme}}
+- id: initiative-baseline
+  type: azure.res.azurerm_policy_set_definition
+  name: initiative-baseline
+  parent: rg-rg-prod
+  props:
+    display_name: changeme
+    name: changeme
+    policy_definition_reference: []
+    policy_type: changeme
+- {id: assign-baseline, type: azure.res.azurerm_management_group_policy_assignment, name: assign-baseline, parent: rg-rg-prod, props: {management_group_id: changeme, name: changeme, policy_definition_id: changeme}}
+- {id: remediate-diagnostics, type: azure.res.azurerm_management_group_policy_remediation, name: remediate-diagnostics, parent: rg-rg-prod, props: {management_group_id: changeme, name: changeme, policy_assignment_id: changeme}}
+- {id: id-policy-remediation, type: azure.res.azurerm_user_assigned_identity, name: id-policy-remediation, parent: rg-rg-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: rg-rg-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: st-app-noncompliant, type: azure.storage_account, name: st-app-noncompliant, parent: rg-rg-prod}
+- {id: kv-app, type: azure.key_vault, name: kv-app, parent: rg-rg-prod}
+- {id: vpc-rg-rg-prod, type: azure.vnet, name: main, parent: rg-rg-prod, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-prod, type: azure.subnet, name: main, parent: vpc-rg-rg-prod, props: {cidr: 10.200.0.0/24}}
+- {id: vm-app, type: azure.virtual_machine, name: vm-app, parent: sub-rg-rg-prod}
+edges:
+- {from: pol-deploy-diagnostics, to: initiative-baseline, label: included definition}
+- {from: initiative-baseline, to: assign-baseline, label: assigned at mg-landing-zones}
+- {from: assign-baseline, to: mg-landing-zones, label: scope}
+- {from: assign-baseline, to: id-policy-remediation, label: assignment identity (roleDefinitionIds)}
+- {from: assign-baseline, to: st-app-noncompliant, label: 'compliance evaluation: non-compliant', step: '1'}
+- {from: users, to: remediate-diagnostics, label: create remediation task, step: '2'}
+- {from: remediate-diagnostics, to: id-policy-remediation, label: runs as identity, step: '3'}
+- {from: id-policy-remediation, to: st-app-noncompliant, label: deployIfNotExists template deployment, step: '4'}
+- {from: st-app-noncompliant, to: law-central, label: diagnostic settings deployed, step: '5'}
+- {from: kv-app, to: law-central, label: diagnostic settings}
+- {from: vm-app, to: law-central, label: diagnostic settings}
+steps:
+- {n: '1', text: 'assign-baseline → st-app-noncompliant: compliance evaluation: non-compliant'}
+- {n: '2', text: 'users → remediate-diagnostics: create remediation task'}
+- {n: '3', text: 'remediate-diagnostics → id-policy-remediation: runs as identity'}
+- {n: '4', text: 'id-policy-remediation → st-app-noncompliant: deployIfNotExists template deployment'}
+- {n: '5', text: 'st-app-noncompliant → law-central: diagnostic settings deployed'}

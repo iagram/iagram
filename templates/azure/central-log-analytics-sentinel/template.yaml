@@ -1,0 +1,61 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-monitor/logs/workspace-design); edit freely.
+title: Centralized Log Analytics workspace with Microsoft Sentinel SIEM
+category: security
+tags:
+- log analytics
+- sentinel
+- siem
+- soar
+- azure monitor agent
+- data collection rules
+- logic apps
+source: https://learn.microsoft.com/en-us/azure/azure-monitor/logs/workspace-design
+description: Operational and security data is consolidated into a single Log Analytics workspace in the management subscription, with Microsoft Sentinel enabled on the workspace so analytics rules, incidents
+  and SOAR playbooks operate on the same data that Azure Monitor collects. Azure Monitor Agent sends VM and Arc-enabled server logs through data collection rules, PaaS resources stream diagnostic settings,
+  and data export to Event Hubs and a storage account supports downstream SIEMs and long-term retention.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-management, type: azure.resource_group, name: rg-management, parent: sub-management, props: {location: westeurope}}
+- {id: sub-landing-zone-prod, type: azure.subscription, name: landing-zone-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-app, type: azure.resource_group, name: rg-app, parent: sub-landing-zone-prod, props: {location: westeurope}}
+- {id: vpc-vnet-app, type: azure.vnet, name: vnet-app, parent: rg-rg-app, props: {cidr: 10.20.0.0/16}}
+- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-vnet-app, props: {cidr: 10.20.1.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: law-security, type: azure.res.azurerm_log_analytics_workspace, name: law-security, parent: rg-rg-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: sentinel-onboarding, type: azure.res.azurerm_sentinel_log_analytics_workspace_onboarding, name: sentinel-onboarding, parent: rg-rg-management, props: {workspace_id: changeme}}
+- id: dcr-security-events
+  type: azure.res.azurerm_monitor_data_collection_rule
+  name: dcr-security-events
+  parent: rg-rg-management
+  props:
+    data_flow: []
+    destinations: {}
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+- {id: playbook-isolate-host, type: azure.res.azurerm_logic_app_workflow, name: playbook-isolate-host, parent: rg-rg-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: evh-siem-export, type: azure.res.azurerm_eventhub_namespace, name: evh-siem-export, parent: rg-rg-management, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: st-log-archive, type: azure.storage_account, name: st-log-archive, parent: rg-rg-management}
+- {id: vm-app, type: azure.virtual_machine, name: vm-app, parent: sub-snet-app}
+- {id: kv-app, type: azure.key_vault, name: kv-app, parent: rg-rg-app}
+- {id: vpc-rg-rg-management, type: azure.vnet, name: main, parent: rg-rg-management, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-management, type: azure.subnet, name: main, parent: vpc-rg-rg-management, props: {cidr: 10.200.0.0/24}}
+- {id: arc-server-onprem, type: azure.res.azurerm_arc_machine, name: arc-server-onprem, parent: sub-rg-rg-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: vm-app, to: dcr-security-events, label: Azure Monitor Agent, step: '1'}
+- {from: arc-server-onprem, to: dcr-security-events, label: Azure Monitor Agent, step: '1'}
+- {from: dcr-security-events, to: law-security, label: ingest, step: '2'}
+- {from: kv-app, to: law-security, label: diagnostic settings}
+- {from: law-security, to: sentinel-onboarding, label: analytics rules -> incidents, step: '3'}
+- {from: sentinel-onboarding, to: playbook-isolate-host, label: automation rule triggers playbook, step: '4'}
+- {from: playbook-isolate-host, to: vm-app, label: isolate / remediate, step: '5'}
+- {from: law-security, to: evh-siem-export, label: data export}
+- {from: law-security, to: st-log-archive, label: long-term archive}
+- {from: users, to: sentinel-onboarding, label: SOC investigation}
+steps:
+- {n: '1', text: 'vm-app → dcr-security-events: Azure Monitor Agent'}
+- {n: '2', text: 'dcr-security-events → law-security: ingest'}
+- {n: '3', text: 'law-security → sentinel-onboarding: analytics rules -> incidents'}
+- {n: '4', text: 'sentinel-onboarding → playbook-isolate-host: automation rule triggers playbook'}
+- {n: '5', text: 'playbook-isolate-host → vm-app: isolate / remediate'}

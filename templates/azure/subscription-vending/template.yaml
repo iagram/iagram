@@ -1,0 +1,61 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/design-area/subscription-vending); edit freely.
+title: Subscription vending for application landing zones
+category: security
+tags:
+- subscription vending
+- landing zone
+- automation
+- management groups
+- budget
+- workload identity
+- ipam
+source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/design-area/subscription-vending
+description: Application teams request a subscription through an ITSM front door; a platform pipeline creates the subscription programmatically with infrastructure as code, places it under the right management
+  group, peers its virtual network to the connectivity hub from a non-overlapping IP range, and configures budgets, tags, subscription owners and workload identities before handing it over. Governance stays
+  with the platform team through Azure Policy assigned on the management group hierarchy.
+nodes:
+- {id: sub-prod, type: azure.subscription, name: prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-prod, type: azure.resource_group, name: rg-prod, parent: sub-prod, props: {location: westeurope}}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-connectivity, type: azure.resource_group, name: rg-connectivity, parent: sub-connectivity, props: {location: westeurope}}
+- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-connectivity, props: {cidr: 10.0.0.0/16}}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub, props: {cidr: 10.0.1.0/26}}
+- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-management, type: azure.resource_group, name: rg-management, parent: sub-management, props: {location: westeurope}}
+- {id: users, type: common.users, name: users}
+- {id: server, type: common.server, name: server}
+- {id: mg-corp, type: azure.res.azurerm_management_group, name: mg-corp, parent: rg-rg-prod}
+- {id: corp-guardrails, type: azure.res.azurerm_management_group_policy_assignment, name: corp-guardrails, parent: rg-rg-prod, props: {management_group_id: changeme, name: changeme, policy_definition_id: changeme}}
+- {id: sub-app-1, type: azure.res.azurerm_subscription, name: sub-app-1, parent: rg-rg-prod, props: {subscription_name: changeme}}
+- id: budget-app-1
+  type: azure.res.azurerm_consumption_budget_subscription
+  name: budget-app-1
+  parent: rg-rg-prod
+  props:
+    amount: 1
+    name: changeme
+    notification: []
+    subscription_id: 00000000-0000-0000-0000-000000000000
+    time_period: {}
+- {id: id-app-1-deploy, type: azure.res.azurerm_user_assigned_identity, name: id-app-1-deploy, parent: rg-rg-prod, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vpc-rg-rg-prod, type: azure.vnet, name: main, parent: rg-rg-prod, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-prod, type: azure.subnet, name: main, parent: vpc-rg-rg-prod, props: {cidr: 10.200.0.0/24}}
+- {id: vm-app-1, type: azure.virtual_machine, name: vm-app-1, parent: sub-rg-rg-prod}
+- {id: hub-fw, type: azure.res.azurerm_firewall, name: hub-fw, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: rg-rg-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: sub-app-1, label: subscription request (ITSM intake), step: '1'}
+- {from: server, to: sub-app-1, label: create subscription (IaC pipeline), step: '2'}
+- {from: sub-app-1, to: mg-corp, label: placement}
+- {from: corp-guardrails, to: mg-corp, label: policy-driven governance}
+- {from: server, to: budget-app-1, label: budget + tags, step: '4'}
+- {from: server, to: id-app-1-deploy, label: workload identity + RBAC, step: '5'}
+- {from: users, to: vm-app-1, label: deploy workload, step: '6'}
+- {from: vm-app-1, to: hub-fw, label: egress via hub}
+- {from: vm-app-1, to: law-central, label: diagnostics}
+steps:
+- {n: '1', text: 'users → sub-app-1: subscription request (ITSM intake)'}
+- {n: '2', text: 'server → sub-app-1: create subscription (IaC pipeline)'}
+- {n: '4', text: 'server → budget-app-1: budget + tags'}
+- {n: '5', text: 'server → id-app-1-deploy: workload identity + RBAC'}
+- {n: '6', text: 'users → vm-app-1: deploy workload'}

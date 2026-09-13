@@ -1,0 +1,84 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-sql/database/failover-group-sql-db); edit freely.
+title: Active-passive multi-region web app with Azure SQL failover groups and private endpoints
+category: resilience
+tags:
+- failover group
+- azure sql
+- active-passive
+- front door
+- private endpoint
+- geo-replication
+- disaster recovery
+source: https://learn.microsoft.com/en-us/azure/azure-sql/database/failover-group-sql-db
+description: A failover group replicates the application's databases from the primary logical server to a secondary server in the paired region and exposes read-write and read-only listener endpoints whose
+  DNS is updated on failover, so application connection strings never change. Front Door sends traffic to the primary region's App Service and fails over to the secondary on failed health probes; each region
+  reaches SQL through private endpoints, and the recommended customer-managed failover policy keeps the failover decision with the operations team.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-app-primary, type: azure.resource_group, name: rg-app-primary, parent: sub-workload, props: {location: westeurope}}
+- {id: grp-global, type: common.group, name: Global, parent: rg-rg-app-primary}
+- {id: vpc-vnet-primary, type: azure.vnet, name: vnet-primary, parent: rg-rg-app-primary, props: {cidr: 10.70.0.0/16}}
+- {id: sub-snet-app-int-primary, type: azure.subnet, name: snet-app-int-primary, parent: vpc-vnet-primary, props: {cidr: 10.70.1.0/24}}
+- {id: sub-snet-pe-primary, type: azure.subnet, name: snet-pe-primary, parent: vpc-vnet-primary, props: {cidr: 10.70.2.0/24}}
+- {id: rg-rg-app-secondary, type: azure.resource_group, name: rg-app-secondary, parent: sub-workload, props: {location: northeurope}}
+- {id: vpc-vnet-secondary, type: azure.vnet, name: vnet-secondary, parent: rg-rg-app-secondary, props: {cidr: 10.71.0.0/16}}
+- {id: sub-snet-app-int-secondary, type: azure.subnet, name: snet-app-int-secondary, parent: vpc-vnet-secondary, props: {cidr: 10.71.1.0/24}}
+- {id: sub-snet-pe-secondary, type: azure.subnet, name: snet-pe-secondary, parent: vpc-vnet-secondary, props: {cidr: 10.71.2.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: afd-app, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-app, parent: grp-global, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: plan-primary, type: azure.res.azurerm_service_plan, name: plan-primary, parent: rg-rg-app-primary, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-primary
+  type: azure.res.azurerm_linux_web_app
+  name: web-primary
+  parent: sub-snet-app-int-primary
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: sql-primary, type: azure.res.azurerm_mssql_server, name: sql-primary, parent: rg-rg-app-primary, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- id: pe-sql-primary
+  type: azure.res.azurerm_private_endpoint
+  name: pe-sql-primary
+  parent: sub-snet-pe-primary
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: fog-app
+  type: azure.res.azurerm_mssql_failover_group
+  name: fog-app
+  parent: rg-rg-app-primary
+  props:
+    name: changeme
+    partner_server: []
+    read_write_endpoint_failover_policy: {}
+    server_id: changeme
+- {id: pdz-sql, type: azure.res.azurerm_private_dns_zone, name: pdz-sql, parent: rg-rg-app-primary, props: {name: changeme, resource_group_name: changeme}}
+- {id: plan-secondary, type: azure.res.azurerm_service_plan, name: plan-secondary, parent: rg-rg-app-secondary, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-secondary
+  type: azure.res.azurerm_linux_web_app
+  name: web-secondary
+  parent: sub-snet-app-int-secondary
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: sql-secondary, type: azure.res.azurerm_mssql_server, name: sql-secondary, parent: rg-rg-app-secondary, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- id: pe-sql-secondary
+  type: azure.res.azurerm_private_endpoint
+  name: pe-sql-secondary
+  parent: sub-snet-pe-secondary
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+edges:
+- {from: users, to: afd-app, label: HTTPS, step: '1'}
+- {from: afd-app, to: web-primary, label: priority 1 origin, step: '2'}
+- {from: afd-app, to: web-secondary, label: priority 2 origin (after failed probes)}
+- {from: web-primary, to: pe-sql-primary, label: <fog>.database.windows.net read-write listener, step: '3'}
+- {from: pe-sql-primary, to: sql-primary, label: Private Link}
+- {from: fog-app, to: sql-primary, label: primary server}
+- {from: fog-app, to: sql-secondary, label: secondary server}
+- {from: sql-primary, to: sql-secondary, label: async geo-replication, step: '4'}
+- {from: web-secondary, to: pe-sql-secondary, label: <fog>.secondary read-only listener / rw after failover}
+- {from: pe-sql-secondary, to: sql-secondary, label: Private Link}
+- {from: pdz-sql, to: vpc-vnet-primary, link: azurerm_private_dns_zone_virtual_network_link}
+- {from: pdz-sql, to: vpc-vnet-secondary, link: azurerm_private_dns_zone_virtual_network_link}
+- {from: users, to: fog-app, label: customer-managed failover, step: '5'}
+steps:
+- {n: '1', text: 'users → afd-app: HTTPS'}
+- {n: '2', text: 'afd-app → web-primary: priority 1 origin'}
+- {n: '3', text: 'web-primary → pe-sql-primary: <fog>.database.windows.net read-write listener'}
+- {n: '4', text: 'sql-primary → sql-secondary: async geo-replication'}
+- {n: '5', text: 'users → fog-app: customer-managed failover'}

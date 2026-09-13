@@ -1,0 +1,54 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/storage/blobs/immutable-storage-overview); edit freely.
+title: WORM records retention with immutable Blob Storage and locked retention policies
+category: storage
+tags:
+- immutable storage
+- worm
+- time-based retention
+- legal hold
+- sec 17a-4
+- compliance
+- private endpoint
+- lifecycle
+source: https://learn.microsoft.com/en-us/azure/storage/blobs/immutable-storage-overview
+description: Records are written as block or append blobs into a container protected by a locked time-based retention policy, so no user, including account administrators, can modify or delete them until
+  the interval expires, and a legal hold can extend protection indefinitely with tagged holds. The account is reached only over a private endpoint, lifecycle management tiers immutable data to cool and
+  archive, and resource logs plus the policy audit log are retained in Log Analytics and an archive account for SEC 17a-4(f), FINRA and CFTC evidence.
+nodes:
+- {id: sub-compliance, type: azure.subscription, name: compliance, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-records, type: azure.resource_group, name: rg-records, parent: sub-compliance, props: {location: westeurope}}
+- {id: vpc-vnet-records, type: azure.vnet, name: vnet-records, parent: rg-rg-records, props: {cidr: 10.130.0.0/16}}
+- {id: sub-snet-app-integration, type: azure.subnet, name: snet-app-integration, parent: vpc-vnet-records, props: {cidr: 10.130.1.0/24}}
+- {id: sub-snet-pe, type: azure.subnet, name: snet-pe, parent: vpc-vnet-records, props: {cidr: 10.130.2.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: plan-records, type: azure.res.azurerm_service_plan, name: plan-records, parent: rg-rg-records, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: app-records-ingest
+  type: azure.res.azurerm_linux_web_app
+  name: app-records-ingest
+  parent: sub-snet-app-integration
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: pe-blob
+  type: azure.res.azurerm_private_endpoint
+  name: pe-blob
+  parent: sub-snet-pe
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: pdz-blob, type: azure.res.azurerm_private_dns_zone, name: pdz-blob, parent: rg-rg-records, props: {name: changeme, resource_group_name: changeme}}
+- {id: st-worm-records, type: azure.storage_account, name: st-worm-records, parent: rg-rg-records}
+- {id: ct-trade-records, type: azure.res.azurerm_storage_container, name: ct-trade-records, parent: rg-rg-records, props: {name: changeme}}
+- {id: law-compliance, type: azure.res.azurerm_log_analytics_workspace, name: law-compliance, parent: rg-rg-records, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: st-audit-archive, type: azure.storage_account, name: st-audit-archive, parent: rg-rg-records}
+edges:
+- {from: client, to: app-records-ingest, label: submit records, step: '1'}
+- {from: app-records-ingest, to: pe-blob, label: write block / append blobs over Private Link, step: '2'}
+- {from: pe-blob, to: st-worm-records, label: public access disabled}
+- {from: st-worm-records, to: ct-trade-records, label: versioning enabled}
+- {from: users, to: ct-trade-records, label: read only; overwrite / delete denied, step: '4'}
+- {from: st-worm-records, to: law-compliance, label: resource logs + policy audit log, step: '5'}
+- {from: law-compliance, to: st-audit-archive, label: long-term export}
+- {from: pdz-blob, to: vpc-vnet-records, link: azurerm_private_dns_zone_virtual_network_link}
+steps:
+- {n: '1', text: 'client → app-records-ingest: submit records'}
+- {n: '2', text: 'app-records-ingest → pe-blob: write block / append blobs over Private Link'}
+- {n: '4', text: 'users → ct-trade-records: read only; overwrite / delete denied'}
+- {n: '5', text: 'st-worm-records → law-compliance: resource logs + policy audit log'}

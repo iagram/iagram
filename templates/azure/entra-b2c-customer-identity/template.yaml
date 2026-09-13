@@ -1,0 +1,58 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/active-directory-b2c/technical-overview); edit freely.
+title: Customer identity with Azure AD B2C, custom domain and API connectors
+category: identity
+tags:
+- azure ad b2c
+- ciam
+- oidc
+- social identity providers
+- user flows
+- custom policies
+- api connectors
+- front door
+source: https://learn.microsoft.com/en-us/azure/active-directory-b2c/technical-overview
+description: A dedicated Azure AD B2C tenant stores consumer accounts and runs sign-up/sign-in user flows or custom policies, federating with social and enterprise identity providers over OIDC, OAuth 2.0
+  and SAML before returning tokens to registered web and mobile applications. Azure Front Door fronts the tenant for a custom login domain, API connectors call a REST API to validate and enrich user data,
+  and audit logs and Application Insights telemetry provide usage and security visibility.
+nodes:
+- {id: sub-identity, type: azure.subscription, name: identity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-b2c, type: azure.resource_group, name: rg-b2c, parent: sub-identity, props: {location: westeurope}}
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-customer-app, type: azure.resource_group, name: rg-customer-app, parent: sub-workload, props: {location: westeurope}}
+- {id: users, type: common.users, name: users}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: idp, type: common.idp, name: idp}
+- {id: afd-login-custom-domain, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-login-custom-domain, parent: rg-rg-b2c, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: appi-b2c-journeys, type: azure.res.azurerm_application_insights, name: appi-b2c-journeys, parent: rg-rg-b2c, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-b2c, type: azure.res.azurerm_log_analytics_workspace, name: law-b2c, parent: rg-rg-b2c, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: plan-customer-app, type: azure.res.azurerm_service_plan, name: plan-customer-app, parent: rg-rg-customer-app, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-customer-portal
+  type: azure.res.azurerm_linux_web_app
+  name: web-customer-portal
+  parent: rg-rg-customer-app
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: func-api-connector
+  type: azure.res.azurerm_linux_function_app
+  name: func-api-connector
+  parent: rg-rg-customer-app
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: cosmos-customer-profiles
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-customer-profiles
+  parent: rg-rg-customer-app
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+edges:
+- {from: users, to: web-customer-portal, label: browse, step: '1'}
+- {from: web-customer-portal, to: afd-login-custom-domain, label: OIDC authorize (login.contoso.com), step: '2'}
+- {from: mobile, to: afd-login-custom-domain, label: OIDC / MSAL}
+- {from: func-api-connector, to: cosmos-customer-profiles, label: loyalty / CRM lookup}
+steps:
+- {n: '1', text: 'users → web-customer-portal: browse'}
+- {n: '2', text: 'web-customer-portal → afd-login-custom-domain: OIDC authorize (login.contoso.com)'}

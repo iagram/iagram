@@ -1,0 +1,70 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/); edit freely.
+title: Azure landing zone management group hierarchy with platform and application subscriptions
+category: security
+tags:
+- landing zone
+- management groups
+- platform landing zone
+- connectivity
+- identity
+- policy
+- cloud adoption framework
+source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/
+description: A platform landing zone (management group hierarchy plus centralized management, connectivity and identity subscriptions) provides governance and shared services for application landing zone
+  subscriptions placed under Corp, Online or Sandbox management groups. Azure Policy assigned at management group scope is inherited by every subscription, while the connectivity hub (firewall, gateways,
+  DDoS) and the central Log Analytics workspace serve all workloads.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-prod, type: azure.subscription, name: prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-prod, type: azure.resource_group, name: rg-prod, parent: sub-prod, props: {location: westeurope}}
+- {id: internet, type: common.internet, name: internet}
+- {id: mg-platform, type: azure.res.azurerm_management_group, name: mg-platform, parent: rg-rg-prod}
+- {id: mg-landing-zones, type: azure.res.azurerm_management_group, name: mg-landing-zones, parent: rg-rg-prod}
+- {id: mg-sandbox, type: azure.res.azurerm_management_group, name: mg-sandbox, parent: rg-rg-prod}
+- {id: alz-guardrails, type: azure.res.azurerm_management_group_policy_assignment, name: alz-guardrails, parent: rg-rg-prod, props: {management_group_id: changeme, name: changeme, policy_definition_id: changeme}}
+- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: rg-rg-prod, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: hub-fw, type: azure.res.azurerm_firewall, name: hub-fw, parent: rg-rg-prod, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- id: hub-ergw
+  type: azure.res.azurerm_virtual_network_gateway
+  name: hub-ergw
+  parent: rg-rg-prod
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- {id: ddos-plan, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-plan, parent: rg-rg-prod, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: adds-dc-1
+  type: azure.res.azurerm_windows_virtual_machine
+  name: adds-dc-1
+  parent: rg-rg-prod
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- {id: vpc-rg-rg-prod, type: azure.vnet, name: main, parent: rg-rg-prod, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-prod, type: azure.subnet, name: main, parent: vpc-rg-rg-prod, props: {cidr: 10.200.0.0/24}}
+- {id: vm-corp-app, type: azure.virtual_machine, name: vm-corp-app, parent: sub-rg-rg-prod}
+- id: web-online-app
+  type: azure.res.azurerm_linux_web_app
+  name: web-online-app
+  parent: rg-rg-prod
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: vm-sandbox, type: azure.virtual_machine, name: vm-sandbox, parent: sub-rg-rg-prod}
+edges:
+- {from: dc-on-premises, to: hub-ergw, label: ExpressRoute / VPN, step: '1'}
+- {from: vm-corp-app, to: hub-fw, label: 0.0.0.0/0 via UDR, step: '2'}
+- {from: hub-fw, to: internet, label: SNAT egress, step: '3'}
+- {from: vm-corp-app, to: adds-dc-1, label: domain authentication, step: '4'}
+- {from: hub-fw, to: law-central, label: diagnostics}
+- {from: web-online-app, to: law-central, label: diagnostics}
+steps:
+- {n: '1', text: 'datacenter → hub-ergw: ExpressRoute / VPN'}
+- {n: '2', text: 'vm-corp-app → hub-fw: 0.0.0.0/0 via UDR'}
+- {n: '3', text: 'hub-fw → internet: SNAT egress'}
+- {n: '4', text: 'vm-corp-app → adds-dc-1: domain authentication'}

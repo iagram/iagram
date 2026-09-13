@@ -1,0 +1,95 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-reference-architectures); edit freely.
+title: DDoS Network Protection and Application Gateway WAF for an N-tier web application
+category: security
+tags:
+- ddos protection
+- waf
+- application gateway
+- n-tier
+- vmss
+- load balancer
+- alerts
+source: https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-reference-architectures
+description: A DDoS Network Protection plan enabled on the virtual network protects every public IP in it at layers 3 and 4, while an Application Gateway WAF v2 in prevention mode blocks layer 7 attacks
+  such as SQL injection before requests reach the web tier. Web and business tiers run as scale sets behind the gateway and an internal load balancer so they can scale out under attack, and DDoS mitigation
+  metrics raise alerts through Azure Monitor.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-web, type: azure.resource_group, name: rg-web, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-web, type: azure.vnet, name: vnet-web, parent: rg-rg-web, props: {cidr: 10.30.0.0/16}}
+- {id: sub-snet-appgw, type: azure.subnet, name: snet-appgw, parent: vpc-vnet-web, props: {cidr: 10.30.0.0/24}}
+- {id: sub-snet-web, type: azure.subnet, name: snet-web, parent: vpc-vnet-web, props: {cidr: 10.30.1.0/24}}
+- {id: sub-snet-business, type: azure.subnet, name: snet-business, parent: vpc-vnet-web, props: {cidr: 10.30.2.0/24}}
+- {id: sub-snet-data, type: azure.subnet, name: snet-data, parent: vpc-vnet-web, props: {cidr: 10.30.3.0/24}}
+- {id: internet, type: common.internet, name: internet}
+- {id: ddos-plan, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-plan, parent: rg-rg-web, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: appgw-waf
+  type: azure.res.azurerm_application_gateway
+  name: appgw-waf
+  parent: sub-snet-appgw
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- id: waf-prevention
+  type: azure.res.azurerm_web_application_firewall_policy
+  name: waf-prevention
+  parent: rg-rg-web
+  props: {location: westeurope, managed_rules: {}, name: changeme, resource_group_name: changeme}
+- id: vmss-web
+  type: azure.res.azurerm_linux_virtual_machine_scale_set
+  name: vmss-web
+  parent: sub-snet-web
+  props:
+    admin_username: changeme
+    location: westeurope
+    name: changeme
+    network_interface: []
+    os_disk: {}
+    resource_group_name: changeme
+    sku: changeme
+- {id: ilb-business, type: azure.res.azurerm_lb, name: ilb-business, parent: sub-snet-business, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: vmss-business
+  type: azure.res.azurerm_linux_virtual_machine_scale_set
+  name: vmss-business
+  parent: sub-snet-business
+  props:
+    admin_username: changeme
+    location: westeurope
+    name: changeme
+    network_interface: []
+    os_disk: {}
+    resource_group_name: changeme
+    sku: changeme
+- id: sql-vm-1
+  type: azure.res.azurerm_windows_virtual_machine
+  name: sql-vm-1
+  parent: sub-snet-data
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- {id: law-web, type: azure.res.azurerm_log_analytics_workspace, name: law-web, parent: rg-rg-web, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: ag-ddos-alerts, type: azure.res.azurerm_monitor_action_group, name: ag-ddos-alerts, parent: rg-rg-web, props: {name: changeme, resource_group_name: changeme, short_name: changeme}}
+edges:
+- {from: ddos-plan, to: vpc-vnet-web, label: DDoS Network Protection (L3/L4) on all public IPs}
+- {from: waf-prevention, to: appgw-waf, label: L7 OWASP rules}
+- {from: appgw-waf, to: vmss-web, label: web tier, step: '2'}
+- {from: vmss-web, to: ilb-business, label: internal LB, step: '3'}
+- {from: ilb-business, to: vmss-business, label: business tier}
+- {from: vmss-business, to: sql-vm-1, label: data tier, step: '4'}
+- {from: ddos-plan, to: law-web, label: mitigation metrics + flow logs, step: '5'}
+- {from: law-web, to: ag-ddos-alerts, label: DDoS attack alert}
+steps:
+- {n: '2', text: 'appgw-waf → vmss-web: web tier'}
+- {n: '3', text: 'vmss-web → ilb-business: internal LB'}
+- {n: '4', text: 'vmss-business → sql-vm-1: data tier'}
+- {n: '5', text: 'ddos-plan → law-web: mitigation metrics + flow logs'}

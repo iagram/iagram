@@ -1,0 +1,83 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-arc/servers/overview); edit freely.
+title: Govern on-premises servers with Azure Arc, Policy, Monitor and Update Manager
+category: security
+tags:
+- azure arc
+- arc-enabled servers
+- machine configuration
+- azure monitor agent
+- update manager
+- defender for servers
+- private link
+source: https://learn.microsoft.com/en-us/azure/azure-arc/servers/overview
+description: The Connected Machine agent projects on-premises Windows and Linux servers into Azure as Arc-enabled server resources with their own resource IDs and managed identities, so Azure RBAC, tags
+  and Azure Policy machine configuration apply to them like native VMs. Azure Monitor Agent sends logs through data collection rules to a central Log Analytics workspace, Update Manager schedules patching,
+  Defender for Servers protects them, and an Arc Private Link Scope keeps agent traffic on a private endpoint reached over the site-to-site connection.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-management, type: azure.resource_group, name: rg-management, parent: sub-management, props: {location: westeurope}}
+- {id: sub-hybrid, type: azure.subscription, name: hybrid, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-arc-servers, type: azure.resource_group, name: rg-arc-servers, parent: sub-hybrid, props: {location: westeurope}}
+- {id: vpc-vnet-hybrid, type: azure.vnet, name: vnet-hybrid, parent: rg-rg-arc-servers, props: {cidr: 10.110.0.0/16}}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-hybrid, props: {cidr: 10.110.0.0/27}}
+- {id: sub-snet-pe, type: azure.subnet, name: snet-pe, parent: vpc-vnet-hybrid, props: {cidr: 10.110.1.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: vpc-rg-rg-management, type: azure.vnet, name: main, parent: rg-rg-management, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-management, type: azure.subnet, name: main, parent: vpc-rg-rg-management, props: {cidr: 10.200.0.0/24}}
+- {id: arc-srv-01, type: azure.res.azurerm_arc_machine, name: arc-srv-01, parent: sub-rg-rg-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: arc-srv-02, type: azure.res.azurerm_arc_machine, name: arc-srv-02, parent: sub-rg-rg-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: vpngw-hybrid
+  type: azure.res.azurerm_virtual_network_gateway
+  name: vpngw-hybrid
+  parent: sub-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- {id: arc-pls, type: azure.res.azurerm_arc_private_link_scope, name: arc-pls, parent: rg-rg-arc-servers, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: pe-arc
+  type: azure.res.azurerm_private_endpoint
+  name: pe-arc
+  parent: sub-snet-pe
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: defender-servers, type: azure.res.azurerm_security_center_subscription_pricing, name: defender-servers, parent: sub-hybrid, props: {tier: changeme}}
+- {id: law-hybrid, type: azure.res.azurerm_log_analytics_workspace, name: law-hybrid, parent: rg-rg-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: dcr-vm-insights
+  type: azure.res.azurerm_monitor_data_collection_rule
+  name: dcr-vm-insights
+  parent: rg-rg-management
+  props:
+    data_flow: []
+    destinations: {}
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+- id: initiative-machine-config
+  type: azure.res.azurerm_policy_set_definition
+  name: initiative-machine-config
+  parent: sub-management
+  props:
+    display_name: changeme
+    name: changeme
+    policy_definition_reference: []
+    policy_type: changeme
+- {id: aa-hybrid-runbooks, type: azure.res.azurerm_automation_account, name: aa-hybrid-runbooks, parent: rg-rg-management, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+edges:
+- {from: dc-on-premises, to: vpngw-hybrid, label: S2S VPN / ExpressRoute, step: '1'}
+- {from: arc-srv-01, to: pe-arc, label: Connected Machine agent over Private Link, step: '2'}
+- {from: pe-arc, to: arc-pls, label: Arc Private Link Scope}
+- {from: arc-srv-01, to: dcr-vm-insights, label: Azure Monitor Agent, step: '3'}
+- {from: dcr-vm-insights, to: law-hybrid, label: logs + VM insights}
+- {from: initiative-machine-config, to: arc-srv-01, label: machine configuration audit, step: '4'}
+- {from: defender-servers, to: arc-srv-02, label: Defender for Endpoint + vulnerability assessment}
+- {from: aa-hybrid-runbooks, to: arc-srv-02, label: runbooks (hybrid worker)}
+- {from: users, to: arc-srv-01, label: manage as Azure resource (RBAC}
+steps:
+- {n: '1', text: 'datacenter → vpngw-hybrid: S2S VPN / ExpressRoute'}
+- {n: '2', text: 'arc-srv-01 → pe-arc: Connected Machine agent over Private Link'}
+- {n: '3', text: 'arc-srv-01 → dcr-vm-insights: Azure Monitor Agent'}
+- {n: '4', text: 'initiative-machine-config → arc-srv-01: machine configuration audit'}

@@ -1,0 +1,92 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/identity/adds-extend-domain); edit freely.
+title: Extend on-premises Active Directory Domain Services into an Azure virtual network
+category: identity
+tags:
+- active directory
+- ad ds
+- domain controllers
+- hybrid identity
+- vpn gateway
+- replication
+- bastion
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/identity/adds-extend-domain
+description: Two domain controller VMs in a dedicated AD DS subnet, spread across availability zones with static private IPs and a restrictive NSG, replicate with on-premises domain controllers over a VPN
+  or ExpressRoute gateway and serve authentication and DNS to workloads in Azure. Administrative access uses Azure Bastion rather than public IPs, DDoS Protection covers the perimeter, and Recovery Services
+  backs up the domain controllers' system state.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-identity, type: azure.subscription, name: identity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-identity, type: azure.resource_group, name: rg-identity, parent: sub-identity, props: {location: westeurope}}
+- {id: vpc-vnet-identity, type: azure.vnet, name: vnet-identity, parent: rg-rg-identity, props: {cidr: 10.10.0.0/16}}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-identity, props: {cidr: 10.10.255.0/27}}
+- {id: sub-snet-adds, type: azure.subnet, name: snet-adds, parent: vpc-vnet-identity, props: {cidr: 10.10.1.0/24}}
+- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-vnet-identity, props: {cidr: 10.10.2.0/24}}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-identity, props: {cidr: 10.10.3.0/26}}
+- {id: user, type: common.user, name: user}
+- id: vpngw-identity
+  type: azure.res.azurerm_virtual_network_gateway
+  name: vpngw-identity
+  parent: sub-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- {id: vpc-rg-rg-identity, type: azure.vnet, name: main, parent: rg-rg-identity, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-identity, type: azure.subnet, name: main, parent: vpc-rg-rg-identity, props: {cidr: 10.200.0.0/24}}
+- {id: lng-onprem, type: azure.res.azurerm_local_network_gateway, name: lng-onprem, parent: sub-rg-rg-identity, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: dc-az-1
+  type: azure.res.azurerm_windows_virtual_machine
+  name: dc-az-1
+  parent: sub-snet-adds
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- id: dc-az-2
+  type: azure.res.azurerm_windows_virtual_machine
+  name: dc-az-2
+  parent: sub-snet-adds
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- {id: nsg-adds, type: azure.network_security_group, name: nsg-adds, parent: vpc-rg-rg-identity}
+- id: app-vm-1
+  type: azure.res.azurerm_windows_virtual_machine
+  name: app-vm-1
+  parent: sub-snet-app
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- {id: bastion-identity, type: azure.res.azurerm_bastion_host, name: bastion-identity, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: ddos-identity, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-identity, parent: rg-rg-identity, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: rsv-identity, type: azure.res.azurerm_recovery_services_vault, name: rsv-identity, parent: rg-rg-identity, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+edges:
+- {from: dc-on-premises, to: vpngw-identity, label: IPsec S2S VPN / ExpressRoute, step: '1'}
+- {from: vpngw-identity, to: lng-onprem, label: S2S connection}
+- {from: dc-az-1, to: dc-on-premises, label: AD DS replication (site link), step: '2'}
+- {from: app-vm-1, to: dc-az-1, label: Kerberos / LDAP authentication, step: '3'}
+- {from: app-vm-1, to: dc-az-2, label: DNS (custom DNS servers)}
+- {from: nsg-adds, to: dc-az-1, label: AD ports only}
+- {from: user, to: bastion-identity, label: RDP over TLS 443, step: '4'}
+- {from: bastion-identity, to: dc-az-1, label: RDP (private IP)}
+- {from: dc-az-1, to: rsv-identity, label: system-state backup}
+- {from: ddos-identity, to: vpc-vnet-identity, label: DDoS Network Protection}
+steps:
+- {n: '1', text: 'datacenter → vpngw-identity: IPsec S2S VPN / ExpressRoute'}
+- {n: '2', text: 'dc-az-1 → datacenter: AD DS replication (site link)'}
+- {n: '3', text: 'app-vm-1 → dc-az-1: Kerberos / LDAP authentication'}
+- {n: '4', text: 'user → bastion-identity: RDP over TLS 443'}

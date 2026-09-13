@@ -1,0 +1,56 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/defender-for-cloud/defender-for-cloud-introduction); edit freely.
+title: Microsoft Defender for Cloud posture management and workload protection
+category: security
+tags:
+- defender for cloud
+- cnapp
+- cspm
+- cwpp
+- defender plans
+- secure score
+- multicloud
+source: https://learn.microsoft.com/en-us/azure/defender-for-cloud/defender-for-cloud-introduction
+description: Defender for Cloud plans are enabled per subscription (Defender for Servers, Storage, Containers, Databases and CSPM) to assess posture against the Microsoft cloud security benchmark and detect
+  threats on VMs, storage accounts, AKS clusters and SQL servers, including Arc-enabled on-premises machines and connected AWS/GCP accounts. Alerts and recommendations flow to a Log Analytics workspace
+  shared with Microsoft Sentinel for correlation and response.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-security, type: azure.resource_group, name: rg-security, parent: sub-management, props: {location: westeurope}}
+- {id: sub-landing-zone-prod, type: azure.subscription, name: landing-zone-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-workload, type: azure.resource_group, name: rg-workload, parent: sub-landing-zone-prod, props: {location: westeurope}}
+- {id: vpc-vnet-workload, type: azure.vnet, name: vnet-workload, parent: rg-rg-workload, props: {cidr: 10.30.0.0/16}}
+- {id: sub-snet-web, type: azure.subnet, name: snet-web, parent: vpc-vnet-workload, props: {cidr: 10.30.1.0/24}}
+- {id: sub-snet-aks, type: azure.subnet, name: snet-aks, parent: vpc-vnet-workload, props: {cidr: 10.30.8.0/21}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: defender-servers-p2, type: azure.res.azurerm_security_center_subscription_pricing, name: defender-servers-p2, parent: sub-landing-zone-prod, props: {tier: changeme}}
+- {id: defender-storage, type: azure.res.azurerm_security_center_subscription_pricing, name: defender-storage, parent: sub-landing-zone-prod, props: {tier: changeme}}
+- {id: defender-containers, type: azure.res.azurerm_security_center_subscription_pricing, name: defender-containers, parent: sub-landing-zone-prod, props: {tier: changeme}}
+- {id: mcsb-initiative, type: azure.res.azurerm_subscription_policy_assignment, name: mcsb-initiative, parent: sub-landing-zone-prod, props: {name: changeme, policy_definition_id: changeme, subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: vm-web, type: azure.virtual_machine, name: vm-web, parent: sub-snet-web}
+- {id: st-data, type: azure.storage_account, name: st-data, parent: rg-rg-workload}
+- {id: aks-prod, type: azure.aks_cluster, name: aks-prod, parent: sub-snet-aks}
+- {id: sql-prod, type: azure.res.azurerm_mssql_server, name: sql-prod, parent: rg-rg-workload, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: vpc-rg-rg-security, type: azure.vnet, name: main, parent: rg-rg-security, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-security, type: azure.subnet, name: main, parent: vpc-rg-rg-security, props: {cidr: 10.200.0.0/24}}
+- {id: arc-onprem-srv, type: azure.res.azurerm_arc_machine, name: arc-onprem-srv, parent: sub-rg-rg-security, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-security, type: azure.res.azurerm_log_analytics_workspace, name: law-security, parent: rg-rg-security, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: sentinel-onboarding, type: azure.res.azurerm_sentinel_log_analytics_workspace_onboarding, name: sentinel-onboarding, parent: rg-rg-security, props: {workspace_id: changeme}}
+edges:
+- {from: mcsb-initiative, to: vm-web, label: MCSB assessment -> secure score, step: '1'}
+- {from: defender-servers-p2, to: vm-web, label: agentless scanning + Defender for Endpoint, step: '2'}
+- {from: defender-servers-p2, to: arc-onprem-srv, label: hybrid server protection}
+- {from: defender-storage, to: st-data, label: malware scanning + sensitive data threats}
+- {from: defender-containers, to: aks-prod, label: vulnerability assessment + runtime protection}
+- {from: sql-prod, to: law-security, label: Defender for SQL alerts}
+- {from: saas, to: law-security, label: AWS / GCP connectors, step: '3'}
+- {from: vm-web, to: law-security, label: security alerts, step: '4'}
+- {from: law-security, to: sentinel-onboarding, label: alerts -> incidents, step: '5'}
+- {from: users, to: sentinel-onboarding, label: SOC triage}
+steps:
+- {n: '1', text: 'mcsb-initiative → vm-web: MCSB assessment -> secure score'}
+- {n: '2', text: 'defender-servers-p2 → vm-web: agentless scanning + Defender for Endpoint'}
+- {n: '3', text: 'saas → law-security: AWS / GCP connectors'}
+- {n: '4', text: 'vm-web → law-security: security alerts'}
+- {n: '5', text: 'law-security → sentinel-onboarding: alerts -> incidents'}

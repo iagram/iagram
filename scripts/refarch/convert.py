@@ -138,7 +138,8 @@ def convert(arch):
         rname = c.get('region') or (c.get('resource_group') or {}).get('location') if isinstance(c.get('resource_group'), dict) else c.get('region')
         if provider == 'azure':
             rg = c.get('resource_group') or {'name': f'rg-{rootname}', 'location': 'westeurope'}
-            rid = add(f'rg-{rg["name"]}', 'azure.resource_group', rg['name'], acct, {'location': rg.get('location', 'westeurope')})
+            existing = [nid for nid, t in node_type.items() if t == 'azure.resource_group' and node_parent.get(nid) == acct and next(n for n in nodes if n['id'] == nid)['name'] == rg['name']]
+            rid = existing[0] if existing else add(f'rg-{rg["name"]}', 'azure.resource_group', rg['name'], acct, {'location': rg.get('location', 'westeurope')})
             if first_region is None: first_region = rid
             ids['region'] = ids.get('region') or rid
             ids[f'resource_group:{rg["name"]}'] = rid

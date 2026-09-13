@@ -1,0 +1,56 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-architecture); edit freely.
+title: Azure VM business continuity with Azure Backup and Site Recovery cross-region replication
+category: resilience
+tags:
+- site recovery
+- azure backup
+- recovery services vault
+- backup vault
+- replication policy
+- disaster recovery
+- cross-region
+source: https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-architecture
+description: The Site Recovery Mobility service on each protected VM writes disk changes to a cache storage account in the source region, and Site Recovery replicates them to replica managed disks in the
+  target region, creating crash-consistent recovery points every five minutes and app-consistent points per the replication policy. On failover VMs are created in the mapped target virtual network from
+  a chosen recovery point; the same Recovery Services vault also holds daily VM backups, and a Backup vault protects blob data.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-app-primary, type: azure.resource_group, name: rg-app-primary, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-primary, type: azure.vnet, name: vnet-primary, parent: rg-rg-app-primary, props: {cidr: 10.50.0.0/16}}
+- {id: sub-snet-app-primary, type: azure.subnet, name: snet-app-primary, parent: vpc-vnet-primary, props: {cidr: 10.50.1.0/24}}
+- {id: rg-rg-app-secondary-asr, type: azure.resource_group, name: rg-app-secondary-asr, parent: sub-workload, props: {location: northeurope}}
+- {id: vpc-vnet-secondary-asr, type: azure.vnet, name: vnet-secondary-asr, parent: rg-rg-app-secondary-asr, props: {cidr: 10.60.0.0/16}}
+- {id: sub-snet-app-secondary, type: azure.subnet, name: snet-app-secondary, parent: vpc-vnet-secondary-asr, props: {cidr: 10.60.1.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: vm-app-1, type: azure.virtual_machine, name: vm-app-1, parent: sub-snet-app-primary}
+- {id: st-asr-cache, type: azure.storage_account, name: st-asr-cache, parent: rg-rg-app-primary}
+- {id: st-app-data, type: azure.storage_account, name: st-app-data, parent: rg-rg-app-primary}
+- {id: rsv-bcdr, type: azure.res.azurerm_recovery_services_vault, name: rsv-bcdr, parent: rg-rg-app-secondary-asr, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: asr-policy-24h, type: azure.res.azurerm_site_recovery_replication_policy, name: asr-policy-24h, parent: rg-rg-app-secondary-asr, props: {application_consistent_snapshot_frequency_in_minutes: 1, name: changeme,
+    recovery_point_retention_in_minutes: 1, recovery_vault_name: changeme, resource_group_name: changeme}}
+- id: backup-policy-daily
+  type: azure.res.azurerm_backup_policy_vm
+  name: backup-policy-daily
+  parent: rg-rg-app-secondary-asr
+  props: {backup: {}, name: changeme, recovery_vault_name: changeme, resource_group_name: changeme}
+- {id: bv-blobs, type: azure.res.azurerm_data_protection_backup_vault, name: bv-blobs, parent: rg-rg-app-secondary-asr, props: {datastore_type: changeme, location: westeurope, name: changeme, redundancy: changeme,
+    resource_group_name: changeme}}
+- {id: disk-app-1-asrreplica, type: azure.res.azurerm_managed_disk, name: disk-app-1-asrreplica, parent: rg-rg-app-secondary-asr, props: {create_option: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    storage_account_type: changeme}}
+- {id: vm-app-1-failover, type: azure.virtual_machine, name: vm-app-1-failover, parent: sub-snet-app-secondary}
+edges:
+- {from: vm-app-1, to: st-asr-cache, label: 'Mobility service: disk writes to cache', step: '1'}
+- {from: st-asr-cache, to: disk-app-1-asrreplica, label: continuous replication to replica disk, step: '2'}
+- {from: asr-policy-24h, to: rsv-bcdr, label: recovery point retention + app-consistent frequency}
+- {from: vm-app-1, to: rsv-bcdr, label: protected item}
+- {from: vpc-vnet-primary, to: vpc-vnet-secondary-asr, label: network mapping}
+- {from: rsv-bcdr, to: vm-app-1-failover, label: 'failover: create VM from recovery point', step: '3'}
+- {from: backup-policy-daily, to: rsv-bcdr, label: daily schedule + retention}
+- {from: vm-app-1, to: rsv-bcdr, label: VM backup}
+- {from: st-app-data, to: bv-blobs, label: blob backup}
+- {from: users, to: rsv-bcdr, label: test failover / recovery plan, step: '4'}
+steps:
+- {n: '1', text: 'vm-app-1 → st-asr-cache: Mobility service: disk writes to cache'}
+- {n: '2', text: 'st-asr-cache → disk-app-1-asrreplica: continuous replication to replica disk'}
+- {n: '3', text: 'rsv-bcdr → vm-app-1-failover: failover: create VM from recovery point'}
+- {n: '4', text: 'users → rsv-bcdr: test failover / recovery plan'}

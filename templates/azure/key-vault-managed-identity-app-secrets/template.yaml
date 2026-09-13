@@ -1,0 +1,59 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/app-service/app-service-key-vault-references); edit freely.
+title: App Service secrets with Key Vault references and managed identity over Private Link
+category: security
+tags:
+- key vault
+- managed identity
+- key vault references
+- private endpoint
+- secrets
+- rbac
+source: https://learn.microsoft.com/en-us/azure/app-service/app-service-key-vault-references
+description: App settings hold Key Vault references instead of secret values; App Service resolves them at startup with a user-assigned managed identity that has the Key Vault Secrets User role, and refetches
+  rotated versions every 24 hours. The vault denies public access and is reached through a private endpoint over regional VNet integration, so no credential is ever stored in configuration or code.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-web, type: azure.resource_group, name: rg-web, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-web, type: azure.vnet, name: vnet-web, parent: rg-rg-web, props: {cidr: 10.40.0.0/16}}
+- {id: sub-snet-app-integration, type: azure.subnet, name: snet-app-integration, parent: vpc-vnet-web, props: {cidr: 10.40.1.0/24}}
+- {id: sub-snet-private-endpoints, type: azure.subnet, name: snet-private-endpoints, parent: vpc-vnet-web, props: {cidr: 10.40.2.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: plan-web, type: azure.res.azurerm_service_plan, name: plan-web, parent: rg-rg-web, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: web-app
+  type: azure.res.azurerm_linux_web_app
+  name: web-app
+  parent: sub-snet-app-integration
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: id-web-app, type: azure.res.azurerm_user_assigned_identity, name: id-web-app, parent: rg-rg-web, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: kv-web, type: azure.key_vault, name: kv-web, parent: rg-rg-web}
+- id: pe-kv
+  type: azure.res.azurerm_private_endpoint
+  name: pe-kv
+  parent: sub-snet-private-endpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: pdz-vaultcore, type: azure.res.azurerm_private_dns_zone, name: pdz-vaultcore, parent: rg-rg-web, props: {name: changeme, resource_group_name: changeme}}
+- {id: sql-web, type: azure.res.azurerm_mssql_server, name: sql-web, parent: rg-rg-web, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- id: pe-sql
+  type: azure.res.azurerm_private_endpoint
+  name: pe-sql
+  parent: sub-snet-private-endpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: law-web, type: azure.res.azurerm_log_analytics_workspace, name: law-web, parent: rg-rg-web, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: appi-web, type: azure.res.azurerm_application_insights, name: appi-web, parent: rg-rg-web, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: web-app, label: HTTPS, step: '1'}
+- {from: web-app, to: id-web-app, label: keyVaultReferenceIdentity, step: '2'}
+- {from: id-web-app, to: kv-web, label: Key Vault Secrets User (RBAC), step: '3'}
+- {from: web-app, to: pe-kv, label: '@Microsoft.KeyVault(SecretUri=...) via VNet integration', step: '4'}
+- {from: pe-kv, to: kv-web, label: Private Link}
+- {from: web-app, to: pe-sql, label: connection string from secret, step: '5'}
+- {from: pe-sql, to: sql-web, label: Private Link}
+- {from: pdz-vaultcore, to: vpc-vnet-web, label: privatelink.vaultcore.azure.net, link: azurerm_private_dns_zone_virtual_network_link}
+- {from: kv-web, to: law-web, label: audit logs}
+- {from: web-app, to: appi-web, label: telemetry}
+steps:
+- {n: '1', text: 'users → web-app: HTTPS'}
+- {n: '2', text: 'web-app → id-web-app: keyVaultReferenceIdentity'}
+- {n: '3', text: 'id-web-app → kv-web: Key Vault Secrets User (RBAC)'}
+- {n: '4', text: 'web-app → pe-kv: @Microsoft.KeyVault(SecretUri=...) via VNet integration'}
+- {n: '5', text: 'web-app → pe-sql: connection string from secret'}
