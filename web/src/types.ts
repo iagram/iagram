@@ -22,7 +22,16 @@ export interface JSONSchema {
   items?: JSONSchema
 }
 
+export interface BoxStyle {
+  border?: string
+  fill?: string
+  dash?: 'solid' | 'dashed' | 'dotted'
+  label?: 'left' | 'center'
+}
+
 export interface Entry {
+  style?: BoxStyle
+  style_variants?: Record<string, BoxStyle>
   terraform?: { role?: string; resource?: string; module?: string }
   attachment?: boolean
   component?: boolean

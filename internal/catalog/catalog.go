@@ -36,6 +36,12 @@ type Entry struct {
 	Terraform       *Terraform        `yaml:"terraform,omitempty" json:"terraform,omitempty"`
 	Outputs         []string          `yaml:"outputs,omitempty" json:"outputs,omitempty"`
 	Size            *Size             `yaml:"size,omitempty" json:"size,omitempty"`
+	// Style is the drawing convention of a container (border colour, dash,
+	// label position), following the provider's official diagram grammar.
+	Style *Style `yaml:"style,omitempty" json:"style,omitempty"`
+	// StyleVariants override Style when the named boolean property is true
+	// (public subnets are green, private ones teal).
+	StyleVariants map[string]Style `yaml:"style_variants,omitempty" json:"style_variants,omitempty"`
 	// Attachment marks a generated element with no graphical counterpart: it is
 	// not drawn on the canvas but configured inside the element it references.
 	Attachment bool `yaml:"-" json:"attachment,omitempty"`
@@ -158,6 +164,15 @@ type Collect struct {
 
 // Provider is the per-cloud Terraform provider configuration, loaded from
 // catalog/<provider>/_provider.yaml.
+// Style is how a container box is drawn: colours in CSS notation, Dash one of
+// solid|dashed|dotted, Label one of left|center.
+type Style struct {
+	Border string `yaml:"border,omitempty" json:"border,omitempty"`
+	Fill   string `yaml:"fill,omitempty" json:"fill,omitempty"`
+	Dash   string `yaml:"dash,omitempty" json:"dash,omitempty"`
+	Label  string `yaml:"label,omitempty" json:"label,omitempty"`
+}
+
 type Provider struct {
 	Name string `yaml:"name" json:"name"`
 	// Local is the Terraform local provider name when it differs from the
@@ -199,6 +214,8 @@ type Catalog struct {
 	// serviceIcons: provider -> tf type prefix (without provider prefix) -> icon path.
 	serviceIcons    map[string]map[string]string
 	serviceDefaults map[string]map[string]string // provider -> prefix -> default tf type of the family
+	serviceLabels   map[string]map[string]string // provider -> icon file -> palette label
+	resourceIcons   map[string]map[string]string // provider -> prefix -> resource (line-art) icon, drawing only
 	attachCache     map[string][]AttachmentOption
 	attachKinds     map[string]map[string]bool // provider -> tf type -> is attachment
 }

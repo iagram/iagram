@@ -273,14 +273,14 @@ func TestFamiliesOnePerIcon(t *testing.T) {
 		switch {
 		case strings.HasSuffix(f.Icon, "/lambda.svg") || strings.HasSuffix(f.Icon, "aws_lambda.svg"):
 			lambda = f
-		case strings.HasSuffix(f.Icon, "aws_identity_and_access_management.svg"):
+		case strings.HasSuffix(f.Icon, "aws_identity_access_management_role.svg"):
 			iam = f
 		}
 	}
 	if lambda == nil || lambda.Default != "aws.res.aws_lambda_function" {
 		t.Errorf("lambda family = %+v", lambda)
 	}
-	if iam == nil || iam.Default != "aws.res.aws_iam_role" || len(iam.Types) < 4 {
+	if iam == nil || iam.Default != "aws.res.aws_iam_role" {
 		t.Errorf("iam family = %+v", iam)
 	}
 	if lambda != nil && lambda.Curated != "aws.lambda_function" {

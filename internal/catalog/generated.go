@@ -256,16 +256,25 @@ func (c *Catalog) serviceIcon(provider, tfType string) (string, bool) {
 		}
 	}
 	_, rest, _ := strings.Cut(tfType, "_")
-	best, bestLen := "", 0
-	for prefix, icon := range c.serviceIcons[provider] {
-		if (rest == strings.TrimSuffix(prefix, "_") || strings.HasPrefix(rest, prefix) || strings.HasPrefix(rest, prefix+"_")) && len(prefix) > bestLen {
-			best, bestLen = icon, len(prefix)
-		}
+	if icon := longestPrefix(rest, c.resourceIcons[provider]); icon != "" {
+		return icon, true
 	}
-	if best != "" {
-		return best, true
+	if icon := longestPrefix(rest, c.serviceIcons[provider]); icon != "" {
+		return icon, true
 	}
 	return provider + "/generic.svg", false
+}
+
+// longestPrefix returns the value of the longest prefix key matching rest
+// (exactly, or followed by "_"), or "".
+func longestPrefix(rest string, m map[string]string) string {
+	best, bestLen := "", 0
+	for prefix, v := range m {
+		if (rest == strings.TrimSuffix(prefix, "_") || strings.HasPrefix(rest, prefix) || strings.HasPrefix(rest, prefix+"_")) && len(prefix) > bestLen {
+			best, bestLen = v, len(prefix)
+		}
+	}
+	return best
 }
 
 // iconKey identifies the icon family of a resource type: the services.yaml

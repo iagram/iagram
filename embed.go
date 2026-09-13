@@ -5,7 +5,7 @@ import "embed"
 
 // CatalogFS holds every catalog entry (YAML) and icon shipped in the binary.
 //
-//go:embed catalog/schema.json catalog/equivalences.yaml catalog/*/*.yaml catalog/icons/*/*.svg catalog/icons/*/services.yaml catalog/icons/*/services/*.svg
+//go:embed catalog/schema.json catalog/equivalences.yaml catalog/*/*.yaml catalog/icons/*/*.svg catalog/icons/*/services.yaml catalog/icons/*/services/*.svg catalog/icons/*/resources/*.svg catalog/icons/*/groups/*.svg
 var CatalogFS embed.FS
 
 // ModulesFS holds the Terraform modules referenced by the catalog.

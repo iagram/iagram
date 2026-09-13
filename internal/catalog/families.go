@@ -27,13 +27,14 @@ func (c *Catalog) Families(provider string) []Family {
 	if !ok || c.registry == nil {
 		return nil
 	}
-	// Group by icon family (the services.yaml icon), so a curated element and
-	// the generated types of its service land in one family.
+	// Group by drawn icon (resource icon when one is mapped, else the service
+	// icon), so a curated element and the generated types sharing its icon
+	// land in one family.
 	curatedByKey := map[string]string{}
 	curatedIcon := map[string]string{}
 	for _, e := range c.Entries {
-		if e.Provider == provider && e.Icon != "" && e.Kind == KindLeaf && e.Terraform != nil && e.Terraform.Import != nil && e.Terraform.Import.Resource != "" {
-			k := c.iconKey(provider, e.Terraform.Import.Resource)
+		if e.Provider == provider && e.Icon != "" && e.Terraform != nil && e.Terraform.Import != nil && e.Terraform.Import.Resource != "" {
+			k, _ := c.serviceIcon(provider, e.Terraform.Import.Resource)
 			curatedByKey[k] = e.ID
 			curatedIcon[k] = e.Icon
 		}
@@ -51,10 +52,10 @@ func (c *Catalog) Families(provider string) []Family {
 			}
 			continue
 		}
-		if _, official := c.serviceIcon(provider, t); !official {
+		key, official := c.serviceIcon(provider, t)
+		if !official {
 			continue
 		}
-		key := c.iconKey(provider, t)
 		byIcon[key] = append(byIcon[key], t)
 	}
 	var out []Family
@@ -80,7 +81,11 @@ func (c *Catalog) Families(provider string) []Family {
 		if ci, ok := curatedIcon[key]; ok {
 			icon = ci
 		}
-		f := Family{Key: key, Label: familyLabel(key), Icon: icon, Category: categoryOf(list[0]), Types: ids, Default: ids[0], Curated: curatedByKey[key]}
+		label := c.serviceLabels[provider][key]
+		if label == "" {
+			label = familyLabel(key)
+		}
+		f := Family{Key: key, Label: label, Icon: icon, Category: categoryOf(list[0]), Types: ids, Default: ids[0], Curated: curatedByKey[key]}
 		out = append(out, f)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
@@ -92,7 +97,9 @@ func (c *Catalog) Families(provider string) []Family {
 func (c *Catalog) familyDefaults(provider string) map[string]string {
 	out := map[string]string{}
 	for prefix, tf := range c.serviceDefaults[provider] {
-		if icon, ok := c.serviceIcons[provider][prefix]; ok {
+		if icon, ok := c.resourceIcons[provider][prefix]; ok {
+			out[icon] = tf
+		} else if icon, ok := c.serviceIcons[provider][prefix]; ok {
 			out[icon] = tf
 		}
 	}
