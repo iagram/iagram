@@ -29,6 +29,7 @@ export function Canvas() {
   const edges = useStore((s) => s.edges)
   const rules = useStore((s) => s.rules)
   const logicalParentType = useStore((s) => s.logicalParentType)
+  const syncSpans = useStore((s) => s.syncSpans)
   const onNodesChange = useStore((s) => s.onNodesChange)
   const onEdgesChange = useStore((s) => s.onEdgesChange)
   const connect = useStore((s) => s.connect)
@@ -133,7 +134,7 @@ export function Canvas() {
       let best: RFNode | null = null
       let bestDepth = -1
       for (const n of nodes) {
-        if (n.type !== 'container' || exclude?.has(n.id)) continue
+        if (n.type !== 'container' || exclude?.has(n.id) || rules?.entry(n.data.type)?.span) continue
         const r = absRect(n.id)
         if (!r) continue
         if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
@@ -146,7 +147,7 @@ export function Canvas() {
       }
       return best
     },
-    [nodes, absRect, depthOf],
+    [nodes, absRect, depthOf, rules],
   )
 
   const onDragOver = useCallback((ev: DragEvent) => {
@@ -243,8 +244,9 @@ export function Canvas() {
         }
         reparent(n.id, targetId, pos)
       }
+      syncSpans()
     },
-    [rules, absRect, containerAt, subtree, reparent, setDragging, showToast, logicalParentType],
+    [rules, absRect, containerAt, subtree, reparent, setDragging, showToast, logicalParentType, syncSpans],
   )
 
   const isValidConnection: IsValidConnection<RFEdge> = useCallback(
@@ -267,11 +269,13 @@ export function Canvas() {
         .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
         // A component's binding to its own box is containment, not an arrow.
         .filter((e) => !(e.data?.kind === 'references' && sourceNodes.find((n) => n.id === e.source)?.parentId === e.target))
+        // A band's coverage of the containers under it is drawn by position, not arrows.
+        .filter((e) => !(e.data?.kind === 'references' && rules?.entry(sourceNodes.find((n) => n.id === e.source)?.data.type ?? '')?.span?.attr === e.data.attr))
         .map((e) => {
         const visible = showLabels || e.id === hoveredEdgeId || e.id === selectedEdgeId
         return { ...e, data: e.data ? { ...e.data, showLabel: visible } : e.data, className: badEdges.has(e.id) ? 'edge-error' : undefined }
       }),
-    [sourceEdges, sourceNodes, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds],
+    [sourceEdges, sourceNodes, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds, rules],
   )
 
   return (

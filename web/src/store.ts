@@ -138,6 +138,10 @@ interface State {
   providedProps: (type: string, parentId: string | null | undefined) => Record<string, string>
   /** Re-apply zone-box values to a node and everything inside it. */
   applyProvided: (rootId: string) => void
+  /** Absolute rectangle of a node on the canvas (positions are parent-relative). */
+  absRect: (id: string) => { x: number; y: number; w: number; h: number } | null
+  /** Recompute which containers each spanning band covers and mirror that as reference edges. */
+  syncSpans: () => void
   primaryProvider: () => string
   setMirror: (v: boolean) => void
   refreshProjection: () => Promise<void>
@@ -332,7 +336,15 @@ export const useStore = create<State>((set, get) => ({
       props: { ...rules.defaults(type), ...get().providedProps(type, parentId) },
       layout: { x: Math.round(position.x), y: Math.round(position.y) },
     })
+    // A spanning band sits above the containers it covers, below leaves.
+    if (entry.span) {
+      const siblings = nodes.filter((n) => (n.parentId ?? null) === (parentId ?? null) && n.type === 'container')
+      const z = Math.max(0, ...siblings.map((n) => n.data.z ?? 0)) + 1
+      node.data.z = z
+      node.zIndex = zIndexFor(true, z)
+    }
     set({ nodes: [...nodes, node], dirty: true, selectedId: id })
+    if (entry.span) get().syncSpans()
     get().validateSoon()
     return id
   },
@@ -882,6 +894,63 @@ export const useStore = create<State>((set, get) => ({
     })
     get().applyProvided(id)
     get().validateSoon()
+  },
+
+  absRect(id) {
+    const nodes = get().nodes
+    let cur = nodes.find((n) => n.id === id)
+    if (!cur) return null
+    const w = Number(cur.style?.width ?? cur.measured?.width ?? 120)
+    const h = Number(cur.style?.height ?? cur.measured?.height ?? 90)
+    let x = cur.position.x
+    let y = cur.position.y
+    const seen = new Set<string>()
+    while (cur?.parentId && !seen.has(cur.id)) {
+      seen.add(cur.id)
+      cur = nodes.find((n) => n.id === cur!.parentId)
+      if (!cur) break
+      x += cur.position.x
+      y += cur.position.y
+    }
+    return { x, y, w, h }
+  },
+
+  syncSpans() {
+    const { rules, nodes, edges } = get()
+    if (!rules) return
+    const spans = nodes.filter((n) => rules.entry(n.data.type)?.span)
+    if (spans.length === 0) return
+    let next = edges
+    let changed = false
+    for (const band of spans) {
+      const span = rules.entry(band.data.type)!.span!
+      const r = get().absRect(band.id)
+      if (!r) continue
+      const covered = new Set<string>()
+      for (const n of nodes) {
+        if (n.id === band.id || !span.elements.includes(n.data.type)) continue
+        const c = get().absRect(n.id)
+        if (!c) continue
+        // Covered when the band overlaps at least 40% of the container's area.
+        const ix = Math.max(0, Math.min(r.x + r.w, c.x + c.w) - Math.max(r.x, c.x))
+        const iy = Math.max(0, Math.min(r.y + r.h, c.y + c.h) - Math.max(r.y, c.y))
+        if (ix * iy >= 0.4 * c.w * c.h) covered.add(n.id)
+      }
+      const mine = next.filter((e) => e.source === band.id && e.data?.kind === 'references' && e.data.attr === span.attr)
+      const have = new Set(mine.map((e) => e.target))
+      const stale = mine.filter((e) => !covered.has(e.target)).map((e) => e.id)
+      if (stale.length) (next = next.filter((e) => !stale.includes(e.id))), (changed = true)
+      for (const target of covered) {
+        if (have.has(target)) continue
+        const t = nodes.find((n) => n.id === target)!
+        next = [...next, makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: 'references', source: band.id, target, attr: span.attr, output: span.outputs[t.data.type] ?? 'id' }, span.attr, { dash: 'dotted' })]
+        changed = true
+      }
+    }
+    if (changed) {
+      set({ edges: next, dirty: true })
+      get().validateSoon()
+    }
   },
 
   applyProvided(rootId) {

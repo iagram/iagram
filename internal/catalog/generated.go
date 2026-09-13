@@ -22,6 +22,7 @@ func (c *Catalog) SetRegistry(r ResourceRegistry) {
 	c.registry = r
 	c.generated = map[string]*Entry{}
 	c.resolveLinkElements()
+	c.resolveSpanElements()
 }
 
 // GeneratedID is the element id for a Terraform resource type.
@@ -163,8 +164,12 @@ func (c *Catalog) generatedEntry(id string) (*Entry, bool) {
 	size := &Size{W: 120, H: 90}
 	component := false
 	link := c.isLink(provider, tfType)
+	span := c.spanOf(provider, tfType)
 	desc := fmt.Sprintf("Terraform resource %s, rendered as a plain resource block. Every attribute of the provider schema is available; reference other elements with arrows.", tfType)
-	if link {
+	if span != nil {
+		attachment, kind, size = false, KindContainer, &Size{W: 520, H: 180}
+		desc = fmt.Sprintf("Terraform resource %s, drawn as a band. The containers it covers fill %s.", tfType, span.Attr)
+	} else if link {
 		attachment = false
 		desc = fmt.Sprintf("Terraform resource %s. Drawn as a line between the two elements it connects; configured on the line.", tfType)
 	} else if attachment {
@@ -187,7 +192,16 @@ func (c *Catalog) generatedEntry(id string) (*Entry, bool) {
 		Description: desc, Icon: icon, Kind: kind, AllowedParents: parents,
 		Props: schema, Outputs: outputs, Size: size,
 		Terraform:  &Terraform{Role: RoleResource, Resource: tfType},
-		Attachment: attachment, Component: component, Link: link,
+		Attachment: attachment, Component: component, Link: link, Span: span,
+	}
+	if span != nil {
+		if span.Label != "" {
+			e.Label = span.Label
+		}
+		if span.Icon != "" {
+			e.Icon = span.Icon
+		}
+		e.Style = span.Style
 	}
 	c.genMu.Lock()
 	c.generated[id] = e

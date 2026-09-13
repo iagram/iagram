@@ -386,3 +386,27 @@ types are derived from the attribute name (`transit_gateway_id` accepts
   turns link resources whose ends resolve into link edges.
 - Lines default to no arrow head (`direction: none`) because they are
   associations, not traffic.
+
+## Spanning groups (`catalog/<provider>/_spans.yaml`)
+
+An Auto Scaling group is drawn as a band across the subnets it uses. A span
+declares that band:
+
+```yaml
+spans:
+  aws_autoscaling_group:
+    label: Auto Scaling group
+    attr: vpc_zone_identifier      # list attribute filled with the covered containers
+    over: [aws_subnet]             # what the band may cover
+    ghost: {count: desired_capacity, icon: aws/resources/amazon_ec2_instance.svg}
+    icon: aws/groups/auto_scaling_group.svg
+    style: {border: "#ED7100", dash: dashed, label: center}
+```
+
+The element becomes a container drawn above its siblings and below leaves,
+never a drop target. Whenever the band or the containers under it move or
+resize, the canvas recomputes which containers it covers (40 % of their area
+or more) and mirrors that as hidden `references` edges from the band to each
+covered container on `attr`; the generator turns them into the list value.
+The `.iad` file therefore stays plain: a node plus reference edges. Ghost
+tiles show the capacity (`ghost.count` property) without creating resources.

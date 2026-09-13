@@ -29,6 +29,9 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
   const dragging = useStore((s) => s.draggingType)
   const rules = useStore((s) => s.rules)
   const commit = useStore((s) => s.commit)
+  const syncSpans = useStore((s) => s.syncSpans)
+  const span = entry?.span
+  const ghosts = span?.ghost ? Math.min(8, Math.max(0, Number(data.props[span.ghost.count] ?? data.props.min_size ?? 0) || 0)) : 0
   const dropState = dragging && rules ? (rules.canContain(data.type, dragging) ? 'valid' : 'invalid') : ''
 
   const style = useMemo(() => styleOf(entry, data.props), [entry, data.props])
@@ -40,12 +43,12 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
   if (style?.dash) css['--box-dash'] = style.dash
   return (
     <div
-      className={`node container ${planClass} ${targetState} ${dropState} ${selected ? 'selected' : ''} ${style?.label === 'center' ? 'label-center' : ''}`}
+      className={`node container ${planClass} ${targetState} ${dropState} ${selected ? 'selected' : ''} ${style?.label === 'center' ? 'label-center' : ''} ${span ? 'span' : ''}`}
       data-type={data.type}
       data-provider={data.type.split('.')[0]}
       style={css as CSSProperties}
     >
-      <NodeResizer isVisible={selected} onResizeStart={() => commit()} minWidth={200} minHeight={120} lineClassName="resizer-line" handleClassName="resizer-handle" />
+      <NodeResizer isVisible={selected} onResizeStart={() => commit()} onResizeEnd={() => span && syncSpans()} minWidth={200} minHeight={span ? 80 : 120} lineClassName="resizer-line" handleClassName="resizer-handle" />
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
       <header>
@@ -56,6 +59,13 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
         {captionOf(entry, data) && <span className="caption">{captionOf(entry, data)}</span>}
         <NodeBadge id={id} />
       </header>
+      {ghosts > 0 && span?.ghost && (
+        <div className="ghosts" title={`${ghosts} instances (capacity)`}>
+          {Array.from({ length: ghosts }, (_, i) => (
+            <img key={i} src={`/icons/${span.ghost!.icon}`} alt="" draggable={false} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

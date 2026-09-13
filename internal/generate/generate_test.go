@@ -251,3 +251,25 @@ func TestLinkEdgesRenderAsResources(t *testing.T) {
 		t.Errorf("plan mapping should point at the edge: %v", res.ModuleToNode)
 	}
 }
+
+func TestSpanReferencesFillTheListAttribute(t *testing.T) {
+	c, d := fixture(t)
+	c.SetRegistry(tfschema.Catalog{Registry: tfschema.NewRegistry(iagram.SchemasFS, "")})
+	e, ok := c.Get("aws.res.aws_autoscaling_group")
+	if !ok || e.Kind != catalog.KindContainer || e.Span == nil || e.Span.Attr != "vpc_zone_identifier" {
+		t.Fatalf("autoscaling group should be a spanning container: %+v", e)
+	}
+	d.Nodes = append(d.Nodes, document.Node{ID: "asg", Type: "aws.res.aws_autoscaling_group", Name: "web_asg", Parent: "vpc", Props: map[string]any{"min_size": 2, "max_size": 4}})
+	d.Edges = append(d.Edges,
+		document.Edge{ID: "s1", Kind: "references", Source: "asg", Target: "sub-a", Attr: "vpc_zone_identifier", Output: "subnet_id"},
+	)
+	res, err := generate.Run(c, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := res.Config["resource"].(map[string]map[string]map[string]any)["aws_autoscaling_group"]["web_asg"]
+	list, _ := block["vpc_zone_identifier"].([]any)
+	if len(list) != 1 || list[0] != "${module.sub_a.subnet_id}" {
+		t.Errorf("vpc_zone_identifier = %v", block["vpc_zone_identifier"])
+	}
+}

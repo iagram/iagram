@@ -60,6 +60,8 @@ type Entry struct {
 	Component bool `yaml:"-" json:"component,omitempty"`
 	// Link marks a link resource: drawn as a line between two elements.
 	Link bool `yaml:"-" json:"link,omitempty"`
+	// Span marks a spanning group: a band across containers (Auto Scaling group).
+	Span *Span `yaml:"-" json:"span,omitempty"`
 }
 
 // Size is the default canvas size of a node.
@@ -241,7 +243,9 @@ type Source struct {
 // Catalog is the loaded, validated set of entries and compiled rules.
 type Catalog struct {
 	// Links are the link resources of every provider (catalog/<p>/_links.yaml).
-	Links     []Link              `json:"links"`
+	Links []Link `json:"links"`
+	// Spans are the spanning groups of every provider (catalog/<p>/_spans.yaml).
+	Spans     []Span              `json:"spans"`
 	Entries   []Entry             `json:"entries"`
 	Rules     []Rule              `json:"connections"`
 	Providers map[string]Provider `json:"providers"`

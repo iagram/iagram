@@ -39,6 +39,8 @@ export interface Entry {
   attachment?: boolean
   component?: boolean
   link?: boolean
+  /** spanning group: a band across containers; covered containers fill span.attr */
+  span?: Span
   transparent?: boolean
   id: string
   label: string
@@ -85,6 +87,19 @@ export interface Link {
   from: LinkEnd
   to: LinkEnd
   style?: Omit<EdgeStyle, 'inactive'>
+}
+
+export interface Span {
+  id: string
+  resource: string
+  provider: string
+  label: string
+  attr: string
+  over: string[]
+  elements: string[]
+  outputs: Record<string, string>
+  ghost?: { count: string; icon: string }
+  icon?: string
 }
 
 export interface Catalog {

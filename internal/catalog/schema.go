@@ -35,7 +35,7 @@ func CheckSchema(schemaJSON []byte, fsys fs.FS, root string) ([]error, error) {
 		}
 		// Entries live at <root>/<provider>/<name>.yaml; top-level files such as
 		// equivalences.yaml and provider files follow other schemas.
-		if d.IsDir() || !strings.HasSuffix(p, ".yaml") || strings.HasPrefix(path.Base(p), "_") || strings.Contains(p, "/icons/") || path.Dir(p) == root {
+		if d.IsDir() || !strings.HasSuffix(p, ".yaml") || strings.HasPrefix(path.Base(p), "_") || strings.Contains(p, "/icons/") || strings.HasPrefix(p, "icons/") || path.Dir(p) == root {
 			return nil
 		}
 		src, err := fs.ReadFile(fsys, p)
