@@ -1,0 +1,25 @@
+# Generated from the official reference (https://docs.cloud.google.com/dataflow/docs/guides/templates/provided/kafka-to-bigquery); edit freely.
+title: Kafka to BigQuery with Managed Service for Apache Kafka and Dataflow
+category: data
+tags:
+- kafka
+- managed kafka
+- dataflow
+- bigquery
+- avro
+source: https://docs.cloud.google.com/dataflow/docs/guides/templates/provided/kafka-to-bigquery
+description: Application producers write Avro or JSON records to topics on a Managed Service for Apache Kafka cluster deployed inside a VPC. The Kafka to BigQuery Dataflow template consumes the topics,
+  decodes records against a schema, and writes them to BigQuery tables, sending malformed messages to a dead-letter table.
+nodes:
+- {id: prj-kafka-analytics, type: gcp.project, name: kafka-analytics, props: {project_id: kafka-analytics-123456, project: changeme, region: europe-west4}}
+- {id: vpc-kafka-vpc, type: gcp.vpc, name: kafka-vpc, parent: prj-kafka-analytics, props: {cidr: 10.20.0.0/16}}
+- {id: sub-kafka-subnet, type: gcp.subnetwork, name: kafka-subnet, parent: vpc-kafka-vpc, props: {cidr: 10.20.1.0/24, region: europe-west4}}
+- {id: sub-dataflow-subnet, type: gcp.subnetwork, name: dataflow-subnet, parent: vpc-kafka-vpc, props: {cidr: 10.20.2.0/24, region: europe-west4}}
+- {id: users, type: common.users, name: users}
+- {id: order-producer-service, type: gcp.cloud_run_service, name: order-producer-service, parent: prj-kafka-analytics}
+- {id: kafka-dataflow-temp-bucket, type: gcp.storage_bucket, name: kafka-dataflow-temp-bucket, parent: prj-kafka-analytics}
+- {id: orders-dataset, type: gcp.bigquery_dataset, name: orders-dataset, parent: prj-kafka-analytics}
+edges:
+- {from: users, to: order-producer-service, label: HTTPS orders, step: '1'}
+steps:
+- {n: '1', text: 'users → order-producer-service: HTTPS orders'}

@@ -1,0 +1,56 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/securing-hybrid-workloads-using-amazon-route-53-resolver-dns-firewall/); edit freely.
+title: Centralized DNS Firewall rule groups enforced with Firewall Manager
+category: networking
+tags:
+- dns firewall
+- route 53 resolver
+- firewall manager
+- multi-account
+- dns exfiltration
+- security
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/securing-hybrid-workloads-using-amazon-route-53-resolver-dns-firewall/
+description: A Route 53 Resolver DNS Firewall rule group with block and allow domain lists is authored in the security tooling account and distributed by AWS Firewall Manager policies to every VPC in the
+  organization, including new ones. The Route 53 Resolver in each VPC evaluates queries from workloads against the associated rule group before resolving, and on-premises queries that arrive through inbound
+  Resolver endpoints receive the same treatment.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-security-tooling, type: aws.account, name: security-tooling}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: vpc-workload, type: aws.vpc, name: workload, parent: reg-us-east-1-2, props: {cidr: 10.1.0.0/16}}
+- {id: az-workload-a, type: aws.availability_zone, name: a, parent: vpc-workload, props: {zone: a}}
+- {id: sub-workload-private-a, type: aws.subnet, name: workload-private-a, parent: az-workload-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: az-workload-b, type: aws.availability_zone, name: b, parent: vpc-workload, props: {zone: b}}
+- {id: sub-workload-private-b, type: aws.subnet, name: workload-private-b, parent: az-workload-b, props: {cidr: 10.1.2.0/24, az: b, public: false}}
+- {id: internet, type: common.internet, name: internet}
+- {id: corp-dns-firewall-rules, type: aws.res.aws_route53_resolver_firewall_rule_group, name: corp-dns-firewall-rules, parent: acct-security-tooling, props: {name: changeme}}
+- {id: blocked-domains, type: aws.res.aws_route53_resolver_firewall_domain_list, name: blocked-domains, parent: acct-security-tooling, props: {name: changeme}}
+- id: dns-firewall-policy
+  type: aws.res.aws_fms_policy
+  name: dns-firewall-policy
+  parent: acct-security-tooling
+  props: {exclude_resource_tags: true, name: changeme, security_service_policy_data: {}}
+- id: inbound-resolver
+  type: aws.res.aws_route53_resolver_endpoint
+  name: inbound-resolver
+  parent: sub-workload-private-a
+  props:
+    direction: changeme
+    ip_address: []
+    security_group_ids: []
+- {id: workload-server, type: aws.ec2_instance, name: workload-server, parent: sub-workload-private-a}
+- {id: dns-firewall-logs, type: aws.res.aws_cloudwatch_log_group, name: dns-firewall-logs, parent: acct-security-tooling}
+edges:
+- {from: blocked-domains, to: corp-dns-firewall-rules, label: BLOCK list}
+- {from: dns-firewall-policy, to: corp-dns-firewall-rules, label: Firewall Manager policy}
+- {from: corp-dns-firewall-rules, to: vpc-workload, label: auto-associated to every VPC}
+- {from: workload-server, to: corp-dns-firewall-rules, label: DNS query evaluated by Resolver, step: '1'}
+- {from: corp-dns-firewall-rules, to: internet, label: allowed query resolved, step: '2'}
+- {from: corp-dns-firewall-rules, to: dns-firewall-logs, label: 'query logs, blocked events', step: '3'}
+- {from: dc-on-premises, to: inbound-resolver, label: on-prem forwarders}
+- {from: inbound-resolver, to: corp-dns-firewall-rules, label: same rules applied}
+steps:
+- {n: '1', text: 'workload-server → corp-dns-firewall-rules: DNS query evaluated by Resolver'}
+- {n: '2', text: 'corp-dns-firewall-rules → internet: allowed query resolved'}
+- {n: '3', text: 'corp-dns-firewall-rules → dns-firewall-logs: query logs, blocked events'}

@@ -1,0 +1,59 @@
+# Generated from the official reference (https://docs.aws.amazon.com/fis/latest/userguide/what-is.html); edit freely.
+title: Chaos engineering with Fault Injection Service simulating an AZ impairment
+category: resilience
+tags:
+- fault injection service
+- chaos engineering
+- experiment template
+- stop condition
+- availability zone
+- cloudwatch alarm
+source: https://docs.aws.amazon.com/fis/latest/userguide/what-is.html
+description: An FIS experiment template defines actions (for example stopping instances or disrupting network connectivity in one Availability Zone), targets selected by tag, and stop conditions tied to
+  CloudWatch alarms on the application's error rate. Running the experiment against the multi-AZ stack validates that the load balancer, Auto Scaling group and Multi-AZ database recover as designed, with
+  automatic rollback if the guardrail alarm fires.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-fis-target, type: aws.vpc, name: fis-target, parent: reg-eu-west-1, props: {cidr: 10.110.0.0/16}}
+- {id: az-fis-target-a, type: aws.availability_zone, name: a, parent: vpc-fis-target, props: {zone: a}}
+- {id: sub-fis-public-a, type: aws.subnet, name: fis-public-a, parent: az-fis-target-a, props: {cidr: 10.110.0.0/24, az: a, public: true}}
+- {id: az-fis-target-b, type: aws.availability_zone, name: b, parent: vpc-fis-target, props: {zone: b}}
+- {id: sub-fis-public-b, type: aws.subnet, name: fis-public-b, parent: az-fis-target-b, props: {cidr: 10.110.1.0/24, az: b, public: true}}
+- {id: sub-fis-app-a, type: aws.subnet, name: fis-app-a, parent: az-fis-target-a, props: {cidr: 10.110.10.0/24, az: a, public: false}}
+- {id: sub-fis-app-b, type: aws.subnet, name: fis-app-b, parent: az-fis-target-b, props: {cidr: 10.110.11.0/24, az: b, public: false}}
+- {id: sub-fis-db-a, type: aws.subnet, name: fis-db-a, parent: az-fis-target-a, props: {cidr: 10.110.20.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- id: az-a-impairment
+  type: aws.res.aws_fis_experiment_template
+  name: az-a-impairment
+  parent: reg-eu-west-1
+  props:
+    action: []
+    description: changeme
+    role_arn: changeme
+    stop_condition: []
+- {id: error-rate-guardrail, type: aws.res.aws_cloudwatch_metric_alarm, name: error-rate-guardrail, parent: reg-eu-west-1, props: {alarm_name: changeme}}
+- {id: experiment-notifications, type: aws.res.aws_sns_topic, name: experiment-notifications, parent: reg-eu-west-1}
+- {id: target-alb, type: aws.alb, name: target-alb, parent: vpc-fis-target}
+- {id: target-asg, type: aws.res.aws_autoscaling_group, name: target-asg, parent: vpc-fis-target, props: {max_size: 1, min_size: 1}}
+- {id: target-az-a, type: aws.ec2_instance, name: target-az-a, parent: sub-fis-app-a}
+- {id: target-az-b, type: aws.ec2_instance, name: target-az-b, parent: sub-fis-app-b}
+- {id: target-db-multi-az, type: aws.rds_instance, name: target-db-multi-az, parent: sub-fis-db-a}
+edges:
+- {from: az-a-impairment, to: target-az-a, label: 'action aws:ec2:stop-instances on tag az=a', step: '1'}
+- {from: az-a-impairment, to: target-asg, label: 'action aws:network:disrupt-connectivity (AZ a)'}
+- {from: error-rate-guardrail, to: az-a-impairment, label: stop condition, step: '2'}
+- {from: az-a-impairment, to: experiment-notifications, label: experiment state changes}
+- {from: users, to: target-alb, label: synthetic load during experiment, step: '3'}
+- {from: target-alb, to: target-az-b, label: traffic shifts to healthy AZ, step: '4'}
+- {from: target-alb, to: target-az-a, label: unhealthy targets removed}
+- {from: target-asg, to: target-az-a, label: replaces stopped instances, step: '5'}
+- {from: target-az-b, to: target-db-multi-az, label: Multi-AZ failover observed}
+- {from: target-alb, to: error-rate-guardrail, label: 5xx metric}
+steps:
+- {n: '1', text: 'az-a-impairment → target-az-a: action aws:ec2:stop-instances on tag az=a'}
+- {n: '2', text: 'error-rate-guardrail → az-a-impairment: stop condition'}
+- {n: '3', text: 'users → target-alb: synthetic load during experiment'}
+- {n: '4', text: 'target-alb → target-az-b: traffic shifts to healthy AZ'}
+- {n: '5', text: 'target-asg → target-az-a: replaces stopped instances'}

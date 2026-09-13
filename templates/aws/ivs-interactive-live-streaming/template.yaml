@@ -1,0 +1,61 @@
+# Generated from the official reference (https://docs.aws.amazon.com/ivs/latest/LowLatencyUserGuide/record-to-s3.html); edit freely.
+title: Interactive live streaming with Amazon IVS, chat and auto-record to S3
+category: media
+tags:
+- amazon ivs
+- low latency
+- live chat
+- auto-record
+- eventbridge
+- cloudfront
+source: https://docs.aws.amazon.com/ivs/latest/LowLatencyUserGuide/record-to-s3.html
+description: Broadcasters push RTMPS to an IVS channel whose recording configuration auto-records HLS renditions and thumbnails into an S3 bucket; IVS emits Recording State Change events to EventBridge,
+  and a Lambda target reads the recording metadata to publish VOD playlists through CloudFront with origin access control. An IVS Chat room with a Lambda message-review handler provides moderated chat,
+  and a serverless API issues stream keys and chat tokens.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: grp-live, type: common.group, name: live, parent: reg-us-west-2}
+- {id: grp-recordings, type: common.group, name: recordings, parent: reg-us-west-2}
+- {id: grp-app, type: common.group, name: app, parent: reg-us-west-2}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: creator-channel, type: aws.res.aws_ivs_channel, name: creator-channel, parent: grp-live}
+- id: auto-record-config
+  type: aws.res.aws_ivs_recording_configuration
+  name: auto-record-config
+  parent: grp-live
+  props: {destination_configuration: {}}
+- {id: creator-chat-room, type: aws.res.aws_ivschat_room, name: creator-chat-room, parent: grp-live}
+- {id: chat-message-review, type: aws.lambda_function, name: chat-message-review, parent: grp-live}
+- {id: recordings-bucket, type: aws.s3_bucket, name: recordings-bucket, parent: grp-recordings}
+- {id: recording-state-rule, type: aws.res.aws_cloudwatch_event_rule, name: recording-state-rule, parent: grp-recordings}
+- {id: vod-publisher, type: aws.lambda_function, name: vod-publisher, parent: grp-recordings}
+- {id: vod-catalog, type: aws.dynamodb_table, name: vod-catalog, parent: grp-recordings}
+- {id: vod-cdn, type: aws.cloudfront_distribution, name: vod-cdn, parent: grp-recordings}
+- {id: streaming-app-api, type: aws.res.aws_api_gateway_rest_api, name: streaming-app-api, parent: grp-app, props: {name: changeme}}
+- {id: token-issuer, type: aws.lambda_function, name: token-issuer, parent: grp-app}
+- {id: viewer-users, type: aws.res.aws_cognito_user_pool, name: viewer-users, parent: grp-app, props: {name: changeme}}
+edges:
+- {from: client, to: creator-channel, label: RTMPS ingest with stream key, step: '1'}
+- {from: creator-channel, to: auto-record-config, label: recording configuration}
+- {from: auto-record-config, to: recordings-bucket, label: HLS renditions and thumbnails, step: '2'}
+- {from: creator-channel, to: recording-state-rule, label: IVS Recording State Change, step: '3'}
+- {from: recording-state-rule, to: vod-publisher, link: aws_cloudwatch_event_target}
+- {from: vod-publisher, to: recordings-bucket, label: read recording-ended.json, step: '4'}
+- {from: vod-publisher, to: vod-catalog, label: register VOD asset, step: '4'}
+- {from: vod-cdn, to: recordings-bucket, label: origin access control, step: '5'}
+- {from: users, to: creator-channel, label: low-latency playback, step: '6'}
+- {from: users, to: vod-cdn, label: on-demand playback}
+- {from: users, to: streaming-app-api, label: chat and stream tokens}
+- {from: streaming-app-api, to: token-issuer, label: CreateChatToken}
+- {from: token-issuer, to: viewer-users, label: verify viewer identity}
+- {from: users, to: creator-chat-room, label: WebSocket chat}
+- {from: creator-chat-room, to: chat-message-review, label: message review handler}
+steps:
+- {n: '1', text: 'client → creator-channel: RTMPS ingest with stream key'}
+- {n: '2', text: 'auto-record-config → recordings-bucket: HLS renditions and thumbnails'}
+- {n: '3', text: 'creator-channel → recording-state-rule: IVS Recording State Change'}
+- {n: '4', text: 'vod-publisher → recordings-bucket: read recording-ended.json'}
+- {n: '5', text: 'vod-cdn → recordings-bucket: origin access control'}
+- {n: '6', text: 'users → creator-channel: low-latency playback'}

@@ -1,0 +1,56 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/media2cloud-on-aws/architecture-overview.html); edit freely.
+title: Media2Cloud media ingestion and AI analysis with Rekognition
+category: media
+tags:
+- rekognition
+- media analysis
+- video
+- step functions
+- mediaconvert
+- opensearch
+source: https://docs.aws.amazon.com/solutions/latest/media2cloud-on-aws/architecture-overview.html
+description: Uploads to an ingest bucket start a main Step Functions state machine whose ingestion sub-workflow creates proxies with MediaConvert and whose analysis sub-workflow runs Rekognition, Transcribe,
+  Comprehend and Textract jobs. Rekognition publishes video job status to SNS, results and state are kept in DynamoDB and indexed into OpenSearch for search from a CloudFront-hosted web app authenticated
+  by Cognito.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-web, type: common.group, name: web, parent: reg-us-east-1}
+- {id: grp-workflows, type: common.group, name: workflows, parent: reg-us-east-1}
+- {id: grp-storage, type: common.group, name: storage, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: m2c-users, type: aws.res.aws_cognito_user_pool, name: m2c-users, parent: grp-web, props: {name: changeme}}
+- {id: web-app, type: aws.cloudfront_distribution, name: web-app, parent: grp-web}
+- {id: m2c-api, type: aws.res.aws_api_gateway_rest_api, name: m2c-api, parent: grp-web, props: {name: changeme}}
+- {id: main-workflow, type: aws.res.aws_sfn_state_machine, name: main-workflow, parent: grp-workflows, props: {definition: changeme, role_arn: changeme}}
+- {id: ingest-workflow, type: aws.res.aws_sfn_state_machine, name: ingest-workflow, parent: grp-workflows, props: {definition: changeme, role_arn: changeme}}
+- {id: analysis-workflow, type: aws.res.aws_sfn_state_machine, name: analysis-workflow, parent: grp-workflows, props: {definition: changeme, role_arn: changeme}}
+- {id: proxy-queue, type: aws.res.aws_media_convert_queue, name: proxy-queue, parent: grp-workflows, props: {name: changeme}}
+- {id: face-collection, type: aws.res.aws_rekognition_collection, name: face-collection, parent: grp-workflows, props: {collection_id: changeme}}
+- {id: rekognition-job-status, type: aws.res.aws_sns_topic, name: rekognition-job-status, parent: grp-workflows}
+- {id: ingest-bucket, type: aws.s3_bucket, name: ingest-bucket, parent: grp-storage}
+- {id: proxy-bucket, type: aws.s3_bucket, name: proxy-bucket, parent: grp-storage}
+- {id: ingest-state, type: aws.dynamodb_table, name: ingest-state, parent: grp-storage}
+- {id: media-index, type: aws.res.aws_opensearch_domain, name: media-index, parent: grp-storage, props: {domain_name: changeme}}
+edges:
+- {from: users, to: web-app, label: HTTPS, step: '1'}
+- {from: web-app, to: m2c-api, label: IAM-signed calls with Cognito credentials, step: '2'}
+- {from: users, to: ingest-bucket, label: multipart upload, step: '3'}
+- {from: m2c-api, to: main-workflow, label: StartExecution, step: '4'}
+- {from: main-workflow, to: ingest-workflow, step: '5'}
+- {from: ingest-workflow, to: proxy-queue, label: MediaConvert proxy job}
+- {from: proxy-queue, to: proxy-bucket, label: proxies}
+- {from: main-workflow, to: analysis-workflow, step: '6'}
+- {from: analysis-workflow, to: face-collection, label: Rekognition video jobs}
+- {from: face-collection, to: rekognition-job-status, label: job completion}
+- {from: rekognition-job-status, to: analysis-workflow, label: resume}
+- {from: analysis-workflow, to: ingest-state, label: status and pointers}
+- {from: analysis-workflow, to: media-index, label: index metadata, step: '7'}
+steps:
+- {n: '1', text: 'users → web-app: HTTPS'}
+- {n: '2', text: 'web-app → m2c-api: IAM-signed calls with Cognito credentials'}
+- {n: '3', text: 'users → ingest-bucket: multipart upload'}
+- {n: '4', text: 'm2c-api → main-workflow: StartExecution'}
+- {n: '5', text: main-workflow → ingest-workflow}
+- {n: '6', text: main-workflow → analysis-workflow}
+- {n: '7', text: 'analysis-workflow → media-index: index metadata'}

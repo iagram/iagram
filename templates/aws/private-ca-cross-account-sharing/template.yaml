@@ -1,0 +1,57 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/security/how-to-use-aws-ram-to-share-your-acm-private-ca-cross-account/); edit freely.
+title: Private CA hierarchy shared across accounts with RAM
+category: security
+tags:
+- acm pca
+- private ca
+- certificate hierarchy
+- ram
+- tls
+- encryption in transit
+source: https://aws.amazon.com/blogs/security/how-to-use-aws-ram-to-share-your-acm-private-ca-cross-account/
+description: A root CA and a subordinate issuing CA run in a dedicated CA account; the subordinate CA is shared to workload accounts through AWS Resource Access Manager. Teams in the workload accounts request
+  private certificates through ACM from the shared CA and attach them to load balancers, so certificate private keys never leave the workload account while CA control stays central.
+nodes:
+- {id: acct-security-ca, type: aws.account, name: security-ca}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security-ca, props: {region: us-east-1}}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1-2, props: {cidr: 10.30.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.30.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- id: root-ca
+  type: aws.res.aws_acmpca_certificate_authority
+  name: root-ca
+  parent: acct-security-ca
+  props: {certificate_authority_configuration: {}}
+- id: issuing-ca
+  type: aws.res.aws_acmpca_certificate_authority
+  name: issuing-ca
+  parent: acct-security-ca
+  props: {certificate_authority_configuration: {}}
+- {id: issuing-ca-share, type: aws.res.aws_ram_resource_share, name: issuing-ca-share, parent: acct-security-ca, props: {name: changeme}}
+- {id: crl-bucket, type: aws.s3_bucket, name: crl-bucket, parent: reg-us-east-1}
+- {id: ca-audit-trail, type: aws.res.aws_cloudtrail, name: ca-audit-trail, parent: acct-security-ca, props: {name: changeme, s3_bucket_name: changeme}}
+- {id: internal-app-cert, type: aws.res.aws_acm_certificate, name: internal-app-cert, parent: acct-workload}
+- {id: internal-alb, type: aws.alb, name: internal-alb, parent: az-app-a}
+- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-private-a}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.30.251.0/24, az: b, public: false}}
+edges:
+- {from: root-ca, to: issuing-ca, label: signs subordinate CA, step: '1'}
+- {from: issuing-ca-share, to: issuing-ca, label: shares CA}
+- {from: issuing-ca-share, to: internal-app-cert, label: ram principal association}
+- {from: internal-app-cert, to: issuing-ca, label: RequestCertificate, step: '2'}
+- {from: issuing-ca, to: crl-bucket, label: publish CRL, step: '3'}
+- {from: internal-app-cert, to: internal-alb, label: attached to listener, step: '4'}
+- {from: users, to: internal-alb, label: HTTPS, step: '5'}
+- {from: internal-alb, to: app-server, label: HTTPS, step: '6'}
+- {from: issuing-ca, to: ca-audit-trail, label: issuance audit}
+steps:
+- {n: '1', text: 'root-ca → issuing-ca: signs subordinate CA'}
+- {n: '2', text: 'internal-app-cert → issuing-ca: RequestCertificate'}
+- {n: '3', text: 'issuing-ca → crl-bucket: publish CRL'}
+- {n: '4', text: 'internal-app-cert → internal-alb: attached to listener'}
+- {n: '5', text: 'users → internal-alb: HTTPS'}
+- {n: '6', text: 'internal-alb → app-server: HTTPS'}

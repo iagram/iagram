@@ -1,0 +1,44 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/getting-started-guide-for-near-real-time-operational-analytics-using-amazon-aurora-zero-etl-integration-with-amazon-redshift); edit freely.
+title: Aurora zero-ETL integration with Amazon Redshift
+category: database
+tags:
+- zero-etl
+- aurora
+- redshift
+- near real-time analytics
+- operational analytics
+source: https://aws.amazon.com/blogs/big-data/getting-started-guide-for-near-real-time-operational-analytics-using-amazon-aurora-zero-etl-integration-with-amazon-redshift
+description: A zero-ETL integration replicates transactional tables from an Aurora MySQL cluster into a Redshift data warehouse within seconds of commit, with no pipeline code to write or operate. Analysts
+  query the replicated database in Redshift alongside other warehouse data and can build materialized views and dashboards on it.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-oltp-analytics, type: aws.vpc, name: oltp-analytics, parent: reg-us-east-1, props: {cidr: 10.70.0.0/16}}
+- {id: az-oltp-analytics-a, type: aws.availability_zone, name: a, parent: vpc-oltp-analytics, props: {zone: a}}
+- {id: sub-db-private-a, type: aws.subnet, name: db-private-a, parent: az-oltp-analytics-a, props: {cidr: 10.70.1.0/24, az: a, public: false}}
+- {id: az-oltp-analytics-b, type: aws.availability_zone, name: b, parent: vpc-oltp-analytics, props: {zone: b}}
+- {id: sub-db-private-b, type: aws.subnet, name: db-private-b, parent: az-oltp-analytics-b, props: {cidr: 10.70.2.0/24, az: b, public: false}}
+- {id: sub-dw-private-a, type: aws.subnet, name: dw-private-a, parent: az-oltp-analytics-a, props: {cidr: 10.70.11.0/24, az: a, public: false}}
+- {id: sub-app-private-a, type: aws.subnet, name: app-private-a, parent: az-oltp-analytics-a, props: {cidr: 10.70.21.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: orders-aurora, type: aws.res.aws_rds_cluster, name: orders-aurora, parent: sub-db-private-a, props: {engine: changeme}}
+- {id: orders-writer, type: aws.res.aws_rds_cluster_instance, name: orders-writer, parent: orders-aurora, props: {cluster_identifier: changeme, engine: changeme, instance_class: changeme}}
+- {id: analytics-dw, type: aws.res.aws_redshift_cluster, name: analytics-dw, parent: sub-dw-private-a, props: {cluster_identifier: changeme, node_type: changeme}}
+- {id: order-app, type: aws.ec2_instance, name: order-app, parent: sub-app-private-a}
+- id: ops-dashboards
+  type: aws.res.aws_quicksight_data_source
+  name: ops-dashboards
+  parent: reg-us-east-1
+  props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+edges:
+- {from: orders-aurora, to: analytics-dw, link: aws_rds_integration}
+- {from: order-app, to: orders-writer, label: OLTP writes, step: '1'}
+- {from: orders-writer, to: orders-aurora, label: writer instance, step: '1'}
+- {from: orders-aurora, to: analytics-dw, label: zero-ETL replication in seconds, step: '2'}
+- {from: ops-dashboards, to: analytics-dw, label: query replicated database, step: '3'}
+- {from: users, to: ops-dashboards, label: near real-time reports, step: '4'}
+steps:
+- {n: '1', text: 'order-app → orders-writer: OLTP writes'}
+- {n: '2', text: 'orders-aurora → analytics-dw: zero-ETL replication in seconds'}
+- {n: '3', text: 'ops-dashboards → analytics-dw: query replicated database'}
+- {n: '4', text: 'users → ops-dashboards: near real-time reports'}

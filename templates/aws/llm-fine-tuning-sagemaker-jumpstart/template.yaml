@@ -1,0 +1,57 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/fine-tune-llama-2-for-text-generation-on-amazon-sagemaker-jumpstart/); edit freely.
+title: LLM fine-tuning and hosting with SageMaker JumpStart
+category: ml
+tags:
+- fine-tuning
+- llama
+- sagemaker jumpstart
+- instruction tuning
+- model hosting
+- gpu
+source: https://aws.amazon.com/blogs/machine-learning/fine-tune-llama-2-for-text-generation-on-amazon-sagemaker-jumpstart/
+description: From SageMaker Studio a JumpStart estimator launches a fine-tuning job on GPU instances that reads an instruction dataset from S3 and writes the adapted Llama 2 weights back to S3. The resulting
+  model is registered and deployed from the JumpStart deep learning container to a real-time endpoint that the application invokes; training logs and metrics go to CloudWatch.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: user, type: common.user, name: user}
+- {id: client, type: common.client, name: client}
+- id: studio-domain
+  type: aws.res.aws_sagemaker_domain
+  name: studio-domain
+  parent: reg-us-west-2
+  props:
+    auth_mode: changeme
+    default_user_settings: {}
+    domain_name: changeme
+    subnet_ids: []
+    vpc_id: changeme
+- {id: instruction-dataset, type: aws.s3_bucket, name: instruction-dataset, parent: reg-us-west-2}
+- {id: fine-tuned-artifacts, type: aws.s3_bucket, name: fine-tuned-artifacts, parent: reg-us-west-2}
+- {id: jumpstart-dlc-mirror, type: aws.res.aws_ecr_repository, name: jumpstart-dlc-mirror, parent: reg-us-west-2, props: {name: changeme}}
+- {id: llama-fine-tuned, type: aws.res.aws_sagemaker_model_package_group, name: llama-fine-tuned, parent: reg-us-west-2, props: {model_package_group_name: changeme}}
+- {id: llama-7b-ft, type: aws.res.aws_sagemaker_model, name: llama-7b-ft, parent: reg-us-west-2, props: {execution_role_arn: changeme}}
+- {id: llama-endpoint, type: aws.res.aws_sagemaker_endpoint, name: llama-endpoint, parent: reg-us-west-2, props: {endpoint_config_name: changeme}}
+- {id: training-job-logs, type: aws.res.aws_cloudwatch_log_group, name: training-job-logs, parent: reg-us-west-2}
+- {id: app-inference-fn, type: aws.lambda_function, name: app-inference-fn, parent: reg-us-west-2}
+edges:
+- {from: user, to: instruction-dataset, label: upload train.jsonl and template.json, step: '1'}
+- {from: user, to: studio-domain, label: JumpStartEstimator.fit, step: '2'}
+- {from: instruction-dataset, to: studio-domain, label: training channel, step: '3'}
+- {from: jumpstart-dlc-mirror, to: studio-domain, label: training container ml.g5}
+- {from: studio-domain, to: fine-tuned-artifacts, label: model.tar.gz, step: '4'}
+- {from: studio-domain, to: training-job-logs, label: loss metrics}
+- {from: fine-tuned-artifacts, to: llama-fine-tuned, label: register version, step: '5'}
+- {from: llama-fine-tuned, to: llama-7b-ft, step: '6'}
+- {from: llama-7b-ft, to: llama-endpoint, label: deploy ml.g5.12xlarge, step: '7'}
+- {from: client, to: app-inference-fn, label: prompt}
+- {from: app-inference-fn, to: llama-endpoint, label: InvokeEndpoint, step: '8'}
+steps:
+- {n: '1', text: 'user → instruction-dataset: upload train.jsonl and template.json'}
+- {n: '2', text: 'user → studio-domain: JumpStartEstimator.fit'}
+- {n: '3', text: 'instruction-dataset → studio-domain: training channel'}
+- {n: '4', text: 'studio-domain → fine-tuned-artifacts: model.tar.gz'}
+- {n: '5', text: 'fine-tuned-artifacts → llama-fine-tuned: register version'}
+- {n: '6', text: llama-fine-tuned → llama-7b-ft}
+- {n: '7', text: 'llama-7b-ft → llama-endpoint: deploy ml.g5.12xlarge'}
+- {n: '8', text: 'app-inference-fn → llama-endpoint: InvokeEndpoint'}

@@ -1,0 +1,82 @@
+# Generated from the official reference (https://docs.aws.amazon.com/drs/latest/userguide/what-is-drs.html); edit freely.
+title: Elastic Disaster Recovery from on-premises servers into AWS
+category: resilience
+tags:
+- elastic disaster recovery
+- drs
+- block-level replication
+- staging area
+- pilot light
+- failback
+source: https://docs.aws.amazon.com/drs/latest/userguide/what-is-drs.html
+description: The AWS Replication Agent on each source server streams block-level changes over TCP 1500 to lightweight replication servers in a staging area subnet, where data lands on low-cost EBS volumes.
+  For drills or recovery, DRS converts the servers to boot natively and launches full-size recovery instances in the recovery subnets from the launch template; after the incident, replication reverses for
+  failback.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-drs-recovery, type: aws.vpc, name: drs-recovery, parent: reg-eu-west-1, props: {cidr: 10.80.0.0/16}}
+- {id: az-drs-recovery-a, type: aws.availability_zone, name: a, parent: vpc-drs-recovery, props: {zone: a}}
+- {id: sub-drs-staging-a, type: aws.subnet, name: drs-staging-a, parent: az-drs-recovery-a, props: {cidr: 10.80.100.0/24, az: a, public: false}}
+- {id: sub-drs-public-a, type: aws.subnet, name: drs-public-a, parent: az-drs-recovery-a, props: {cidr: 10.80.0.0/24, az: a, public: true}}
+- {id: sub-drs-recovery-a, type: aws.subnet, name: drs-recovery-a, parent: az-drs-recovery-a, props: {cidr: 10.80.10.0/24, az: a, public: false}}
+- {id: az-drs-recovery-b, type: aws.availability_zone, name: b, parent: vpc-drs-recovery, props: {zone: b}}
+- {id: sub-drs-recovery-b, type: aws.subnet, name: drs-recovery-b, parent: az-drs-recovery-b, props: {cidr: 10.80.11.0/24, az: b, public: false}}
+- {id: server, type: common.server, name: server}
+- {id: database, type: common.database, name: database}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: dc-router, type: aws.res.aws_customer_gateway, name: dc-router, parent: sub-reg-eu-west-1-a, props: {type: changeme}}
+- id: replication-settings
+  type: aws.res.aws_drs_replication_configuration_template
+  name: replication-settings
+  parent: reg-eu-west-1
+  props:
+    associate_default_security_group: true
+    bandwidth_throttling: 1
+    create_public_ip: true
+    data_plane_routing: changeme
+    default_large_staging_disk_type: changeme
+    ebs_encryption: changeme
+    replication_server_instance_type: changeme
+    replication_servers_security_groups_ids: []
+    staging_area_subnet_id: changeme
+    staging_area_tags: {}
+    use_dedicated_replication_server: true
+- {id: replication-server, type: aws.ec2_instance, name: replication-server, parent: sub-drs-staging-a}
+- {id: s3-gateway-endpoint, type: aws.res.aws_vpc_endpoint, name: s3-gateway-endpoint, parent: vpc-drs-recovery, props: {vpc_id: changeme}}
+- {id: recovery-launch-template, type: aws.res.aws_launch_template, name: recovery-launch-template, parent: reg-eu-west-1}
+- {id: recovered-app-1, type: aws.ec2_instance, name: recovered-app-1, parent: sub-drs-recovery-a}
+- {id: recovered-app-2, type: aws.ec2_instance, name: recovered-app-2, parent: sub-drs-recovery-b}
+- {id: recovered-db, type: aws.ec2_instance, name: recovered-db, parent: sub-drs-recovery-a}
+- {id: recovery-alb, type: aws.alb, name: recovery-alb, parent: az-drs-recovery-a}
+- {id: app-dns, type: aws.route53_zone, name: app-dns, parent: reg-eu-west-1, props: {domain: example.com}}
+edges:
+- {from: server, to: replication-server, label: agent replication over TCP 1500 (TLS), step: '1'}
+- {from: database, to: replication-server, label: block-level replication}
+- {from: dc-router, to: vpc-drs-recovery, label: Site-to-Site VPN}
+- {from: replication-settings, to: replication-server, label: staging subnet}
+- {from: replication-server, to: s3-gateway-endpoint, label: software download over TCP 443, step: '2'}
+- {from: recovery-launch-template, to: recovered-app-1, label: drill or recovery launch, step: '3'}
+- {from: recovery-launch-template, to: recovered-app-2}
+- {from: recovery-launch-template, to: recovered-db}
+- {from: replication-server, to: recovered-app-1, label: point-in-time snapshot volumes}
+- {from: replication-server, to: recovered-db}
+- {from: users, to: app-dns, label: DNS after failover, step: '4'}
+- {from: app-dns, to: recovery-alb, step: '5'}
+- {from: recovery-alb, to: recovered-app-1, step: '6'}
+- {from: recovery-alb, to: recovered-app-2}
+- {from: recovered-app-1, to: recovered-db}
+- {from: recovered-db, to: database, label: failback replication when site restored}
+steps:
+- {n: '1', text: 'server → replication-server: agent replication over TCP 1500 (TLS)'}
+- {n: '2', text: 'replication-server → s3-gateway-endpoint: software download over TCP 443'}
+- {n: '3', text: 'recovery-launch-template → recovered-app-1: drill or recovery launch'}
+- {n: '4', text: 'users → app-dns: DNS after failover'}
+- {n: '5', text: app-dns → recovery-alb}
+- {n: '6', text: recovery-alb → recovered-app-1}

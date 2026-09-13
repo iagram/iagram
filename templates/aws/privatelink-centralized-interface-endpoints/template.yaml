@@ -1,0 +1,52 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/centralized-access-to-vpc-private-endpoints.html); edit freely.
+title: Centralized interface endpoints shared across VPCs via Transit Gateway
+category: networking
+tags:
+- privatelink
+- interface endpoint
+- shared services vpc
+- private hosted zone
+- transit gateway
+- cost optimization
+source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/centralized-access-to-vpc-private-endpoints.html
+description: Interface endpoints for AWS services are provisioned once in a shared-services VPC instead of in every spoke, and spokes reach them across the Transit Gateway. Because the endpoint's managed
+  private DNS only resolves inside its own VPC, private DNS is disabled and a Route 53 private hosted zone matching the service name with an alias record to the endpoint is associated with every spoke VPC.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-shared-services, type: aws.vpc, name: shared-services, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-shared-services-a, type: aws.availability_zone, name: a, parent: vpc-shared-services, props: {zone: a}}
+- {id: sub-shared-endpoints-a, type: aws.subnet, name: shared-endpoints-a, parent: az-shared-services-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: az-shared-services-b, type: aws.availability_zone, name: b, parent: vpc-shared-services, props: {zone: b}}
+- {id: sub-shared-endpoints-b, type: aws.subnet, name: shared-endpoints-b, parent: az-shared-services-b, props: {cidr: 10.0.2.0/24, az: b, public: false}}
+- {id: vpc-spoke-1, type: aws.vpc, name: spoke-1, parent: reg-eu-west-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-spoke-1-a, type: aws.availability_zone, name: a, parent: vpc-spoke-1, props: {zone: a}}
+- {id: sub-spoke-1-private-a, type: aws.subnet, name: spoke-1-private-a, parent: az-spoke-1-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-spoke-2, type: aws.vpc, name: spoke-2, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}}
+- {id: az-spoke-2-a, type: aws.availability_zone, name: a, parent: vpc-spoke-2, props: {zone: a}}
+- {id: sub-spoke-2-private-a, type: aws.subnet, name: spoke-2-private-a, parent: az-spoke-2-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-eu-west-1}
+- {id: sqs-endpoint, type: aws.res.aws_vpc_endpoint, name: sqs-endpoint, parent: sub-shared-endpoints-a, props: {vpc_id: changeme}}
+- {id: ssm-endpoint, type: aws.res.aws_vpc_endpoint, name: ssm-endpoint, parent: sub-shared-endpoints-a, props: {vpc_id: changeme}}
+- {id: phz-sqs-eu-west-1, type: aws.route53_zone, name: phz-sqs-eu-west-1, parent: reg-eu-west-1, props: {domain: example.com}}
+- {id: phz-ssm-eu-west-1, type: aws.route53_zone, name: phz-ssm-eu-west-1, parent: reg-eu-west-1, props: {domain: example.com}}
+- {id: spoke-1-app, type: aws.ec2_instance, name: spoke-1-app, parent: sub-spoke-1-private-a}
+- {id: spoke-2-app, type: aws.ec2_instance, name: spoke-2-app, parent: sub-spoke-2-private-a}
+- {id: az-vpc-spoke-1-b, type: aws.availability_zone, name: b, parent: vpc-spoke-1, props: {zone: b}}
+- {id: sub-vpc-spoke-1-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-1-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-spoke-2-b, type: aws.availability_zone, name: b, parent: vpc-spoke-2, props: {zone: b}}
+- {id: sub-vpc-spoke-2-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-2-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+edges:
+- {from: hub-tgw, to: vpc-shared-services, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-spoke-1, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-spoke-2, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: phz-sqs-eu-west-1, to: vpc-spoke-1, link: aws_route53_zone_association}
+- {from: phz-sqs-eu-west-1, to: vpc-spoke-2, link: aws_route53_zone_association}
+- {from: spoke-1-app, to: phz-sqs-eu-west-1, label: resolve sqs.eu-west-1.amazonaws.com to endpoint IP, step: '1'}
+- {from: spoke-1-app, to: hub-tgw, label: 10.0.0.0/16 via TGW, step: '2'}
+- {from: hub-tgw, to: sqs-endpoint, step: '3'}
+- {from: spoke-2-app, to: ssm-endpoint, label: same shared endpoints}
+steps:
+- {n: '1', text: 'spoke-1-app → phz-sqs-eu-west-1: resolve sqs.eu-west-1.amazonaws.com to endpoint IP'}
+- {n: '2', text: 'spoke-1-app → hub-tgw: 10.0.0.0/16 via TGW'}
+- {n: '3', text: hub-tgw → sqs-endpoint}

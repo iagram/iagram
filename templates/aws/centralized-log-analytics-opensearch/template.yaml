@@ -1,0 +1,55 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/centralized-logging-with-opensearch/service-log-analytics-pipeline.html); edit freely.
+title: Centralized service log analytics with OpenSearch
+category: observability
+tags:
+- opensearch
+- log analytics
+- kinesis firehose
+- cloudwatch logs
+- sqs
+- lambda
+- s3
+source: https://docs.aws.amazon.com/solutions/latest/centralized-logging-with-opensearch/service-log-analytics-pipeline.html
+description: AWS service logs such as CloudTrail, ALB access logs and VPC flow logs are delivered to a log bucket, either directly or through CloudWatch Logs and a Kinesis Data Firehose subscription; S3
+  event notifications queue new objects in SQS and a log processor Lambda parses and indexes them into an OpenSearch domain. Records that fail processing are written to a backup bucket and dashboards are
+  served from OpenSearch Dashboards.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-log-sources, type: common.group, name: log sources, parent: reg-us-east-1}
+- {id: vpc-logging, type: aws.vpc, name: logging, parent: reg-us-east-1, props: {cidr: 10.170.0.0/16}}
+- {id: az-logging-a, type: aws.availability_zone, name: a, parent: vpc-logging, props: {zone: a}}
+- {id: sub-log-private-a, type: aws.subnet, name: log-private-a, parent: az-logging-a, props: {cidr: 10.170.1.0/24, az: a, public: false}}
+- {id: az-logging-b, type: aws.availability_zone, name: b, parent: vpc-logging, props: {zone: b}}
+- {id: sub-log-private-b, type: aws.subnet, name: log-private-b, parent: az-logging-b, props: {cidr: 10.170.2.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: app-alb, type: aws.alb, name: app-alb, parent: vpc-reg-us-east-1}
+- {id: org-trail, type: aws.res.aws_cloudtrail, name: org-trail, parent: grp-log-sources, props: {name: changeme, s3_bucket_name: changeme}}
+- {id: lambda-logs, type: aws.res.aws_cloudwatch_log_group, name: lambda-logs, parent: grp-log-sources}
+- {id: cwl-to-s3, type: aws.res.aws_kinesis_firehose_delivery_stream, name: cwl-to-s3, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
+- {id: log-bucket, type: aws.s3_bucket, name: log-bucket, parent: reg-us-east-1}
+- {id: new-log-objects, type: aws.sqs_queue, name: new-log-objects, parent: reg-us-east-1}
+- {id: log-processor, type: aws.lambda_function, name: log-processor, parent: sub-log-private-a}
+- {id: logs-domain, type: aws.res.aws_opensearch_domain, name: logs-domain, parent: sub-log-private-b, props: {domain_name: changeme}}
+- {id: backup-bucket, type: aws.s3_bucket, name: backup-bucket, parent: reg-us-east-1}
+- {id: sub-vpc-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: vpc-reg-us-east-1, props: {cidr: 10.200.250.0/24, az: a, public: false}}
+- {id: sub-vpc-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: vpc-reg-us-east-1, props: {cidr: 10.200.251.0/24, az: b, public: false}}
+edges:
+- {from: app-alb, to: log-bucket, label: access logs, step: '1'}
+- {from: org-trail, to: log-bucket, label: CloudTrail logs, step: '1'}
+- {from: lambda-logs, to: cwl-to-s3, label: subscription filter, step: '1'}
+- {from: cwl-to-s3, to: log-bucket, label: batched delivery, step: '1'}
+- {from: log-bucket, to: new-log-objects, label: S3 event notification, step: '2'}
+- {from: new-log-objects, to: log-processor, link: aws_lambda_event_source_mapping}
+- {from: log-processor, to: log-bucket, label: read and parse log file, step: '3'}
+- {from: log-processor, to: logs-domain, label: bulk index, step: '4'}
+- {from: log-processor, to: backup-bucket, label: failed records, step: '5'}
+- {from: users, to: logs-domain, label: OpenSearch Dashboards, step: '6'}
+steps:
+- {n: '1', text: 'app-alb → log-bucket: access logs'}
+- {n: '2', text: 'log-bucket → new-log-objects: S3 event notification'}
+- {n: '3', text: 'log-processor → log-bucket: read and parse log file'}
+- {n: '4', text: 'log-processor → logs-domain: bulk index'}
+- {n: '5', text: 'log-processor → backup-bucket: failed records'}
+- {n: '6', text: 'users → logs-domain: OpenSearch Dashboards'}

@@ -1,0 +1,56 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/security/protect-apis-with-amazon-api-gateway-and-perimeter-protection-services/); edit freely.
+title: API perimeter protection with CloudFront, WAF, and API Gateway
+category: edge
+tags:
+- api gateway
+- waf
+- cloudfront
+- origin verify
+- lambda
+- secrets manager
+source: https://aws.amazon.com/blogs/security/protect-apis-with-amazon-api-gateway-and-perimeter-protection-services/
+description: A CloudFront distribution with a WAF web ACL fronts a regional REST API and injects a secret origin-verify header that a second web ACL on API Gateway requires, so callers cannot bypass the
+  edge. The shared secret lives in Secrets Manager and is rotated by a Lambda function that updates both the distribution and the API-side rule.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: grp-api, type: common.group, name: api, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: api-zone, type: aws.route53_zone, name: api-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: api-cert, type: aws.res.aws_acm_certificate, name: api-cert, parent: reg-us-east-1}
+- {id: api-cdn, type: aws.cloudfront_distribution, name: api-cdn, parent: grp-global-edge}
+- id: edge-waf
+  type: aws.res.aws_wafv2_web_acl
+  name: edge-waf
+  parent: grp-global-edge
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+- {id: orders-api, type: aws.res.aws_api_gateway_rest_api, name: orders-api, parent: grp-api, props: {name: changeme}}
+- id: regional-waf
+  type: aws.res.aws_wafv2_web_acl
+  name: regional-waf
+  parent: grp-api
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+- {id: orders-handler, type: aws.lambda_function, name: orders-handler, parent: grp-api}
+- {id: orders, type: aws.dynamodb_table, name: orders, parent: grp-api}
+- {id: origin-verify-secret, type: aws.res.aws_secretsmanager_secret, name: origin-verify-secret, parent: reg-us-east-1}
+- {id: secret-rotator, type: aws.lambda_function, name: secret-rotator, parent: reg-us-east-1}
+edges:
+- {from: client, to: api-zone, label: DNS, step: '1'}
+- {from: client, to: api-cdn, label: HTTPS API call, step: '2'}
+- {from: api-cert, to: api-cdn, label: TLS certificate}
+- {from: edge-waf, to: api-cdn, label: managed rules and rate limits}
+- {from: api-cdn, to: orders-api, label: origin request with X-Origin-Verify header, step: '3'}
+- {from: regional-waf, to: orders-api, label: allow only matching header, step: '4'}
+- {from: orders-api, to: orders-handler, label: Lambda integration, step: '5'}
+- {from: orders-handler, to: orders, label: read/write, step: '6'}
+- {from: secret-rotator, to: origin-verify-secret, label: rotate}
+- {from: secret-rotator, to: api-cdn, label: update origin custom header}
+- {from: secret-rotator, to: regional-waf, label: update rule value}
+steps:
+- {n: '1', text: 'client → api-zone: DNS'}
+- {n: '2', text: 'client → api-cdn: HTTPS API call'}
+- {n: '3', text: 'api-cdn → orders-api: origin request with X-Origin-Verify header'}
+- {n: '4', text: 'regional-waf → orders-api: allow only matching header'}
+- {n: '5', text: 'orders-api → orders-handler: Lambda integration'}
+- {n: '6', text: 'orders-handler → orders: read/write'}

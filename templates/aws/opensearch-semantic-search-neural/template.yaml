@@ -1,0 +1,43 @@
+# Generated from the official reference (https://docs.aws.amazon.com/opensearch-service/latest/developerguide/semantic-search.html); edit freely.
+title: Semantic search with OpenSearch Service neural search and remote embeddings
+category: analytics-bi
+tags:
+- opensearch
+- semantic search
+- neural search
+- k-nn
+- embeddings
+- ml connector
+source: https://docs.aws.amazon.com/opensearch-service/latest/developerguide/semantic-search.html
+description: An OpenSearch Service domain uses an ML connector to a remote embedding model hosted on SageMaker or Bedrock, and a neural ingest pipeline embeds documents indexed by a Lambda that reads from
+  S3. Search requests from API Gateway run neural or hybrid k-NN queries that embed the query text with the same connector at query time.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-search, type: aws.vpc, name: search, parent: reg-us-east-1, props: {cidr: 10.40.0.0/16}}
+- {id: az-search-a, type: aws.availability_zone, name: a, parent: vpc-search, props: {zone: a}}
+- {id: sub-search-a, type: aws.subnet, name: search-a, parent: az-search-a, props: {cidr: 10.40.1.0/24, az: a, public: false}}
+- {id: az-search-b, type: aws.availability_zone, name: b, parent: vpc-search, props: {zone: b}}
+- {id: sub-search-b, type: aws.subnet, name: search-b, parent: az-search-b, props: {cidr: 10.40.2.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: product-search, type: aws.res.aws_opensearch_domain, name: product-search, parent: sub-search-a, props: {domain_name: changeme}}
+- {id: embedding-endpoint, type: aws.res.aws_sagemaker_endpoint, name: embedding-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}}
+- {id: product-catalog, type: aws.s3_bucket, name: product-catalog, parent: reg-us-east-1}
+- {id: indexer-fn, type: aws.lambda_function, name: indexer-fn, parent: sub-search-b}
+- {id: search-api, type: aws.res.aws_api_gateway_rest_api, name: search-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: search-fn, type: aws.lambda_function, name: search-fn, parent: sub-search-b}
+- {id: search-users, type: aws.res.aws_cognito_user_pool, name: search-users, parent: reg-us-east-1, props: {name: changeme}}
+edges:
+- {from: product-catalog, to: indexer-fn, label: s3 bucket notification}
+- {from: indexer-fn, to: product-search, label: _bulk through neural ingest pipeline, step: '1'}
+- {from: product-search, to: embedding-endpoint, label: ML connector text_embedding, step: '2'}
+- {from: users, to: search-api, label: 'GET /search?q=', step: '3'}
+- {from: search-api, to: search-fn, step: '4'}
+- {from: search-fn, to: product-search, label: neural query on k-NN field, step: '5'}
+- {from: search-api, to: search-users, label: Cognito authorizer}
+steps:
+- {n: '1', text: 'indexer-fn → product-search: _bulk through neural ingest pipeline'}
+- {n: '2', text: 'product-search → embedding-endpoint: ML connector text_embedding'}
+- {n: '3', text: 'users → search-api: GET /search?q='}
+- {n: '4', text: search-api → search-fn}
+- {n: '5', text: 'search-fn → product-search: neural query on k-NN field'}

@@ -1,0 +1,56 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/video-on-demand-on-aws/architecture-overview.html); edit freely.
+title: Video on Demand on AWS
+category: media
+tags:
+- mediaconvert
+- step functions
+- vod
+- transcoding
+- cloudfront
+- dynamodb
+source: https://docs.aws.amazon.com/solutions/latest/video-on-demand-on-aws/architecture-overview.html
+description: Uploading a source video or a video plus metadata file to the source S3 bucket starts Step Functions ingest, process and publish workflows implemented with Lambda functions. MediaConvert transcodes
+  the asset into the destination bucket, EventBridge rules capture job status changes, DynamoDB tracks workflow state, SNS sends notifications, SQS captures outputs, and CloudFront delivers the encoded
+  content.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingest, type: common.group, name: ingest, parent: reg-us-east-1}
+- {id: grp-process, type: common.group, name: process, parent: reg-us-east-1}
+- {id: grp-publish, type: common.group, name: publish, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: source-bucket, type: aws.s3_bucket, name: source-bucket, parent: grp-ingest}
+- {id: ingest-workflow, type: aws.res.aws_sfn_state_machine, name: ingest-workflow, parent: grp-ingest, props: {definition: changeme, role_arn: changeme}}
+- {id: workflow-steps, type: aws.lambda_function, name: workflow-steps, parent: grp-ingest}
+- {id: vod-workflow-table, type: aws.dynamodb_table, name: vod-workflow-table, parent: grp-ingest}
+- {id: process-workflow, type: aws.res.aws_sfn_state_machine, name: process-workflow, parent: grp-process, props: {definition: changeme, role_arn: changeme}}
+- {id: transcode-queue, type: aws.res.aws_media_convert_queue, name: transcode-queue, parent: grp-process, props: {name: changeme}}
+- {id: mediaconvert-status-rule, type: aws.res.aws_cloudwatch_event_rule, name: mediaconvert-status-rule, parent: grp-process}
+- {id: publish-workflow, type: aws.res.aws_sfn_state_machine, name: publish-workflow, parent: grp-publish, props: {definition: changeme, role_arn: changeme}}
+- {id: destination-bucket, type: aws.s3_bucket, name: destination-bucket, parent: grp-publish}
+- {id: vod-cdn, type: aws.cloudfront_distribution, name: vod-cdn, parent: grp-publish}
+- {id: workflow-notifications, type: aws.res.aws_sns_topic, name: workflow-notifications, parent: grp-publish}
+- {id: workflow-outputs, type: aws.sqs_queue, name: workflow-outputs, parent: grp-publish}
+edges:
+- {from: client, to: source-bucket, label: upload source video and metadata, step: '1'}
+- {from: source-bucket, to: ingest-workflow, label: S3 event starts ingest, step: '2'}
+- {from: ingest-workflow, to: workflow-steps, label: Lambda tasks, step: '3'}
+- {from: workflow-steps, to: vod-workflow-table, label: record asset state, step: '4'}
+- {from: ingest-workflow, to: process-workflow, label: encoding profile selected}
+- {from: process-workflow, to: transcode-queue, label: submit MediaConvert job, step: '5'}
+- {from: transcode-queue, to: destination-bucket, label: HLS/DASH/MP4 outputs, step: '9'}
+- {from: mediaconvert-status-rule, to: publish-workflow, link: aws_cloudwatch_event_target}
+- {from: publish-workflow, to: workflow-notifications, label: publish complete, step: '7'}
+- {from: workflow-notifications, to: workflow-outputs, link: aws_sns_topic_subscription}
+- {from: vod-cdn, to: destination-bucket, label: origin access, step: '10'}
+- {from: users, to: vod-cdn, label: playback}
+steps:
+- {n: '1', text: 'client → source-bucket: upload source video and metadata'}
+- {n: '2', text: 'source-bucket → ingest-workflow: S3 event starts ingest'}
+- {n: '3', text: 'ingest-workflow → workflow-steps: Lambda tasks'}
+- {n: '4', text: 'workflow-steps → vod-workflow-table: record asset state'}
+- {n: '5', text: 'process-workflow → transcode-queue: submit MediaConvert job'}
+- {n: '7', text: 'publish-workflow → workflow-notifications: publish complete'}
+- {n: '9', text: 'transcode-queue → destination-bucket: HLS/DASH/MP4 outputs'}
+- {n: '10', text: 'vod-cdn → destination-bucket: origin access'}

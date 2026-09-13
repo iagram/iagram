@@ -1,0 +1,50 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/big-data-analytics/analytics-lakehouse); edit freely.
+title: Analytics lakehouse with BigLake and Apache Iceberg
+category: data
+tags:
+- lakehouse
+- biglake
+- iceberg
+- dataproc
+- bigquery
+- dataplex
+source: https://docs.cloud.google.com/architecture/big-data-analytics/analytics-lakehouse
+description: Raw files land in Cloud Storage and are transformed by Dataproc Spark jobs into Apache Iceberg tables on Cloud Storage that BigQuery reads through BigLake tables via a Cloud Resource connection.
+  Dataplex manages the lake zones and metadata, Cloud Workflows orchestrates the load, and analysts query the same open-format data from BigQuery or Spark without copies.
+nodes:
+- {id: prj-lakehouse, type: gcp.project, name: lakehouse, props: {project_id: lakehouse-123456, project: changeme, region: us-central1}}
+- {id: grp-landing, type: common.group, name: landing, parent: prj-lakehouse}
+- {id: grp-processing, type: common.group, name: processing, parent: prj-lakehouse}
+- {id: grp-serving, type: common.group, name: serving, parent: prj-lakehouse}
+- {id: server, type: common.server, name: server}
+- {id: users, type: common.users, name: users}
+- {id: raw-landing-bucket, type: gcp.storage_bucket, name: raw-landing-bucket, parent: grp-landing}
+- {id: iceberg-warehouse-bucket, type: gcp.storage_bucket, name: iceberg-warehouse-bucket, parent: grp-landing}
+- {id: spark-transform-cluster, type: gcp.res.google_dataproc_cluster, name: spark-transform-cluster, parent: grp-processing, props: {name: changeme}}
+- {id: lakehouse-load-workflow, type: gcp.res.google_workflows_workflow, name: lakehouse-load-workflow, parent: grp-processing}
+- {id: analytics-lake, type: gcp.res.google_dataplex_lake, name: analytics-lake, parent: grp-processing, props: {location: westeurope, name: changeme}}
+- {id: biglake-gcs-connection, type: gcp.res.google_bigquery_connection, name: biglake-gcs-connection, parent: grp-serving}
+- {id: lakehouse-dataset, type: gcp.bigquery_dataset, name: lakehouse-dataset, parent: grp-serving}
+- id: lakehouse-looker
+  type: gcp.res.google_looker_instance
+  name: lakehouse-looker
+  parent: grp-serving
+  props: {name: changeme, oauth_config: {}}
+edges:
+- {from: server, to: raw-landing-bucket, label: upload raw files, step: '1'}
+- {from: lakehouse-load-workflow, to: spark-transform-cluster, label: submit Spark job, step: '2'}
+- {from: spark-transform-cluster, to: raw-landing-bucket, label: read raw, step: '3'}
+- {from: spark-transform-cluster, to: iceberg-warehouse-bucket, label: write Iceberg tables, step: '4'}
+- {from: analytics-lake, to: iceberg-warehouse-bucket, label: discover and catalog, step: '5'}
+- {from: biglake-gcs-connection, to: iceberg-warehouse-bucket, label: Parquet and Iceberg metadata, step: '7'}
+- {from: lakehouse-looker, to: lakehouse-dataset, label: SQL queries, step: '8'}
+- {from: users, to: lakehouse-looker, label: dashboards, step: '9'}
+steps:
+- {n: '1', text: 'server → raw-landing-bucket: upload raw files'}
+- {n: '2', text: 'lakehouse-load-workflow → spark-transform-cluster: submit Spark job'}
+- {n: '3', text: 'spark-transform-cluster → raw-landing-bucket: read raw'}
+- {n: '4', text: 'spark-transform-cluster → iceberg-warehouse-bucket: write Iceberg tables'}
+- {n: '5', text: 'analytics-lake → iceberg-warehouse-bucket: discover and catalog'}
+- {n: '7', text: 'biglake-gcs-connection → iceberg-warehouse-bucket: Parquet and Iceberg metadata'}
+- {n: '8', text: 'lakehouse-looker → lakehouse-dataset: SQL queries'}
+- {n: '9', text: 'users → lakehouse-looker: dashboards'}

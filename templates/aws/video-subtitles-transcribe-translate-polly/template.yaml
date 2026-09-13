@@ -1,0 +1,44 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/create-video-subtitles-with-translation-using-machine-learning/); edit freely.
+title: Video subtitle and dubbing pipeline with Transcribe, Translate and Polly
+category: media
+tags:
+- transcribe
+- translate
+- polly
+- subtitles
+- localization
+- lambda
+source: https://aws.amazon.com/blogs/machine-learning/create-video-subtitles-with-translation-using-machine-learning/
+description: A video dropped in S3 triggers a Lambda that starts an Amazon Transcribe job; on completion an EventBridge rule invokes a second Lambda that converts the transcript into timed captions and
+  translates them with Amazon Translate. A third Lambda synthesizes the translated text with Amazon Polly to produce an alternate audio track, and captions and audio are written to an output bucket for
+  delivery.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: source-videos, type: aws.s3_bucket, name: source-videos, parent: reg-us-east-1}
+- {id: start-transcribe-fn, type: aws.lambda_function, name: start-transcribe-fn, parent: reg-us-east-1}
+- {id: brand-vocabulary, type: aws.res.aws_transcribe_vocabulary, name: brand-vocabulary, parent: reg-us-east-1, props: {language_code: changeme, vocabulary_name: changeme}}
+- {id: transcribe-job-complete, type: aws.res.aws_cloudwatch_event_rule, name: transcribe-job-complete, parent: reg-us-east-1}
+- {id: caption-translate-fn, type: aws.lambda_function, name: caption-translate-fn, parent: reg-us-east-1}
+- {id: polly-dub-fn, type: aws.lambda_function, name: polly-dub-fn, parent: reg-us-east-1}
+- {id: localized-output, type: aws.s3_bucket, name: localized-output, parent: reg-us-east-1}
+- {id: playback-cdn, type: aws.cloudfront_distribution, name: playback-cdn, parent: reg-us-east-1}
+edges:
+- {from: user, to: source-videos, label: upload MP4, step: '1'}
+- {from: source-videos, to: start-transcribe-fn, label: s3 bucket notification}
+- {from: start-transcribe-fn, to: brand-vocabulary, label: StartTranscriptionJob with custom vocabulary, step: '2'}
+- {from: transcribe-job-complete, to: caption-translate-fn, link: aws_cloudwatch_event_target}
+- {from: caption-translate-fn, to: localized-output, label: SRT/VTT per language via TranslateText, step: '3'}
+- {from: caption-translate-fn, to: polly-dub-fn, label: translated transcript, step: '4'}
+- {from: polly-dub-fn, to: localized-output, label: SynthesizeSpeech MP3, step: '5'}
+- {from: playback-cdn, to: localized-output, label: origin}
+- {from: users, to: playback-cdn, label: subtitled video, step: '6'}
+steps:
+- {n: '1', text: 'user → source-videos: upload MP4'}
+- {n: '2', text: 'start-transcribe-fn → brand-vocabulary: StartTranscriptionJob with custom vocabulary'}
+- {n: '3', text: 'caption-translate-fn → localized-output: SRT/VTT per language via TranslateText'}
+- {n: '4', text: 'caption-translate-fn → polly-dub-fn: translated transcript'}
+- {n: '5', text: 'polly-dub-fn → localized-output: SynthesizeSpeech MP3'}
+- {n: '6', text: 'users → playback-cdn: subtitled video'}

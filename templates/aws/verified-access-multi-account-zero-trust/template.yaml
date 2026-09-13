@@ -1,0 +1,51 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/building-zero-trust-access-across-multi-account-aws-environments/); edit freely.
+title: Zero trust application access with Verified Access across accounts
+category: security
+tags:
+- verified access
+- zero trust
+- iam identity center
+- cedar
+- ram
+- shared services
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/building-zero-trust-access-across-multi-account-aws-environments/
+description: A Verified Access instance is deployed in a shared networking account with IAM Identity Center as the trust provider, and Verified Access groups are shared to organizational units via AWS Resource
+  Access Manager. Application teams create endpoints for their internal load balancers in workload accounts, and every request is evaluated per user identity and device posture with Cedar policies instead
+  of network location.
+nodes:
+- {id: acct-networking, type: aws.account, name: networking}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-networking, props: {region: us-east-1}}
+- {id: vpc-shared-services, type: aws.vpc, name: shared-services, parent: reg-us-east-1, props: {cidr: 10.50.0.0/16}}
+- {id: az-shared-services-a, type: aws.availability_zone, name: a, parent: vpc-shared-services, props: {zone: a}}
+- {id: sub-endpoint-a, type: aws.subnet, name: endpoint-a, parent: az-shared-services-a, props: {cidr: 10.50.1.0/24, az: a, public: false}}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1-2, props: {cidr: 10.60.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-app-private-a, type: aws.subnet, name: app-private-a, parent: az-app-a, props: {cidr: 10.60.1.0/24, az: a, public: false}}
+- {id: acct-management, type: aws.account, name: management}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: idp, type: common.idp, name: idp}
+- {id: zero-trust-instance, type: aws.res.aws_verifiedaccess_instance, name: zero-trust-instance, parent: vpc-shared-services}
+- {id: identity-center-trust, type: aws.res.aws_verifiedaccess_trust_provider, name: identity-center-trust, parent: acct-networking, props: {policy_reference_name: changeme, trust_provider_type: changeme}}
+- {id: verified-access-share, type: aws.res.aws_ram_resource_share, name: verified-access-share, parent: acct-networking, props: {name: changeme}}
+- {id: workforce-identity, type: aws.res.aws_ssoadmin_permission_set, name: workforce-identity, parent: acct-management, props: {instance_arn: changeme, name: changeme}}
+- {id: hr-app-alb, type: aws.alb, name: hr-app-alb, parent: az-app-a}
+- {id: hr-app-server, type: aws.ec2_instance, name: hr-app-server, parent: sub-app-private-a}
+- {id: access-logs, type: aws.res.aws_cloudwatch_log_group, name: access-logs, parent: acct-networking}
+- {id: az-vpc-shared-services-b, type: aws.availability_zone, name: b, parent: vpc-shared-services, props: {zone: b}}
+- {id: sub-vpc-shared-services-b, type: aws.subnet, name: private-b, parent: az-vpc-shared-services-b, props: {cidr: 10.50.251.0/24, az: b, public: false}}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.60.251.0/24, az: b, public: false}}
+edges:
+- {from: idp, to: workforce-identity, label: SAML federation, step: '1'}
+- {from: workforce-identity, to: identity-center-trust, label: identity source}
+- {from: identity-center-trust, to: zero-trust-instance, label: verifiedaccess instance trust provider attachment}
+- {from: users, to: zero-trust-instance, label: HTTPS with identity, step: '2'}
+- {from: hr-app-alb, to: hr-app-server, label: HTTP, step: '6'}
+- {from: zero-trust-instance, to: access-logs, label: access logs}
+steps:
+- {n: '1', text: 'idp → workforce-identity: SAML federation'}
+- {n: '2', text: 'users → zero-trust-instance: HTTPS with identity'}
+- {n: '6', text: 'hr-app-alb → hr-app-server: HTTP'}

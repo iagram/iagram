@@ -1,0 +1,42 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/transform-your-data-to-amazon-s3-tables-with-amazon-athena/); edit freely.
+title: Transform Parquet into S3 Tables with Athena
+category: data
+tags:
+- s3 tables
+- apache iceberg
+- athena
+- glue catalog
+- lake formation
+- ctas
+source: https://aws.amazon.com/blogs/big-data/transform-your-data-to-amazon-s3-tables-with-amazon-athena/
+description: Partitioned Parquet files in a general purpose bucket are registered as an external Glue table, and an Athena CREATE TABLE AS SELECT writes them into a fully managed Iceberg table inside an
+  S3 table bucket namespace with a day partition transform. Enabling the analytics integration creates the s3tablescatalog in the Glue Data Catalog under Lake Formation, and Athena INSERT, UPDATE and DELETE
+  run with ACID guarantees while S3 Tables handles compaction and maintenance.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-general-purpose-storage, type: common.group, name: general purpose storage, parent: reg-us-east-1}
+- {id: grp-table-storage, type: common.group, name: table storage, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: reviews-parquet, type: aws.s3_bucket, name: reviews-parquet, parent: grp-general-purpose-storage}
+- {id: source-db, type: aws.res.aws_glue_catalog_database, name: source-db, parent: reg-us-east-1, props: {name: changeme}}
+- {id: analytics-table-bucket, type: aws.res.aws_s3tables_table_bucket, name: analytics-table-bucket, parent: grp-table-storage, props: {name: changeme}}
+- {id: reviews-namespace, type: aws.res.aws_s3tables_namespace, name: reviews-namespace, parent: grp-table-storage, props: {namespace: changeme, table_bucket_arn: changeme}}
+- {id: reviews-iceberg, type: aws.res.aws_s3tables_table, name: reviews-iceberg, parent: grp-table-storage, props: {format: changeme, name: changeme, namespace: changeme, table_bucket_arn: changeme}}
+- {id: s3tables-integration, type: aws.res.aws_lakeformation_data_lake_settings, name: s3tables-integration, parent: reg-us-east-1}
+- {id: iceberg-athena, type: aws.res.aws_athena_workgroup, name: iceberg-athena, parent: reg-us-east-1, props: {name: changeme}}
+- {id: warehouse-reader, type: aws.res.aws_redshiftserverless_workgroup, name: warehouse-reader, parent: reg-us-east-1, props: {namespace_name: changeme, workgroup_name: changeme}}
+edges:
+- {from: s3tables-integration, to: analytics-table-bucket, label: s3tablescatalog in Glue Data Catalog, step: '2'}
+- {from: reviews-namespace, to: analytics-table-bucket, step: '2'}
+- {from: iceberg-athena, to: reviews-iceberg, label: CTAS with day(review_date) partition, step: '4'}
+- {from: reviews-iceberg, to: reviews-namespace, step: '4'}
+- {from: iceberg-athena, to: reviews-iceberg, label: 'INSERT, UPDATE, DELETE with ACID', step: '5'}
+- {from: warehouse-reader, to: reviews-iceberg, label: query via s3tablescatalog, step: '6'}
+- {from: users, to: iceberg-athena, step: '7'}
+steps:
+- {n: '2', text: 's3tables-integration → analytics-table-bucket: s3tablescatalog in Glue Data Catalog'}
+- {n: '4', text: 'iceberg-athena → reviews-iceberg: CTAS with day(review_date) partition'}
+- {n: '5', text: 'iceberg-athena → reviews-iceberg: INSERT, UPDATE, DELETE with ACID'}
+- {n: '6', text: 'warehouse-reader → reviews-iceberg: query via s3tablescatalog'}
+- {n: '7', text: users → iceberg-athena}

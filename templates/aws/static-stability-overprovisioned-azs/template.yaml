@@ -1,0 +1,54 @@
+# Generated from the official reference (https://aws.amazon.com/builders-library/static-stability-using-availability-zones/); edit freely.
+title: Static stability with pre-provisioned capacity across Availability Zones
+category: resilience
+tags:
+- static stability
+- builders library
+- availability zones
+- overprovisioning
+- control plane
+- data plane
+source: https://aws.amazon.com/builders-library/static-stability-using-availability-zones/
+description: The fleet is overprovisioned so that the instances in any two of three Availability Zones can carry full load; an AZ impairment therefore requires no new launches and no dependency on EC2 or
+  Auto Scaling control planes. Golden AMIs and launch templates are pre-baked, the database runs active-standby across zones, and cross-zone traffic is kept zone-local where possible.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: vpc-ss-fleet, type: aws.vpc, name: ss-fleet, parent: reg-us-west-2, props: {cidr: 10.100.0.0/16}}
+- {id: az-ss-fleet-a, type: aws.availability_zone, name: a, parent: vpc-ss-fleet, props: {zone: a}}
+- {id: sub-ss-public-a, type: aws.subnet, name: ss-public-a, parent: az-ss-fleet-a, props: {cidr: 10.100.0.0/24, az: a, public: true}}
+- {id: az-ss-fleet-b, type: aws.availability_zone, name: b, parent: vpc-ss-fleet, props: {zone: b}}
+- {id: sub-ss-public-b, type: aws.subnet, name: ss-public-b, parent: az-ss-fleet-b, props: {cidr: 10.100.1.0/24, az: b, public: true}}
+- {id: az-ss-fleet-c, type: aws.availability_zone, name: c, parent: vpc-ss-fleet, props: {zone: c}}
+- {id: sub-ss-public-c, type: aws.subnet, name: ss-public-c, parent: az-ss-fleet-c, props: {cidr: 10.100.2.0/24, az: c, public: true}}
+- {id: sub-ss-app-a, type: aws.subnet, name: ss-app-a, parent: az-ss-fleet-a, props: {cidr: 10.100.10.0/24, az: a, public: false}}
+- {id: sub-ss-app-b, type: aws.subnet, name: ss-app-b, parent: az-ss-fleet-b, props: {cidr: 10.100.11.0/24, az: b, public: false}}
+- {id: sub-ss-app-c, type: aws.subnet, name: ss-app-c, parent: az-ss-fleet-c, props: {cidr: 10.100.12.0/24, az: c, public: false}}
+- {id: sub-ss-db-a, type: aws.subnet, name: ss-db-a, parent: az-ss-fleet-a, props: {cidr: 10.100.20.0/24, az: a, public: false}}
+- {id: sub-ss-db-b, type: aws.subnet, name: ss-db-b, parent: az-ss-fleet-b, props: {cidr: 10.100.21.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: fleet-alb, type: aws.alb, name: fleet-alb, parent: vpc-ss-fleet}
+- {id: fleet-asg-150pct, type: aws.res.aws_autoscaling_group, name: fleet-asg-150pct, parent: vpc-ss-fleet, props: {max_size: 1, min_size: 1}}
+- {id: fleet-launch-template, type: aws.res.aws_launch_template, name: fleet-launch-template, parent: reg-us-west-2}
+- {id: fleet-golden-ami, type: aws.res.aws_ami, name: fleet-golden-ami, parent: reg-us-west-2, props: {name: changeme}}
+- {id: fleet-a, type: aws.ec2_instance, name: fleet-a, parent: sub-ss-app-a}
+- {id: fleet-b, type: aws.ec2_instance, name: fleet-b, parent: sub-ss-app-b}
+- {id: fleet-c, type: aws.ec2_instance, name: fleet-c, parent: sub-ss-app-c}
+- {id: state-db-active, type: aws.rds_instance, name: state-db-active, parent: sub-ss-db-a}
+- {id: state-db-standby, type: aws.rds_instance, name: state-db-standby, parent: sub-ss-db-b}
+edges:
+- {from: users, to: fleet-alb, label: HTTPS, step: '1'}
+- {from: fleet-alb, to: fleet-a, label: zone-local target, step: '2'}
+- {from: fleet-alb, to: fleet-b, label: zone-local target}
+- {from: fleet-alb, to: fleet-c, label: zone-local target}
+- {from: fleet-asg-150pct, to: fleet-a, label: 50% headroom per AZ}
+- {from: fleet-asg-150pct, to: fleet-b}
+- {from: fleet-asg-150pct, to: fleet-c}
+- {from: fleet-launch-template, to: fleet-golden-ami, label: pre-baked image}
+- {from: fleet-asg-150pct, to: fleet-launch-template, label: replacement only}
+- {from: fleet-a, to: state-db-active, label: writes, step: '3'}
+- {from: state-db-active, to: state-db-standby, label: warm standby in another AZ}
+steps:
+- {n: '1', text: 'users → fleet-alb: HTTPS'}
+- {n: '2', text: 'fleet-alb → fleet-a: zone-local target'}
+- {n: '3', text: 'fleet-a → state-db-active: writes'}

@@ -1,0 +1,64 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/security/how-to-automate-forensic-disk-collection-in-aws/); edit freely.
+title: Automated forensic disk collection into a forensics account
+category: security
+tags:
+- incident response
+- forensics
+- step functions
+- ebs snapshots
+- guardduty
+- evidence bucket
+source: https://aws.amazon.com/blogs/security/how-to-automate-forensic-disk-collection-in-aws/
+description: A GuardDuty or Security Hub finding matched by an EventBridge rule invokes a Lambda function that starts a Step Functions workflow, which snapshots the suspect instance's EBS volumes, shares
+  and copies them with KMS encryption into a separate forensics account. Collector instances in an isolated forensics VPC stream bit-for-bit disk images into an evidence S3 bucket while every step is logged
+  for chain of custody.
+nodes:
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.120.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.120.1.0/24, az: a, public: false}}
+- {id: acct-forensics, type: aws.account, name: forensics}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-forensics, props: {region: us-east-1}}
+- {id: vpc-forensics, type: aws.vpc, name: forensics, parent: reg-us-east-1-2, props: {cidr: 10.130.0.0/16}}
+- {id: az-forensics-a, type: aws.availability_zone, name: a, parent: vpc-forensics, props: {zone: a}}
+- {id: sub-collector-a, type: aws.subnet, name: collector-a, parent: az-forensics-a, props: {cidr: 10.130.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: guardduty, type: aws.res.aws_guardduty_detector, name: guardduty, parent: acct-workload}
+- {id: suspect-instance, type: aws.ec2_instance, name: suspect-instance, parent: sub-private-a}
+- {id: suspect-snapshot, type: aws.res.aws_ebs_snapshot, name: suspect-snapshot, parent: acct-workload, props: {volume_id: changeme}}
+- {id: finding-trigger-rule, type: aws.res.aws_cloudwatch_event_rule, name: finding-trigger-rule, parent: acct-forensics}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: start-collection, type: aws.lambda_function, name: start-collection, parent: sub-reg-us-east-1-a}
+- {id: disk-collection-workflow, type: aws.res.aws_sfn_state_machine, name: disk-collection-workflow, parent: acct-forensics, props: {definition: changeme, role_arn: changeme}}
+- {id: forensics-cmk, type: aws.res.aws_kms_key, name: forensics-cmk, parent: acct-forensics}
+- {id: collector-instance, type: aws.ec2_instance, name: collector-instance, parent: sub-collector-a}
+- {id: evidence-bucket, type: aws.s3_bucket, name: evidence-bucket, parent: reg-us-east-1}
+- {id: chain-of-custody-log, type: aws.res.aws_cloudwatch_log_group, name: chain-of-custody-log, parent: acct-forensics}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.120.251.0/24, az: b, public: false}}
+- {id: az-vpc-forensics-b, type: aws.availability_zone, name: b, parent: vpc-forensics, props: {zone: b}}
+- {id: sub-vpc-forensics-b, type: aws.subnet, name: private-b, parent: az-vpc-forensics-b, props: {cidr: 10.130.251.0/24, az: b, public: false}}
+edges:
+- {from: guardduty, to: suspect-instance, label: finding on instance, step: '1'}
+- {from: guardduty, to: finding-trigger-rule, label: finding event, step: '2'}
+- {from: finding-trigger-rule, to: start-collection, link: aws_cloudwatch_event_target}
+- {from: start-collection, to: disk-collection-workflow, label: StartExecution, step: '3'}
+- {from: disk-collection-workflow, to: suspect-snapshot, label: CreateSnapshot, step: '4'}
+- {from: suspect-snapshot, to: forensics-cmk, label: copy with encryption, step: '5'}
+- {from: disk-collection-workflow, to: collector-instance, label: launch collector, step: '6'}
+- {from: collector-instance, to: evidence-bucket, label: stream disk image, step: '7'}
+- {from: disk-collection-workflow, to: chain-of-custody-log, label: log each step}
+- {from: users, to: evidence-bucket, label: analyst access}
+steps:
+- {n: '1', text: 'guardduty → suspect-instance: finding on instance'}
+- {n: '2', text: 'guardduty → finding-trigger-rule: finding event'}
+- {n: '3', text: 'start-collection → disk-collection-workflow: StartExecution'}
+- {n: '4', text: 'disk-collection-workflow → suspect-snapshot: CreateSnapshot'}
+- {n: '5', text: 'suspect-snapshot → forensics-cmk: copy with encryption'}
+- {n: '6', text: 'disk-collection-workflow → collector-instance: launch collector'}
+- {n: '7', text: 'collector-instance → evidence-bucket: stream disk image'}

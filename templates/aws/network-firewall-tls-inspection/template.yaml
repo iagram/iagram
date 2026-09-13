@@ -1,0 +1,59 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/security/tls-inspection-configuration-for-encrypted-traffic-and-aws-network-firewall/); edit freely.
+title: TLS inspection of encrypted traffic with Network Firewall
+category: security
+tags:
+- network firewall
+- tls inspection
+- acm
+- private ca
+- encryption in transit
+- deep packet inspection
+source: https://aws.amazon.com/blogs/security/tls-inspection-configuration-for-encrypted-traffic-and-aws-network-firewall/
+description: A Network Firewall TLS inspection configuration references a certificate in ACM, issued by Private CA, so the firewall decrypts in-scope TLS sessions, applies stateful Suricata rules to the
+  plaintext and re-encrypts before forwarding to the target. Ingress traffic from an internet gateway passes through the firewall endpoint subnet before reaching the load balancer, and decrypted-session
+  alerts are logged to S3.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-ingress, type: aws.vpc, name: ingress, parent: reg-us-east-1, props: {cidr: 10.110.0.0/16}}
+- {id: az-ingress-a, type: aws.availability_zone, name: a, parent: vpc-ingress, props: {zone: a}}
+- {id: sub-firewall-a, type: aws.subnet, name: firewall-a, parent: az-ingress-a, props: {cidr: 10.110.0.0/28, az: a, public: false}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-ingress-a, props: {cidr: 10.110.1.0/24, az: a, public: true}}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-ingress-a, props: {cidr: 10.110.2.0/24, az: a, public: false}}
+- {id: internet, type: common.internet, name: internet}
+- {id: ingress-igw, type: aws.res.aws_internet_gateway, name: ingress-igw, parent: vpc-ingress}
+- {id: tls-firewall, type: aws.res.aws_networkfirewall_firewall, name: tls-firewall, parent: sub-firewall-a, props: {firewall_policy_arn: changeme, name: changeme}}
+- {id: inbound-tls-config, type: aws.res.aws_networkfirewall_tls_inspection_configuration, name: inbound-tls-config, parent: vpc-ingress, props: {name: changeme}}
+- id: tls-policy
+  type: aws.res.aws_networkfirewall_firewall_policy
+  name: tls-policy
+  parent: vpc-ingress
+  props: {firewall_policy: {}, name: changeme}
+- {id: suricata-http-rules, type: aws.res.aws_networkfirewall_rule_group, name: suricata-http-rules, parent: vpc-ingress, props: {capacity: 1, name: changeme, type: changeme}}
+- id: internal-ca
+  type: aws.res.aws_acmpca_certificate_authority
+  name: internal-ca
+  parent: reg-us-east-1
+  props: {certificate_authority_configuration: {}}
+- {id: inspection-cert, type: aws.res.aws_acm_certificate, name: inspection-cert, parent: reg-us-east-1}
+- {id: app-alb, type: aws.alb, name: app-alb, parent: az-ingress-a}
+- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-app-a}
+- {id: firewall-alert-logs, type: aws.s3_bucket, name: firewall-alert-logs, parent: reg-us-east-1}
+- {id: az-vpc-ingress-b, type: aws.availability_zone, name: b, parent: vpc-ingress, props: {zone: b}}
+- {id: sub-vpc-ingress-b, type: aws.subnet, name: private-b, parent: az-vpc-ingress-b, props: {cidr: 10.110.251.0/24, az: b, public: false}}
+edges:
+- {from: internal-ca, to: inspection-cert, label: issues certificate, step: '1'}
+- {from: inspection-cert, to: inbound-tls-config, label: server certificate}
+- {from: inbound-tls-config, to: tls-policy, label: attached}
+- {from: suricata-http-rules, to: tls-policy, label: stateful rules}
+- {from: internet, to: ingress-igw, label: HTTPS, step: '2'}
+- {from: ingress-igw, to: tls-firewall, label: ingress route, step: '3'}
+- {from: tls-firewall, to: app-alb, label: decrypt inspect re-encrypt, step: '4'}
+- {from: app-alb, to: app-server, label: HTTPS, step: '5'}
+- {from: tls-firewall, to: firewall-alert-logs, label: alert logs}
+steps:
+- {n: '1', text: 'internal-ca → inspection-cert: issues certificate'}
+- {n: '2', text: 'internet → ingress-igw: HTTPS'}
+- {n: '3', text: 'ingress-igw → tls-firewall: ingress route'}
+- {n: '4', text: 'tls-firewall → app-alb: decrypt inspect re-encrypt'}
+- {n: '5', text: 'app-alb → app-server: HTTPS'}

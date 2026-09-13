@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/generative-ai-application-builder-on-aws/architecture-overview.html); edit freely.
+title: Generative AI Application Builder on AWS text chat use case
+category: ml
+tags:
+- solutions library
+- chatbot
+- bedrock
+- websocket
+- cognito
+- cloudfront
+source: https://docs.aws.amazon.com/solutions/latest/generative-ai-application-builder-on-aws/architecture-overview.html
+description: CloudFront serves a React web UI from S3 and Cognito authenticates users of both the deployment dashboard and the chat use case. A REST API drives use-case management Lambdas that record configurations
+  in DynamoDB, while a WebSocket API queues chat messages in SQS for a chat Lambda that calls Bedrock, optionally grounded by a Bedrock knowledge base or Kendra index.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-deployment-dashboard, type: common.group, name: deployment-dashboard, parent: reg-us-east-1}
+- {id: grp-text-use-case, type: common.group, name: text-use-case, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: web-ui-cdn, type: aws.cloudfront_distribution, name: web-ui-cdn, parent: grp-deployment-dashboard}
+- {id: web-ui-bucket, type: aws.s3_bucket, name: web-ui-bucket, parent: grp-deployment-dashboard}
+- {id: solution-users, type: aws.res.aws_cognito_user_pool, name: solution-users, parent: grp-deployment-dashboard, props: {name: changeme}}
+- {id: deployment-api, type: aws.res.aws_api_gateway_rest_api, name: deployment-api, parent: grp-deployment-dashboard, props: {name: changeme}}
+- {id: use-case-mgmt-fn, type: aws.lambda_function, name: use-case-mgmt-fn, parent: grp-deployment-dashboard}
+- {id: use-case-configs, type: aws.dynamodb_table, name: use-case-configs, parent: grp-deployment-dashboard}
+- {id: chat-websocket-api, type: aws.res.aws_apigatewayv2_api, name: chat-websocket-api, parent: grp-text-use-case, props: {name: changeme, protocol_type: changeme}}
+- {id: chat-request-queue, type: aws.sqs_queue, name: chat-request-queue, parent: grp-text-use-case}
+- {id: chat-fn, type: aws.lambda_function, name: chat-fn, parent: grp-text-use-case}
+- {id: conversation-history, type: aws.dynamodb_table, name: conversation-history, parent: grp-text-use-case}
+- {id: use-case-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: use-case-kb, parent: grp-text-use-case, props: {name: changeme, role_arn: changeme}}
+- {id: use-case-kendra, type: aws.res.aws_kendra_index, name: use-case-kendra, parent: grp-text-use-case, props: {name: changeme, role_arn: changeme}}
+edges:
+- {from: user, to: web-ui-cdn, label: admin deploys use case, step: '1'}
+- {from: web-ui-cdn, to: web-ui-bucket, label: static assets}
+- {from: web-ui-cdn, to: deployment-api, label: REST with Cognito token, step: '2'}
+- {from: deployment-api, to: use-case-mgmt-fn, step: '3'}
+- {from: use-case-mgmt-fn, to: use-case-configs, label: CloudFormation stack per use case}
+- {from: users, to: chat-websocket-api, label: WSS chat, step: '4'}
+- {from: chat-websocket-api, to: chat-request-queue, step: '5'}
+- {from: chat-request-queue, to: chat-fn, link: aws_lambda_event_source_mapping}
+- {from: chat-fn, to: use-case-kb, label: Retrieve, step: '6'}
+- {from: chat-fn, to: use-case-kendra, label: alternative retriever}
+- {from: chat-fn, to: conversation-history, label: memory}
+- {from: chat-fn, to: chat-websocket-api, label: streamed tokens, step: '7'}
+steps:
+- {n: '1', text: 'user → web-ui-cdn: admin deploys use case'}
+- {n: '2', text: 'web-ui-cdn → deployment-api: REST with Cognito token'}
+- {n: '3', text: deployment-api → use-case-mgmt-fn}
+- {n: '4', text: 'users → chat-websocket-api: WSS chat'}
+- {n: '5', text: chat-websocket-api → chat-request-queue}
+- {n: '6', text: 'chat-fn → use-case-kb: Retrieve'}
+- {n: '7', text: 'chat-fn → chat-websocket-api: streamed tokens'}

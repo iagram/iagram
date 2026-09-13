@@ -1,0 +1,71 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/containers/bootstrapping-clusters-with-eks-blueprints/); edit freely.
+title: EKS baseline cluster with managed node groups and a Fargate profile
+category: containers
+tags:
+- eks
+- managed node groups
+- fargate profile
+- eks blueprints
+- add-ons
+- irsa
+source: https://aws.amazon.com/blogs/containers/bootstrapping-clusters-with-eks-blueprints/
+description: A private-subnet EKS cluster runs a small managed node group for system add-ons and a second group for applications across two Availability Zones, while a Fargate profile schedules pods in
+  a selected namespace on serverless compute. Managed add-ons (VPC CNI, CoreDNS, kube-proxy) and an IAM OIDC provider for IAM roles for service accounts are created with the cluster, and NAT gateways give
+  nodes outbound access to ECR and the EKS API.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-eks-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-eks-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.0.16.0/20, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.0.32.0/20, az: b, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-eks}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: nat-b, type: aws.res.aws_nat_gateway, name: nat-b, parent: sub-public-b}
+- {id: baseline-cluster, type: aws.eks_cluster, name: baseline-cluster, parent: vpc-eks}
+- id: system-nodes
+  type: aws.res.aws_eks_node_group
+  name: system-nodes
+  parent: baseline-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- id: app-nodes
+  type: aws.res.aws_eks_node_group
+  name: app-nodes
+  parent: baseline-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- id: cluster-oidc
+  type: aws.res.aws_iam_openid_connect_provider
+  name: cluster-oidc
+  parent: reg-eu-west-1
+  props:
+    client_id_list: []
+    url: changeme
+- {id: node-role, type: aws.res.aws_iam_role, name: node-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}}
+- {id: app-image, type: aws.res.aws_ecr_repository, name: app-image, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: control-plane-logs, type: aws.res.aws_cloudwatch_log_group, name: control-plane-logs, parent: reg-eu-west-1}
+edges:
+- {from: user, to: baseline-cluster, label: kubectl to API endpoint, step: '1'}
+- {from: baseline-cluster, to: system-nodes, label: schedule add-on pods, step: '2'}
+- {from: baseline-cluster, to: app-nodes, label: schedule application pods, step: '2'}
+- {from: cluster-oidc, to: baseline-cluster, label: IRSA identity provider}
+- {from: node-role, to: app-nodes, label: node IAM role}
+- {from: app-image, to: app-nodes, label: image pull, step: '3'}
+- {from: app-nodes, to: nat-b, label: outbound}
+- {from: nat-b, to: igw}
+- {from: baseline-cluster, to: control-plane-logs, label: audit}
+steps:
+- {n: '1', text: 'user → baseline-cluster: kubectl to API endpoint'}
+- {n: '2', text: 'baseline-cluster → system-nodes: schedule add-on pods'}
+- {n: '3', text: 'app-image → app-nodes: image pull'}

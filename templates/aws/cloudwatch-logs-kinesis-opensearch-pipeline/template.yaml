@@ -1,0 +1,42 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/centralized-logging-with-opensearch/service-log-analytics-pipeline.html); edit freely.
+title: CloudWatch Logs to Kinesis to OpenSearch log analytics pipeline
+category: observability
+tags:
+- log analytics
+- cloudwatch logs
+- subscription filter
+- kinesis data streams
+- opensearch
+- centralized logging
+source: https://docs.aws.amazon.com/solutions/latest/centralized-logging-with-opensearch/service-log-analytics-pipeline.html
+description: In the Centralized Logging with OpenSearch solution, service logs such as CloudTrail and VPC Flow Logs are written to CloudWatch Logs and redelivered in real time to a Kinesis data stream through
+  a subscription filter. The stream invokes a Log Processor Lambda that parses the records and indexes them into an OpenSearch Service domain, exporting failed records to an S3 backup bucket.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-logging-vpc, type: aws.vpc, name: logging-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-logging-vpc-a, type: aws.availability_zone, name: a, parent: vpc-logging-vpc, props: {zone: a}}
+- {id: sub-opensearch-a, type: aws.subnet, name: opensearch-a, parent: az-logging-vpc-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: az-logging-vpc-b, type: aws.availability_zone, name: b, parent: vpc-logging-vpc, props: {zone: b}}
+- {id: sub-opensearch-b, type: aws.subnet, name: opensearch-b, parent: az-logging-vpc-b, props: {cidr: 10.0.2.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: vpc-flow-logs, type: aws.res.aws_cloudwatch_log_group, name: vpc-flow-logs, parent: reg-us-east-1}
+- {id: cloudtrail-logs, type: aws.res.aws_cloudwatch_log_group, name: cloudtrail-logs, parent: reg-us-east-1}
+- {id: log-stream, type: aws.res.aws_kinesis_stream, name: log-stream, parent: reg-us-east-1, props: {name: changeme}}
+- {id: log-processor, type: aws.lambda_function, name: log-processor, parent: reg-us-east-1}
+- {id: log-domain, type: aws.res.aws_opensearch_domain, name: log-domain, parent: vpc-logging-vpc, props: {domain_name: changeme}}
+- {id: backup-bucket, type: aws.s3_bucket, name: backup-bucket, parent: reg-us-east-1}
+edges:
+- {from: vpc-flow-logs, to: log-stream, label: subscription filter, step: '1'}
+- {from: cloudtrail-logs, to: log-stream, label: subscription filter, step: '2'}
+- {from: log-stream, to: log-processor, step: '3', link: aws_lambda_event_source_mapping}
+- {from: log-processor, to: log-domain, label: bulk index, step: '4'}
+- {from: log-processor, to: backup-bucket, label: failed records, step: '5'}
+- {from: users, to: log-domain, label: OpenSearch Dashboards, step: '6'}
+steps:
+- {n: '1', text: 'vpc-flow-logs → log-stream: subscription filter'}
+- {n: '2', text: 'cloudtrail-logs → log-stream: subscription filter'}
+- {n: '3', text: log-stream → log-processor}
+- {n: '4', text: 'log-processor → log-domain: bulk index'}
+- {n: '5', text: 'log-processor → backup-bucket: failed records'}
+- {n: '6', text: 'users → log-domain: OpenSearch Dashboards'}

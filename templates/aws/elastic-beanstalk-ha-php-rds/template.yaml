@@ -1,0 +1,57 @@
+# Generated from the official reference (https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/php-ha-tutorial.html); edit freely.
+title: High-availability Elastic Beanstalk application with an external RDS database
+category: web
+tags:
+- elastic beanstalk
+- php
+- alb
+- auto scaling
+- rds multi-az
+- s3
+source: https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/php-ha-tutorial.html
+description: An Elastic Beanstalk web server environment provisions an Application Load Balancer, an Auto Scaling group across two Availability Zones, and the EC2 instances that run the application, with
+  application versions stored in an S3 bucket. The database is a Multi-AZ RDS instance created outside the environment so it survives environment rebuilds and blue/green swaps, and its endpoint is passed
+  to the application as environment properties.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: vpc-beanstalk, type: aws.vpc, name: beanstalk, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}}
+- {id: az-beanstalk-a, type: aws.availability_zone, name: a, parent: vpc-beanstalk, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-beanstalk-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-beanstalk-b, type: aws.availability_zone, name: b, parent: vpc-beanstalk, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-beanstalk-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-beanstalk-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-beanstalk-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: sub-db-a, type: aws.subnet, name: db-a, parent: az-beanstalk-a, props: {cidr: 10.0.20.0/24, az: a, public: false}}
+- {id: sub-db-b, type: aws.subnet, name: db-b, parent: az-beanstalk-b, props: {cidr: 10.0.21.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: php-app, type: aws.res.aws_elastic_beanstalk_application, name: php-app, parent: reg-us-west-2, props: {name: changeme}}
+- {id: app-versions, type: aws.s3_bucket, name: app-versions, parent: reg-us-west-2}
+- {id: eb-igw, type: aws.res.aws_internet_gateway, name: eb-igw, parent: vpc-beanstalk}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: eb-alb, type: aws.alb, name: eb-alb, parent: vpc-beanstalk}
+- {id: eb-asg, type: aws.res.aws_autoscaling_group, name: eb-asg, parent: vpc-beanstalk, props: {max_size: 1, min_size: 1}}
+- {id: php-a, type: aws.ec2_instance, name: php-a, parent: sub-app-a}
+- {id: php-b, type: aws.ec2_instance, name: php-b, parent: sub-app-b}
+- {id: app-db, type: aws.rds_instance, name: app-db, parent: sub-db-a}
+- {id: app-db-standby, type: aws.rds_instance, name: app-db-standby, parent: sub-db-b}
+edges:
+- {from: user, to: php-app, label: eb deploy application version, step: '1'}
+- {from: php-app, to: app-versions, label: store bundle, step: '2'}
+- {from: eb-asg, to: php-a, label: launches}
+- {from: eb-asg, to: php-b, label: launches}
+- {from: users, to: eb-alb, label: HTTPS, step: '4'}
+- {from: eb-igw, to: eb-alb}
+- {from: eb-alb, to: php-a, step: '5'}
+- {from: eb-alb, to: php-b}
+- {from: php-a, to: app-db, label: RDS_HOSTNAME environment property, step: '6'}
+- {from: app-db, to: app-db-standby, label: Multi-AZ synchronous replica}
+- {from: php-a, to: nat-a}
+- {from: nat-a, to: eb-igw}
+steps:
+- {n: '1', text: 'user → php-app: eb deploy application version'}
+- {n: '2', text: 'php-app → app-versions: store bundle'}
+- {n: '4', text: 'users → eb-alb: HTTPS'}
+- {n: '5', text: eb-alb → php-a}
+- {n: '6', text: 'php-a → app-db: RDS_HOSTNAME environment property'}

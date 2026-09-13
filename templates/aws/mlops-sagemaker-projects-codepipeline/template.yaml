@@ -1,0 +1,78 @@
+# Generated from the official reference (https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-projects-templates-sm.html); edit freely.
+title: MLOps CI/CD with SageMaker Projects and CodePipeline
+category: devops
+tags:
+- mlops
+- codepipeline
+- codebuild
+- sagemaker projects
+- model registry
+- staging production
+source: https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-projects-templates-sm.html
+description: The SageMaker-provided MLOps template creates a model-build CodePipeline whose CodeBuild step upserts and runs a SageMaker pipeline from a third-party Git repository, registering models in
+  the Model Registry. An EventBridge rule on model approval starts a model-deploy CodePipeline that builds CloudFormation stacks and deploys endpoints to staging and, after manual approval, to production.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: grp-model-build, type: common.group, name: model-build, parent: reg-eu-west-1}
+- {id: grp-model-deploy, type: common.group, name: model-deploy, parent: reg-eu-west-1}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- {id: github-connection, type: aws.res.aws_codestarconnections_connection, name: github-connection, parent: reg-eu-west-1, props: {name: changeme}}
+- id: model-build-pipeline
+  type: aws.res.aws_codepipeline
+  name: model-build-pipeline
+  parent: grp-model-build
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- id: build-pipeline-project
+  type: aws.res.aws_codebuild_project
+  name: build-pipeline-project
+  parent: grp-model-build
+  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
+- {id: abalone-pipeline, type: aws.res.aws_sagemaker_pipeline, name: abalone-pipeline, parent: grp-model-build, props: {pipeline_display_name: changeme, pipeline_name: changeme}}
+- {id: abalone-models, type: aws.res.aws_sagemaker_model_package_group, name: abalone-models, parent: grp-model-build, props: {model_package_group_name: changeme}}
+- {id: mlops-artifacts, type: aws.s3_bucket, name: mlops-artifacts, parent: reg-eu-west-1}
+- {id: model-approved-rule, type: aws.res.aws_cloudwatch_event_rule, name: model-approved-rule, parent: grp-model-deploy}
+- id: model-deploy-pipeline
+  type: aws.res.aws_codepipeline
+  name: model-deploy-pipeline
+  parent: grp-model-deploy
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- id: deploy-build-project
+  type: aws.res.aws_codebuild_project
+  name: deploy-build-project
+  parent: grp-model-deploy
+  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
+- {id: staging-endpoint, type: aws.res.aws_sagemaker_endpoint, name: staging-endpoint, parent: grp-model-deploy, props: {endpoint_config_name: changeme}}
+- {id: prod-endpoint, type: aws.res.aws_sagemaker_endpoint, name: prod-endpoint, parent: grp-model-deploy, props: {endpoint_config_name: changeme}}
+edges:
+- {from: user, to: saas, label: push modelbuild repo, step: '1'}
+- {from: saas, to: github-connection, label: webhook}
+- {from: github-connection, to: model-build-pipeline, label: source stage, step: '2'}
+- {from: model-build-pipeline, to: build-pipeline-project, label: build stage, step: '3'}
+- {from: build-pipeline-project, to: abalone-pipeline, label: upsert and start execution, step: '4'}
+- {from: abalone-pipeline, to: mlops-artifacts, label: training artifacts}
+- {from: abalone-pipeline, to: abalone-models, label: RegisterModel PendingManualApproval, step: '5'}
+- {from: abalone-models, to: model-approved-rule, label: ModelPackage state change Approved, step: '6'}
+- {from: model-approved-rule, to: model-deploy-pipeline, link: aws_cloudwatch_event_target}
+- {from: model-deploy-pipeline, to: deploy-build-project, label: build CloudFormation templates, step: '7'}
+- {from: deploy-build-project, to: staging-endpoint, label: DeployStaging stack, step: '8'}
+- {from: deploy-build-project, to: prod-endpoint, label: DeployProd after manual approval, step: '9'}
+steps:
+- {n: '1', text: 'user → saas: push modelbuild repo'}
+- {n: '2', text: 'github-connection → model-build-pipeline: source stage'}
+- {n: '3', text: 'model-build-pipeline → build-pipeline-project: build stage'}
+- {n: '4', text: 'build-pipeline-project → abalone-pipeline: upsert and start execution'}
+- {n: '5', text: 'abalone-pipeline → abalone-models: RegisterModel PendingManualApproval'}
+- {n: '6', text: 'abalone-models → model-approved-rule: ModelPackage state change Approved'}
+- {n: '7', text: 'model-deploy-pipeline → deploy-build-project: build CloudFormation templates'}
+- {n: '8', text: 'deploy-build-project → staging-endpoint: DeployStaging stack'}
+- {n: '9', text: 'deploy-build-project → prod-endpoint: DeployProd after manual approval'}

@@ -1,0 +1,60 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/extending-a-serverless-event-driven-architecture-to-existing-container-workloads/); edit freely.
+title: Event-driven microservices with EventBridge, SQS and ECS Fargate consumers
+category: containers
+tags:
+- eventbridge
+- sqs
+- ecs
+- fargate
+- event-driven
+- queue processing
+- autoscaling
+source: https://aws.amazon.com/blogs/compute/extending-a-serverless-event-driven-architecture-to-existing-container-workloads/
+description: Producers publish domain events to a custom EventBridge event bus; rules match on detail-type and deliver matching events to per-consumer SQS queues so each containerized service polls its
+  own queue at its own pace. The settlement service on ECS Fargate scales on queue depth, persists results to DynamoDB and emits a follow-up event back to the bus, while a dead-letter queue captures messages
+  that repeatedly fail.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: client, type: common.client, name: client}
+- {id: payments-bus, type: aws.res.aws_cloudwatch_event_bus, name: payments-bus, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: fraud-not-detected-rule, type: aws.res.aws_cloudwatch_event_rule, name: fraud-not-detected-rule, parent: reg-eu-west-1}
+- {id: settlement-finalized-rule, type: aws.res.aws_cloudwatch_event_rule, name: settlement-finalized-rule, parent: reg-eu-west-1}
+- {id: settlement-queue, type: aws.sqs_queue, name: settlement-queue, parent: reg-eu-west-1}
+- {id: settlement-dlq, type: aws.sqs_queue, name: settlement-dlq, parent: reg-eu-west-1}
+- {id: fraud-detection-fn, type: aws.lambda_function, name: fraud-detection-fn, parent: reg-eu-west-1}
+- {id: notification-fn, type: aws.lambda_function, name: notification-fn, parent: reg-eu-west-1}
+- {id: payments-cluster, type: aws.res.aws_ecs_cluster, name: payments-cluster, parent: vpc-main, props: {name: changeme}}
+- {id: settlement-service, type: aws.res.aws_ecs_service, name: settlement-service, parent: payments-cluster, props: {name: changeme}}
+- {id: settlements-table, type: aws.dynamodb_table, name: settlements-table, parent: reg-eu-west-1}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: settlement-image, type: aws.res.aws_ecr_repository, name: settlement-image, parent: reg-eu-west-1, props: {name: changeme}}
+edges:
+- {from: client, to: fraud-detection-fn, label: payment request, step: '1'}
+- {from: fraud-detection-fn, to: payments-bus, label: PutEvents Fraud.Not.Detected, step: '2'}
+- {from: payments-bus, to: fraud-not-detected-rule, label: rule match on detail-type, step: '3'}
+- {from: fraud-not-detected-rule, to: settlement-queue, step: '4', link: aws_cloudwatch_event_target}
+- {from: settlement-service, to: settlement-queue, label: long poll ReceiveMessage, step: '5'}
+- {from: settlement-queue, to: settlement-dlq, label: redrive after maxReceiveCount}
+- {from: settlement-service, to: settlements-table, label: PutItem, step: '6'}
+- {from: settlement-service, to: payments-bus, label: PutEvents Settlement.Finalized, step: '7'}
+- {from: payments-bus, to: settlement-finalized-rule, step: '8'}
+- {from: settlement-finalized-rule, to: notification-fn, step: '9', link: aws_cloudwatch_event_target}
+- {from: settlement-image, to: settlement-service, label: image pull}
+- {from: settlement-service, to: nat-a, label: outbound to SQS}
+steps:
+- {n: '1', text: 'client → fraud-detection-fn: payment request'}
+- {n: '2', text: 'fraud-detection-fn → payments-bus: PutEvents Fraud.Not.Detected'}
+- {n: '3', text: 'payments-bus → fraud-not-detected-rule: rule match on detail-type'}
+- {n: '4', text: fraud-not-detected-rule → settlement-queue}
+- {n: '5', text: 'settlement-service → settlement-queue: long poll ReceiveMessage'}
+- {n: '6', text: 'settlement-service → settlements-table: PutItem'}
+- {n: '7', text: 'settlement-service → payments-bus: PutEvents Settlement.Finalized'}
+- {n: '8', text: payments-bus → settlement-finalized-rule}
+- {n: '9', text: settlement-finalized-rule → notification-fn}

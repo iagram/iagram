@@ -1,0 +1,69 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architecture-on-aws-part-iv-multi-site-active-active/); edit freely.
+title: Multi-site active/active across two Regions
+category: resilience
+tags:
+- disaster recovery
+- active-active
+- multi-region
+- route 53 latency
+- dynamodb global tables
+- aurora write forwarding
+- elasticache global datastore
+source: https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architecture-on-aws-part-iv-multi-site-active-active/
+description: Both Regions serve production traffic, with Route 53 latency-based records backed by health checks sending each user to the nearest healthy stack. Reads are local everywhere; DynamoDB global
+  tables accept writes in both Regions (write-local), Aurora Global Database with write forwarding keeps a single write Region for relational data (write-global), and an ElastiCache Global Datastore replicates
+  session state.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: primary}
+- {id: vpc-aa-east, type: aws.vpc, name: aa-east, parent: reg-us-east-1, props: {cidr: 10.40.0.0/16}}
+- {id: az-aa-east-a, type: aws.availability_zone, name: a, parent: vpc-aa-east, props: {zone: a}}
+- {id: sub-aa-e-public-a, type: aws.subnet, name: aa-e-public-a, parent: az-aa-east-a, props: {cidr: 10.40.0.0/24, az: a, public: true}}
+- {id: az-aa-east-b, type: aws.availability_zone, name: b, parent: vpc-aa-east, props: {zone: b}}
+- {id: sub-aa-e-public-b, type: aws.subnet, name: aa-e-public-b, parent: az-aa-east-b, props: {cidr: 10.40.1.0/24, az: b, public: true}}
+- {id: sub-aa-e-data-a, type: aws.subnet, name: aa-e-data-a, parent: az-aa-east-a, props: {cidr: 10.40.10.0/24, az: a, public: false}}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, caption: secondary}
+- {id: vpc-aa-west, type: aws.vpc, name: aa-west, parent: reg-eu-west-1, props: {cidr: 10.41.0.0/16}}
+- {id: az-aa-west-a, type: aws.availability_zone, name: a, parent: vpc-aa-west, props: {zone: a}}
+- {id: sub-aa-w-public-a, type: aws.subnet, name: aa-w-public-a, parent: az-aa-west-a, props: {cidr: 10.41.0.0/24, az: a, public: true}}
+- {id: az-aa-west-b, type: aws.availability_zone, name: b, parent: vpc-aa-west, props: {zone: b}}
+- {id: sub-aa-w-public-b, type: aws.subnet, name: aa-w-public-b, parent: az-aa-west-b, props: {cidr: 10.41.1.0/24, az: b, public: true}}
+- {id: sub-aa-w-data-a, type: aws.subnet, name: aa-w-data-a, parent: az-aa-west-a, props: {cidr: 10.41.10.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: global-zone, type: aws.route53_zone, name: global-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: east-check, type: aws.res.aws_route53_health_check, name: east-check, parent: reg-us-east-1, props: {type: changeme}}
+- {id: west-check, type: aws.res.aws_route53_health_check, name: west-check, parent: reg-us-east-1, props: {type: changeme}}
+- {id: east-alb, type: aws.alb, name: east-alb, parent: vpc-aa-east}
+- {id: east-ecs, type: aws.res.aws_ecs_cluster, name: east-ecs, parent: vpc-aa-east, props: {name: changeme}}
+- {id: profiles-us-east-1, type: aws.dynamodb_table, name: profiles-us-east-1, parent: reg-us-east-1}
+- {id: ledger-global, type: aws.res.aws_rds_global_cluster, name: ledger-global, parent: reg-us-east-1, props: {global_cluster_identifier: changeme}}
+- {id: ledger-east, type: aws.res.aws_rds_cluster, name: ledger-east, parent: sub-aa-e-data-a, props: {engine: changeme}}
+- {id: sessions-global, type: aws.res.aws_elasticache_global_replication_group, name: sessions-global, parent: reg-us-east-1, props: {global_replication_group_id_suffix: changeme, primary_replication_group_id: changeme}}
+- {id: sessions-east, type: aws.res.aws_elasticache_replication_group, name: sessions-east, parent: sub-aa-e-data-a, props: {description: changeme, replication_group_id: changeme}}
+- {id: west-alb, type: aws.alb, name: west-alb, parent: vpc-aa-west}
+- {id: west-ecs, type: aws.res.aws_ecs_cluster, name: west-ecs, parent: vpc-aa-west, props: {name: changeme}}
+- {id: profiles-eu-west-1, type: aws.dynamodb_table, name: profiles-eu-west-1, parent: reg-eu-west-1}
+- {id: ledger-west, type: aws.res.aws_rds_cluster, name: ledger-west, parent: sub-aa-w-data-a, props: {engine: changeme}}
+edges:
+- {from: users, to: global-zone, label: DNS, step: '1'}
+- {from: global-zone, to: east-alb, label: latency record us-east-1, step: '2'}
+- {from: global-zone, to: west-alb, label: latency record eu-west-1}
+- {from: east-check, to: east-alb, label: health check}
+- {from: west-check, to: west-alb, label: health check}
+- {from: east-alb, to: east-ecs, step: '3'}
+- {from: west-alb, to: west-ecs}
+- {from: east-ecs, to: profiles-us-east-1, label: read-local / write-local, step: '4'}
+- {from: west-ecs, to: profiles-eu-west-1, label: read-local / write-local}
+- {from: profiles-us-east-1, to: profiles-eu-west-1, label: global table replication}
+- {from: ledger-global, to: ledger-east, label: primary (write) cluster}
+- {from: ledger-global, to: ledger-west, label: secondary cluster}
+- {from: east-ecs, to: ledger-east, label: read/write}
+- {from: west-ecs, to: ledger-west, label: read-local; writes forwarded to primary}
+- {from: ledger-east, to: ledger-west, label: storage replication < 1 s}
+- {from: sessions-global, to: sessions-east, label: primary cluster}
+- {from: east-ecs, to: sessions-east, label: session reads/writes}
+steps:
+- {n: '1', text: 'users → global-zone: DNS'}
+- {n: '2', text: 'global-zone → east-alb: latency record us-east-1'}
+- {n: '3', text: east-alb → east-ecs}
+- {n: '4', text: 'east-ecs → profiles-us-east-1: read-local / write-local'}

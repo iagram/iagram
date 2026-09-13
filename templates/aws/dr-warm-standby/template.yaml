@@ -1,0 +1,62 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architecture-on-aws-part-iii-pilot-light-and-warm-standby/); edit freely.
+title: Warm standby with a scaled-down stack in the recovery Region
+category: resilience
+tags:
+- disaster recovery
+- warm standby
+- auto scaling
+- dynamodb global tables
+- rds read replica
+- route 53
+source: https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architecture-on-aws-part-iii-pilot-light-and-warm-standby/
+description: A fully functional copy of the workload runs in the recovery Region with one instance per tier behind its own load balancer, continuously serving test traffic. DynamoDB global tables and a
+  cross-Region RDS read replica keep data current; on failover Route 53 redirects users and the Auto Scaling group is raised to production capacity.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, caption: primary}
+- {id: vpc-ws-primary, type: aws.vpc, name: ws-primary, parent: reg-eu-west-1, props: {cidr: 10.30.0.0/16}}
+- {id: az-ws-primary-a, type: aws.availability_zone, name: a, parent: vpc-ws-primary, props: {zone: a}}
+- {id: sub-ws-p-public-a, type: aws.subnet, name: ws-p-public-a, parent: az-ws-primary-a, props: {cidr: 10.30.0.0/24, az: a, public: true}}
+- {id: az-ws-primary-b, type: aws.availability_zone, name: b, parent: vpc-ws-primary, props: {zone: b}}
+- {id: sub-ws-p-public-b, type: aws.subnet, name: ws-p-public-b, parent: az-ws-primary-b, props: {cidr: 10.30.1.0/24, az: b, public: true}}
+- {id: sub-ws-p-db-a, type: aws.subnet, name: ws-p-db-a, parent: az-ws-primary-a, props: {cidr: 10.30.10.0/24, az: a, public: false}}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}, caption: secondary}
+- {id: vpc-ws-standby, type: aws.vpc, name: ws-standby, parent: reg-eu-central-1, props: {cidr: 10.31.0.0/16}}
+- {id: az-ws-standby-a, type: aws.availability_zone, name: a, parent: vpc-ws-standby, props: {zone: a}}
+- {id: sub-ws-s-public-a, type: aws.subnet, name: ws-s-public-a, parent: az-ws-standby-a, props: {cidr: 10.31.0.0/24, az: a, public: true}}
+- {id: az-ws-standby-b, type: aws.availability_zone, name: b, parent: vpc-ws-standby, props: {zone: b}}
+- {id: sub-ws-s-public-b, type: aws.subnet, name: ws-s-public-b, parent: az-ws-standby-b, props: {cidr: 10.31.1.0/24, az: b, public: true}}
+- {id: sub-ws-s-db-a, type: aws.subnet, name: ws-s-db-a, parent: az-ws-standby-a, props: {cidr: 10.31.10.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: shop-zone, type: aws.route53_zone, name: shop-zone, parent: reg-eu-west-1, props: {domain: example.com}}
+- {id: shop-primary-check, type: aws.res.aws_route53_health_check, name: shop-primary-check, parent: reg-eu-west-1, props: {type: changeme}}
+- {id: shop-primary-alb, type: aws.alb, name: shop-primary-alb, parent: vpc-ws-primary}
+- {id: shop-primary-asg, type: aws.res.aws_autoscaling_group, name: shop-primary-asg, parent: vpc-ws-primary, props: {max_size: 1, min_size: 1}}
+- {id: catalog-primary, type: aws.rds_instance, name: catalog-primary, parent: sub-ws-p-db-a}
+- {id: cart-eu-west-1, type: aws.dynamodb_table, name: cart-eu-west-1, parent: reg-eu-west-1}
+- {id: shop-standby-alb, type: aws.alb, name: shop-standby-alb, parent: vpc-ws-standby}
+- {id: shop-standby-asg, type: aws.res.aws_autoscaling_group, name: shop-standby-asg, parent: vpc-ws-standby, props: {max_size: 1, min_size: 1}}
+- {id: catalog-replica, type: aws.rds_instance, name: catalog-replica, parent: sub-ws-s-db-a}
+- {id: cart-eu-central-1, type: aws.dynamodb_table, name: cart-eu-central-1, parent: reg-eu-central-1}
+- {id: failover-trigger, type: aws.res.aws_cloudwatch_event_rule, name: failover-trigger, parent: reg-eu-central-1}
+- {id: scale-up-standby, type: aws.lambda_function, name: scale-up-standby, parent: reg-eu-central-1}
+edges:
+- {from: users, to: shop-zone, label: DNS, step: '1'}
+- {from: shop-zone, to: shop-primary-alb, label: PRIMARY record, step: '2'}
+- {from: shop-primary-check, to: shop-primary-alb, label: health check}
+- {from: shop-primary-alb, to: shop-primary-asg, step: '3'}
+- {from: shop-primary-asg, to: catalog-primary, label: read/write}
+- {from: shop-primary-asg, to: cart-eu-west-1, label: read/write}
+- {from: catalog-primary, to: catalog-replica, label: cross-Region read replica (async)}
+- {from: cart-eu-west-1, to: cart-eu-central-1, label: global table replication}
+- {from: shop-zone, to: shop-standby-alb, label: SECONDARY record}
+- {from: shop-standby-alb, to: shop-standby-asg, label: one instance per tier}
+- {from: shop-standby-asg, to: catalog-replica, label: reads; writes after promotion}
+- {from: shop-standby-asg, to: cart-eu-central-1, label: read/write}
+- {from: failover-trigger, to: scale-up-standby, label: health check alarm}
+- {from: scale-up-standby, to: shop-standby-asg, label: raise desired capacity}
+- {from: scale-up-standby, to: catalog-replica, label: promote read replica}
+steps:
+- {n: '1', text: 'users → shop-zone: DNS'}
+- {n: '2', text: 'shop-zone → shop-primary-alb: PRIMARY record'}
+- {n: '3', text: shop-primary-alb → shop-primary-asg}

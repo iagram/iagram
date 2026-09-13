@@ -1,0 +1,943 @@
+# AWS reference architectures: data lakes, warehouses and batch analytics.
+# Format: see FORMAT.md. One official source page per item.
+
+- slug: modern-data-analytics-lakehouse
+  title: Modern data analytics lake house on AWS
+  category: data
+  tags: [lake house, lake formation, glue, athena, redshift spectrum, emr, quicksight]
+  source: https://docs.aws.amazon.com/architecture-diagrams/latest/modern-data-analytics-on-aws/modern-data-analytics-on-aws.html
+  description: Enterprise, SaaS, device and file sources are ingested through DMS, DataSync, Kinesis and Transfer Family into an S3 data lake registered with Lake Formation and catalogued in the Glue Data Catalog. Glue transforms the data, EMR and Redshift process it, and Athena, Redshift Spectrum, QuickSight and OpenSearch consume it under Lake Formation governance.
+  containers:
+    - datacenter: on-premises
+    - region: us-east-1
+      groups: [{label: ingestion}, {label: lake storage and governance}, {label: consumption}]
+      vpcs:
+        - name: analytics
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: analytics-private-a, cidr: 10.20.1.0/24, az: a, public: false}
+            - {name: analytics-private-b, cidr: 10.20.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_dms_replication_instance, name: dms-replication, in: subnet:analytics-private-a}
+    - {tf: aws_datasync_task, name: datasync-files, in: group:ingestion}
+    - {tf: aws_kinesis_stream, name: event-stream, in: group:ingestion}
+    - {tf: aws_transfer_server, name: sftp-endpoint, in: group:ingestion}
+    - {tf: aws_s3_bucket, name: data-lake, in: group:lake storage and governance}
+    - {tf: aws_lakeformation_resource, name: lake-formation-location, in: group:lake storage and governance}
+    - {tf: aws_glue_catalog_database, name: lake-catalog, in: group:lake storage and governance}
+    - {tf: aws_glue_job, name: glue-etl, in: group:lake storage and governance}
+    - {tf: aws_emr_cluster, name: emr-spark, in: subnet:analytics-private-b}
+    - {tf: aws_redshift_cluster, name: redshift-dw, in: subnet:analytics-private-a}
+    - {tf: aws_opensearch_domain, name: opensearch-ops, in: subnet:analytics-private-b}
+    - {tf: aws_athena_workgroup, name: athena-analytics, in: group:consumption}
+    - {tf: aws_quicksight_data_source, name: quicksight-bi, in: group:consumption}
+  actors: [datacenter, saas, device, users]
+  flows:
+    - {from: datacenter, to: dms-replication, label: database CDC, step: 1}
+    - {from: datacenter, to: datasync-files, label: file shares, step: 1}
+    - {from: device, to: event-stream, label: telemetry, step: 1}
+    - {from: saas, to: sftp-endpoint, label: SFTP drops, step: 1}
+    - {from: dms-replication, to: data-lake, label: Parquet, step: 2}
+    - {from: datasync-files, to: data-lake, step: 2}
+    - {from: event-stream, to: data-lake, step: 2}
+    - {from: sftp-endpoint, to: data-lake, step: 2}
+    - {from: lake-formation-location, to: data-lake, label: registered location, step: 3}
+    - {from: glue-etl, to: data-lake, label: transform and enrich, step: 4}
+    - {from: glue-etl, to: lake-catalog, label: catalog tables, step: 4}
+    - {from: emr-spark, to: data-lake, label: Spark processing, step: 5}
+    - {from: redshift-dw, to: lake-catalog, label: Spectrum external schema, step: 5}
+    - {from: athena-analytics, to: lake-catalog, label: SQL, step: 6}
+    - {from: quicksight-bi, to: athena-analytics, step: 7}
+    - {from: quicksight-bi, to: redshift-dw, step: 7}
+    - {from: opensearch-ops, to: data-lake, label: operational analytics}
+    - {from: users, to: quicksight-bi, label: dashboards, step: 8}
+
+- slug: supply-chain-data-lake
+  title: Supply chain data lake
+  category: industry
+  tags: [supply chain, data lake, lake formation, glue, athena, quicksight, neptune]
+  source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/supply-chain-data-lake/supply-chain-data-lake.html
+  description: Planning, execution and shipment-status data from ERP and CRM systems, edge devices and streams is ingested with DMS, DataSync, Kinesis and AppFlow into an S3 data lake built with Lake Formation and transformed by Glue. Athena and QuickSight give planners cross-category scorecards, Redshift and EMR handle warehouse and big data processing, SageMaker trains models and Neptune answers network queries.
+  containers:
+    - datacenter: on-premises
+    - region: us-east-1
+      groups: [{label: ingestion}, {label: data lake}, {label: analytics}]
+      vpcs:
+        - name: supply-chain
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: sc-private-a, cidr: 10.30.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_dms_replication_instance, name: erp-dms, in: subnet:sc-private-a}
+    - {tf: aws_datasync_task, name: plan-files-sync, in: group:ingestion}
+    - {tf: aws_kinesis_stream, name: shipment-events, in: group:ingestion}
+    - {tf: aws_appflow_flow, name: crm-appflow, in: group:ingestion}
+    - {tf: aws_s3_bucket, name: supply-chain-lake, in: group:data lake}
+    - {tf: aws_lakeformation_resource, name: lake-location, in: group:data lake}
+    - {tf: aws_glue_job, name: glue-etl, in: group:data lake}
+    - {tf: aws_glue_catalog_database, name: supply-chain-catalog, in: group:data lake}
+    - {tf: aws_athena_workgroup, name: planner-athena, in: group:analytics}
+    - {tf: aws_quicksight_data_source, name: scorecards, in: group:analytics}
+    - {tf: aws_redshift_cluster, name: supply-chain-dw, in: subnet:sc-private-a}
+    - {tf: aws_emr_cluster, name: emr-processing, in: subnet:sc-private-a}
+    - {tf: aws_sagemaker_domain, name: demand-ml, in: group:analytics}
+    - {tf: aws_neptune_cluster, name: network-graph, in: subnet:sc-private-a}
+  actors: [datacenter, saas, device, users]
+  flows:
+    - {from: datacenter, to: erp-dms, label: ERP tables, step: 1}
+    - {from: datacenter, to: plan-files-sync, label: planning files, step: 1}
+    - {from: device, to: shipment-events, label: shipment status, step: 1}
+    - {from: saas, to: crm-appflow, label: CRM objects, step: 1}
+    - {from: erp-dms, to: supply-chain-lake, step: 2}
+    - {from: plan-files-sync, to: supply-chain-lake, step: 2}
+    - {from: shipment-events, to: supply-chain-lake, step: 2}
+    - {from: crm-appflow, to: supply-chain-lake, step: 2}
+    - {from: lake-location, to: supply-chain-lake, label: Lake Formation registration, step: 3}
+    - {from: glue-etl, to: supply-chain-lake, label: transform, step: 4}
+    - {from: glue-etl, to: supply-chain-catalog, label: catalog, step: 4}
+    - {from: planner-athena, to: supply-chain-catalog, label: SQL, step: 5}
+    - {from: scorecards, to: planner-athena, step: 6}
+    - {from: users, to: scorecards, label: planners drill down, step: 7}
+    - {from: supply-chain-dw, to: supply-chain-lake, label: warehouse loads}
+    - {from: emr-processing, to: supply-chain-lake, label: open-source processing}
+    - {from: demand-ml, to: supply-chain-lake, label: train models}
+    - {from: network-graph, to: glue-etl, label: graph loads}
+
+- slug: data-mesh-lf-tag-based-access
+  title: Data mesh with Lake Formation tag-based access control
+  category: data
+  tags: [data mesh, lake formation, lf-tags, cross-account, ram, athena]
+  source: https://aws.amazon.com/blogs/big-data/build-a-modern-data-architecture-and-data-mesh-pattern-at-scale-using-aws-lake-formation-tag-based-access-control/
+  description: A producer account stores domain data in S3 and crawls it with Glue, a central governance account owns the Lake Formation catalog, LF-tag ontology and cross-account shares through AWS RAM, and a consumer account queries through resource links with Athena. Permissions are granted on tags such as line of business and classification rather than on individual tables, so producers keep ownership while governance stays central.
+  containers:
+    - region: us-east-1
+      account: producer
+    - region: us-east-1
+      account: governance
+    - region: us-east-1
+      account: consumer
+  elements:
+    - {tf: aws_s3_bucket, name: retail-raw, in: account:producer}
+    - {tf: aws_s3_bucket, name: cards-raw, in: account:producer}
+    - {tf: aws_glue_crawler, name: producer-crawler, in: account:producer}
+    - {tf: aws_glue_catalog_database, name: producer-resource-link, in: account:producer}
+    - {tf: aws_lakeformation_resource, name: central-lake-location, in: account:governance}
+    - {tf: aws_glue_catalog_database, name: central-catalog, in: account:governance}
+    - {tf: aws_lakeformation_data_lake_settings, name: lf-admin-settings, in: account:governance}
+    - {tf: aws_ram_resource_share, name: catalog-share, in: account:governance}
+    - {tf: aws_glue_catalog_database, name: consumer-resource-link, in: account:consumer}
+    - {tf: aws_athena_workgroup, name: analyst-workgroup, in: account:consumer}
+  actors: [users]
+  flows:
+    - {from: producer-crawler, to: retail-raw, label: crawl, step: 1}
+    - {from: producer-crawler, to: cards-raw, label: crawl, step: 1}
+    - {from: producer-crawler, to: producer-resource-link, label: tables via resource link, step: 2}
+    - {from: producer-resource-link, to: central-catalog, label: points to shared database, step: 2}
+    - {from: central-lake-location, to: retail-raw, label: registered S3 location, step: 3}
+    - {from: lf-admin-settings, to: central-catalog, label: 'LF-tags: LOB, Classification', step: 4}
+    - {from: catalog-share, to: consumer-resource-link, label: RAM share of tagged tables, step: 5}
+    - {from: consumer-resource-link, to: central-catalog, label: resource link, step: 5}
+    - {from: analyst-workgroup, to: consumer-resource-link, label: Athena SQL, step: 6}
+    - {from: users, to: analyst-workgroup, label: analysts, step: 7}
+
+- slug: data-mesh-datazone
+  title: Data mesh with Amazon DataZone
+  category: data
+  tags: [data mesh, datazone, glue, redshift, governance, subscription]
+  source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/data-mesh-datazone/data-mesh-datazone.html
+  description: Producer accounts ingest raw data with AppFlow, DMS and Kinesis, transform it with Glue, measure quality with Glue Data Quality and publish S3, Redshift and RDS assets to a DataZone catalog hosted in a central governance account. Consumers search the DataZone portal, subscribe to assets and, once the owner approves, analyse them with Athena, Redshift, QuickSight and SageMaker in their own account.
+  containers:
+    - region: us-east-1
+      account: producer
+    - region: us-east-1
+      account: governance
+    - region: us-east-1
+      account: consumer
+  elements:
+    - {tf: aws_appflow_flow, name: saas-ingest, in: account:producer}
+    - {tf: aws_dms_replication_instance, name: db-ingest, in: account:producer}
+    - {tf: aws_kinesis_stream, name: stream-ingest, in: account:producer}
+    - {tf: aws_s3_bucket, name: producer-lake, in: account:producer}
+    - {tf: aws_glue_job, name: producer-transform, in: account:producer}
+    - {tf: aws_glue_data_quality_ruleset, name: producer-dq, in: account:producer}
+    - {tf: aws_glue_catalog_database, name: producer-catalog, in: account:producer}
+    - {tf: aws_redshift_cluster, name: producer-warehouse, in: account:producer}
+    - {tf: aws_datazone_domain, name: mesh-domain, in: account:governance}
+    - {tf: aws_datazone_project, name: consumer-project, in: account:consumer}
+    - {tf: aws_athena_workgroup, name: consumer-athena, in: account:consumer}
+    - {tf: aws_quicksight_data_source, name: consumer-bi, in: account:consumer}
+    - {tf: aws_sagemaker_domain, name: consumer-ml, in: account:consumer}
+  actors: [saas, database, users, idp]
+  flows:
+    - {from: saas, to: saas-ingest, step: 1}
+    - {from: database, to: db-ingest, step: 1}
+    - {from: saas-ingest, to: producer-lake, step: 2}
+    - {from: db-ingest, to: producer-lake, step: 2}
+    - {from: stream-ingest, to: producer-lake, step: 2}
+    - {from: producer-transform, to: producer-lake, label: transform raw data, step: 3}
+    - {from: producer-dq, to: producer-catalog, label: quality scores, step: 3}
+    - {from: producer-transform, to: producer-catalog, label: technical metadata, step: 3}
+    - {from: producer-catalog, to: mesh-domain, label: data source job publishes assets, step: 4}
+    - {from: producer-warehouse, to: mesh-domain, label: Redshift assets, step: 4}
+    - {from: idp, to: mesh-domain, label: SSO to data portal, step: 5}
+    - {from: users, to: mesh-domain, label: search and subscribe, step: 6}
+    - {from: mesh-domain, to: consumer-project, label: approved subscription grant, step: 7}
+    - {from: consumer-athena, to: consumer-project, label: query subscribed assets, step: 8}
+    - {from: consumer-bi, to: consumer-athena, step: 8}
+    - {from: consumer-ml, to: consumer-project, label: model development, step: 8}
+
+- slug: enterprise-lake-lf-cross-account
+  title: Enterprise data lake with Lake Formation cross-account access
+  category: data
+  tags: [lake formation, cross-account, resource links, ram, glue, athena, redshift spectrum]
+  source: https://aws.amazon.com/blogs/big-data/design-patterns-for-an-enterprise-data-lake-using-aws-lake-formation-cross-account-access/
+  description: A central enterprise data lake account holds the shared S3 buckets, Glue Data Catalog and Lake Formation permissions; producer accounts write into it with Glue jobs, and consumer accounts read through resource links with Athena, EMR or Redshift Spectrum. Lake Formation creates AWS RAM resource shares for every grant, so catalog changes are visible immediately in all accounts with no copy or sync.
+  containers:
+    - region: eu-west-1
+      account: data-lake
+    - region: eu-west-1
+      account: producer
+    - region: eu-west-1
+      account: consumer
+  elements:
+    - {tf: aws_s3_bucket, name: edla-raw, in: account:data-lake}
+    - {tf: aws_s3_bucket, name: edla-curated, in: account:data-lake}
+    - {tf: aws_lakeformation_resource, name: edla-location, in: account:data-lake}
+    - {tf: aws_glue_catalog_database, name: edla-catalog, in: account:data-lake}
+    - {tf: aws_ram_resource_share, name: edla-share, in: account:data-lake}
+    - {tf: aws_glue_job, name: producer-etl, in: account:producer}
+    - {tf: aws_glue_catalog_database, name: producer-link, in: account:producer}
+    - {tf: aws_glue_catalog_database, name: consumer-link, in: account:consumer}
+    - {tf: aws_athena_workgroup, name: consumer-athena, in: account:consumer}
+    - {tf: aws_redshift_cluster, name: consumer-redshift, in: account:consumer}
+    - {tf: aws_quicksight_data_source, name: consumer-quicksight, in: account:consumer}
+  actors: [users]
+  flows:
+    - {from: edla-location, to: edla-raw, label: registered, step: 1}
+    - {from: edla-location, to: edla-curated, label: registered, step: 1}
+    - {from: edla-share, to: producer-link, label: write grant via RAM, step: 2}
+    - {from: producer-link, to: edla-catalog, label: resource link, step: 2}
+    - {from: producer-etl, to: edla-raw, label: read, step: 3}
+    - {from: producer-etl, to: edla-curated, label: write curated tables, step: 3}
+    - {from: producer-etl, to: producer-link, label: update catalog, step: 3}
+    - {from: edla-share, to: consumer-link, label: read grant via RAM, step: 4}
+    - {from: consumer-link, to: edla-catalog, label: resource link, step: 4}
+    - {from: consumer-athena, to: consumer-link, label: SELECT, step: 5}
+    - {from: consumer-redshift, to: consumer-link, label: Spectrum external schema, step: 5}
+    - {from: consumer-quicksight, to: consumer-athena, step: 6}
+    - {from: users, to: consumer-quicksight, step: 7}
+
+- slug: redshift-spectrum-lf-governance
+  title: Redshift Spectrum on a Lake Formation governed data lake
+  category: data
+  tags: [redshift spectrum, lake formation, glue catalog, column-level security, data lake]
+  source: https://aws.amazon.com/blogs/big-data/centralize-governance-for-your-data-lake-using-aws-lake-formation-while-enabling-a-modern-data-architecture-with-amazon-redshift-spectrum
+  description: An S3 data lake registered with Lake Formation is catalogued by a Glue crawler, and Lake Formation grants table and column permissions to an IAM role used by a Redshift cluster. Redshift Spectrum creates an external schema over the Glue database so warehouse users join hot data in Redshift with lake data in S3 while Lake Formation enforces the same policies that Athena and Glue honour.
+  containers:
+    - region: us-east-1
+      groups: [{label: governed data lake}]
+      vpcs:
+        - name: warehouse
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: dw-private-a, cidr: 10.40.1.0/24, az: a, public: false}
+            - {name: dw-private-b, cidr: 10.40.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_s3_bucket, name: lake-bucket, in: group:governed data lake}
+    - {tf: aws_lakeformation_resource, name: lake-registration, in: group:governed data lake}
+    - {tf: aws_glue_crawler, name: lake-crawler, in: group:governed data lake}
+    - {tf: aws_glue_catalog_database, name: lake-db, in: group:governed data lake}
+    - {tf: aws_redshift_cluster, name: analytics-dw, in: subnet:dw-private-a}
+    - {tf: aws_athena_workgroup, name: adhoc-athena, in: region}
+    - {tf: aws_quicksight_data_source, name: bi-dashboards, in: region}
+  actors: [users]
+  flows:
+    - {from: lake-registration, to: lake-bucket, label: register S3 location, step: 1}
+    - {from: lake-crawler, to: lake-bucket, label: crawl Parquet, step: 2}
+    - {from: lake-crawler, to: lake-db, label: create tables, step: 2}
+    - {from: analytics-dw, to: lake-db, label: external schema (Spectrum), step: 3}
+    - {from: analytics-dw, to: lake-bucket, label: Spectrum scans governed columns, step: 4}
+    - {from: adhoc-athena, to: lake-db, label: same Lake Formation grants, step: 4}
+    - {from: bi-dashboards, to: analytics-dw, label: JDBC, step: 5}
+    - {from: users, to: bi-dashboards, step: 6}
+
+- slug: redshift-serverless-glue-mwaa-etl
+  title: End-to-end ETL into Redshift Serverless orchestrated by MWAA
+  category: data
+  tags: [mwaa, airflow, glue, redshift serverless, vpc peering, cross-account]
+  source: https://aws.amazon.com/blogs/big-data/orchestrate-an-end-to-end-etl-pipeline-using-amazon-s3-aws-glue-and-amazon-redshift-serverless-with-amazon-mwaa/
+  description: An Airflow DAG in MWAA waits for date-partitioned files in a source bucket, runs a Glue crawler and Glue job to stage them, loads a Redshift Serverless workgroup in private subnets, runs stored procedures and unloads the result back to a target bucket in the central account. The MWAA VPC peers with the Redshift VPC and reaches S3 and Secrets Manager through VPC endpoints.
+  containers:
+    - region: us-east-1
+      account: central-data
+    - region: us-east-1
+      account: processing
+      vpcs:
+        - name: mwaa
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: mwaa-private-a, cidr: 10.50.1.0/24, az: a, public: false}
+            - {name: mwaa-private-b, cidr: 10.50.2.0/24, az: b, public: false}
+        - name: redshift
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: rs-private-a, cidr: 10.60.1.0/24, az: a, public: false}
+            - {name: rs-private-b, cidr: 10.60.2.0/24, az: b, public: false}
+            - {name: rs-private-c, cidr: 10.60.3.0/24, az: c, public: false}
+  elements:
+    - {tf: aws_s3_bucket, name: source-products, in: account:central-data}
+    - {tf: aws_s3_bucket, name: target-unload, in: account:central-data}
+    - {tf: aws_mwaa_environment, name: airflow, in: subnet:mwaa-private-a}
+    - {tf: aws_glue_crawler, name: products-crawler, in: account:processing}
+    - {tf: aws_glue_catalog_database, name: staging-db, in: account:processing}
+    - {tf: aws_glue_job, name: products-etl, in: account:processing}
+    - {tf: aws_redshiftserverless_namespace, name: dw-namespace, in: account:processing}
+    - {tf: aws_redshiftserverless_workgroup, name: dw-workgroup, in: subnet:rs-private-a}
+    - {tf: aws_vpc_endpoint, name: s3-endpoint, in: vpc:redshift}
+  actors: []
+  flows:
+    - {from: airflow, to: vpc:redshift, link: aws_vpc_peering_connection}
+    - {from: airflow, to: source-products, label: S3KeySensor waits for partition, step: 1}
+    - {from: airflow, to: products-crawler, label: start crawler, step: 2}
+    - {from: products-crawler, to: staging-db, label: update catalog, step: 2}
+    - {from: airflow, to: products-etl, label: run Glue job, step: 3}
+    - {from: products-etl, to: staging-db, label: read staged table, step: 3}
+    - {from: products-etl, to: dw-workgroup, label: load into Redshift, step: 4}
+    - {from: dw-workgroup, to: dw-namespace, label: stored procedures, step: 5}
+    - {from: airflow, to: dw-workgroup, label: RedshiftToS3Operator UNLOAD, step: 6}
+    - {from: dw-workgroup, to: s3-endpoint, step: 6}
+    - {from: s3-endpoint, to: target-unload, label: cross-account write, step: 7}
+
+- slug: aurora-redshift-zero-etl
+  title: Aurora zero-ETL integration with Amazon Redshift
+  category: database
+  tags: [zero-etl, aurora, redshift, near real-time analytics, operational analytics]
+  source: https://aws.amazon.com/blogs/big-data/getting-started-guide-for-near-real-time-operational-analytics-using-amazon-aurora-zero-etl-integration-with-amazon-redshift
+  description: A zero-ETL integration replicates transactional tables from an Aurora MySQL cluster into a Redshift data warehouse within seconds of commit, with no pipeline code to write or operate. Analysts query the replicated database in Redshift alongside other warehouse data and can build materialized views and dashboards on it.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: oltp-analytics
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: db-private-a, cidr: 10.70.1.0/24, az: a, public: false}
+            - {name: db-private-b, cidr: 10.70.2.0/24, az: b, public: false}
+            - {name: dw-private-a, cidr: 10.70.11.0/24, az: a, public: false}
+            - {name: app-private-a, cidr: 10.70.21.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_rds_cluster, name: orders-aurora, in: subnet:db-private-a}
+    - {tf: aws_rds_cluster_instance, name: orders-writer, in: subnet:db-private-a}
+    - {tf: aws_rds_cluster_parameter_group, name: binlog-params, in: region}
+    - {tf: aws_redshift_cluster, name: analytics-dw, in: subnet:dw-private-a}
+    - {tf: aws_instance, name: order-app, in: subnet:app-private-a}
+    - {tf: aws_quicksight_data_source, name: ops-dashboards, in: region}
+  actors: [users]
+  flows:
+    - {from: orders-aurora, to: analytics-dw, link: aws_rds_integration}
+    - {from: order-app, to: orders-writer, label: OLTP writes, step: 1}
+    - {from: orders-writer, to: orders-aurora, label: writer instance, step: 1}
+    - {from: binlog-params, to: orders-aurora, label: enhanced binlog enabled, step: 1}
+    - {from: orders-aurora, to: analytics-dw, label: zero-ETL replication in seconds, step: 2}
+    - {from: ops-dashboards, to: analytics-dw, label: query replicated database, step: 3}
+    - {from: users, to: ops-dashboards, label: near real-time reports, step: 4}
+
+- slug: emr-eks-spark-sql-etl
+  title: Spark SQL ETL pipeline on Amazon EMR on EKS
+  category: data
+  tags: [emr on eks, spark, fargate, kubernetes, etl, s3]
+  source: https://aws.amazon.com/blogs/big-data/run-a-spark-sql-based-etl-pipeline-with-amazon-emr-on-amazon-eks/
+  description: An EMR virtual cluster is registered against an EKS cluster running on Fargate, and declarative Spark SQL jobs are submitted through the EMR on EKS job API; each driver and executor runs as an isolated pod that scales from zero and is torn down when the job completes. Jobs read raw data from S3, validate schema, aggregate and write Parquet results back to S3 with pod-level IAM roles.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: eks
+          cidr: 10.80.0.0/16
+          subnets:
+            - {name: eks-private-a, cidr: 10.80.1.0/24, az: a, public: false}
+            - {name: eks-private-b, cidr: 10.80.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_eks_cluster, name: analytics-eks, in: vpc:eks}
+    - {tf: aws_eks_fargate_profile, name: emr-fargate, in: subnet:eks-private-a}
+    - {tf: aws_emrcontainers_virtual_cluster, name: emr-virtual-cluster, in: vpc:eks}
+    - {tf: aws_s3_bucket, name: raw-taxi-data, in: region}
+    - {tf: aws_s3_bucket, name: etl-output, in: region}
+    - {tf: aws_s3_bucket, name: job-artifacts, in: region}
+    - {tf: aws_cloudwatch_log_group, name: spark-logs, in: region}
+    - {tf: aws_glue_catalog_database, name: output-catalog, in: region}
+    - {tf: aws_athena_workgroup, name: verify-athena, in: region}
+  actors: [user]
+  flows:
+    - {from: user, to: emr-virtual-cluster, label: start-job-run with SQL job spec, step: 1}
+    - {from: emr-virtual-cluster, to: analytics-eks, label: schedule driver and executor pods, step: 2}
+    - {from: analytics-eks, to: emr-fargate, label: pods on Fargate, step: 2}
+    - {from: emr-virtual-cluster, to: job-artifacts, label: fetch job definition, step: 3}
+    - {from: analytics-eks, to: raw-taxi-data, label: Spark reads Parquet, step: 4}
+    - {from: analytics-eks, to: etl-output, label: write aggregated Parquet, step: 5}
+    - {from: analytics-eks, to: spark-logs, label: driver and executor logs, step: 5}
+    - {from: etl-output, to: output-catalog, label: external table, step: 6}
+    - {from: verify-athena, to: output-catalog, label: check results, step: 7}
+
+- slug: emr-serverless-mwaa-athena-validation
+  title: EMR Serverless Spark jobs orchestrated by MWAA with Athena validation
+  category: data
+  tags: [emr serverless, mwaa, airflow, spark, athena, glue catalog]
+  source: https://aws.amazon.com/blogs/big-data/orchestrate-amazon-emr-serverless-spark-jobs-with-amazon-mwaa-and-data-validation-using-amazon-athena/
+  description: An Airflow DAG in MWAA submits three sequential PySpark jobs to an EMR Serverless application, which scales workers up and down per job without a managed cluster. The jobs join and aggregate taxi trip data from an input bucket into Parquet in an output bucket, register tables in the Glue Data Catalog and the DAG runs an Athena query to validate the summary table.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: mwaa
+          cidr: 10.90.0.0/16
+          subnets:
+            - {name: mwaa-private-a, cidr: 10.90.1.0/24, az: a, public: false}
+            - {name: mwaa-private-b, cidr: 10.90.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_mwaa_environment, name: airflow, in: subnet:mwaa-private-a}
+    - {tf: aws_s3_bucket, name: dags-bucket, in: region}
+    - {tf: aws_emrserverless_application, name: spark-app, in: region}
+    - {tf: aws_s3_bucket, name: taxi-input, in: region}
+    - {tf: aws_s3_bucket, name: taxi-output, in: region}
+    - {tf: aws_glue_catalog_database, name: taxi-db, in: region}
+    - {tf: aws_athena_workgroup, name: validation-athena, in: region}
+  actors: [user]
+  flows:
+    - {from: user, to: dags-bucket, label: upload DAG and scripts, step: 1}
+    - {from: airflow, to: dags-bucket, label: load DAG, step: 1}
+    - {from: airflow, to: spark-app, label: 'EmrServerlessStartJobOperator: green, yellow, summary', step: 2}
+    - {from: spark-app, to: taxi-input, label: read raw trips and zones, step: 3}
+    - {from: spark-app, to: taxi-output, label: write Parquet, step: 4}
+    - {from: spark-app, to: taxi-db, label: create external tables, step: 4}
+    - {from: airflow, to: validation-athena, label: AthenaOperator query, step: 5}
+    - {from: validation-athena, to: taxi-db, label: SELECT ny_taxi_summary, step: 5}
+    - {from: validation-athena, to: taxi-output, label: scan Parquet, step: 5}
+
+- slug: emr-hive-metastore-lf-federation
+  title: Data mesh for EMR data lakes with Lake Formation Hive metastore federation
+  category: data
+  tags: [emr, hive metastore, lake formation, federation, data mesh, athena, emr serverless]
+  source: https://aws.amazon.com/blogs/big-data/design-a-data-mesh-pattern-for-amazon-emr-based-data-lakes-using-aws-lake-formation-with-hive-metastore-federation/
+  description: A producer account runs an EMR cluster whose Hive metastore describes tables stored in S3; a central catalog account federates that metastore into the Glue Data Catalog through a Lambda connector and applies Lake Formation database, table and column permissions. Consumer accounts query the federated tables through resource links with Athena, EMR Serverless or SageMaker while data stays in the producer account.
+  containers:
+    - region: us-east-1
+      account: producer
+      vpcs:
+        - name: emr
+          cidr: 10.100.0.0/16
+          subnets:
+            - {name: emr-private-a, cidr: 10.100.1.0/24, az: a, public: false}
+    - region: us-east-1
+      account: catalog
+    - region: us-east-1
+      account: consumer
+  elements:
+    - {tf: aws_emr_cluster, name: producer-emr, in: subnet:emr-private-a}
+    - {tf: aws_db_instance, name: hive-metastore-db, in: subnet:emr-private-a}
+    - {tf: aws_s3_bucket, name: producer-lake, in: account:producer}
+    - {tf: aws_lambda_function, name: hms-connector, in: account:catalog}
+    - {tf: aws_glue_catalog_database, name: federated-db, in: account:catalog}
+    - {tf: aws_lakeformation_resource, name: producer-location, in: account:catalog}
+    - {tf: aws_ram_resource_share, name: federated-share, in: account:catalog}
+    - {tf: aws_glue_catalog_database, name: consumer-link, in: account:consumer}
+    - {tf: aws_athena_workgroup, name: consumer-athena, in: account:consumer}
+    - {tf: aws_emrserverless_application, name: consumer-spark, in: account:consumer}
+  actors: [users]
+  flows:
+    - {from: producer-emr, to: producer-lake, label: Hive and Spark write tables, step: 1}
+    - {from: producer-emr, to: hive-metastore-db, label: external Hive metastore, step: 1}
+    - {from: hms-connector, to: hive-metastore-db, label: read metadata at query time, step: 2}
+    - {from: federated-db, to: hms-connector, label: federated database connection, step: 2}
+    - {from: producer-location, to: producer-lake, label: registered with Lake Formation, step: 3}
+    - {from: federated-share, to: consumer-link, label: share with column permissions, step: 4}
+    - {from: consumer-link, to: federated-db, label: resource link, step: 4}
+    - {from: consumer-athena, to: consumer-link, label: SQL, step: 5}
+    - {from: consumer-spark, to: consumer-link, label: Spark jobs, step: 5}
+    - {from: consumer-athena, to: producer-lake, label: governed reads, step: 6}
+    - {from: users, to: consumer-athena, step: 7}
+
+- slug: dms-sql-server-export-s3-parquet
+  title: Export a SQL Server database to S3 with DMS in Parquet format
+  category: migration
+  tags: [dms, sql server, s3, parquet, full load, cdc, athena]
+  source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/export-a-microsoft-sql-server-database-to-amazon-s3-by-using-aws-dms.html
+  description: A DMS replication instance connects to an on-premises or EC2 SQL Server source endpoint and an S3 target endpoint, running a full load followed by ongoing change data capture. Output is written as Parquet rather than the default CSV for compact storage, and the exported tables can be catalogued and queried with Athena.
+  containers:
+    - datacenter: on-premises
+    - region: us-east-1
+      vpcs:
+        - name: migration
+          cidr: 10.110.0.0/16
+          subnets:
+            - {name: dms-private-a, cidr: 10.110.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_dms_replication_instance, name: sqlserver-dms, in: subnet:dms-private-a}
+    - {tf: aws_dms_endpoint, name: sqlserver-source, in: region}
+    - {tf: aws_dms_s3_endpoint, name: s3-target, in: region}
+    - {tf: aws_dms_replication_task, name: full-load-cdc, in: region}
+    - {tf: aws_s3_bucket, name: exported-tables, in: region}
+    - {tf: aws_glue_crawler, name: export-crawler, in: region}
+    - {tf: aws_glue_catalog_database, name: export-db, in: region}
+    - {tf: aws_athena_workgroup, name: export-athena, in: region}
+  actors: [datacenter, users]
+  flows:
+    - {from: datacenter, to: sqlserver-source, label: SQL Server over VPN or DX, step: 1}
+    - {from: sqlserver-source, to: sqlserver-dms, label: source endpoint, step: 1}
+    - {from: full-load-cdc, to: sqlserver-dms, label: full load then CDC, step: 2}
+    - {from: sqlserver-dms, to: s3-target, label: target endpoint, step: 3}
+    - {from: s3-target, to: exported-tables, label: 'Parquet: schema/table/files', step: 3}
+    - {from: export-crawler, to: exported-tables, step: 4}
+    - {from: export-crawler, to: export-db, step: 4}
+    - {from: export-athena, to: export-db, label: SQL, step: 5}
+    - {from: users, to: export-athena, step: 6}
+
+- slug: dms-cdc-kinesis-glue-streaming-hudi
+  title: Near real-time transactional lake with DMS, Kinesis, Glue streaming and Hudi
+  category: data
+  tags: [cdc, dms, kinesis, glue streaming, apache hudi, athena, quicksight]
+  source: https://aws.amazon.com/blogs/big-data/create-an-apache-hudi-based-near-real-time-transactional-data-lake-using-aws-dms-amazon-kinesis-aws-glue-streaming-etl-and-data-visualization-using-amazon-quicksight
+  description: DMS captures changes from an RDS database and publishes them to a Kinesis data stream, where a Glue streaming job consumes them continuously and upserts into Apache Hudi tables on S3. The Hudi tables are registered in the Glue Data Catalog so Athena queries and QuickSight dashboards reflect inserts and updates within minutes.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: source
+          cidr: 10.120.0.0/16
+          subnets:
+            - {name: src-private-a, cidr: 10.120.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_db_instance, name: source-rds, in: subnet:src-private-a}
+    - {tf: aws_dms_replication_instance, name: cdc-dms, in: subnet:src-private-a}
+    - {tf: aws_kinesis_stream, name: cdc-stream, in: region}
+    - {tf: aws_glue_job, name: hudi-streaming-job, in: region}
+    - {tf: aws_s3_bucket, name: hudi-lake, in: region}
+    - {tf: aws_glue_catalog_database, name: hudi-db, in: region}
+    - {tf: aws_athena_workgroup, name: hudi-athena, in: region}
+    - {tf: aws_quicksight_data_source, name: hudi-dashboards, in: region}
+  actors: [users]
+  flows:
+    - {from: source-rds, to: cdc-dms, label: transaction log CDC, step: 1}
+    - {from: cdc-dms, to: cdc-stream, label: change records, step: 2}
+    - {from: cdc-stream, to: hudi-streaming-job, label: Glue streaming consumer, step: 3}
+    - {from: hudi-streaming-job, to: hudi-lake, label: Hudi upserts, step: 4}
+    - {from: hudi-streaming-job, to: hudi-db, label: register Hudi tables, step: 4}
+    - {from: hudi-athena, to: hudi-db, label: SQL, step: 5}
+    - {from: hudi-dashboards, to: hudi-athena, step: 6}
+    - {from: users, to: hudi-dashboards, step: 7}
+
+- slug: dms-glue-iceberg-transactional-lake
+  title: Replicate relational sources into an Iceberg transactional data lake
+  category: data
+  tags: [apache iceberg, dms, glue, cdc, merge, lake formation, athena]
+  source: https://aws.amazon.com/blogs/big-data/automate-replication-of-relational-sources-into-a-transactional-data-lake-with-apache-iceberg-and-aws-glue/
+  description: DMS runs a full load and then CDC from a PostgreSQL source into a raw S3 layer organised by schema and table; a Glue job driven by Parameter Store configuration and job bookmarks deduplicates the change files and merges them into Iceberg tables in a stage layer. The Iceberg tables are registered in the Glue Data Catalog, optionally governed by Lake Formation, scheduled through EventBridge and queried with Athena.
+  containers:
+    - region: us-east-1
+      groups: [{label: raw layer}, {label: stage layer}]
+      vpcs:
+        - name: source
+          cidr: 10.130.0.0/16
+          subnets:
+            - {name: src-private-a, cidr: 10.130.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_rds_cluster, name: source-postgres, in: subnet:src-private-a}
+    - {tf: aws_dms_replication_instance, name: replication, in: subnet:src-private-a}
+    - {tf: aws_s3_bucket, name: raw-bucket, in: group:raw layer}
+    - {tf: aws_glue_job, name: iceberg-merge-job, in: region}
+    - {tf: aws_ssm_parameter, name: table-config, in: region}
+    - {tf: aws_cloudwatch_event_rule, name: hourly-schedule, in: region}
+    - {tf: aws_s3_bucket, name: stage-bucket, in: group:stage layer}
+    - {tf: aws_glue_catalog_database, name: iceberg-db, in: group:stage layer}
+    - {tf: aws_lakeformation_resource, name: stage-location, in: group:stage layer}
+    - {tf: aws_athena_workgroup, name: iceberg-athena, in: region}
+  actors: [users]
+  flows:
+    - {from: source-postgres, to: replication, label: full load then CDC, step: 1}
+    - {from: replication, to: raw-bucket, label: Parquet per schema/table, step: 2}
+    - {from: hourly-schedule, to: iceberg-merge-job, link: aws_cloudwatch_event_target}
+    - {from: table-config, to: iceberg-merge-job, label: primary keys and partitions, step: 3}
+    - {from: iceberg-merge-job, to: raw-bucket, label: read new files via job bookmark, step: 3}
+    - {from: iceberg-merge-job, to: stage-bucket, label: Iceberg MERGE upserts, step: 4}
+    - {from: iceberg-merge-job, to: iceberg-db, label: register Iceberg tables, step: 4}
+    - {from: stage-location, to: stage-bucket, label: Lake Formation permissions, step: 5}
+    - {from: iceberg-athena, to: iceberg-db, label: SQL with time travel, step: 6}
+    - {from: users, to: iceberg-athena, step: 7}
+
+- slug: datasync-nfs-to-s3-lake
+  title: Synchronize on-premises NFS shares into S3 with DataSync
+  category: storage
+  tags: [datasync, nfs, on-premises, s3, incremental transfer, cloudwatch]
+  source: https://aws.amazon.com/blogs/storage/synchronizing-your-data-to-amazon-s3-using-aws-datasync/
+  description: A DataSync agent deployed as a VM next to an on-premises Linux NFS server reads the shares and transfers them to an S3 bucket through a scheduled DataSync task with incremental transfer and checksum verification enabled. Each run compares source metadata against S3 objects and uploads only new or changed files, logging every transferred object to CloudWatch Logs.
+  containers:
+    - datacenter: on-premises
+    - region: eu-west-1
+  elements:
+    - {tf: aws_datasync_agent, name: nfs-agent, in: datacenter}
+    - {tf: aws_datasync_location_nfs, name: nfs-source, in: datacenter}
+    - {tf: aws_datasync_location_s3, name: lake-destination, in: region}
+    - {tf: aws_datasync_task, name: nightly-sync, in: region}
+    - {tf: aws_s3_bucket, name: landing-bucket, in: region}
+    - {tf: aws_cloudwatch_log_group, name: datasync-logs, in: region}
+    - {tf: aws_glue_crawler, name: landing-crawler, in: region}
+    - {tf: aws_glue_catalog_database, name: landing-db, in: region}
+  actors: [server]
+  flows:
+    - {from: server, to: nfs-source, label: NFS export, step: 1}
+    - {from: nfs-agent, to: nfs-source, label: agent reads share, step: 2}
+    - {from: nightly-sync, to: nfs-agent, label: scheduled task execution, step: 3}
+    - {from: nfs-agent, to: lake-destination, label: 'TLS transfer, only changed data', step: 4}
+    - {from: lake-destination, to: landing-bucket, label: PUT objects, step: 4}
+    - {from: nightly-sync, to: datasync-logs, label: log all transferred objects, step: 5}
+    - {from: landing-crawler, to: landing-bucket, step: 6}
+    - {from: landing-crawler, to: landing-db, step: 6}
+
+- slug: transfer-family-managed-file-transfer
+  title: Managed file transfer with AWS Transfer Family and S3
+  category: storage
+  tags: [transfer family, sftp, s3, lambda, cognito, aurora, route 53]
+  source: https://aws.amazon.com/blogs/architecture/managed-file-transfer-using-aws-transfer-family-and-amazon-s3/
+  description: Partners connect over SFTP or FTPS to a Transfer Family server resolved through Route 53; a custom identity provider built on API Gateway and Lambda authenticates them against Cognito, looks up entitlements in Aurora and returns a scoped IAM policy with logical directory mappings into S3. Inbound files land in S3 and trigger a Lambda that queries subscriptions, optionally runs AWS Batch transformations and pushes outputs to customer SFTP destinations.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: mft
+          cidr: 10.140.0.0/16
+          subnets:
+            - {name: mft-public-a, cidr: 10.140.0.0/24, az: a, public: true}
+            - {name: mft-private-a, cidr: 10.140.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: transfer-dns, in: region}
+    - {tf: aws_transfer_server, name: sftp-server, in: subnet:mft-public-a}
+    - {tf: aws_api_gateway_rest_api, name: idp-api, in: region}
+    - {tf: aws_lambda_function, name: authorizer, in: region}
+    - {tf: aws_cognito_user_pool, name: partner-users, in: region}
+    - {tf: aws_rds_cluster, name: entitlements-db, in: subnet:mft-private-a}
+    - {tf: aws_s3_bucket, name: file-exchange, in: region}
+    - {tf: aws_lambda_function, name: outbound-router, in: region}
+    - {tf: aws_batch_job_queue, name: transform-jobs, in: region}
+  actors: [client, saas]
+  flows:
+    - {from: client, to: transfer-dns, label: resolve SFTP hostname, step: 1}
+    - {from: client, to: sftp-server, label: 'SFTP/FTPS: user and key', step: 2}
+    - {from: sftp-server, to: idp-api, label: custom identity provider, step: 3}
+    - {from: idp-api, to: authorizer, step: 3}
+    - {from: authorizer, to: partner-users, label: validate credentials, step: 4}
+    - {from: authorizer, to: entitlements-db, label: lookup logical directories, step: 4}
+    - {from: authorizer, to: sftp-server, label: scoped IAM policy and home mappings, step: 5}
+    - {from: sftp-server, to: file-exchange, label: read and write files, step: 6}
+    - {from: file-exchange, to: outbound-router, label: S3 event, step: 7}
+    - {from: outbound-router, to: entitlements-db, label: subscriptions, step: 8}
+    - {from: outbound-router, to: transform-jobs, label: optional transformation, step: 8}
+    - {from: outbound-router, to: saas, label: deliver to customer SFTP, step: 9}
+
+- slug: lf-row-level-security-athena
+  title: Row-level access control with Lake Formation data filters
+  category: security
+  tags: [lake formation, data filters, row-level security, athena, glue catalog]
+  source: https://docs.aws.amazon.com/lake-formation/latest/dg/cbac-tutorial.html
+  description: A product reviews table in S3 is catalogued in the Glue Data Catalog and governed by Lake Formation, where a data lake administrator creates data filters with row expressions such as marketplace equals US or JP. Each analyst role is granted SELECT through its filter, so the same Athena query returns only the rows the user is allowed to see and access is audited centrally.
+  containers:
+    - region: us-east-1
+      groups: [{label: governed data lake}]
+  elements:
+    - {tf: aws_s3_bucket, name: reviews-bucket, in: group:governed data lake}
+    - {tf: aws_lakeformation_resource, name: reviews-location, in: group:governed data lake}
+    - {tf: aws_glue_catalog_database, name: reviews-db, in: group:governed data lake}
+    - {tf: aws_glue_catalog_table, name: amazon-reviews, in: group:governed data lake}
+    - {tf: aws_lakeformation_data_lake_settings, name: lf-admin, in: group:governed data lake}
+    - {tf: aws_iam_role, name: analyst-us, in: region}
+    - {tf: aws_iam_role, name: analyst-jp, in: region}
+    - {tf: aws_athena_workgroup, name: reviews-athena, in: region}
+  actors: [users]
+  flows:
+    - {from: reviews-location, to: reviews-bucket, label: register location, step: 1}
+    - {from: amazon-reviews, to: reviews-bucket, label: partitioned Parquet, step: 1}
+    - {from: amazon-reviews, to: reviews-db, step: 1}
+    - {from: lf-admin, to: amazon-reviews, label: 'data filters: marketplace=US, marketplace=JP', step: 2}
+    - {from: lf-admin, to: analyst-us, label: grant SELECT via US filter, step: 3}
+    - {from: lf-admin, to: analyst-jp, label: grant SELECT via JP filter, step: 3}
+    - {from: users, to: reviews-athena, label: analysts query, step: 4}
+    - {from: reviews-athena, to: analyst-us, label: assume role, step: 4}
+    - {from: reviews-athena, to: amazon-reviews, label: rows filtered at query time, step: 5}
+
+- slug: databrew-pii-masking-pipeline
+  title: Discover and mask PII with Glue DataBrew orchestrated by Step Functions
+  category: data
+  tags: [glue databrew, pii, step functions, eventbridge, lambda, s3]
+  source: https://aws.amazon.com/blogs/big-data/build-a-data-pipeline-to-automatically-discover-and-mask-pii-data-with-aws-glue-databrew/
+  description: An object landing in the raw bucket sends an S3 event to EventBridge, which starts a Step Functions state machine; the workflow runs a DataBrew profile job to detect PII columns, a Lambda builds a recipe of masking transformations, and a DataBrew recipe job writes the masked output. Results land in a curated bucket and the workflow notifies operators through SNS.
+  containers:
+    - region: us-east-1
+      groups: [{label: raw zone}, {label: curated zone}]
+  elements:
+    - {tf: aws_s3_bucket, name: raw-uploads, in: group:raw zone}
+    - {tf: aws_cloudwatch_event_rule, name: object-created, in: region}
+    - {tf: aws_sfn_state_machine, name: pii-workflow, in: region}
+    - {tf: aws_glue_job, name: databrew-profile-job, in: region}
+    - {tf: aws_lambda_function, name: build-mask-recipe, in: region}
+    - {tf: aws_glue_job, name: databrew-recipe-job, in: region}
+    - {tf: aws_s3_bucket, name: masked-output, in: group:curated zone}
+    - {tf: aws_sns_topic, name: pipeline-status, in: region}
+  actors: [user, users]
+  flows:
+    - {from: user, to: raw-uploads, label: upload dataset, step: 1}
+    - {from: raw-uploads, to: object-created, label: S3 event notification, step: 2}
+    - {from: object-created, to: pii-workflow, link: aws_cloudwatch_event_target}
+    - {from: pii-workflow, to: databrew-profile-job, label: profile job with PII detection, step: 3}
+    - {from: databrew-profile-job, to: raw-uploads, label: read sample, step: 3}
+    - {from: pii-workflow, to: build-mask-recipe, label: profile results, step: 4}
+    - {from: build-mask-recipe, to: databrew-recipe-job, label: 'create recipe (hash, redact)', step: 4}
+    - {from: pii-workflow, to: databrew-recipe-job, label: run recipe job, step: 5}
+    - {from: databrew-recipe-job, to: masked-output, label: masked Parquet, step: 6}
+    - {from: pii-workflow, to: pipeline-status, label: success or failure, step: 7}
+    - {from: pipeline-status, to: users, label: email}
+
+- slug: athena-federated-query
+  title: Athena federated query across data sources with Lambda connectors
+  category: analytics-bi
+  tags: [athena, federated query, lambda connectors, dynamodb, rds, cloudwatch logs, redshift]
+  source: https://aws.amazon.com/blogs/big-data/query-any-data-source-with-amazon-athenas-new-federated-query/
+  description: Athena registers each external source as a data catalog backed by a Lambda data source connector, so one SQL statement can join S3 data with DynamoDB, an RDS database, CloudWatch Logs and Redshift. Connectors run on demand in Lambda, spill large results to an S3 spill bucket and let analysts query in place without first copying data into the lake.
+  containers:
+    - region: us-east-1
+      groups: [{label: federated sources}]
+      vpcs:
+        - name: sources
+          cidr: 10.150.0.0/16
+          subnets:
+            - {name: src-private-a, cidr: 10.150.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_athena_workgroup, name: federated-athena, in: region}
+    - {tf: aws_athena_data_catalog, name: dynamodb-catalog, in: region}
+    - {tf: aws_athena_data_catalog, name: postgres-catalog, in: region}
+    - {tf: aws_athena_data_catalog, name: cwlogs-catalog, in: region}
+    - {tf: aws_lambda_function, name: dynamodb-connector, in: region}
+    - {tf: aws_lambda_function, name: jdbc-connector, in: subnet:src-private-a}
+    - {tf: aws_lambda_function, name: cwlogs-connector, in: region}
+    - {tf: aws_dynamodb_table, name: orders-table, in: group:federated sources}
+    - {tf: aws_rds_cluster, name: customers-postgres, in: subnet:src-private-a}
+    - {tf: aws_cloudwatch_log_group, name: app-logs, in: group:federated sources}
+    - {tf: aws_s3_bucket, name: data-lake, in: region}
+    - {tf: aws_s3_bucket, name: spill-bucket, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: federated-athena, label: single SQL join, step: 1}
+    - {from: federated-athena, to: data-lake, label: lake tables via Glue catalog, step: 2}
+    - {from: federated-athena, to: dynamodb-catalog, step: 2}
+    - {from: federated-athena, to: postgres-catalog, step: 2}
+    - {from: federated-athena, to: cwlogs-catalog, step: 2}
+    - {from: dynamodb-catalog, to: dynamodb-connector, label: LAMBDA catalog, step: 3}
+    - {from: postgres-catalog, to: jdbc-connector, label: LAMBDA catalog, step: 3}
+    - {from: cwlogs-catalog, to: cwlogs-connector, label: LAMBDA catalog, step: 3}
+    - {from: dynamodb-connector, to: orders-table, label: scan with pushdown, step: 4}
+    - {from: jdbc-connector, to: customers-postgres, label: JDBC, step: 4}
+    - {from: cwlogs-connector, to: app-logs, label: filter log events, step: 4}
+    - {from: jdbc-connector, to: spill-bucket, label: spill large results, step: 5}
+
+- slug: quicksight-data-lake-spice-dashboards
+  title: QuickSight dashboards over a data lake via Athena and Redshift Serverless
+  category: analytics-bi
+  tags: [quicksight, spice, athena, redshift serverless, data lake, business users]
+  source: https://aws.amazon.com/blogs/business-intelligence/enable-business-users-to-analyze-large-datasets-in-your-data-lake-with-amazon-quicksight/
+  description: Partitioned datasets in an S3 data lake are exposed to QuickSight two ways, through Athena queries whose results are imported into SPICE for fast, high-concurrency dashboards, and through ETL that loads curated tables into Redshift Serverless for datasets that need correction or multi-client access. Business users in marketing, product and sales build analyses without help from the data team.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: analytics
+          cidr: 10.160.0.0/16
+          subnets:
+            - {name: rs-private-a, cidr: 10.160.1.0/24, az: a, public: false}
+            - {name: rs-private-b, cidr: 10.160.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_s3_bucket, name: events-lake, in: region}
+    - {tf: aws_glue_crawler, name: events-crawler, in: region}
+    - {tf: aws_glue_catalog_database, name: events-db, in: region}
+    - {tf: aws_athena_workgroup, name: bi-athena, in: region}
+    - {tf: aws_glue_job, name: curate-etl, in: region}
+    - {tf: aws_redshiftserverless_namespace, name: bi-namespace, in: region}
+    - {tf: aws_redshiftserverless_workgroup, name: bi-workgroup, in: subnet:rs-private-a}
+    - {tf: aws_quicksight_data_source, name: athena-source, in: region}
+    - {tf: aws_quicksight_data_source, name: redshift-source, in: region}
+    - {tf: aws_quicksight_data_set, name: spice-dataset, in: region}
+  actors: [users]
+  flows:
+    - {from: events-crawler, to: events-lake, label: partition discovery, step: 1}
+    - {from: events-crawler, to: events-db, step: 1}
+    - {from: bi-athena, to: events-db, label: SQL over partitions, step: 2}
+    - {from: athena-source, to: bi-athena, step: 3}
+    - {from: spice-dataset, to: athena-source, label: import into SPICE, step: 4}
+    - {from: curate-etl, to: events-lake, label: read curated files, step: 2}
+    - {from: curate-etl, to: bi-workgroup, label: COPY into Redshift, step: 3}
+    - {from: bi-workgroup, to: bi-namespace, step: 3}
+    - {from: redshift-source, to: bi-workgroup, label: direct query, step: 4}
+    - {from: users, to: spice-dataset, label: self-service dashboards, step: 5}
+    - {from: users, to: redshift-source, label: complex datasets, step: 5}
+
+- slug: centralized-log-analytics-opensearch
+  title: Centralized service log analytics with OpenSearch
+  category: observability
+  tags: [opensearch, log analytics, kinesis firehose, cloudwatch logs, sqs, lambda, s3]
+  source: https://docs.aws.amazon.com/solutions/latest/centralized-logging-with-opensearch/service-log-analytics-pipeline.html
+  description: AWS service logs such as CloudTrail, ALB access logs and VPC flow logs are delivered to a log bucket, either directly or through CloudWatch Logs and a Kinesis Data Firehose subscription; S3 event notifications queue new objects in SQS and a log processor Lambda parses and indexes them into an OpenSearch domain. Records that fail processing are written to a backup bucket and dashboards are served from OpenSearch Dashboards.
+  containers:
+    - region: us-east-1
+      groups: [{label: log sources}]
+      vpcs:
+        - name: logging
+          cidr: 10.170.0.0/16
+          subnets:
+            - {name: log-private-a, cidr: 10.170.1.0/24, az: a, public: false}
+            - {name: log-private-b, cidr: 10.170.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_lb, name: app-alb, in: group:log sources}
+    - {tf: aws_cloudtrail, name: org-trail, in: group:log sources}
+    - {tf: aws_cloudwatch_log_group, name: lambda-logs, in: group:log sources}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: cwl-to-s3, in: region}
+    - {tf: aws_s3_bucket, name: log-bucket, in: region}
+    - {tf: aws_sqs_queue, name: new-log-objects, in: region}
+    - {tf: aws_lambda_function, name: log-processor, in: subnet:log-private-a}
+    - {tf: aws_opensearch_domain, name: logs-domain, in: subnet:log-private-b}
+    - {tf: aws_s3_bucket, name: backup-bucket, in: region}
+  actors: [users]
+  flows:
+    - {from: app-alb, to: log-bucket, label: access logs, step: 1}
+    - {from: org-trail, to: log-bucket, label: CloudTrail logs, step: 1}
+    - {from: lambda-logs, to: cwl-to-s3, label: subscription filter, step: 1}
+    - {from: cwl-to-s3, to: log-bucket, label: batched delivery, step: 1}
+    - {from: log-bucket, to: new-log-objects, label: S3 event notification, step: 2}
+    - {from: new-log-objects, to: log-processor, link: aws_lambda_event_source_mapping}
+    - {from: log-processor, to: log-bucket, label: read and parse log file, step: 3}
+    - {from: log-processor, to: logs-domain, label: bulk index, step: 4}
+    - {from: log-processor, to: backup-bucket, label: failed records, step: 5}
+    - {from: users, to: logs-domain, label: OpenSearch Dashboards, step: 6}
+
+- slug: medallion-iceberg-materialized-views
+  title: Medallion architecture with Iceberg materialized views in SageMaker
+  category: data
+  tags: [medallion, bronze silver gold, apache iceberg, s3 tables, glue, sagemaker unified studio, athena, redshift]
+  source: https://aws.amazon.com/blogs/big-data/building-medallion-architecture-with-iceberg-materialized-views-in-amazon-sagemaker/
+  description: Raw bronze data is ingested into Iceberg tables in an S3 table bucket, and the silver and gold layers are each defined as a scheduled Iceberg materialized view authored in SageMaker Unified Studio. Glue uses Iceberg change-tracking metadata to refresh only changed rows through Spark, nested views give implicit lineage, and Athena and Redshift query the gold layer.
+  containers:
+    - region: us-east-1
+      groups: [{label: bronze}, {label: silver}, {label: gold}]
+  elements:
+    - {tf: aws_kinesis_firehose_delivery_stream, name: bronze-ingest, in: region}
+    - {tf: aws_s3tables_table_bucket, name: lakehouse-tables, in: region}
+    - {tf: aws_s3tables_table, name: bronze-orders, in: group:bronze}
+    - {tf: aws_s3tables_table, name: silver-orders-mv, in: group:silver}
+    - {tf: aws_s3tables_table, name: gold-daily-kpis-mv, in: group:gold}
+    - {tf: aws_glue_catalog_database, name: lakehouse-catalog, in: region}
+    - {tf: aws_glue_job, name: mv-refresh-spark, in: region}
+    - {tf: aws_sagemaker_domain, name: unified-studio, in: region}
+    - {tf: aws_athena_workgroup, name: gold-athena, in: region}
+    - {tf: aws_redshiftserverless_workgroup, name: gold-redshift, in: region}
+  actors: [device, users]
+  flows:
+    - {from: device, to: bronze-ingest, label: raw events, step: 1}
+    - {from: bronze-ingest, to: bronze-orders, label: append to Iceberg, step: 2}
+    - {from: bronze-orders, to: lakehouse-tables, label: stored in table bucket}
+    - {from: unified-studio, to: lakehouse-catalog, label: CREATE MATERIALIZED VIEW with SCHEDULE REFRESH, step: 3}
+    - {from: mv-refresh-spark, to: bronze-orders, label: read changed rows only, step: 4}
+    - {from: mv-refresh-spark, to: silver-orders-mv, label: clean and deduplicate, step: 4}
+    - {from: mv-refresh-spark, to: gold-daily-kpis-mv, label: aggregate KPIs, step: 5}
+    - {from: silver-orders-mv, to: gold-daily-kpis-mv, label: nested view lineage}
+    - {from: gold-athena, to: gold-daily-kpis-mv, label: SQL, step: 6}
+    - {from: gold-redshift, to: gold-daily-kpis-mv, label: SQL, step: 6}
+    - {from: users, to: gold-athena, step: 7}
+
+- slug: glue-data-quality-alerts
+  title: Data quality evaluation with alerts using Glue Data Quality
+  category: data
+  tags: [glue data quality, step functions, eventbridge, lambda, sns, glue catalog]
+  source: https://aws.amazon.com/blogs/big-data/set-up-alerts-and-orchestrate-data-quality-rules-with-aws-glue-data-quality/
+  description: A Step Functions workflow starts a Glue Data Quality evaluation of a ruleset against a Glue Data Catalog table backed by Parquet in S3. When the evaluation result event reaches EventBridge, a rule invokes a Lambda that formats the scores and failed rules, stores the results in S3 and publishes an email notification through SNS.
+  containers:
+    - region: us-east-1
+  elements:
+    - {tf: aws_s3_bucket, name: staging-data, in: region}
+    - {tf: aws_glue_catalog_database, name: staging-db, in: region}
+    - {tf: aws_glue_data_quality_ruleset, name: orders-ruleset, in: region}
+    - {tf: aws_sfn_state_machine, name: dq-orchestrator, in: region}
+    - {tf: aws_cloudwatch_event_rule, name: dq-results-available, in: region}
+    - {tf: aws_lambda_function, name: format-results, in: region}
+    - {tf: aws_s3_bucket, name: dq-results, in: region}
+    - {tf: aws_sns_topic, name: dq-alerts, in: region}
+  actors: [user, users]
+  flows:
+    - {from: user, to: staging-data, label: upload Parquet, step: 1}
+    - {from: staging-data, to: staging-db, label: catalogued table, step: 1}
+    - {from: user, to: dq-orchestrator, label: start with table and ruleset, step: 2}
+    - {from: dq-orchestrator, to: orders-ruleset, label: StartDataQualityRulesetEvaluationRun, step: 3}
+    - {from: orders-ruleset, to: staging-db, label: evaluate rules, step: 3}
+    - {from: orders-ruleset, to: dq-results-available, label: Data Quality Evaluations Results Available, step: 4}
+    - {from: dq-results-available, to: format-results, link: aws_cloudwatch_event_target}
+    - {from: format-results, to: dq-results, label: write results JSON, step: 5}
+    - {from: format-results, to: dq-alerts, label: publish score and failed rules, step: 6}
+    - {from: dq-alerts, to: users, label: email, step: 7}
+
+- slug: sfn-etl-validate-transform-partition
+  title: Serverless ETL with validation, transformation and partitioning on Step Functions
+  category: data
+  tags: [step functions, glue, lambda, sns, s3, parquet, partitioning]
+  source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/orchestrate-an-etl-pipeline-with-validation-transformation-and-partitioning-using-aws-step-functions.html
+  description: A CSV upload to the source folder triggers a Lambda that starts a Step Functions state machine; a validation Lambda checks schema and types, moving good files to a stage folder and bad files to an error folder with an SNS alert. A Glue crawler catalogs the staged file, a Glue job converts it to compressed Parquet partitioned by year, month and day, a second crawl registers the result for Athena and SNS reports success or failure.
+  containers:
+    - region: us-east-1
+      groups: [{label: bucket folders}]
+  elements:
+    - {tf: aws_s3_bucket, name: etl-bucket, in: group:bucket folders}
+    - {tf: aws_lambda_function, name: start-pipeline, in: region}
+    - {tf: aws_sfn_state_machine, name: etl-state-machine, in: region}
+    - {tf: aws_lambda_function, name: validate-csv, in: region}
+    - {tf: aws_lambda_function, name: move-file, in: region}
+    - {tf: aws_glue_crawler, name: stage-crawler, in: region}
+    - {tf: aws_glue_job, name: csv-to-parquet, in: region}
+    - {tf: aws_glue_catalog_database, name: etl-db, in: region}
+    - {tf: aws_sns_topic, name: pipeline-notifications, in: region}
+    - {tf: aws_athena_workgroup, name: adhoc-queries, in: region}
+  actors: [user, users]
+  flows:
+    - {from: user, to: etl-bucket, label: upload CSV to source folder, step: 1}
+    - {from: etl-bucket, to: start-pipeline, label: S3 event notification, step: 2}
+    - {from: start-pipeline, to: etl-state-machine, label: StartExecution, step: 2}
+    - {from: etl-state-machine, to: validate-csv, label: schema and type validation, step: 3}
+    - {from: etl-state-machine, to: move-file, label: stage or error folder, step: 4}
+    - {from: move-file, to: etl-bucket, step: 4}
+    - {from: etl-state-machine, to: stage-crawler, label: crawl staged CSV, step: 5}
+    - {from: stage-crawler, to: etl-db, step: 5}
+    - {from: etl-state-machine, to: csv-to-parquet, label: run Glue job, step: 6}
+    - {from: csv-to-parquet, to: etl-bucket, label: Parquet partitioned by year/month/day, step: 7}
+    - {from: stage-crawler, to: etl-bucket, label: crawl transform folder, step: 8}
+    - {from: etl-state-machine, to: pipeline-notifications, label: success or failure, step: 9}
+    - {from: pipeline-notifications, to: users, label: email}
+    - {from: adhoc-queries, to: etl-db, label: ad hoc SQL}
+
+- slug: s3-tables-athena-iceberg
+  title: Transform Parquet into S3 Tables with Athena
+  category: data
+  tags: [s3 tables, apache iceberg, athena, glue catalog, lake formation, ctas]
+  source: https://aws.amazon.com/blogs/big-data/transform-your-data-to-amazon-s3-tables-with-amazon-athena/
+  description: Partitioned Parquet files in a general purpose bucket are registered as an external Glue table, and an Athena CREATE TABLE AS SELECT writes them into a fully managed Iceberg table inside an S3 table bucket namespace with a day partition transform. Enabling the analytics integration creates the s3tablescatalog in the Glue Data Catalog under Lake Formation, and Athena INSERT, UPDATE and DELETE run with ACID guarantees while S3 Tables handles compaction and maintenance.
+  containers:
+    - region: us-east-1
+      groups: [{label: general purpose storage}, {label: table storage}]
+  elements:
+    - {tf: aws_s3_bucket, name: reviews-parquet, in: group:general purpose storage}
+    - {tf: aws_glue_catalog_database, name: source-db, in: region}
+    - {tf: aws_glue_catalog_table, name: reviews-external, in: region}
+    - {tf: aws_s3tables_table_bucket, name: analytics-table-bucket, in: group:table storage}
+    - {tf: aws_s3tables_namespace, name: reviews-namespace, in: group:table storage}
+    - {tf: aws_s3tables_table, name: reviews-iceberg, in: group:table storage}
+    - {tf: aws_lakeformation_data_lake_settings, name: s3tables-integration, in: region}
+    - {tf: aws_athena_workgroup, name: iceberg-athena, in: region}
+    - {tf: aws_redshiftserverless_workgroup, name: warehouse-reader, in: region}
+  actors: [users]
+  flows:
+    - {from: reviews-external, to: reviews-parquet, label: MSCK REPAIR TABLE partitions, step: 1}
+    - {from: reviews-external, to: source-db, step: 1}
+    - {from: s3tables-integration, to: analytics-table-bucket, label: s3tablescatalog in Glue Data Catalog, step: 2}
+    - {from: reviews-namespace, to: analytics-table-bucket, step: 2}
+    - {from: iceberg-athena, to: reviews-external, label: CTAS reads Parquet, step: 3}
+    - {from: iceberg-athena, to: reviews-iceberg, label: 'CTAS with day(review_date) partition', step: 4}
+    - {from: reviews-iceberg, to: reviews-namespace, step: 4}
+    - {from: iceberg-athena, to: reviews-iceberg, label: 'INSERT, UPDATE, DELETE with ACID', step: 5}
+    - {from: warehouse-reader, to: reviews-iceberg, label: query via s3tablescatalog, step: 6}
+    - {from: users, to: iceberg-athena, step: 7}

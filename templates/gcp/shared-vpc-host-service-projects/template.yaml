@@ -1,0 +1,42 @@
+# Generated from the official reference (https://docs.cloud.google.com/vpc/docs/shared-vpc); edit freely.
+title: Shared VPC host and service projects
+category: networking
+tags:
+- shared vpc
+- host project
+- service project
+- subnet iam
+- centralized network admin
+source: https://docs.cloud.google.com/vpc/docs/shared-vpc
+description: A host project owns the VPC network and its subnets; service projects are attached to the host and deploy Compute Engine, GKE and load balancer resources into shared subnets using internal
+  IPs. Network administration stays centralized in the host project while subnet-level IAM delegates usage to service project teams.
+nodes:
+- {id: prj-shared-vpc-host, type: gcp.project, name: shared-vpc-host, props: {project_id: shared-vpc-host-123456, project: changeme, region: europe-west1}}
+- {id: vpc-shared-vpc, type: gcp.vpc, name: shared-vpc, parent: prj-shared-vpc-host, props: {cidr: 10.30.0.0/16}}
+- {id: sub-team-web-ew1, type: gcp.subnetwork, name: team-web-ew1, parent: vpc-shared-vpc, props: {cidr: 10.30.0.0/24, region: europe-west1}}
+- {id: sub-team-data-ew1, type: gcp.subnetwork, name: team-data-ew1, parent: vpc-shared-vpc, props: {cidr: 10.30.1.0/24, region: europe-west1}}
+- {id: sub-proxy-only-ew1, type: gcp.subnetwork, name: proxy-only-ew1, parent: vpc-shared-vpc, props: {cidr: 10.30.255.0/24, region: europe-west1}}
+- {id: prj-service-web, type: gcp.project, name: service-web, props: {project_id: service-web-123456, project: changeme, region: europe-west1}}
+- {id: prj-service-data, type: gcp.project, name: service-data, props: {project_id: service-data-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: shared-router, type: gcp.res.google_compute_router, name: shared-router, parent: vpc-shared-vpc, props: {name: changeme, network: changeme}}
+- {id: shared-nat, type: gcp.res.google_compute_router_nat, name: shared-nat, parent: vpc-shared-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+- {id: shared-fw-policy, type: gcp.res.google_compute_network_firewall_policy, name: shared-fw-policy, parent: vpc-shared-vpc, props: {name: changeme}}
+- {id: shared-private-zone, type: gcp.cloud_dns_zone, name: shared-private-zone, parent: prj-shared-vpc-host, props: {domain: example.com}}
+- {id: web-vm, type: gcp.compute_instance, name: web-vm, parent: sub-team-web-ew1}
+- {id: web-internal-alb, type: gcp.res.google_compute_forwarding_rule, name: web-internal-alb, parent: sub-team-web-ew1, props: {name: changeme}}
+- {id: web-backend, type: gcp.res.google_compute_backend_service, name: web-backend, parent: prj-service-web, props: {name: changeme}}
+- {id: data-vm, type: gcp.compute_instance, name: data-vm, parent: sub-team-data-ew1}
+- {id: data-internal-ip, type: gcp.res.google_compute_address, name: data-internal-ip, parent: sub-team-data-ew1, props: {name: changeme}}
+edges:
+- {from: users, to: web-internal-alb, label: HTTPS from corporate network, step: '1'}
+- {from: web-internal-alb, to: web-backend, label: proxy from proxy-only subnet, step: '2'}
+- {from: web-backend, to: web-vm, label: HTTP, step: '3'}
+- {from: web-vm, to: data-vm, label: internal IP across service projects, step: '4'}
+- {from: data-vm, to: shared-nat, label: egress via Cloud NAT, step: '5'}
+steps:
+- {n: '1', text: 'users → web-internal-alb: HTTPS from corporate network'}
+- {n: '2', text: 'web-internal-alb → web-backend: proxy from proxy-only subnet'}
+- {n: '3', text: 'web-backend → web-vm: HTTP'}
+- {n: '4', text: 'web-vm → data-vm: internal IP across service projects'}
+- {n: '5', text: 'data-vm → shared-nat: egress via Cloud NAT'}

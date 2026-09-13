@@ -1,0 +1,36 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/using-amazon-mq-for-rabbitmq-as-an-event-source-for-lambda/); edit freely.
+title: Amazon MQ for RabbitMQ as a Lambda event source
+category: serverless
+tags:
+- amazon mq
+- rabbitmq
+- lambda
+- event source mapping
+- message broker
+source: https://aws.amazon.com/blogs/compute/using-amazon-mq-for-rabbitmq-as-an-event-source-for-lambda/
+description: An existing application publishes to a RabbitMQ queue on an Amazon MQ broker in a private subnet; a Lambda event source mapping polls the queue every 100 ms using broker credentials from Secrets
+  Manager and invokes the function with a batch. Processed messages are persisted to DynamoDB, so the legacy producer is integrated without a consumer fleet.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-messaging, type: aws.vpc, name: messaging, parent: reg-us-east-1, props: {cidr: 10.30.0.0/16}}
+- {id: az-messaging-a, type: aws.availability_zone, name: a, parent: vpc-messaging, props: {zone: a}}
+- {id: sub-broker-a, type: aws.subnet, name: broker-a, parent: az-messaging-a, props: {cidr: 10.30.1.0/24, az: a, public: false}}
+- {id: az-messaging-b, type: aws.availability_zone, name: b, parent: vpc-messaging, props: {zone: b}}
+- {id: sub-broker-b, type: aws.subnet, name: broker-b, parent: az-messaging-b, props: {cidr: 10.30.2.0/24, az: b, public: false}}
+- {id: rabbitmq-broker, type: aws.res.aws_mq_broker, name: rabbitmq-broker, parent: sub-broker-a, props: {broker_name: changeme, engine_type: changeme, engine_version: changeme, host_instance_type: changeme}}
+- {id: legacy-order-app, type: aws.ec2_instance, name: legacy-order-app, parent: sub-broker-b}
+- {id: rabbitmq-credentials, type: aws.res.aws_secretsmanager_secret, name: rabbitmq-credentials, parent: reg-us-east-1}
+- {id: order-consumer, type: aws.lambda_function, name: order-consumer, parent: reg-us-east-1}
+- {id: orders, type: aws.dynamodb_table, name: orders, parent: reg-us-east-1}
+- {id: consumer-failures, type: aws.sqs_queue, name: consumer-failures, parent: reg-us-east-1}
+edges:
+- {from: legacy-order-app, to: rabbitmq-broker, label: AMQP publish, step: '1'}
+- {from: rabbitmq-broker, to: order-consumer, link: aws_lambda_event_source_mapping}
+- {from: order-consumer, to: rabbitmq-credentials, label: broker credentials, step: '2'}
+- {from: order-consumer, to: orders, label: PutItem, step: '3'}
+- {from: order-consumer, to: consumer-failures, label: on-failure destination}
+steps:
+- {n: '1', text: 'legacy-order-app → rabbitmq-broker: AMQP publish'}
+- {n: '2', text: 'order-consumer → rabbitmq-credentials: broker credentials'}
+- {n: '3', text: 'order-consumer → orders: PutItem'}

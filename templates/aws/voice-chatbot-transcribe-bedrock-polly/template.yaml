@@ -1,0 +1,39 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/build-a-serverless-voice-based-contextual-chatbot-for-people-with-disabilities-using-amazon-bedrock/); edit freely.
+title: Serverless voice assistant with Transcribe, Bedrock and Polly
+category: ml
+tags:
+- voice assistant
+- transcribe streaming
+- bedrock
+- polly
+- amplify
+- cognito
+source: https://aws.amazon.com/blogs/machine-learning/build-a-serverless-voice-based-contextual-chatbot-for-people-with-disabilities-using-amazon-bedrock/
+description: An Amplify-hosted web application obtains temporary credentials from a Cognito identity pool and streams microphone audio directly to Amazon Transcribe streaming. The transcript is sent to
+  a Bedrock model with conversation context and the reply is synthesized by Amazon Polly and played back; conversation history can be persisted in DynamoDB.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: voice-assistant-web, type: aws.res.aws_amplify_app, name: voice-assistant-web, parent: reg-us-east-1, props: {name: changeme}}
+- {id: assistant-users, type: aws.res.aws_cognito_user_pool, name: assistant-users, parent: reg-us-east-1, props: {name: changeme}}
+- {id: assistant-identity, type: aws.res.aws_cognito_identity_pool, name: assistant-identity, parent: reg-us-east-1, props: {identity_pool_name: changeme}}
+- {id: domain-vocabulary, type: aws.res.aws_transcribe_vocabulary, name: domain-vocabulary, parent: reg-us-east-1, props: {language_code: changeme, vocabulary_name: changeme}}
+- {id: assistant-guardrail, type: aws.res.aws_bedrock_guardrail, name: assistant-guardrail, parent: reg-us-east-1, props: {blocked_input_messaging: changeme, blocked_outputs_messaging: changeme, name: changeme}}
+- {id: conversation-history, type: aws.dynamodb_table, name: conversation-history, parent: reg-us-east-1}
+- {id: synthesized-audio, type: aws.s3_bucket, name: synthesized-audio, parent: reg-us-east-1}
+edges:
+- {from: users, to: voice-assistant-web, label: speak into browser, step: '1'}
+- {from: voice-assistant-web, to: assistant-users, label: sign in, step: '2'}
+- {from: assistant-users, to: assistant-identity, label: identity token exchange, step: '3'}
+- {from: voice-assistant-web, to: domain-vocabulary, label: StartStreamTranscription over WebSocket, step: '4'}
+- {from: voice-assistant-web, to: assistant-guardrail, label: InvokeModel with transcript and history, step: '5'}
+- {from: voice-assistant-web, to: synthesized-audio, label: Polly SynthesizeSpeech output, step: '6'}
+- {from: voice-assistant-web, to: conversation-history, label: persist turns}
+steps:
+- {n: '1', text: 'users → voice-assistant-web: speak into browser'}
+- {n: '2', text: 'voice-assistant-web → assistant-users: sign in'}
+- {n: '3', text: 'assistant-users → assistant-identity: identity token exchange'}
+- {n: '4', text: 'voice-assistant-web → domain-vocabulary: StartStreamTranscription over WebSocket'}
+- {n: '5', text: 'voice-assistant-web → assistant-guardrail: InvokeModel with transcript and history'}
+- {n: '6', text: 'voice-assistant-web → synthesized-audio: Polly SynthesizeSpeech output'}

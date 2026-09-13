@@ -1,0 +1,80 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/opensource/getting-started-with-istio-on-amazon-eks/); edit freely.
+title: Istio service mesh on EKS with an ingress gateway behind an NLB
+category: containers
+tags:
+- eks
+- istio
+- service mesh
+- envoy
+- nlb
+- mtls
+- kiali
+source: https://aws.amazon.com/blogs/opensource/getting-started-with-istio-on-amazon-eks/
+description: Istio's control plane (istiod) runs on an EKS cluster with managed node groups and injects Envoy sidecars into pods of namespaces labelled istio-injection=enabled, giving mutual TLS, retries
+  and traffic splitting between service versions. The Istio ingress gateway is exposed as a LoadBalancer service that the AWS Load Balancer Controller realizes as a Network Load Balancer, and Gateway and
+  VirtualService resources route edge traffic to the application; Kiali, Prometheus, Grafana and Jaeger add-ons visualize the mesh.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}}
+- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-eks-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-eks-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.0.16.0/20, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.0.32.0/20, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-eks}
+- {id: istio-ingress-nlb, type: aws.alb, name: istio-ingress-nlb, parent: vpc-eks}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: mesh-cluster, type: aws.eks_cluster, name: mesh-cluster, parent: vpc-eks}
+- id: istio-system-nodes
+  type: aws.res.aws_eks_node_group
+  name: istio-system-nodes
+  parent: mesh-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- id: app-nodes
+  type: aws.res.aws_eks_node_group
+  name: app-nodes
+  parent: mesh-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- {id: productpage-image, type: aws.res.aws_ecr_repository, name: productpage-image, parent: reg-us-west-2, props: {name: changeme}}
+- {id: reviews-image, type: aws.res.aws_ecr_repository, name: reviews-image, parent: reg-us-west-2, props: {name: changeme}}
+- {id: lb-controller-role, type: aws.res.aws_iam_role, name: lb-controller-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}}
+- {id: mesh-metrics, type: aws.res.aws_prometheus_workspace, name: mesh-metrics, parent: reg-us-west-2}
+- id: mesh-dashboards
+  type: aws.res.aws_grafana_workspace
+  name: mesh-dashboards
+  parent: reg-us-west-2
+  props:
+    account_access_type: changeme
+    authentication_providers: []
+    permission_type: changeme
+edges:
+- {from: users, to: igw, label: HTTP/HTTPS, step: '1'}
+- {from: igw, to: istio-ingress-nlb, step: '2'}
+- {from: istio-ingress-nlb, to: istio-system-nodes, label: istio-ingressgateway pods (IP targets), step: '3'}
+- {from: istio-system-nodes, to: app-nodes, label: Gateway + VirtualService route to productpage, step: '4'}
+- {from: app-nodes, to: app-nodes, label: sidecar-to-sidecar mTLS (reviews v1/v2/v3 traffic split), step: '5'}
+- {from: istio-system-nodes, to: app-nodes, label: istiod pushes xDS config to Envoy sidecars}
+- {from: mesh-cluster, to: istio-ingress-nlb, label: AWS Load Balancer Controller creates NLB}
+- {from: lb-controller-role, to: mesh-cluster, label: IRSA}
+- {from: productpage-image, to: app-nodes, label: image pull}
+- {from: reviews-image, to: app-nodes, label: image pull}
+- {from: app-nodes, to: mesh-metrics, label: Envoy telemetry (Prometheus remote write)}
+- {from: mesh-dashboards, to: mesh-metrics, label: Kiali / Grafana queries}
+- {from: app-nodes, to: nat-a, label: outbound}
+steps:
+- {n: '1', text: 'users → igw: HTTP/HTTPS'}
+- {n: '2', text: igw → istio-ingress-nlb}
+- {n: '3', text: 'istio-ingress-nlb → istio-system-nodes: istio-ingressgateway pods (IP targets)'}
+- {n: '4', text: 'istio-system-nodes → app-nodes: Gateway + VirtualService route to productpage'}
+- {n: '5', text: 'app-nodes → app-nodes: sidecar-to-sidecar mTLS (reviews v1/v2/v3 traffic split)'}

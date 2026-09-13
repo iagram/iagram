@@ -1,0 +1,47 @@
+# Generated from the official reference (https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-edge-optimized-custom-domain-name.html); edit freely.
+title: Edge-optimized REST API with a custom domain
+category: web
+tags:
+- api gateway
+- edge-optimized
+- custom domain
+- acm
+- route 53
+- lambda
+source: https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-edge-optimized-custom-domain-name.html
+description: An edge-optimized REST API is reached through an API Gateway managed CloudFront distribution, so requests enter at the nearest point of presence and travel the AWS backbone to the regional
+  API endpoint. A custom domain name with an ACM certificate issued in us-east-1 is mapped to the API stage and published as a Route 53 alias record, while Lambda functions and DynamoDB implement the resources.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: grp-backend, type: common.group, name: backend, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: api-zone, type: aws.route53_zone, name: api-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: api-cert, type: aws.res.aws_acm_certificate, name: api-cert, parent: reg-us-east-1}
+- {id: api-example-com, type: aws.res.aws_api_gateway_domain_name, name: api-example-com, parent: grp-global-edge, props: {domain_name: changeme}}
+- {id: petstore-api, type: aws.res.aws_api_gateway_rest_api, name: petstore-api, parent: grp-backend, props: {name: changeme}}
+- {id: get-pets, type: aws.lambda_function, name: get-pets, parent: grp-backend}
+- {id: create-pet, type: aws.lambda_function, name: create-pet, parent: grp-backend}
+- {id: pets, type: aws.dynamodb_table, name: pets, parent: grp-backend}
+- {id: api-users, type: aws.res.aws_cognito_user_pool, name: api-users, parent: grp-backend, props: {name: changeme}}
+edges:
+- {from: client, to: api-zone, label: DNS lookup api.example.com, step: '1'}
+- {from: api-zone, to: api-example-com, label: alias record to distribution domain, step: '2'}
+- {from: client, to: api-example-com, label: HTTPS at nearest edge POP, step: '3'}
+- {from: mobile, to: api-example-com, label: HTTPS}
+- {from: api-cert, to: api-example-com, label: TLS certificate}
+- {from: api-example-com, to: petstore-api, label: base path mapping to stage, step: '4'}
+- {from: petstore-api, to: api-users, label: Cognito authorizer}
+- {from: petstore-api, to: get-pets, label: GET /pets, step: '5'}
+- {from: petstore-api, to: create-pet, label: POST /pets}
+- {from: get-pets, to: pets, label: Query, step: '6'}
+- {from: create-pet, to: pets, label: PutItem}
+steps:
+- {n: '1', text: 'client → api-zone: DNS lookup api.example.com'}
+- {n: '2', text: 'api-zone → api-example-com: alias record to distribution domain'}
+- {n: '3', text: 'client → api-example-com: HTTPS at nearest edge POP'}
+- {n: '4', text: 'api-example-com → petstore-api: base path mapping to stage'}
+- {n: '5', text: 'petstore-api → get-pets: GET /pets'}
+- {n: '6', text: 'get-pets → pets: Query'}

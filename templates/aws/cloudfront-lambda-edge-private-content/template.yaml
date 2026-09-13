@@ -1,0 +1,51 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/serving-private-content-using-amazon-cloudfront-aws-lambdaedge/); edit freely.
+title: Private content delivery with CloudFront signed cookies and Lambda@Edge
+category: edge
+tags:
+- private content
+- signed cookies
+- signed urls
+- lambda@edge
+- cognito
+- oac
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/serving-private-content-using-amazon-cloudfront-aws-lambdaedge/
+description: Users authenticate against a Cognito user pool, and a Lambda@Edge viewer-request function validates the JWT before issuing CloudFront signed cookies whose private key is fetched from Secrets
+  Manager. Protected objects stay in a private S3 bucket that only the distribution can read, so unauthenticated or expired requests are rejected at the edge.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: grp-identity, type: common.group, name: identity, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: content-zone, type: aws.route53_zone, name: content-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: content-cert, type: aws.res.aws_acm_certificate, name: content-cert, parent: reg-us-east-1}
+- {id: private-cdn, type: aws.cloudfront_distribution, name: private-cdn, parent: grp-global-edge}
+- {id: auth-check-edge, type: aws.lambda_function, name: auth-check-edge, parent: grp-global-edge}
+- {id: signing-key, type: aws.res.aws_cloudfront_public_key, name: signing-key, parent: grp-global-edge, props: {encoded_key: changeme}}
+- {id: subscribers, type: aws.res.aws_cognito_user_pool, name: subscribers, parent: grp-identity, props: {name: changeme}}
+- {id: signing-private-key, type: aws.res.aws_secretsmanager_secret, name: signing-private-key, parent: reg-us-east-1}
+- {id: premium-content, type: aws.s3_bucket, name: premium-content, parent: reg-us-east-1}
+edges:
+- {from: users, to: subscribers, label: sign in, step: '1'}
+- {from: subscribers, to: users, label: JWT, step: '2'}
+- {from: users, to: content-zone, label: DNS, step: '3'}
+- {from: users, to: private-cdn, label: GET /login with JWT, step: '4'}
+- {from: content-cert, to: private-cdn, label: TLS certificate}
+- {from: private-cdn, to: auth-check-edge, label: viewer request, step: '5'}
+- {from: auth-check-edge, to: subscribers, label: verify JWT against JWKS, step: '6'}
+- {from: auth-check-edge, to: signing-private-key, label: fetch private key, step: '7'}
+- {from: auth-check-edge, to: users, label: Set-Cookie CloudFront-Policy/Signature/Key-Pair-Id, step: '8'}
+- {from: users, to: private-cdn, label: GET protected object with signed cookies, step: '9'}
+- {from: signing-key, to: private-cdn, label: trusted key group validates signature}
+- {from: private-cdn, to: premium-content, label: origin fetch via OAC, step: '10'}
+steps:
+- {n: '1', text: 'users → subscribers: sign in'}
+- {n: '2', text: 'subscribers → users: JWT'}
+- {n: '3', text: 'users → content-zone: DNS'}
+- {n: '4', text: 'users → private-cdn: GET /login with JWT'}
+- {n: '5', text: 'private-cdn → auth-check-edge: viewer request'}
+- {n: '6', text: 'auth-check-edge → subscribers: verify JWT against JWKS'}
+- {n: '7', text: 'auth-check-edge → signing-private-key: fetch private key'}
+- {n: '8', text: 'auth-check-edge → users: Set-Cookie CloudFront-Policy/Signature/Key-Pair-Id'}
+- {n: '9', text: 'users → private-cdn: GET protected object with signed cookies'}
+- {n: '10', text: 'private-cdn → premium-content: origin fetch via OAC'}

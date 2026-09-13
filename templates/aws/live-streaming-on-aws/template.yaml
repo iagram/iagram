@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/live-streaming-on-aws/architecture-overview.html); edit freely.
+title: Live Streaming on AWS
+category: media
+tags:
+- medialive
+- mediapackage
+- cloudfront
+- hls
+- dash
+- live streaming
+source: https://docs.aws.amazon.com/solutions/latest/live-streaming-on-aws/architecture-overview.html
+description: MediaLive ingests two redundant contribution feeds and transcodes them into adaptive bitrate HLS; MediaPackage packages the output into HLS, DASH and CMAF endpoints and acts as the origin.
+  CloudFront delivers the stream to viewers, authenticating to MediaPackage with a CDN identifier header stored in Secrets Manager, and a demo player is hosted from an S3 bucket.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingest-and-transcode, type: common.group, name: ingest and transcode, parent: reg-us-east-1}
+- {id: grp-package-and-deliver, type: common.group, name: package and deliver, parent: reg-us-east-1}
+- {id: server, type: common.server, name: server}
+- {id: users, type: common.users, name: users}
+- {id: primary-input, type: aws.res.aws_medialive_input, name: primary-input, parent: grp-ingest-and-transcode, props: {name: changeme, type: changeme}}
+- id: live-channel
+  type: aws.res.aws_medialive_channel
+  name: live-channel
+  parent: grp-ingest-and-transcode
+  props:
+    channel_class: changeme
+    destinations: []
+    encoder_settings: {}
+    input_attachments: []
+    input_specification: {}
+    name: changeme
+- {id: cdn-identifier, type: aws.res.aws_secretsmanager_secret, name: cdn-identifier, parent: grp-package-and-deliver}
+- {id: live-cdn, type: aws.cloudfront_distribution, name: live-cdn, parent: grp-package-and-deliver}
+- {id: demo-player-site, type: aws.s3_bucket, name: demo-player-site, parent: grp-package-and-deliver}
+- {id: stack-custom-resources, type: aws.lambda_function, name: stack-custom-resources, parent: grp-package-and-deliver}
+edges:
+- {from: server, to: primary-input, label: RTMP/RTP/HLS primary and backup feeds, step: '1'}
+- {from: primary-input, to: live-channel, label: attached input, step: '1'}
+- {from: live-cdn, to: cdn-identifier, label: CDN authorization header}
+- {from: live-cdn, to: demo-player-site, label: static player origin, step: '5'}
+- {from: users, to: live-cdn, label: playback, step: '4'}
+steps:
+- {n: '1', text: 'server → primary-input: RTMP/RTP/HLS primary and backup feeds'}
+- {n: '4', text: 'users → live-cdn: playback'}
+- {n: '5', text: 'live-cdn → demo-player-site: static player origin'}

@@ -1,0 +1,37 @@
+# Generated from the official reference (https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-kendra-genai-index-create.html); edit freely.
+title: Bedrock Knowledge Base backed by an Amazon Kendra GenAI index
+category: ml
+tags:
+- kendra
+- genai index
+- bedrock knowledge bases
+- enterprise search
+- connectors
+source: https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-kendra-genai-index-create.html
+description: A Kendra GenAI index crawls enterprise sources such as S3 and SaaS repositories through Kendra data source connectors and provides managed semantic retrieval. A Bedrock knowledge base wraps
+  the index and is attached to a Bedrock agent so the foundation model grounds its answers on Kendra results without a separate vector database.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: policy-docs, type: aws.s3_bucket, name: policy-docs, parent: reg-us-east-1}
+- {id: genai-index, type: aws.res.aws_kendra_index, name: genai-index, parent: reg-us-east-1, props: {name: changeme, role_arn: changeme}}
+- {id: kendra-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: kendra-kb, parent: reg-us-east-1, props: {name: changeme, role_arn: changeme}}
+- {id: hr-assistant, type: aws.res.aws_bedrockagent_agent, name: hr-assistant, parent: reg-us-east-1, props: {agent_name: changeme, agent_resource_role_arn: changeme, foundation_model: changeme}}
+- {id: invoke-agent-fn, type: aws.lambda_function, name: invoke-agent-fn, parent: reg-us-east-1}
+- {id: assistant-api, type: aws.res.aws_api_gateway_rest_api, name: assistant-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: employees, type: aws.res.aws_cognito_user_pool, name: employees, parent: reg-us-east-1, props: {name: changeme}}
+edges:
+- {from: policy-docs, to: genai-index, label: kendra data source}
+- {from: saas, to: genai-index, label: SharePoint/Confluence connector sync}
+- {from: kendra-kb, to: genai-index, label: Kendra Retrieve API, step: '4'}
+- {from: hr-assistant, to: kendra-kb, label: bedrockagent agent knowledge base association}
+- {from: users, to: assistant-api, label: HTTPS, step: '1'}
+- {from: assistant-api, to: invoke-agent-fn, step: '2'}
+- {from: invoke-agent-fn, to: hr-assistant, label: InvokeAgent, step: '3'}
+steps:
+- {n: '1', text: 'users → assistant-api: HTTPS'}
+- {n: '2', text: assistant-api → invoke-agent-fn}
+- {n: '3', text: 'invoke-agent-fn → hr-assistant: InvokeAgent'}
+- {n: '4', text: 'kendra-kb → genai-index: Kendra Retrieve API'}

@@ -1,0 +1,35 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/streaming-data-solution-for-amazon-kinesis/architecture.html); edit freely.
+title: Kinesis Data Streams with API Gateway proxy and Lambda consumer
+category: data
+tags:
+- kinesis data streams
+- api gateway
+- lambda
+- streaming data solution
+source: https://docs.aws.amazon.com/solutions/latest/streaming-data-solution-for-amazon-kinesis/architecture.html
+description: Option 1 of the Streaming Data Solution for Amazon Kinesis. An API Gateway REST API acts as a proxy that writes records into a Kinesis data stream; a Lambda function consumes the stream, failed
+  batches are recorded in an SQS queue, and a CloudWatch dashboard and alarms monitor stream health.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-processing, type: common.group, name: processing, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: ingest-api, type: aws.res.aws_api_gateway_rest_api, name: ingest-api, parent: grp-ingestion, props: {name: changeme}}
+- {id: data-stream, type: aws.res.aws_kinesis_stream, name: data-stream, parent: grp-ingestion, props: {name: changeme}}
+- {id: record-processor, type: aws.lambda_function, name: record-processor, parent: grp-processing}
+- {id: failed-records-queue, type: aws.sqs_queue, name: failed-records-queue, parent: grp-processing}
+- {id: stream-dashboard, type: aws.res.aws_cloudwatch_dashboard, name: stream-dashboard, parent: reg-us-east-1, props: {dashboard_body: changeme, dashboard_name: changeme}}
+- {id: iterator-age-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: iterator-age-alarm, parent: reg-us-east-1, props: {alarm_name: changeme}}
+edges:
+- {from: client, to: ingest-api, label: PutRecord via HTTPS, step: '1'}
+- {from: ingest-api, to: data-stream, label: Kinesis proxy integration, step: '2'}
+- {from: data-stream, to: record-processor, step: '3', link: aws_lambda_event_source_mapping}
+- {from: record-processor, to: failed-records-queue, label: failed batch metadata, step: '4'}
+- {from: data-stream, to: stream-dashboard, label: metrics, step: '5'}
+steps:
+- {n: '1', text: 'client → ingest-api: PutRecord via HTTPS'}
+- {n: '2', text: 'ingest-api → data-stream: Kinesis proxy integration'}
+- {n: '3', text: data-stream → record-processor}
+- {n: '4', text: 'record-processor → failed-records-queue: failed batch metadata'}
+- {n: '5', text: 'data-stream → stream-dashboard: metrics'}

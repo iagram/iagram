@@ -1,0 +1,49 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/serverless-multi-tier-architectures-api-gateway-lambda/serverless-multi-tier-architectures-api-gateway-lambda.html); edit freely.
+title: Serverless web application with S3, CloudFront, Cognito and API Gateway
+category: web
+tags:
+- serverless web app
+- s3
+- cloudfront
+- cognito
+- api gateway
+- lambda
+- dynamodb
+source: https://docs.aws.amazon.com/whitepapers/latest/serverless-multi-tier-architectures-api-gateway-lambda/serverless-multi-tier-architectures-api-gateway-lambda.html
+description: A single-page application is served from S3 through CloudFront with WAF in front; users sign in with a Cognito user pool and present JWTs to an API Gateway REST API protected by a Cognito authorizer.
+  Lambda functions implement the logic tier and DynamoDB the data tier, so no tier runs on servers.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: spa-static-site, type: aws.s3_bucket, name: spa-static-site, parent: reg-us-east-1}
+- {id: site-cdn, type: aws.cloudfront_distribution, name: site-cdn, parent: reg-us-east-1}
+- id: edge-waf
+  type: aws.res.aws_wafv2_web_acl
+  name: edge-waf
+  parent: reg-us-east-1
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+- {id: app-users, type: aws.res.aws_cognito_user_pool, name: app-users, parent: reg-us-east-1, props: {name: changeme}}
+- {id: backend-api, type: aws.res.aws_api_gateway_rest_api, name: backend-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: request-ride, type: aws.lambda_function, name: request-ride, parent: reg-us-east-1}
+- {id: list-rides, type: aws.lambda_function, name: list-rides, parent: reg-us-east-1}
+- {id: rides, type: aws.dynamodb_table, name: rides, parent: reg-us-east-1}
+edges:
+- {from: users, to: site-cdn, label: HTTPS GET /, step: '1'}
+- {from: site-cdn, to: edge-waf, label: WAF inspection}
+- {from: site-cdn, to: spa-static-site, label: S3 origin OAC, step: '2'}
+- {from: users, to: app-users, label: 'sign in, get JWT', step: '3'}
+- {from: users, to: backend-api, label: POST /ride with Authorization JWT, step: '4'}
+- {from: backend-api, to: app-users, label: Cognito authorizer validates token, step: '5'}
+- {from: backend-api, to: request-ride, step: '6'}
+- {from: request-ride, to: rides, label: PutItem, step: '7'}
+- {from: backend-api, to: list-rides, label: GET /rides}
+- {from: list-rides, to: rides, label: Query}
+steps:
+- {n: '1', text: 'users → site-cdn: HTTPS GET /'}
+- {n: '2', text: 'site-cdn → spa-static-site: S3 origin OAC'}
+- {n: '3', text: 'users → app-users: sign in, get JWT'}
+- {n: '4', text: 'users → backend-api: POST /ride with Authorization JWT'}
+- {n: '5', text: 'backend-api → app-users: Cognito authorizer validates token'}
+- {n: '6', text: backend-api → request-ride}
+- {n: '7', text: 'request-ride → rides: PutItem'}

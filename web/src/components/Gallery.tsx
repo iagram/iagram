@@ -15,6 +15,16 @@ const CATEGORY_LABEL: Record<string, string> = {
   security: 'Security & governance',
   iot: 'IoT',
   devops: 'DevOps',
+  migration: 'Migration',
+  media: 'Media',
+  'analytics-bi': 'Analytics & BI',
+  observability: 'Observability',
+  identity: 'Identity',
+  storage: 'Storage',
+  database: 'Databases',
+  compute: 'Compute',
+  edge: 'Edge',
+  industry: 'Industry solutions',
 }
 const CATEGORY_ORDER = Object.keys(CATEGORY_LABEL)
 
@@ -38,9 +48,12 @@ export function Gallery() {
   const [provider, setProvider] = useState<string>('all')
   const [category, setCategory] = useState<string>('all')
   const [q, setQ] = useState('')
+  const PAGE = 48
+  const [limit, setLimit] = useState(PAGE)
   useEffect(() => {
     if (show) void loadTemplates()
   }, [show, loadTemplates])
+  useEffect(() => setLimit(PAGE), [provider, category, q])
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return (templates ?? []).filter(
@@ -50,10 +63,12 @@ export function Gallery() {
         (!needle || t.title.toLowerCase().includes(needle) || t.description.toLowerCase().includes(needle) || t.tags.some((x) => x.toLowerCase().includes(needle))),
     )
   }, [templates, provider, category, q])
-  const categories = useMemo(() => {
-    const seen = new Set((templates ?? []).filter((t) => provider === 'all' || t.provider === provider).map((t) => t.category))
-    return CATEGORY_ORDER.filter((c) => seen.has(c))
+  const categoryCounts = useMemo(() => {
+    const c: Record<string, number> = {}
+    for (const t of templates ?? []) if (provider === 'all' || t.provider === provider) c[t.category] = (c[t.category] ?? 0) + 1
+    return c
   }, [templates, provider])
+  const categories = useMemo(() => [...CATEGORY_ORDER.filter((c) => categoryCounts[c]), ...Object.keys(categoryCounts).filter((c) => !CATEGORY_ORDER.includes(c)).sort()], [categoryCounts])
   const counts = useMemo(() => {
     const c: Record<string, number> = {}
     for (const t of templates ?? []) c[t.provider] = (c[t.provider] ?? 0) + 1
@@ -94,7 +109,7 @@ export function Gallery() {
         </button>
         {categories.map((c) => (
           <button key={c} className={category === c ? 'chip active' : 'chip'} onClick={() => setCategory(c)}>
-            {CATEGORY_LABEL[c] ?? c}
+            {CATEGORY_LABEL[c] ?? c} <span className="count">{categoryCounts[c]}</span>
           </button>
         ))}
       </div>
@@ -110,7 +125,7 @@ export function Gallery() {
             </div>
           </article>
         )}
-        {list.map((t) => (
+        {list.slice(0, limit).map((t) => (
           <article key={t.id} className="card" onClick={() => void useTemplate(t)} title="Open a copy in the editor (the reference architecture itself is never modified)">
             <Preview doc={t.document} provider={t.provider} types={t.types} />
             <div className="card-body">
@@ -130,6 +145,13 @@ export function Gallery() {
           </article>
         ))}
       </div>
+      {list.length > limit && (
+        <div className="gallery-more">
+          <button onClick={() => setLimit((l) => l + PAGE)}>
+            Show more ({list.length - limit} remaining)
+          </button>
+        </div>
+      )}
     </div>
   )
 }

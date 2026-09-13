@@ -1,0 +1,38 @@
+# Generated from the official reference (https://docs.cloud.google.com/network-connectivity/docs/interconnect/concepts/cci-overview); edit freely.
+title: Cross-Cloud Interconnect to another cloud provider
+category: networking
+tags:
+- cross-cloud interconnect
+- multicloud
+- aws
+- azure
+- vlan attachment
+- cloud router
+- redundancy
+source: https://docs.cloud.google.com/network-connectivity/docs/interconnect/concepts/cci-overview
+description: Google provisions dedicated physical ports between its network and a remote cloud provider such as AWS or Azure in a supported location; the customer orders a primary and a redundant port in
+  different edge availability domains, then configures VLAN attachments and Cloud Router BGP sessions to the remote provider's gateway. Ninety-nine point nine percent availability needs two connections
+  in one metro and 99.99% needs pairs in two metros.
+nodes:
+- {id: dc-other-cloud-provider, type: common.datacenter, name: other-cloud-provider}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-east4}}
+- {id: vpc-multicloud-vpc, type: gcp.vpc, name: multicloud-vpc, parent: prj-net-hub, props: {cidr: 10.180.0.0/16}}
+- {id: sub-multicloud-use4, type: gcp.subnetwork, name: multicloud-use4, parent: vpc-multicloud-vpc, props: {cidr: 10.180.0.0/24, region: us-east4}}
+- {id: cci-router, type: gcp.res.google_compute_router, name: cci-router, parent: vpc-multicloud-vpc, props: {name: changeme, network: changeme}}
+- {id: cci-vlan-primary, type: gcp.res.google_compute_interconnect_attachment, name: cci-vlan-primary, parent: vpc-multicloud-vpc, props: {name: changeme, router: changeme}}
+- {id: cci-vlan-redundant, type: gcp.res.google_compute_interconnect_attachment, name: cci-vlan-redundant, parent: vpc-multicloud-vpc, props: {name: changeme, router: changeme}}
+- {id: gcp-app, type: gcp.compute_instance, name: gcp-app, parent: sub-multicloud-use4}
+- {id: allow-remote-cloud, type: gcp.firewall_rule, name: allow-remote-cloud, parent: vpc-multicloud-vpc}
+- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub}
+- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: remote-cloud-gateway, type: gcp.res.google_compute_router, name: remote-cloud-gateway, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}}
+- {id: remote-cloud-workload, type: gcp.compute_instance, name: remote-cloud-workload, parent: sub-prj-net-hub}
+edges:
+- {from: remote-cloud-gateway, to: cci-vlan-primary, label: Cross-Cloud Interconnect primary port, step: '1'}
+- {from: remote-cloud-gateway, to: cci-vlan-redundant, label: Cross-Cloud Interconnect redundant port, step: '1'}
+- {from: cci-router, to: remote-cloud-gateway, label: BGP, step: '2'}
+- {from: gcp-app, to: remote-cloud-workload, label: private inter-cloud traffic, step: '3'}
+steps:
+- {n: '1', text: 'remote-cloud-gateway → cci-vlan-primary: Cross-Cloud Interconnect primary port'}
+- {n: '2', text: 'cci-router → remote-cloud-gateway: BGP'}
+- {n: '3', text: 'gcp-app → remote-cloud-workload: private inter-cloud traffic'}

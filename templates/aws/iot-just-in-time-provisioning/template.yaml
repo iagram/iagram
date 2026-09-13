@@ -1,0 +1,41 @@
+# Generated from the official reference (https://docs.aws.amazon.com/iot/latest/developerguide/jit-provisioning.html); edit freely.
+title: IoT just-in-time provisioning with a registered CA
+category: iot
+tags:
+- iot core
+- jitp
+- ca certificate
+- provisioning template
+- x509
+source: https://docs.aws.amazon.com/iot/latest/developerguide/jit-provisioning.html
+description: A customer CA certificate is registered in IoT Core with auto-registration enabled and a JITP provisioning template attached. When a device presents a certificate signed by that CA for the
+  first time, IoT Core registers the certificate as PENDING_ACTIVATION, runs RegisterThing with values extracted from the certificate subject, creates the thing, policy and thing-group membership, and flips
+  the certificate to ACTIVE.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
+- {id: grp-trust, type: common.group, name: trust, parent: reg-eu-central-1}
+- {id: grp-registry, type: common.group, name: registry, parent: reg-eu-central-1}
+- {id: grp-audit, type: common.group, name: audit, parent: reg-eu-central-1}
+- {id: device, type: common.device, name: device}
+- {id: manufacturer-ca, type: aws.res.aws_iot_ca_certificate, name: manufacturer-ca, parent: grp-trust, props: {active: true, allow_auto_registration: true, ca_certificate_pem: changeme}}
+- {id: jitp-template, type: aws.res.aws_iot_provisioning_template, name: jitp-template, parent: grp-trust, props: {name: changeme, provisioning_role_arn: changeme, template_body: changeme}}
+- {id: bulb-thing, type: aws.res.aws_iot_thing, name: bulb-thing, parent: grp-registry, props: {name: changeme}}
+- {id: bulb-policy, type: aws.res.aws_iot_policy, name: bulb-policy, parent: grp-registry, props: {name: changeme, policy: changeme}}
+- {id: registration-events-rule, type: aws.res.aws_iot_topic_rule, name: registration-events-rule, parent: grp-audit, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: registration-auditor, type: aws.lambda_function, name: registration-auditor, parent: grp-audit}
+- {id: registration-log, type: aws.dynamodb_table, name: registration-log, parent: grp-audit}
+edges:
+- {from: device, to: manufacturer-ca, label: TLS with CA-signed device cert, step: '1'}
+- {from: manufacturer-ca, to: jitp-template, label: template associated with CA, step: '2'}
+- {from: jitp-template, to: bulb-thing, label: create thing from cert CommonName, step: '3'}
+- {from: jitp-template, to: bulb-policy, label: attach policy and activate cert, step: '4'}
+- {from: jitp-template, to: registration-events-rule, label: $aws/events/certificates/registered, step: '5'}
+- {from: registration-events-rule, to: registration-auditor, label: lambda action}
+- {from: registration-auditor, to: registration-log, label: record provisioning result}
+steps:
+- {n: '1', text: 'device → manufacturer-ca: TLS with CA-signed device cert'}
+- {n: '2', text: 'manufacturer-ca → jitp-template: template associated with CA'}
+- {n: '3', text: 'jitp-template → bulb-thing: create thing from cert CommonName'}
+- {n: '4', text: 'jitp-template → bulb-policy: attach policy and activate cert'}
+- {n: '5', text: 'jitp-template → registration-events-rule: $aws/events/certificates/registered'}

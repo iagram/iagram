@@ -1,0 +1,61 @@
+# Generated from the official reference (https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_fault_isolation_multiaz_region_system.html); edit freely.
+title: Multi-AZ three-tier workload (REL10-BP01)
+category: resilience
+tags:
+- well-architected
+- reliability
+- multi-az
+- auto scaling
+- rds multi-az
+- load balancer
+source: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_fault_isolation_multiaz_region_system.html
+description: Web and application tiers run in Auto Scaling groups spread over three Availability Zones behind an Application Load Balancer, while RDS Multi-AZ keeps a synchronous standby in a second zone
+  and S3 and DynamoDB are Multi-AZ by design. Loss of any one zone leaves capacity and data intact and the load balancer stops routing to unreachable targets.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-three-tier, type: aws.vpc, name: three-tier, parent: reg-us-east-1, props: {cidr: 10.90.0.0/16}}
+- {id: az-three-tier-a, type: aws.availability_zone, name: a, parent: vpc-three-tier, props: {zone: a}}
+- {id: sub-tt-public-a, type: aws.subnet, name: tt-public-a, parent: az-three-tier-a, props: {cidr: 10.90.0.0/24, az: a, public: true}}
+- {id: az-three-tier-b, type: aws.availability_zone, name: b, parent: vpc-three-tier, props: {zone: b}}
+- {id: sub-tt-public-b, type: aws.subnet, name: tt-public-b, parent: az-three-tier-b, props: {cidr: 10.90.1.0/24, az: b, public: true}}
+- {id: az-three-tier-c, type: aws.availability_zone, name: c, parent: vpc-three-tier, props: {zone: c}}
+- {id: sub-tt-public-c, type: aws.subnet, name: tt-public-c, parent: az-three-tier-c, props: {cidr: 10.90.2.0/24, az: c, public: true}}
+- {id: sub-tt-app-a, type: aws.subnet, name: tt-app-a, parent: az-three-tier-a, props: {cidr: 10.90.10.0/24, az: a, public: false}}
+- {id: sub-tt-app-b, type: aws.subnet, name: tt-app-b, parent: az-three-tier-b, props: {cidr: 10.90.11.0/24, az: b, public: false}}
+- {id: sub-tt-app-c, type: aws.subnet, name: tt-app-c, parent: az-three-tier-c, props: {cidr: 10.90.12.0/24, az: c, public: false}}
+- {id: sub-tt-db-a, type: aws.subnet, name: tt-db-a, parent: az-three-tier-a, props: {cidr: 10.90.20.0/24, az: a, public: false}}
+- {id: sub-tt-db-b, type: aws.subnet, name: tt-db-b, parent: az-three-tier-b, props: {cidr: 10.90.21.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: site-zone, type: aws.route53_zone, name: site-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: web-alb, type: aws.alb, name: web-alb, parent: vpc-three-tier}
+- {id: web-asg, type: aws.res.aws_autoscaling_group, name: web-asg, parent: vpc-three-tier, props: {max_size: 1, min_size: 1}}
+- {id: app-internal-alb, type: aws.alb, name: app-internal-alb, parent: vpc-three-tier}
+- {id: app-asg, type: aws.res.aws_autoscaling_group, name: app-asg, parent: vpc-three-tier, props: {max_size: 1, min_size: 1}}
+- {id: orders-db-primary, type: aws.rds_instance, name: orders-db-primary, parent: sub-tt-db-a}
+- {id: orders-db-standby, type: aws.rds_instance, name: orders-db-standby, parent: sub-tt-db-b}
+- {id: static-assets, type: aws.s3_bucket, name: static-assets, parent: reg-us-east-1}
+- {id: session-table, type: aws.dynamodb_table, name: session-table, parent: reg-us-east-1}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-tt-public-a}
+- {id: nat-b, type: aws.res.aws_nat_gateway, name: nat-b, parent: sub-tt-public-b}
+- {id: nat-c, type: aws.res.aws_nat_gateway, name: nat-c, parent: sub-tt-public-c}
+edges:
+- {from: users, to: site-zone, label: DNS (alias, step: '1'}
+- {from: site-zone, to: web-alb, step: '2'}
+- {from: web-alb, to: web-asg, label: targets in 3 AZs, step: '3'}
+- {from: web-asg, to: app-internal-alb, step: '4'}
+- {from: app-internal-alb, to: app-asg, label: targets in 3 AZs, step: '5'}
+- {from: app-asg, to: orders-db-primary, label: read/write, step: '6'}
+- {from: orders-db-primary, to: orders-db-standby, label: synchronous Multi-AZ standby}
+- {from: app-asg, to: session-table, label: Multi-AZ by default}
+- {from: web-asg, to: static-assets, label: Multi-AZ by default}
+- {from: app-asg, to: nat-a, label: per-AZ egress}
+- {from: app-asg, to: nat-b}
+- {from: app-asg, to: nat-c}
+steps:
+- {n: '1', text: 'users → site-zone: DNS (alias'}
+- {n: '2', text: site-zone → web-alb}
+- {n: '3', text: 'web-alb → web-asg: targets in 3 AZs'}
+- {n: '4', text: web-asg → app-internal-alb}
+- {n: '5', text: 'app-internal-alb → app-asg: targets in 3 AZs'}
+- {n: '6', text: 'app-asg → orders-db-primary: read/write'}

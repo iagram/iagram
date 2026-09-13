@@ -1,0 +1,78 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/containers/operating-a-multi-regional-stateless-application-using-amazon-eks/); edit freely.
+title: Multi-Region stateless application on EKS with Global Accelerator failover
+category: containers
+tags:
+- eks
+- multi-region
+- global accelerator
+- route 53
+- alb
+- failover
+source: https://aws.amazon.com/blogs/containers/operating-a-multi-regional-stateless-application-using-amazon-eks/
+description: Identical stateless deployments run on EKS clusters in two Regions, each exposed through an ALB created by the AWS Load Balancer Controller. Global Accelerator publishes two static anycast
+  IPs, sends 100 percent of traffic to the primary endpoint group and 0 percent to the secondary, and health-checks both ALBs so failover happens at the accelerator without waiting for DNS propagation;
+  Route 53 maps the application domain to the accelerator.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: primary}
+- {id: vpc-primary-vpc, type: aws.vpc, name: primary-vpc, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}}
+- {id: az-primary-vpc-a, type: aws.availability_zone, name: a, parent: vpc-primary-vpc, props: {zone: a}}
+- {id: sub-p-public-a, type: aws.subnet, name: p-public-a, parent: az-primary-vpc-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-primary-vpc-b, type: aws.availability_zone, name: b, parent: vpc-primary-vpc, props: {zone: b}}
+- {id: sub-p-public-b, type: aws.subnet, name: p-public-b, parent: az-primary-vpc-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-p-private-a, type: aws.subnet, name: p-private-a, parent: az-primary-vpc-a, props: {cidr: 10.0.16.0/20, az: a, public: false}}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: secondary}
+- {id: vpc-secondary-vpc, type: aws.vpc, name: secondary-vpc, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-secondary-vpc-a, type: aws.availability_zone, name: a, parent: vpc-secondary-vpc, props: {zone: a}}
+- {id: sub-s-public-a, type: aws.subnet, name: s-public-a, parent: az-secondary-vpc-a, props: {cidr: 10.1.0.0/24, az: a, public: true}}
+- {id: az-secondary-vpc-b, type: aws.availability_zone, name: b, parent: vpc-secondary-vpc, props: {zone: b}}
+- {id: sub-s-public-b, type: aws.subnet, name: s-public-b, parent: az-secondary-vpc-b, props: {cidr: 10.1.1.0/24, az: b, public: true}}
+- {id: sub-s-private-a, type: aws.subnet, name: s-private-a, parent: az-secondary-vpc-a, props: {cidr: 10.1.16.0/20, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: example-zone, type: aws.route53_zone, name: example-zone, parent: reg-us-west-2, props: {domain: example.com}}
+- {id: app-accelerator, type: aws.res.aws_globalaccelerator_accelerator, name: app-accelerator, parent: reg-us-west-2, props: {name: changeme}}
+- {id: primary-igw, type: aws.res.aws_internet_gateway, name: primary-igw, parent: vpc-primary-vpc}
+- {id: primary-alb, type: aws.alb, name: primary-alb, parent: vpc-primary-vpc}
+- {id: primary-cluster, type: aws.eks_cluster, name: primary-cluster, parent: vpc-primary-vpc}
+- id: primary-nodes
+  type: aws.res.aws_eks_node_group
+  name: primary-nodes
+  parent: primary-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- {id: app-image, type: aws.res.aws_ecr_repository, name: app-image, parent: reg-us-west-2, props: {name: changeme}}
+- {id: secondary-igw, type: aws.res.aws_internet_gateway, name: secondary-igw, parent: vpc-secondary-vpc}
+- {id: secondary-alb, type: aws.alb, name: secondary-alb, parent: vpc-secondary-vpc}
+- {id: secondary-cluster, type: aws.eks_cluster, name: secondary-cluster, parent: vpc-secondary-vpc}
+- id: secondary-nodes
+  type: aws.res.aws_eks_node_group
+  name: secondary-nodes
+  parent: primary-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- {id: app-image-replica, type: aws.res.aws_ecr_repository, name: app-image-replica, parent: reg-us-east-1, props: {name: changeme}}
+edges:
+- {from: users, to: example-zone, label: DNS, step: '1'}
+- {from: example-zone, to: app-accelerator, label: alias to accelerator DNS name, step: '2'}
+- {from: users, to: app-accelerator, label: 'TCP :443 to anycast IPs', step: '3'}
+- {from: app-accelerator, to: primary-alb, label: endpoint group traffic dial 100, step: '4'}
+- {from: app-accelerator, to: secondary-alb, label: endpoint group traffic dial 0 (failover)}
+- {from: primary-alb, to: primary-nodes, label: Ingress target group (pod IPs), step: '5'}
+- {from: secondary-alb, to: secondary-nodes, label: Ingress target group (pod IPs)}
+- {from: primary-cluster, to: primary-alb, label: AWS Load Balancer Controller}
+- {from: secondary-cluster, to: secondary-alb, label: AWS Load Balancer Controller}
+- {from: app-image, to: app-image-replica, label: ECR cross-Region replication}
+- {from: app-image, to: primary-nodes, label: image pull}
+- {from: app-image-replica, to: secondary-nodes, label: image pull}
+steps:
+- {n: '1', text: 'users → example-zone: DNS'}
+- {n: '2', text: 'example-zone → app-accelerator: alias to accelerator DNS name'}
+- {n: '3', text: 'users → app-accelerator: TCP :443 to anycast IPs'}
+- {n: '4', text: 'app-accelerator → primary-alb: endpoint group traffic dial 100'}
+- {n: '5', text: 'primary-alb → primary-nodes: Ingress target group (pod IPs)'}

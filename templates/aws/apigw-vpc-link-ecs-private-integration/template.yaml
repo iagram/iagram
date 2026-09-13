@@ -1,0 +1,60 @@
+# Generated from the official reference (https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-private-integration.html); edit freely.
+title: HTTP API with a VPC Link private integration to ECS services
+category: containers
+tags:
+- api gateway
+- http api
+- vpc link
+- ecs
+- fargate
+- cloud map
+- alb
+source: https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-private-integration.html
+description: An API Gateway HTTP API terminates client requests and forwards them through a VPC Link into private subnets, either to an internal ALB in front of ECS services or directly to task IPs registered
+  in a Cloud Map service. The ECS tasks never receive internet traffic, and API Gateway supplies authorization, throttling and routing while a single VPC link fans out to many backend routes.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: client, type: common.client, name: client}
+- {id: shop-http-api, type: aws.res.aws_apigatewayv2_api, name: shop-http-api, parent: reg-us-east-1, props: {name: changeme, protocol_type: changeme}}
+- id: private-vpc-link
+  type: aws.res.aws_apigatewayv2_vpc_link
+  name: private-vpc-link
+  parent: sub-private-a
+  props:
+    name: changeme
+    security_group_ids: []
+    subnet_ids: []
+- {id: internal-alb, type: aws.alb, name: internal-alb, parent: vpc-main}
+- {id: orders-tg, type: aws.res.aws_lb_target_group, name: orders-tg, parent: vpc-main}
+- {id: api-cluster, type: aws.res.aws_ecs_cluster, name: api-cluster, parent: vpc-main, props: {name: changeme}}
+- {id: orders-service, type: aws.res.aws_ecs_service, name: orders-service, parent: api-cluster, props: {name: changeme}}
+- {id: inventory-service, type: aws.res.aws_ecs_service, name: inventory-service, parent: api-cluster, props: {name: changeme}}
+- {id: api-namespace, type: aws.res.aws_service_discovery_private_dns_namespace, name: api-namespace, parent: vpc-main, props: {name: changeme, vpc: changeme}}
+- {id: inventory-discovery, type: aws.res.aws_service_discovery_service, name: inventory-discovery, parent: reg-us-east-1, props: {name: changeme}}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: orders-aurora, type: aws.res.aws_rds_cluster, name: orders-aurora, parent: sub-private-b, props: {engine: changeme}}
+edges:
+- {from: client, to: shop-http-api, label: HTTPS /orders, step: '1'}
+- {from: shop-http-api, to: private-vpc-link, label: private integration, step: '2'}
+- {from: private-vpc-link, to: internal-alb, label: route /orders -> ALB listener, step: '3'}
+- {from: internal-alb, to: orders-tg, step: '4'}
+- {from: orders-tg, to: orders-service, label: 'HTTP :8080', step: '5'}
+- {from: private-vpc-link, to: inventory-discovery, label: route /inventory -> Cloud Map DiscoverInstances, step: '3'}
+- {from: inventory-discovery, to: inventory-service, label: healthy task IPs (SRV), step: '5'}
+- {from: inventory-service, to: api-namespace, label: registers tasks}
+- {from: orders-service, to: orders-aurora, label: SQL, step: '6'}
+- {from: orders-service, to: nat-a, label: outbound}
+steps:
+- {n: '1', text: 'client → shop-http-api: HTTPS /orders'}
+- {n: '2', text: 'shop-http-api → private-vpc-link: private integration'}
+- {n: '3', text: 'private-vpc-link → internal-alb: route /orders -> ALB listener'}
+- {n: '4', text: internal-alb → orders-tg}
+- {n: '5', text: 'orders-tg → orders-service: HTTP :8080'}
+- {n: '6', text: 'orders-service → orders-aurora: SQL'}

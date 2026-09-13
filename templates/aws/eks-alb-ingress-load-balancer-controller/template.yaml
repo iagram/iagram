@@ -1,0 +1,68 @@
+# Generated from the official reference (https://docs.aws.amazon.com/eks/latest/userguide/alb-ingress.html); edit freely.
+title: EKS ingress with the AWS Load Balancer Controller and an ALB
+category: containers
+tags:
+- eks
+- aws load balancer controller
+- ingress
+- alb
+- ip targets
+- acm
+source: https://docs.aws.amazon.com/eks/latest/userguide/alb-ingress.html
+description: The AWS Load Balancer Controller, running in the cluster with an IAM role for its service account, watches Kubernetes Ingress objects and creates an internet-facing ALB with a target group
+  per backend; in IP target mode the ALB sends traffic straight to pod IPs assigned by the VPC CNI. An ACM certificate provides TLS on the listener and a Route 53 alias record points the application hostname
+  at the ALB.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
+- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-eu-central-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-eks-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-eks-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.0.16.0/20, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.0.32.0/20, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: example-zone, type: aws.route53_zone, name: example-zone, parent: reg-eu-central-1, props: {domain: example.com}}
+- {id: app-certificate, type: aws.res.aws_acm_certificate, name: app-certificate, parent: reg-eu-central-1}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-eks}
+- {id: ingress-alb, type: aws.alb, name: ingress-alb, parent: vpc-eks}
+- {id: web-pods-tg, type: aws.res.aws_lb_target_group, name: web-pods-tg, parent: vpc-eks}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: web-cluster, type: aws.eks_cluster, name: web-cluster, parent: vpc-eks}
+- id: web-nodes
+  type: aws.res.aws_eks_node_group
+  name: web-nodes
+  parent: web-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- {id: lb-controller-role, type: aws.res.aws_iam_role, name: lb-controller-role, parent: reg-eu-central-1, props: {assume_role_policy: changeme}}
+- id: cluster-oidc
+  type: aws.res.aws_iam_openid_connect_provider
+  name: cluster-oidc
+  parent: reg-eu-central-1
+  props:
+    client_id_list: []
+    url: changeme
+edges:
+- {from: users, to: example-zone, label: DNS app.example.com, step: '1'}
+- {from: example-zone, to: ingress-alb, label: alias record, step: '2'}
+- {from: users, to: igw, label: HTTPS, step: '3'}
+- {from: igw, to: ingress-alb, step: '4'}
+- {from: app-certificate, to: ingress-alb, label: TLS listener certificate}
+- {from: ingress-alb, to: web-pods-tg, label: host/path rule from Ingress, step: '5'}
+- {from: web-pods-tg, to: web-nodes, label: IP targets = pod IPs, step: '6'}
+- {from: web-cluster, to: ingress-alb, label: controller reconciles Ingress into ALB}
+- {from: lb-controller-role, to: web-cluster, label: IRSA for aws-load-balancer-controller}
+- {from: cluster-oidc, to: lb-controller-role, label: trust}
+- {from: web-nodes, to: nat-a, label: outbound}
+steps:
+- {n: '1', text: 'users → example-zone: DNS app.example.com'}
+- {n: '2', text: 'example-zone → ingress-alb: alias record'}
+- {n: '3', text: 'users → igw: HTTPS'}
+- {n: '4', text: igw → ingress-alb}
+- {n: '5', text: 'ingress-alb → web-pods-tg: host/path rule from Ingress'}
+- {n: '6', text: 'web-pods-tg → web-nodes: IP targets = pod IPs'}

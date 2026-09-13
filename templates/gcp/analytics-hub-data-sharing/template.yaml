@@ -1,0 +1,28 @@
+# Generated from the official reference (https://docs.cloud.google.com/bigquery/docs/analytics-hub-introduction); edit freely.
+title: Cross-organization data sharing with BigQuery Analytics Hub
+category: data
+tags:
+- analytics hub
+- bigquery sharing
+- data exchange
+- linked dataset
+source: https://docs.cloud.google.com/bigquery/docs/analytics-hub-introduction
+description: A publisher project curates a BigQuery dataset and a Pub/Sub topic and lists them in an Analytics Hub data exchange. Subscriber projects create linked datasets and linked subscriptions that
+  read the shared data in place, so publishers keep a single copy while subscribers pay only for their own queries.
+nodes:
+- {id: prj-data-publisher, type: gcp.project, name: data-publisher, props: {project_id: data-publisher-123456, project: changeme, region: us}}
+- {id: prj-data-subscriber, type: gcp.project, name: data-subscriber, props: {project_id: data-subscriber-123456, project: changeme, region: us}}
+- {id: users, type: common.users, name: users}
+- {id: curated-market-dataset, type: gcp.bigquery_dataset, name: curated-market-dataset, parent: prj-data-publisher}
+- {id: market-ticks-topic, type: gcp.pubsub_topic, name: market-ticks-topic, parent: prj-data-publisher}
+- {id: market-data-exchange, type: gcp.res.google_bigquery_analytics_hub_data_exchange, name: market-data-exchange, parent: prj-data-publisher, props: {data_exchange_id: changeme, display_name: changeme,
+    location: westeurope}}
+- {id: linked-market-dataset, type: gcp.bigquery_dataset, name: linked-market-dataset, parent: prj-data-subscriber}
+- {id: linked-ticks-subscription, type: gcp.res.google_pubsub_subscription, name: linked-ticks-subscription, parent: prj-data-subscriber, props: {name: changeme, topic: changeme}}
+- {id: subscriber-analytics-dataset, type: gcp.bigquery_dataset, name: subscriber-analytics-dataset, parent: prj-data-subscriber}
+edges:
+- {from: subscriber-analytics-dataset, to: linked-market-dataset, label: join shared data, step: '6'}
+- {from: users, to: subscriber-analytics-dataset, label: query, step: '7'}
+steps:
+- {n: '6', text: 'subscriber-analytics-dataset → linked-market-dataset: join shared data'}
+- {n: '7', text: 'users → subscriber-analytics-dataset: query'}

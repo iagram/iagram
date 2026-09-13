@@ -1,0 +1,33 @@
+# Generated from the official reference (https://docs.cloud.google.com/vertex-ai/docs/pipelines/introduction); edit freely.
+title: Data preparation pipelines with Vertex AI Pipelines and Dataflow
+category: ml
+tags:
+- vertex ai pipelines
+- kubeflow
+- dataflow
+- bigquery
+- feature engineering
+- metadata
+source: https://docs.cloud.google.com/vertex-ai/docs/pipelines/introduction
+description: A Kubeflow pipeline compiled to Vertex AI Pipelines pulls raw data from BigQuery and Cloud Storage, launches a Dataflow job to validate and transform it at scale, and materializes a training
+  dataset in Vertex AI. Every artifact and execution is tracked in Vertex ML Metadata, pipeline components run from images in Artifact Registry, and Cloud Scheduler triggers recurring runs.
+nodes:
+- {id: prj-ml-platform, type: gcp.project, name: ml-platform, props: {project_id: ml-platform-123456, project: changeme, region: us-central1}}
+- {id: grp-sources, type: common.group, name: sources, parent: prj-ml-platform}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: prj-ml-platform}
+- {id: grp-outputs, type: common.group, name: outputs, parent: prj-ml-platform}
+- {id: users, type: common.users, name: users}
+- {id: raw-training-dataset, type: gcp.bigquery_dataset, name: raw-training-dataset, parent: grp-sources}
+- {id: raw-images-bucket, type: gcp.storage_bucket, name: raw-images-bucket, parent: grp-sources}
+- {id: weekly-pipeline-trigger, type: gcp.res.google_cloud_scheduler_job, name: weekly-pipeline-trigger, parent: grp-pipeline, props: {name: changeme}}
+- {id: submit-pipeline-function, type: gcp.res.google_cloudfunctions2_function, name: submit-pipeline-function, parent: grp-pipeline, props: {location: westeurope, name: changeme}}
+- {id: pipeline-components-repo, type: gcp.res.google_artifact_registry_repository, name: pipeline-components-repo, parent: grp-pipeline, props: {format: changeme, repository_id: changeme}}
+- {id: pipeline-root-bucket, type: gcp.storage_bucket, name: pipeline-root-bucket, parent: grp-pipeline}
+- {id: prepared-training-dataset, type: gcp.res.google_vertex_ai_dataset, name: prepared-training-dataset, parent: grp-outputs, props: {display_name: changeme, metadata_schema_uri: changeme}}
+- {id: features-dataset, type: gcp.bigquery_dataset, name: features-dataset, parent: grp-outputs}
+edges:
+- {from: weekly-pipeline-trigger, to: submit-pipeline-function, label: cron, step: '1'}
+- {from: submit-pipeline-function, to: pipeline-root-bucket, label: submit compiled pipeline, step: '2'}
+steps:
+- {n: '1', text: 'weekly-pipeline-trigger → submit-pipeline-function: cron'}
+- {n: '2', text: 'submit-pipeline-function → pipeline-root-bucket: submit compiled pipeline'}

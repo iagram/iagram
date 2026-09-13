@@ -1,0 +1,37 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/image-optimization-using-amazon-cloudfront-and-aws-lambda/); edit freely.
+title: On-the-fly image optimization with CloudFront and Lambda
+category: edge
+tags:
+- cloudfront
+- image resizing
+- lambda function url
+- s3
+- origin failover
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/image-optimization-using-amazon-cloudfront-and-aws-lambda/
+description: A CloudFront Function normalizes the requested width and format on the viewer request; CloudFront first tries an S3 bucket of already transformed images and, on a 403 miss, fails over to a
+  Lambda function URL. The function fetches the original from S3, resizes it with Sharp, stores the variant back in the transformed bucket and returns it for caching.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: image-cdn, type: aws.cloudfront_distribution, name: image-cdn, parent: reg-us-east-1}
+- {id: normalize-image-url, type: aws.res.aws_cloudfront_function, name: normalize-image-url, parent: reg-us-east-1, props: {code: changeme, name: changeme, runtime: changeme}}
+- {id: transformed-images, type: aws.s3_bucket, name: transformed-images, parent: reg-us-east-1}
+- {id: image-transformer, type: aws.lambda_function, name: image-transformer, parent: reg-us-east-1}
+- {id: original-images, type: aws.s3_bucket, name: original-images, parent: reg-us-east-1}
+- {id: transformer-logs, type: aws.res.aws_cloudwatch_log_group, name: transformer-logs, parent: reg-us-east-1}
+edges:
+- {from: users, to: image-cdn, label: 'GET /photo.jpg?width=400&format=auto', step: '1'}
+- {from: image-cdn, to: normalize-image-url, label: viewer request rewrite, step: '2'}
+- {from: image-cdn, to: transformed-images, label: primary origin, step: '3'}
+- {from: image-cdn, to: image-transformer, label: origin failover to function URL, step: '4'}
+- {from: image-transformer, to: original-images, label: GetObject original, step: '5'}
+- {from: image-transformer, to: transformed-images, label: PutObject variant, step: '6'}
+- {from: image-transformer, to: transformer-logs, label: logs}
+steps:
+- {n: '1', text: 'users → image-cdn: GET /photo.jpg?width=400&format=auto'}
+- {n: '2', text: 'image-cdn → normalize-image-url: viewer request rewrite'}
+- {n: '3', text: 'image-cdn → transformed-images: primary origin'}
+- {n: '4', text: 'image-cdn → image-transformer: origin failover to function URL'}
+- {n: '5', text: 'image-transformer → original-images: GetObject original'}
+- {n: '6', text: 'image-transformer → transformed-images: PutObject variant'}

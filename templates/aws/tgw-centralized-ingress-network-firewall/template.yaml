@@ -1,0 +1,50 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/using-network-firewall-for-centralized-ingress.html); edit freely.
+title: Centralized ingress with AWS Network Firewall and a shared ALB
+category: networking
+tags:
+- centralized ingress
+- network firewall
+- application load balancer
+- transit gateway
+- deep packet inspection
+source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/using-network-firewall-for-centralized-ingress.html
+description: An ingress VPC exposes a single internet-facing Application Load Balancer; the internet gateway route table (ingress routing) forces inbound packets through AWS Network Firewall endpoints before
+  they reach the load balancer subnets. The ALB terminates TLS and forwards to application targets in spoke VPCs across the Transit Gateway, so spoke VPCs stay private and share one inspected entry point.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
+- {id: vpc-ingress, type: aws.vpc, name: ingress, parent: reg-eu-central-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-ingress-a, type: aws.availability_zone, name: a, parent: vpc-ingress, props: {zone: a}}
+- {id: sub-ingress-firewall-a, type: aws.subnet, name: ingress-firewall-a, parent: az-ingress-a, props: {cidr: 10.0.0.0/28, az: a, public: false}}
+- {id: sub-ingress-alb-a, type: aws.subnet, name: ingress-alb-a, parent: az-ingress-a, props: {cidr: 10.0.1.0/24, az: a, public: true}}
+- {id: az-ingress-b, type: aws.availability_zone, name: b, parent: vpc-ingress, props: {zone: b}}
+- {id: sub-ingress-alb-b, type: aws.subnet, name: ingress-alb-b, parent: az-ingress-b, props: {cidr: 10.0.2.0/24, az: b, public: true}}
+- {id: sub-ingress-tgw-a, type: aws.subnet, name: ingress-tgw-a, parent: az-ingress-a, props: {cidr: 10.0.3.0/28, az: a, public: false}}
+- {id: vpc-spoke-web, type: aws.vpc, name: spoke-web, parent: reg-eu-central-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-spoke-web-a, type: aws.availability_zone, name: a, parent: vpc-spoke-web, props: {zone: a}}
+- {id: sub-web-private-a, type: aws.subnet, name: web-private-a, parent: az-spoke-web-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: az-spoke-web-b, type: aws.availability_zone, name: b, parent: vpc-spoke-web, props: {zone: b}}
+- {id: sub-web-private-b, type: aws.subnet, name: web-private-b, parent: az-spoke-web-b, props: {cidr: 10.1.2.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-eu-central-1}
+- {id: ingress-igw, type: aws.res.aws_internet_gateway, name: ingress-igw, parent: vpc-ingress}
+- {id: ingress-firewall, type: aws.res.aws_networkfirewall_firewall, name: ingress-firewall, parent: sub-ingress-firewall-a, props: {firewall_policy_arn: changeme, name: changeme}}
+- {id: ingress-alb-application, type: aws.alb, name: ingress-alb-application, parent: az-ingress-a}
+- {id: web-cert, type: aws.res.aws_acm_certificate, name: web-cert, parent: reg-eu-central-1}
+- {id: web-1, type: aws.ec2_instance, name: web-1, parent: sub-web-private-a}
+- {id: web-2, type: aws.ec2_instance, name: web-2, parent: sub-web-private-b}
+edges:
+- {from: hub-tgw, to: vpc-ingress, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-spoke-web, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: users, to: ingress-igw, label: HTTPS, step: '1'}
+- {from: ingress-igw, to: ingress-firewall, label: IGW ingress route to firewall endpoint, step: '2'}
+- {from: ingress-firewall, to: ingress-alb-application, label: inspected, step: '3'}
+- {from: ingress-alb-application, to: hub-tgw, label: IP targets in spoke, step: '4'}
+- {from: hub-tgw, to: web-1, step: '5'}
+- {from: web-cert, to: ingress-alb-application, label: TLS certificate}
+steps:
+- {n: '1', text: 'users → ingress-igw: HTTPS'}
+- {n: '2', text: 'ingress-igw → ingress-firewall: IGW ingress route to firewall endpoint'}
+- {n: '3', text: 'ingress-firewall → ingress-alb-application: inspected'}
+- {n: '4', text: 'ingress-alb-application → hub-tgw: IP targets in spoke'}
+- {n: '5', text: hub-tgw → web-1}

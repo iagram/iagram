@@ -1,0 +1,54 @@
+# Generated from the official reference (https://docs.aws.amazon.com/iot-twinmaker/latest/guide/what-is-twinmaker.html); edit freely.
+title: Digital twin with IoT TwinMaker, SiteWise and Kinesis Video Streams
+category: iot
+tags:
+- iot twinmaker
+- digital twin
+- sitewise
+- kinesis video streams
+- grafana
+- scene composer
+source: https://docs.aws.amazon.com/iot-twinmaker/latest/guide/what-is-twinmaker.html
+description: A TwinMaker workspace stores its entity-component knowledge graph and 3D scene assets in an S3 bucket, with built-in connectors to SiteWise time series and Kinesis Video Streams camera feeds
+  plus a Lambda-backed custom connector to Timestream telemetry. Operators view the scenes with data overlays in Amazon Managed Grafana through the TwinMaker plugin.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-data-sources, type: common.group, name: data sources, parent: reg-us-east-1}
+- {id: grp-twin, type: common.group, name: twin, parent: reg-us-east-1}
+- {id: grp-visualisation, type: common.group, name: visualisation, parent: reg-us-east-1}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: plant-gateway, type: aws.res.aws_iot_thing, name: plant-gateway, parent: grp-data-sources, props: {name: changeme}}
+- {id: telemetry-rule, type: aws.res.aws_iot_topic_rule, name: telemetry-rule, parent: grp-data-sources, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: telemetry-tsdb, type: aws.res.aws_timestreamwrite_database, name: telemetry-tsdb, parent: grp-data-sources, props: {database_name: changeme}}
+- {id: line-camera, type: aws.res.aws_kinesis_video_stream, name: line-camera, parent: grp-data-sources, props: {name: changeme}}
+- {id: twinmaker-workspace-bucket, type: aws.s3_bucket, name: twinmaker-workspace-bucket, parent: grp-twin}
+- {id: timestream-connector, type: aws.lambda_function, name: timestream-connector, parent: grp-twin}
+- {id: alarm-connector, type: aws.lambda_function, name: alarm-connector, parent: grp-twin}
+- id: twin-dashboards
+  type: aws.res.aws_grafana_workspace
+  name: twin-dashboards
+  parent: grp-visualisation
+  props:
+    account_access_type: changeme
+    authentication_providers: []
+    permission_type: changeme
+- {id: twin-alarms, type: aws.res.aws_sns_topic, name: twin-alarms, parent: grp-visualisation}
+edges:
+- {from: device, to: plant-gateway, label: equipment telemetry, step: '1'}
+- {from: plant-gateway, to: telemetry-rule, label: MQTT}
+- {from: telemetry-rule, to: telemetry-tsdb, label: timestream action, step: '2'}
+- {from: device, to: line-camera, label: RTSP camera via KVS producer, step: '2'}
+- {from: twinmaker-workspace-bucket, to: timestream-connector, label: component data reader, step: '3'}
+- {from: timestream-connector, to: telemetry-tsdb, label: query time-series property, step: '3'}
+- {from: twinmaker-workspace-bucket, to: line-camera, label: built-in video component}
+- {from: alarm-connector, to: twin-alarms, label: alarm notifications}
+- {from: twinmaker-workspace-bucket, to: alarm-connector, label: alarm component}
+- {from: users, to: twin-dashboards, label: 3D scene with tags, step: '4'}
+- {from: twin-dashboards, to: twinmaker-workspace-bucket, label: TwinMaker Grafana plugin queries, step: '4'}
+steps:
+- {n: '1', text: 'device → plant-gateway: equipment telemetry'}
+- {n: '2', text: 'telemetry-rule → telemetry-tsdb: timestream action'}
+- {n: '3', text: 'twinmaker-workspace-bucket → timestream-connector: component data reader'}
+- {n: '4', text: 'users → twin-dashboards: 3D scene with tags'}

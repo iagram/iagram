@@ -1,0 +1,39 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/introducing-aws-lambda-destinations/); edit freely.
+title: Asynchronous Lambda invocation with destinations
+category: serverless
+tags:
+- lambda destinations
+- asynchronous invocation
+- eventbridge
+- sqs
+- error handling
+source: https://aws.amazon.com/blogs/compute/introducing-aws-lambda-destinations/
+description: An HTTP API invokes a Lambda function asynchronously; the function's OnSuccess destination sends the execution record to an EventBridge bus and its OnFailure destination sends it to an SQS
+  queue, with no code in the function for either. A rule on the bus triggers a notification function and a triage function drains the failure queue.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: client, type: common.client, name: client}
+- {id: ingest-api, type: aws.res.aws_apigatewayv2_api, name: ingest-api, parent: reg-us-east-1, props: {name: changeme, protocol_type: changeme}}
+- {id: process-order, type: aws.lambda_function, name: process-order, parent: reg-us-east-1}
+- {id: order-results-bus, type: aws.res.aws_cloudwatch_event_bus, name: order-results-bus, parent: reg-us-east-1, props: {name: changeme}}
+- {id: order-processed, type: aws.res.aws_cloudwatch_event_rule, name: order-processed, parent: reg-us-east-1}
+- {id: notify-customer, type: aws.lambda_function, name: notify-customer, parent: reg-us-east-1}
+- {id: process-failures, type: aws.sqs_queue, name: process-failures, parent: reg-us-east-1}
+- {id: triage-failures, type: aws.lambda_function, name: triage-failures, parent: reg-us-east-1}
+- {id: orders, type: aws.dynamodb_table, name: orders, parent: reg-us-east-1}
+edges:
+- {from: client, to: ingest-api, label: POST /orders, step: '1'}
+- {from: ingest-api, to: process-order, label: InvocationType Event, step: '2'}
+- {from: process-order, to: orders, label: PutItem, step: '3'}
+- {from: process-order, to: order-results-bus, label: OnSuccess destination, step: '4'}
+- {from: process-order, to: process-failures, label: OnFailure destination after retries}
+- {from: order-results-bus, to: order-processed, step: '5'}
+- {from: order-processed, to: notify-customer, link: aws_cloudwatch_event_target}
+- {from: process-failures, to: triage-failures, link: aws_lambda_event_source_mapping}
+steps:
+- {n: '1', text: 'client → ingest-api: POST /orders'}
+- {n: '2', text: 'ingest-api → process-order: InvocationType Event'}
+- {n: '3', text: 'process-order → orders: PutItem'}
+- {n: '4', text: 'process-order → order-results-bus: OnSuccess destination'}
+- {n: '5', text: order-results-bus → order-processed}

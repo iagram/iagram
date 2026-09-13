@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.aws.amazon.com/config/latest/developerguide/remediation.html); edit freely.
+title: Config rules with automatic SSM remediation
+category: security
+tags:
+- aws config
+- conformance pack
+- remediation
+- ssm automation
+- compliance
+- sns
+source: https://docs.aws.amazon.com/config/latest/developerguide/remediation.html
+description: Config records resource configuration and evaluates managed and custom rules; when a resource becomes non-compliant, a remediation configuration invokes a Systems Manager Automation runbook
+  under an IAM role that fixes the resource, for example re-enabling S3 public access block or EBS encryption. Compliance changes are published to SNS and configuration history is delivered to an S3 bucket.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: recorder, type: aws.res.aws_config_configuration_recorder, name: recorder, parent: reg-us-east-1, props: {role_arn: changeme}}
+- {id: delivery-channel, type: aws.res.aws_config_delivery_channel, name: delivery-channel, parent: reg-us-east-1, props: {s3_bucket_name: changeme}}
+- {id: security-best-practices-pack, type: aws.res.aws_config_conformance_pack, name: security-best-practices-pack, parent: reg-us-east-1, props: {name: changeme}}
+- id: s3-public-read-prohibited
+  type: aws.res.aws_config_config_rule
+  name: s3-public-read-prohibited
+  parent: reg-us-east-1
+  props: {name: changeme, source: {}}
+- {id: disable-public-access-runbook, type: aws.res.aws_ssm_document, name: disable-public-access-runbook, parent: reg-us-east-1, props: {content: changeme, document_type: changeme, name: changeme}}
+- {id: remediation-role, type: aws.res.aws_iam_role, name: remediation-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+- {id: config-history, type: aws.s3_bucket, name: config-history, parent: reg-us-east-1}
+- {id: compliance-changes, type: aws.res.aws_sns_topic, name: compliance-changes, parent: reg-us-east-1}
+- {id: noncompliant-bucket, type: aws.s3_bucket, name: noncompliant-bucket, parent: reg-us-east-1}
+edges:
+- {from: recorder, to: noncompliant-bucket, label: record configuration, step: '1'}
+- {from: recorder, to: s3-public-read-prohibited, label: evaluate, step: '2'}
+- {from: security-best-practices-pack, to: s3-public-read-prohibited, label: contains rule}
+- {from: disable-public-access-runbook, to: remediation-role, label: assumes}
+- {from: disable-public-access-runbook, to: noncompliant-bucket, label: PutPublicAccessBlock, step: '5'}
+- {from: delivery-channel, to: config-history, label: configuration snapshots}
+- {from: delivery-channel, to: compliance-changes, label: compliance notifications, step: '6'}
+- {from: compliance-changes, to: users, label: alert}
+steps:
+- {n: '1', text: 'recorder → noncompliant-bucket: record configuration'}
+- {n: '2', text: 'recorder → s3-public-read-prohibited: evaluate'}
+- {n: '5', text: 'disable-public-access-runbook → noncompliant-bucket: PutPublicAccessBlock'}
+- {n: '6', text: 'delivery-channel → compliance-changes: compliance notifications'}

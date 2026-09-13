@@ -1,0 +1,51 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/security/how-to-improve-security-incident-investigations-using-amazon-detective-finding-groups/); edit freely.
+title: Investigating GuardDuty findings with Detective finding groups
+category: security
+tags:
+- detective
+- guardduty
+- investigation
+- behavior graph
+- finding groups
+- cloudtrail
+- vpc flow logs
+source: https://aws.amazon.com/blogs/security/how-to-improve-security-incident-investigations-using-amazon-detective-finding-groups/
+description: Detective in the security account ingests CloudTrail management events, VPC flow logs, EKS audit logs and GuardDuty findings from member accounts into a behavior graph. Finding groups correlate
+  related GuardDuty findings and the IAM roles, instances and IP addresses they touch so analysts can pivot from a Security Hub finding into a scoped investigation.
+nodes:
+- {id: acct-security-tooling, type: aws.account, name: security-tooling}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1-2, props: {cidr: 10.80.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.80.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: behavior-graph, type: aws.res.aws_detective_graph, name: behavior-graph, parent: acct-security-tooling}
+- {id: detective-admin, type: aws.res.aws_detective_organization_admin_account, name: detective-admin, parent: acct-security-tooling, props: {account_id: changeme}}
+- {id: guardduty-admin, type: aws.res.aws_guardduty_detector, name: guardduty-admin, parent: acct-security-tooling}
+- {id: security-hub, type: aws.res.aws_securityhub_account, name: security-hub, parent: acct-security-tooling}
+- {id: guardduty-member, type: aws.res.aws_guardduty_detector, name: guardduty-member, parent: acct-workload}
+- {id: workload-trail, type: aws.res.aws_cloudtrail, name: workload-trail, parent: acct-workload, props: {name: changeme, s3_bucket_name: changeme}}
+- {id: app-flow-log, type: aws.res.aws_flow_log, name: app-flow-log, parent: vpc-app}
+- {id: compromised-instance, type: aws.ec2_instance, name: compromised-instance, parent: sub-private-a}
+- {id: suspicious-role, type: aws.res.aws_iam_role, name: suspicious-role, parent: acct-workload, props: {assume_role_policy: changeme}}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.80.251.0/24, az: b, public: false}}
+edges:
+- {from: guardduty-member, to: compromised-instance, label: monitors, step: '1'}
+- {from: guardduty-member, to: guardduty-admin, label: findings, step: '2'}
+- {from: guardduty-admin, to: security-hub, label: findings, step: '3'}
+- {from: guardduty-admin, to: behavior-graph, label: findings ingest, step: '4'}
+- {from: workload-trail, to: behavior-graph, label: CloudTrail events}
+- {from: app-flow-log, to: behavior-graph, label: VPC flow logs}
+- {from: suspicious-role, to: behavior-graph, label: entity in graph}
+- {from: users, to: security-hub, label: triage finding, step: '5'}
+- {from: users, to: behavior-graph, label: investigate finding group, step: '6'}
+steps:
+- {n: '1', text: 'guardduty-member → compromised-instance: monitors'}
+- {n: '2', text: 'guardduty-member → guardduty-admin: findings'}
+- {n: '3', text: 'guardduty-admin → security-hub: findings'}
+- {n: '4', text: 'guardduty-admin → behavior-graph: findings ingest'}
+- {n: '5', text: 'users → security-hub: triage finding'}
+- {n: '6', text: 'users → behavior-graph: investigate finding group'}

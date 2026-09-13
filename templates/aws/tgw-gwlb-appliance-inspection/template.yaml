@@ -1,0 +1,63 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/centralized-inspection-architecture-with-aws-gateway-load-balancer-and-aws-transit-gateway/); edit freely.
+title: Centralized inspection with Gateway Load Balancer and Transit Gateway
+category: networking
+tags:
+- gateway load balancer
+- transit gateway
+- third-party firewall
+- appliance vpc
+- geneve
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/centralized-inspection-architecture-with-aws-gateway-load-balancer-and-aws-transit-gateway/
+description: A security VPC hosts a Gateway Load Balancer fronting a fleet of third-party firewall appliances in an Auto Scaling group; Gateway Load Balancer endpoints in the same VPC are the routable next
+  hop for traffic arriving from the Transit Gateway. East-west and egress traffic from spoke VPCs is routed to the endpoints, encapsulated in GENEVE to the appliances, and returned transparently to the
+  Transit Gateway, with appliance mode ensuring symmetric flows.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-security, type: aws.vpc, name: security, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-security-a, type: aws.availability_zone, name: a, parent: vpc-security, props: {zone: a}}
+- {id: sub-sec-tgw-a, type: aws.subnet, name: sec-tgw-a, parent: az-security-a, props: {cidr: 10.0.0.0/28, az: a, public: false}}
+- {id: sub-sec-gwlbe-a, type: aws.subnet, name: sec-gwlbe-a, parent: az-security-a, props: {cidr: 10.0.1.0/28, az: a, public: false}}
+- {id: sub-sec-appliance-a, type: aws.subnet, name: sec-appliance-a, parent: az-security-a, props: {cidr: 10.0.2.0/24, az: a, public: false}}
+- {id: sub-sec-public-a, type: aws.subnet, name: sec-public-a, parent: az-security-a, props: {cidr: 10.0.3.0/24, az: a, public: true}}
+- {id: vpc-spoke-a, type: aws.vpc, name: spoke-a, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-spoke-a-a, type: aws.availability_zone, name: a, parent: vpc-spoke-a, props: {zone: a}}
+- {id: sub-spoke-a-private, type: aws.subnet, name: spoke-a-private, parent: az-spoke-a-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-spoke-b, type: aws.vpc, name: spoke-b, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}}
+- {id: az-spoke-b-a, type: aws.availability_zone, name: a, parent: vpc-spoke-b, props: {zone: a}}
+- {id: sub-spoke-b-private, type: aws.subnet, name: spoke-b-private, parent: az-spoke-b-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
+- {id: internet, type: common.internet, name: internet}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1}
+- {id: inspection-gwlb, type: aws.alb, name: inspection-gwlb, parent: az-security-a}
+- {id: gwlb-endpoint-a, type: aws.res.aws_vpc_endpoint, name: gwlb-endpoint-a, parent: sub-sec-gwlbe-a, props: {vpc_id: changeme}}
+- {id: firewall-appliances, type: aws.res.aws_autoscaling_group, name: firewall-appliances, parent: sub-sec-appliance-a, props: {max_size: 1, min_size: 1}}
+- {id: firewall-appliance-1, type: aws.ec2_instance, name: firewall-appliance-1, parent: sub-sec-appliance-a}
+- {id: sec-nat-a, type: aws.res.aws_nat_gateway, name: sec-nat-a, parent: sub-sec-public-a}
+- {id: sec-igw, type: aws.res.aws_internet_gateway, name: sec-igw, parent: vpc-security}
+- {id: app-a, type: aws.ec2_instance, name: app-a, parent: sub-spoke-a-private}
+- {id: app-b, type: aws.ec2_instance, name: app-b, parent: sub-spoke-b-private}
+- {id: az-vpc-security-b, type: aws.availability_zone, name: b, parent: vpc-security, props: {zone: b}}
+- {id: sub-vpc-security-b, type: aws.subnet, name: private-b, parent: az-vpc-security-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
+- {id: az-vpc-spoke-a-b, type: aws.availability_zone, name: b, parent: vpc-spoke-a, props: {zone: b}}
+- {id: sub-vpc-spoke-a-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-a-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-spoke-b-b, type: aws.availability_zone, name: b, parent: vpc-spoke-b, props: {zone: b}}
+- {id: sub-vpc-spoke-b-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-b-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+edges:
+- {from: hub-tgw, to: vpc-spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-security, label: appliance mode, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: app-a, to: hub-tgw, label: route to security VPC, step: '1'}
+- {from: hub-tgw, to: gwlb-endpoint-a, label: TGW subnet route to GWLBE, step: '2'}
+- {from: gwlb-endpoint-a, to: inspection-gwlb, label: PrivateLink, step: '3'}
+- {from: inspection-gwlb, to: firewall-appliance-1, label: GENEVE 6081, step: '4'}
+- {from: firewall-appliance-1, to: inspection-gwlb, label: return, step: '5'}
+- {from: gwlb-endpoint-a, to: sec-nat-a, label: egress after inspection}
+- {from: sec-nat-a, to: sec-igw}
+- {from: sec-igw, to: internet}
+- {from: hub-tgw, to: app-b, label: east-west after inspection}
+steps:
+- {n: '1', text: 'app-a → hub-tgw: route to security VPC'}
+- {n: '2', text: 'hub-tgw → gwlb-endpoint-a: TGW subnet route to GWLBE'}
+- {n: '3', text: 'gwlb-endpoint-a → inspection-gwlb: PrivateLink'}
+- {n: '4', text: 'inspection-gwlb → firewall-appliance-1: GENEVE 6081'}
+- {n: '5', text: 'firewall-appliance-1 → inspection-gwlb: return'}

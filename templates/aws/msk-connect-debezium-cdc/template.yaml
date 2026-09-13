@@ -1,0 +1,79 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/build-an-end-to-end-change-data-capture-with-amazon-msk-connect-and-aws-glue-schema-registry/); edit freely.
+title: End-to-end CDC with MSK Connect, Debezium and Glue Schema Registry
+category: data
+tags:
+- msk connect
+- debezium
+- kafka connect
+- aurora mysql
+- glue schema registry
+- s3 sink
+source: https://aws.amazon.com/blogs/big-data/build-an-end-to-end-change-data-capture-with-amazon-msk-connect-and-aws-glue-schema-registry/
+description: A Debezium MySQL source connector on MSK Connect monitors an Aurora MySQL cluster and pushes row-level changes to Kafka topics on an MSK cluster, serializing records against schemas in the
+  AWS Glue Schema Registry. A Confluent S3 sink connector, also on MSK Connect, deserializes the topics and writes Parquet files to an S3 bucket for downstream consumers.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-cdc-vpc, type: aws.vpc, name: cdc-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-cdc-vpc-a, type: aws.availability_zone, name: a, parent: vpc-cdc-vpc, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-cdc-vpc-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: az-cdc-vpc-b, type: aws.availability_zone, name: b, parent: vpc-cdc-vpc, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-cdc-vpc-b, props: {cidr: 10.0.2.0/24, az: b, public: false}}
+- {id: az-cdc-vpc-c, type: aws.availability_zone, name: c, parent: vpc-cdc-vpc, props: {zone: c}}
+- {id: sub-private-c, type: aws.subnet, name: private-c, parent: az-cdc-vpc-c, props: {cidr: 10.0.3.0/24, az: c, public: false}}
+- {id: client, type: common.client, name: client}
+- {id: aurora-mysql, type: aws.res.aws_rds_cluster, name: aurora-mysql, parent: vpc-cdc-vpc, props: {engine: changeme}}
+- id: debezium-source
+  type: aws.res.aws_mskconnect_connector
+  name: debezium-source
+  parent: vpc-cdc-vpc
+  props:
+    capacity: {}
+    connector_configuration: {}
+    kafka_cluster: {}
+    kafka_cluster_client_authentication: {}
+    kafka_cluster_encryption_in_transit: {}
+    kafkaconnect_version: changeme
+    name: changeme
+    plugin: []
+    service_execution_role_arn: changeme
+- id: msk-cluster
+  type: aws.res.aws_msk_cluster
+  name: msk-cluster
+  parent: vpc-cdc-vpc
+  props: {broker_node_group_info: {}, cluster_name: changeme, kafka_version: changeme, number_of_broker_nodes: 1}
+- {id: schema-registry, type: aws.res.aws_glue_registry, name: schema-registry, parent: reg-us-east-1, props: {registry_name: changeme}}
+- id: s3-sink
+  type: aws.res.aws_mskconnect_connector
+  name: s3-sink
+  parent: vpc-cdc-vpc
+  props:
+    capacity: {}
+    connector_configuration: {}
+    kafka_cluster: {}
+    kafka_cluster_client_authentication: {}
+    kafka_cluster_encryption_in_transit: {}
+    kafkaconnect_version: changeme
+    name: changeme
+    plugin: []
+    service_execution_role_arn: changeme
+- {id: cdc-bucket, type: aws.s3_bucket, name: cdc-bucket, parent: reg-us-east-1}
+- {id: connector-plugins, type: aws.res.aws_mskconnect_custom_plugin, name: connector-plugins, parent: reg-us-east-1, props: {content_type: changeme, location: westeurope, name: changeme}}
+edges:
+- {from: client, to: aurora-mysql, label: transactions, step: '1'}
+- {from: aurora-mysql, to: debezium-source, label: binlog CDC, step: '2'}
+- {from: debezium-source, to: schema-registry, label: register schema, step: '3'}
+- {from: debezium-source, to: msk-cluster, label: change events to topics, step: '4'}
+- {from: msk-cluster, to: s3-sink, label: consume topics, step: '5'}
+- {from: s3-sink, to: schema-registry, label: fetch schema, step: '6'}
+- {from: s3-sink, to: cdc-bucket, label: Parquet objects, step: '7'}
+- {from: connector-plugins, to: debezium-source, label: custom plugin, step: '8'}
+steps:
+- {n: '1', text: 'client → aurora-mysql: transactions'}
+- {n: '2', text: 'aurora-mysql → debezium-source: binlog CDC'}
+- {n: '3', text: 'debezium-source → schema-registry: register schema'}
+- {n: '4', text: 'debezium-source → msk-cluster: change events to topics'}
+- {n: '5', text: 'msk-cluster → s3-sink: consume topics'}
+- {n: '6', text: 's3-sink → schema-registry: fetch schema'}
+- {n: '7', text: 's3-sink → cdc-bucket: Parquet objects'}
+- {n: '8', text: 'connector-plugins → debezium-source: custom plugin'}

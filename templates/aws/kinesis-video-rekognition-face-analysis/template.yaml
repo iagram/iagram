@@ -1,0 +1,42 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/easily-perform-facial-analysis-on-live-feeds-by-creating-a-serverless-video-analytics-environment-with-amazon-rekognition-video-and-amazon-kinesis-video-streams/); edit freely.
+title: Serverless live video facial analysis with Kinesis Video Streams and Rekognition
+category: media
+tags:
+- kinesis video streams
+- rekognition video
+- stream processor
+- lambda
+- sns
+source: https://aws.amazon.com/blogs/machine-learning/easily-perform-facial-analysis-on-live-feeds-by-creating-a-serverless-video-analytics-environment-with-amazon-rekognition-video-and-amazon-kinesis-video-streams/
+description: A camera streams live video into a Kinesis video stream, where a Rekognition Video stream processor compares detected faces against a face collection. Match results are written to a Kinesis
+  data stream, a Lambda consumer formats them, and Amazon SNS delivers email notifications.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-video-ingestion, type: common.group, name: video ingestion, parent: reg-us-east-1}
+- {id: grp-analysis, type: common.group, name: analysis, parent: reg-us-east-1}
+- {id: grp-notification, type: common.group, name: notification, parent: reg-us-east-1}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: camera-feed, type: aws.res.aws_kinesis_video_stream, name: camera-feed, parent: grp-video-ingestion, props: {name: changeme}}
+- {id: known-faces, type: aws.res.aws_rekognition_collection, name: known-faces, parent: grp-analysis, props: {collection_id: changeme}}
+- {id: face-search-processor, type: aws.res.aws_rekognition_stream_processor, name: face-search-processor, parent: grp-analysis, props: {name: changeme, role_arn: changeme}}
+- {id: face-matches, type: aws.res.aws_kinesis_stream, name: face-matches, parent: grp-analysis, props: {name: changeme}}
+- {id: match-handler, type: aws.lambda_function, name: match-handler, parent: grp-notification}
+- {id: match-alerts, type: aws.res.aws_sns_topic, name: match-alerts, parent: grp-notification}
+edges:
+- {from: device, to: camera-feed, label: KVS producer SDK, step: '1'}
+- {from: camera-feed, to: face-search-processor, label: video fragments, step: '2'}
+- {from: known-faces, to: face-search-processor, label: face collection, step: '3'}
+- {from: face-search-processor, to: face-matches, label: match records, step: '4'}
+- {from: face-matches, to: match-handler, step: '5', link: aws_lambda_event_source_mapping}
+- {from: match-handler, to: match-alerts, label: Publish, step: '6'}
+- {from: match-alerts, to: users, label: email, step: '7'}
+steps:
+- {n: '1', text: 'device → camera-feed: KVS producer SDK'}
+- {n: '2', text: 'camera-feed → face-search-processor: video fragments'}
+- {n: '3', text: 'known-faces → face-search-processor: face collection'}
+- {n: '4', text: 'face-search-processor → face-matches: match records'}
+- {n: '5', text: face-matches → match-handler}
+- {n: '6', text: 'match-handler → match-alerts: Publish'}
+- {n: '7', text: 'match-alerts → users: email'}

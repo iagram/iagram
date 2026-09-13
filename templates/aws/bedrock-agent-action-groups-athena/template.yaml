@@ -1,0 +1,54 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/develop-a-fully-automated-chat-based-assistant-by-using-amazon-bedrock-agents-and-knowledge-bases.html); edit freely.
+title: Bedrock agent with Lambda action groups over documents and Athena
+category: ml
+tags:
+- bedrock agents
+- action groups
+- lambda
+- athena
+- text-to-sql
+- streamlit
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/develop-a-fully-automated-chat-based-assistant-by-using-amazon-bedrock-agents-and-knowledge-bases.html
+description: A Streamlit front end on ECS Fargate behind an Application Load Balancer calls an Invocation Lambda that talks to a Bedrock agent. The agent answers documentation questions from a knowledge
+  base on OpenSearch Serverless and delegates database questions to an action-group Lambda that generates SQL and runs it in Athena against a Glue Data Catalog database.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.30.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-app-a, props: {cidr: 10.30.0.0/24, az: a, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.30.10.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: streamlit-alb, type: aws.alb, name: streamlit-alb, parent: az-app-a}
+- {id: streamlit-cluster, type: aws.res.aws_ecs_cluster, name: streamlit-cluster, parent: sub-private-a, props: {name: changeme}}
+- {id: streamlit-image, type: aws.res.aws_ecr_repository, name: streamlit-image, parent: reg-us-east-1, props: {name: changeme}}
+- {id: invocation-fn, type: aws.lambda_function, name: invocation-fn, parent: reg-us-east-1}
+- {id: chatbot-agent, type: aws.res.aws_bedrockagent_agent, name: chatbot-agent, parent: reg-us-east-1, props: {agent_name: changeme, agent_resource_role_arn: changeme, foundation_model: changeme}}
+- {id: agent-executor-fn, type: aws.lambda_function, name: agent-executor-fn, parent: reg-us-east-1}
+- {id: docs-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: docs-kb, parent: reg-us-east-1, props: {name: changeme, role_arn: changeme}}
+- {id: kb-vectors, type: aws.res.aws_opensearchserverless_collection, name: kb-vectors, parent: reg-us-east-1, props: {name: changeme}}
+- {id: chatbot-athena, type: aws.res.aws_athena_workgroup, name: chatbot-athena, parent: reg-us-east-1, props: {name: changeme}}
+- {id: tabular-db, type: aws.res.aws_glue_catalog_database, name: tabular-db, parent: reg-us-east-1, props: {name: changeme}}
+- {id: assets-bucket, type: aws.s3_bucket, name: assets-bucket, parent: reg-us-east-1}
+- {id: assets-key, type: aws.res.aws_kms_key, name: assets-key, parent: reg-us-east-1}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.30.251.0/24, az: b, public: false}}
+edges:
+- {from: users, to: streamlit-alb, label: HTTP, step: '1'}
+- {from: streamlit-alb, to: streamlit-cluster, step: '2'}
+- {from: streamlit-image, to: streamlit-cluster, label: task image}
+- {from: streamlit-cluster, to: invocation-fn, label: Invoke, step: '3'}
+- {from: invocation-fn, to: chatbot-agent, label: InvokeAgent, step: '4'}
+- {from: chatbot-agent, to: docs-kb, label: bedrockagent agent knowledge base association}
+- {from: docs-kb, to: kb-vectors, label: vector retrieval}
+- {from: chatbot-agent, to: agent-executor-fn, label: bedrockagent agent action group}
+- {from: agent-executor-fn, to: chatbot-athena, label: generated SQL, step: '5'}
+- {from: chatbot-athena, to: tabular-db, label: table metadata}
+- {from: chatbot-athena, to: assets-bucket, label: scan CSV dataset}
+- {from: assets-bucket, to: docs-kb, label: bedrockagent data source}
+steps:
+- {n: '1', text: 'users → streamlit-alb: HTTP'}
+- {n: '2', text: streamlit-alb → streamlit-cluster}
+- {n: '3', text: 'streamlit-cluster → invocation-fn: Invoke'}
+- {n: '4', text: 'invocation-fn → chatbot-agent: InvokeAgent'}
+- {n: '5', text: 'agent-executor-fn → chatbot-athena: generated SQL'}

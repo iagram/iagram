@@ -1,0 +1,45 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/resizing-images-with-amazon-cloudfront-lambdaedge-aws-cdn-blog/); edit freely.
+title: On-the-fly image resizing with CloudFront and Lambda@Edge
+category: edge
+tags:
+- lambda@edge
+- cloudfront
+- image optimization
+- s3
+- viewer request
+- origin response
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/resizing-images-with-amazon-cloudfront-lambdaedge-aws-cdn-blog/
+description: A viewer-request Lambda@Edge function normalizes the requested dimensions and format into a canonical cache key, and on a cache miss the origin-response function fetches the source image from
+  S3, resizes it, writes the derived image back to the bucket, and returns it. Later requests for the same variant are served from the CloudFront cache or directly from the pre-generated object.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: img-zone, type: aws.route53_zone, name: img-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: img-cert, type: aws.res.aws_acm_certificate, name: img-cert, parent: reg-us-east-1}
+- {id: image-cdn, type: aws.cloudfront_distribution, name: image-cdn, parent: grp-global-edge}
+- {id: viewer-request-normalize, type: aws.lambda_function, name: viewer-request-normalize, parent: grp-global-edge}
+- {id: origin-response-resize, type: aws.lambda_function, name: origin-response-resize, parent: grp-global-edge}
+- {id: image-bucket, type: aws.s3_bucket, name: image-bucket, parent: reg-us-east-1}
+edges:
+- {from: users, to: img-zone, label: DNS, step: '1'}
+- {from: users, to: image-cdn, label: 'GET /images/cat.jpg?d=200x200', step: '2'}
+- {from: img-cert, to: image-cdn, label: TLS certificate}
+- {from: image-cdn, to: viewer-request-normalize, label: viewer request event, step: '3'}
+- {from: viewer-request-normalize, to: image-cdn, label: rewritten URI /images/200x200/webp/cat.jpg, step: '4'}
+- {from: image-cdn, to: image-bucket, label: origin fetch on cache miss, step: '5'}
+- {from: image-cdn, to: origin-response-resize, label: origin response event on 404, step: '6'}
+- {from: origin-response-resize, to: image-bucket, label: 'GET source, PUT resized variant', step: '7'}
+- {from: origin-response-resize, to: image-cdn, label: return resized image, step: '8'}
+- {from: image-cdn, to: users, label: cached response, step: '9'}
+steps:
+- {n: '1', text: 'users → img-zone: DNS'}
+- {n: '2', text: 'users → image-cdn: GET /images/cat.jpg?d=200x200'}
+- {n: '3', text: 'image-cdn → viewer-request-normalize: viewer request event'}
+- {n: '4', text: 'viewer-request-normalize → image-cdn: rewritten URI /images/200x200/webp/cat.jpg'}
+- {n: '5', text: 'image-cdn → image-bucket: origin fetch on cache miss'}
+- {n: '6', text: 'image-cdn → origin-response-resize: origin response event on 404'}
+- {n: '7', text: 'origin-response-resize → image-bucket: GET source, PUT resized variant'}
+- {n: '8', text: 'origin-response-resize → image-cdn: return resized image'}
+- {n: '9', text: 'image-cdn → users: cached response'}

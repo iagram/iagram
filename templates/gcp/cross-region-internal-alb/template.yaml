@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.cloud.google.com/load-balancing/docs/l7-internal/setting-up-l7-cross-reg-internal); edit freely.
+title: Cross-region internal Application Load Balancer across two regions
+category: networking
+tags:
+- internal application load balancer
+- cross-region
+- proxy-only subnet
+- envoy
+- multi-region vpc
+- failover
+source: https://docs.cloud.google.com/load-balancing/docs/l7-internal/setting-up-l7-cross-reg-internal
+description: A single global VPC spans two regions, each with a workload subnet, a proxy-only subnet for the managed Envoy proxies and a managed instance group backend attached to one global internal backend
+  service. Two forwarding rules with regional internal IPs point at the same global target proxy, so clients in either region hit local proxies and fail over to the other region's backends when needed.
+nodes:
+- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: us-west1}}
+- {id: vpc-lb-network, type: gcp.vpc, name: lb-network, parent: prj-workload, props: {cidr: 10.140.0.0/16}}
+- {id: sub-backend-usw1, type: gcp.subnetwork, name: backend-usw1, parent: vpc-lb-network, props: {cidr: 10.140.0.0/24, region: us-west1}}
+- {id: sub-proxy-only-usw1, type: gcp.subnetwork, name: proxy-only-usw1, parent: vpc-lb-network, props: {cidr: 10.140.129.0/24, region: us-west1}}
+- {id: sub-backend-use1, type: gcp.subnetwork, name: backend-use1, parent: vpc-lb-network, props: {cidr: 10.140.1.0/24, region: us-east1}}
+- {id: sub-proxy-only-use1, type: gcp.subnetwork, name: proxy-only-use1, parent: vpc-lb-network, props: {cidr: 10.140.130.0/24, region: us-east1}}
+- {id: fr-usw1, type: gcp.res.google_compute_global_forwarding_rule, name: fr-usw1, parent: sub-backend-usw1, props: {name: changeme, target: changeme}}
+- {id: fr-use1, type: gcp.res.google_compute_global_forwarding_rule, name: fr-use1, parent: sub-backend-use1, props: {name: changeme, target: changeme}}
+- {id: global-backend, type: gcp.res.google_compute_backend_service, name: global-backend, parent: vpc-lb-network, props: {name: changeme}}
+- {id: mig-usw1, type: gcp.compute_instance, name: mig-usw1, parent: sub-backend-usw1}
+- {id: mig-use1, type: gcp.compute_instance, name: mig-use1, parent: sub-backend-use1}
+- {id: client-usw1, type: gcp.compute_instance, name: client-usw1, parent: sub-backend-usw1}
+- {id: allow-proxy-only, type: gcp.firewall_rule, name: allow-proxy-only, parent: vpc-lb-network}
+- {id: allow-health-check, type: gcp.firewall_rule, name: allow-health-check, parent: vpc-lb-network}
+edges:
+- {from: client-usw1, to: fr-usw1, label: HTTP to regional internal IP, step: '1'}
+- {from: fr-usw1, to: global-backend, label: Envoy proxies in proxy-only subnet, step: '2'}
+- {from: global-backend, to: mig-usw1, label: local region backend, step: '3'}
+- {from: global-backend, to: mig-use1, label: failover to other region, step: '4'}
+- {from: fr-use1, to: global-backend, label: clients in us-east1}
+steps:
+- {n: '1', text: 'client-usw1 → fr-usw1: HTTP to regional internal IP'}
+- {n: '2', text: 'fr-usw1 → global-backend: Envoy proxies in proxy-only subnet'}
+- {n: '3', text: 'global-backend → mig-usw1: local region backend'}
+- {n: '4', text: 'global-backend → mig-use1: failover to other region'}

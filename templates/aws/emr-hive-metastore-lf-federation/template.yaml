@@ -1,0 +1,63 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/design-a-data-mesh-pattern-for-amazon-emr-based-data-lakes-using-aws-lake-formation-with-hive-metastore-federation/); edit freely.
+title: Data mesh for EMR data lakes with Lake Formation Hive metastore federation
+category: data
+tags:
+- emr
+- hive metastore
+- lake formation
+- federation
+- data mesh
+- athena
+- emr serverless
+source: https://aws.amazon.com/blogs/big-data/design-a-data-mesh-pattern-for-amazon-emr-based-data-lakes-using-aws-lake-formation-with-hive-metastore-federation/
+description: A producer account runs an EMR cluster whose Hive metastore describes tables stored in S3; a central catalog account federates that metastore into the Glue Data Catalog through a Lambda connector
+  and applies Lake Formation database, table and column permissions. Consumer accounts query the federated tables through resource links with Athena, EMR Serverless or SageMaker while data stays in the
+  producer account.
+nodes:
+- {id: acct-producer, type: aws.account, name: producer}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-producer, props: {region: us-east-1}}
+- {id: vpc-emr, type: aws.vpc, name: emr, parent: reg-us-east-1, props: {cidr: 10.100.0.0/16}}
+- {id: az-emr-a, type: aws.availability_zone, name: a, parent: vpc-emr, props: {zone: a}}
+- {id: sub-emr-private-a, type: aws.subnet, name: emr-private-a, parent: az-emr-a, props: {cidr: 10.100.1.0/24, az: a, public: false}}
+- {id: acct-catalog, type: aws.account, name: catalog}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-catalog, props: {region: us-east-1}}
+- {id: acct-consumer, type: aws.account, name: consumer}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-consumer, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: producer-emr, type: aws.res.aws_emr_cluster, name: producer-emr, parent: sub-emr-private-a, props: {name: changeme, release_label: changeme, service_role: changeme}}
+- {id: hive-metastore-db, type: aws.rds_instance, name: hive-metastore-db, parent: sub-emr-private-a}
+- {id: producer-lake, type: aws.s3_bucket, name: producer-lake, parent: reg-us-east-1}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: hms-connector, type: aws.lambda_function, name: hms-connector, parent: sub-reg-us-east-1-a}
+- {id: federated-db, type: aws.res.aws_glue_catalog_database, name: federated-db, parent: acct-catalog, props: {name: changeme}}
+- {id: producer-location, type: aws.res.aws_lakeformation_resource, name: producer-location, parent: acct-catalog, props: {arn: changeme}}
+- {id: federated-share, type: aws.res.aws_ram_resource_share, name: federated-share, parent: acct-catalog, props: {name: changeme}}
+- {id: consumer-link, type: aws.res.aws_glue_catalog_database, name: consumer-link, parent: acct-consumer, props: {name: changeme}}
+- {id: consumer-athena, type: aws.res.aws_athena_workgroup, name: consumer-athena, parent: acct-consumer, props: {name: changeme}}
+- {id: consumer-spark, type: aws.res.aws_emrserverless_application, name: consumer-spark, parent: acct-consumer, props: {name: changeme, release_label: changeme, type: changeme}}
+- {id: az-vpc-emr-b, type: aws.availability_zone, name: b, parent: vpc-emr, props: {zone: b}}
+- {id: sub-vpc-emr-b, type: aws.subnet, name: private-b, parent: az-vpc-emr-b, props: {cidr: 10.100.251.0/24, az: b, public: false}}
+edges:
+- {from: producer-emr, to: producer-lake, label: Hive and Spark write tables, step: '1'}
+- {from: producer-emr, to: hive-metastore-db, label: external Hive metastore, step: '1'}
+- {from: hms-connector, to: hive-metastore-db, label: read metadata at query time, step: '2'}
+- {from: federated-db, to: hms-connector, label: federated database connection, step: '2'}
+- {from: producer-location, to: producer-lake, label: registered with Lake Formation, step: '3'}
+- {from: federated-share, to: consumer-link, label: share with column permissions, step: '4'}
+- {from: consumer-link, to: federated-db, label: resource link, step: '4'}
+- {from: consumer-athena, to: consumer-link, label: SQL, step: '5'}
+- {from: consumer-spark, to: consumer-link, label: Spark jobs, step: '5'}
+- {from: consumer-athena, to: producer-lake, label: governed reads, step: '6'}
+- {from: users, to: consumer-athena, step: '7'}
+steps:
+- {n: '1', text: 'producer-emr → producer-lake: Hive and Spark write tables'}
+- {n: '2', text: 'hms-connector → hive-metastore-db: read metadata at query time'}
+- {n: '3', text: 'producer-location → producer-lake: registered with Lake Formation'}
+- {n: '4', text: 'federated-share → consumer-link: share with column permissions'}
+- {n: '5', text: 'consumer-athena → consumer-link: SQL'}
+- {n: '6', text: 'consumer-athena → producer-lake: governed reads'}
+- {n: '7', text: users → consumer-athena}

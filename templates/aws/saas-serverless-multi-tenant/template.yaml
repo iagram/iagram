@@ -1,0 +1,62 @@
+# Generated from the official reference (https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/serverless-saas.html); edit freely.
+title: Serverless multi-tenant SaaS with pooled and siloed tiers
+category: web
+tags:
+- saas
+- multi-tenant
+- cognito
+- api gateway
+- lambda authorizer
+- dynamodb
+- tenant isolation
+source: https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/serverless-saas.html
+description: A shared web application on S3 and CloudFront signs tenants in through Cognito user pools whose JWTs carry tenant ID and tier as custom claims. API Gateway calls a Lambda authorizer that maps
+  the claims to scoped IAM credentials, so pooled tenants share Lambda functions and DynamoDB tables partitioned by tenant while premium tenants get dedicated siloed stacks, and an onboarding service provisions
+  each new tenant.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: grp-shared-services, type: common.group, name: shared services, parent: reg-us-east-1}
+- {id: grp-pooled-tier, type: common.group, name: pooled tier, parent: reg-us-east-1}
+- {id: grp-siloed-tenant, type: common.group, name: siloed tenant, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: saas-cdn, type: aws.cloudfront_distribution, name: saas-cdn, parent: grp-global-edge}
+- {id: saas-web, type: aws.s3_bucket, name: saas-web, parent: reg-us-east-1}
+- {id: tenant-users, type: aws.res.aws_cognito_user_pool, name: tenant-users, parent: grp-shared-services, props: {name: changeme}}
+- {id: tenant-onboarding, type: aws.lambda_function, name: tenant-onboarding, parent: grp-shared-services}
+- {id: tenant-registry, type: aws.dynamodb_table, name: tenant-registry, parent: grp-shared-services}
+- {id: pooled-api, type: aws.res.aws_api_gateway_rest_api, name: pooled-api, parent: grp-pooled-tier, props: {name: changeme}}
+- {id: tenant-authorizer, type: aws.lambda_function, name: tenant-authorizer, parent: grp-pooled-tier}
+- {id: product-service, type: aws.lambda_function, name: product-service, parent: grp-pooled-tier}
+- {id: pooled-products, type: aws.dynamodb_table, name: pooled-products, parent: grp-pooled-tier}
+- {id: silo-api, type: aws.res.aws_api_gateway_rest_api, name: silo-api, parent: grp-siloed-tenant, props: {name: changeme}}
+- {id: silo-product-service, type: aws.lambda_function, name: silo-product-service, parent: grp-siloed-tenant}
+- {id: silo-products, type: aws.dynamodb_table, name: silo-products, parent: grp-siloed-tenant}
+edges:
+- {from: user, to: tenant-onboarding, label: tenant sign-up, step: '1'}
+- {from: tenant-onboarding, to: tenant-users, label: create user pool group / pool, step: '2'}
+- {from: tenant-onboarding, to: tenant-registry, label: register tenant and tier}
+- {from: users, to: saas-cdn, label: HTTPS web app, step: '3'}
+- {from: saas-cdn, to: saas-web, label: static origin}
+- {from: users, to: tenant-users, label: 'sign in, JWT with tenantId and tier claims', step: '4'}
+- {from: users, to: pooled-api, label: API call with JWT, step: '5'}
+- {from: pooled-api, to: tenant-authorizer, label: Lambda authorizer, step: '6'}
+- {from: tenant-authorizer, to: tenant-registry, label: look up tenant}
+- {from: tenant-authorizer, to: pooled-api, label: policy plus scoped STS credentials, step: '7'}
+- {from: pooled-api, to: product-service, step: '8'}
+- {from: product-service, to: pooled-products, label: leading-key condition on tenantId, step: '9'}
+- {from: users, to: silo-api, label: premium tenant traffic}
+- {from: silo-api, to: silo-product-service}
+- {from: silo-product-service, to: silo-products, label: dedicated table}
+steps:
+- {n: '1', text: 'user → tenant-onboarding: tenant sign-up'}
+- {n: '2', text: 'tenant-onboarding → tenant-users: create user pool group / pool'}
+- {n: '3', text: 'users → saas-cdn: HTTPS web app'}
+- {n: '4', text: 'users → tenant-users: sign in, JWT with tenantId and tier claims'}
+- {n: '5', text: 'users → pooled-api: API call with JWT'}
+- {n: '6', text: 'pooled-api → tenant-authorizer: Lambda authorizer'}
+- {n: '7', text: 'tenant-authorizer → pooled-api: policy plus scoped STS credentials'}
+- {n: '8', text: pooled-api → product-service}
+- {n: '9', text: 'product-service → pooled-products: leading-key condition on tenantId'}

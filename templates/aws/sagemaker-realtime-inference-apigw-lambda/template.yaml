@@ -1,0 +1,35 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/call-an-amazon-sagemaker-model-endpoint-using-amazon-api-gateway-and-aws-lambda/); edit freely.
+title: Real-time SageMaker inference behind API Gateway and Lambda
+category: ml
+tags:
+- sagemaker endpoint
+- real-time inference
+- api gateway
+- lambda
+- model hosting
+source: https://aws.amazon.com/blogs/machine-learning/call-an-amazon-sagemaker-model-endpoint-using-amazon-api-gateway-and-aws-lambda/
+description: A model trained in a SageMaker notebook is stored in S3 and deployed to a real-time SageMaker endpoint. API Gateway exposes a REST method that invokes a Lambda function; the function transforms
+  the payload, calls InvokeEndpoint and returns the prediction, and endpoint metrics and logs go to CloudWatch.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: client, type: common.client, name: client}
+- {id: training-notebook, type: aws.res.aws_sagemaker_notebook_instance, name: training-notebook, parent: reg-us-east-1, props: {instance_type: changeme, name: changeme, role_arn: changeme}}
+- {id: model-artifacts, type: aws.s3_bucket, name: model-artifacts, parent: reg-us-east-1}
+- {id: xgboost-model, type: aws.res.aws_sagemaker_model, name: xgboost-model, parent: reg-us-east-1, props: {execution_role_arn: changeme}}
+- {id: predict-endpoint, type: aws.res.aws_sagemaker_endpoint, name: predict-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}}
+- {id: invoke-endpoint-fn, type: aws.lambda_function, name: invoke-endpoint-fn, parent: reg-us-east-1}
+- {id: prediction-api, type: aws.res.aws_api_gateway_rest_api, name: prediction-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: endpoint-logs, type: aws.res.aws_cloudwatch_log_group, name: endpoint-logs, parent: reg-us-east-1}
+edges:
+- {from: training-notebook, to: model-artifacts, label: model.tar.gz}
+- {from: model-artifacts, to: xgboost-model, label: ModelDataUrl}
+- {from: xgboost-model, to: predict-endpoint, label: endpoint configuration}
+- {from: client, to: prediction-api, label: POST /predict, step: '1'}
+- {from: prediction-api, to: invoke-endpoint-fn, label: Lambda proxy, step: '2'}
+- {from: invoke-endpoint-fn, to: predict-endpoint, label: InvokeEndpoint CSV payload, step: '3'}
+- {from: predict-endpoint, to: endpoint-logs, label: invocation metrics}
+steps:
+- {n: '1', text: 'client → prediction-api: POST /predict'}
+- {n: '2', text: 'prediction-api → invoke-endpoint-fn: Lambda proxy'}
+- {n: '3', text: 'invoke-endpoint-fn → predict-endpoint: InvokeEndpoint CSV payload'}

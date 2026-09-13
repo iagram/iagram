@@ -1,0 +1,48 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/deploy-lambda-functions-with-container-images.html); edit freely.
+title: Lambda functions packaged as container images behind an HTTP API
+category: containers
+tags:
+- lambda
+- container image
+- ecr
+- api gateway
+- codebuild
+- serverless
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/deploy-lambda-functions-with-container-images.html
+description: CodeBuild builds an image from a Lambda base image and pushes it to ECR; the Lambda function is created from that image URI (up to 10 GB) and Lambda pulls and caches it in its execution environment.
+  An API Gateway HTTP API routes requests to the function, which reads and writes a DynamoDB table, so a team keeps its Docker-based tooling while running serverless.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: user, type: common.user, name: user}
+- {id: client, type: common.client, name: client}
+- {id: function-source, type: aws.res.aws_codecommit_repository, name: function-source, parent: reg-eu-west-1, props: {repository_name: changeme}}
+- id: image-build
+  type: aws.res.aws_codebuild_project
+  name: image-build
+  parent: reg-eu-west-1
+  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
+- {id: function-image, type: aws.res.aws_ecr_repository, name: function-image, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: orders-fn, type: aws.lambda_function, name: orders-fn, parent: reg-eu-west-1}
+- {id: orders-http-api, type: aws.res.aws_apigatewayv2_api, name: orders-http-api, parent: reg-eu-west-1, props: {name: changeme, protocol_type: changeme}}
+- {id: orders-table, type: aws.dynamodb_table, name: orders-table, parent: reg-eu-west-1}
+- {id: orders-fn-role, type: aws.res.aws_iam_role, name: orders-fn-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}}
+- {id: orders-fn-logs, type: aws.res.aws_cloudwatch_log_group, name: orders-fn-logs, parent: reg-eu-west-1}
+edges:
+- {from: user, to: function-source, label: git push Dockerfile + handler, step: '1'}
+- {from: function-source, to: image-build, label: build trigger, step: '2'}
+- {from: image-build, to: function-image, label: docker push, step: '3'}
+- {from: function-image, to: orders-fn, label: ImageUri deployment package, step: '4'}
+- {from: client, to: orders-http-api, label: HTTPS POST /orders, step: '5'}
+- {from: orders-http-api, to: orders-fn, label: Lambda proxy integration, step: '6'}
+- {from: orders-fn, to: orders-table, label: PutItem / GetItem, step: '7'}
+- {from: orders-fn-role, to: orders-fn, label: execution role}
+- {from: orders-fn, to: orders-fn-logs, label: logs}
+steps:
+- {n: '1', text: 'user → function-source: git push Dockerfile + handler'}
+- {n: '2', text: 'function-source → image-build: build trigger'}
+- {n: '3', text: 'image-build → function-image: docker push'}
+- {n: '4', text: 'function-image → orders-fn: ImageUri deployment package'}
+- {n: '5', text: 'client → orders-http-api: HTTPS POST /orders'}
+- {n: '6', text: 'orders-http-api → orders-fn: Lambda proxy integration'}
+- {n: '7', text: 'orders-fn → orders-table: PutItem / GetItem'}

@@ -1,0 +1,64 @@
+# Generated from the official reference (https://docs.aws.amazon.com/vpn/latest/clientvpn-admin/cvpn-tgw.html); edit freely.
+title: Remote user access to multiple VPCs with Client VPN and Transit Gateway
+category: networking
+tags:
+- client vpn
+- remote access
+- transit gateway
+- openvpn
+- split tunnel
+- hybrid
+source: https://docs.aws.amazon.com/vpn/latest/clientvpn-admin/cvpn-tgw.html
+description: A Client VPN endpoint associated directly with a Transit Gateway gives remote users access to every VPC and on-premises network attached to that hub without an intermediate VPC. Routes for
+  each destination CIDR are added to the Client VPN endpoint together with authorization rules, split tunnel keeps internet traffic local to the user, and the client source IP is preserved because no source
+  NAT is applied.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-eu-west-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-app-private-a, type: aws.subnet, name: app-private-a, parent: az-app-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-tools, type: aws.vpc, name: tools, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}}
+- {id: az-tools-a, type: aws.availability_zone, name: a, parent: vpc-tools, props: {zone: a}}
+- {id: sub-tools-private-a, type: aws.subnet, name: tools-private-a, parent: az-tools-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: idp, type: common.idp, name: idp}
+- id: corp-client-vpn
+  type: aws.res.aws_ec2_client_vpn_endpoint
+  name: corp-client-vpn
+  parent: reg-eu-west-1
+  props:
+    authentication_options: []
+    connection_log_options: {}
+    server_certificate_arn: changeme
+- {id: vpn-server-cert, type: aws.res.aws_acm_certificate, name: vpn-server-cert, parent: reg-eu-west-1}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-eu-west-1}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-eu-west-1-a, props: {type: changeme}}
+- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-app-private-a}
+- {id: jump-host, type: aws.ec2_instance, name: jump-host, parent: sub-tools-private-a}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-tools-b, type: aws.availability_zone, name: b, parent: vpc-tools, props: {zone: b}}
+- {id: sub-vpc-tools-b, type: aws.subnet, name: private-b, parent: az-vpc-tools-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+edges:
+- {from: users, to: corp-client-vpn, label: OpenVPN TLS 443, step: '1'}
+- {from: corp-client-vpn, to: idp, label: SAML federated authentication, step: '2'}
+- {from: vpn-server-cert, to: corp-client-vpn, label: server certificate}
+- {from: corp-client-vpn, to: hub-tgw, label: 'Transit Gateway association, no SNAT', step: '3'}
+- {from: hub-tgw, to: vpc-app, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-tools, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: app-server, label: authorization rule 10.1.0.0/16, step: '4'}
+- {from: hub-tgw, to: jump-host}
+- {from: dc-on-premises, to: dc-cgw}
+- {from: dc-cgw, to: hub-tgw, label: IPsec, link: aws_vpn_connection}
+steps:
+- {n: '1', text: 'users → corp-client-vpn: OpenVPN TLS 443'}
+- {n: '2', text: 'corp-client-vpn → idp: SAML federated authentication'}
+- {n: '3', text: 'corp-client-vpn → hub-tgw: Transit Gateway association, no SNAT'}
+- {n: '4', text: 'hub-tgw → app-server: authorization rule 10.1.0.0/16'}

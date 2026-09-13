@@ -1,0 +1,37 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/implementing-architectural-patterns-with-amazon-eventbridge-pipes/); edit freely.
+title: EventBridge Pipes from SQS with enrichment to Step Functions
+category: serverless
+tags:
+- eventbridge pipes
+- sqs
+- enrichment
+- step functions
+- point-to-point
+source: https://aws.amazon.com/blogs/compute/implementing-architectural-patterns-with-amazon-eventbridge-pipes/
+description: A pipe polls an SQS order queue, filters messages, calls a Lambda enrichment step that looks up the customer record in DynamoDB, and starts a Step Functions execution with the enriched payload.
+  No consumer code is written for the queue; batching, filtering and the target invocation are handled by the pipe.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
+- {id: client, type: common.client, name: client}
+- {id: orders-queue, type: aws.sqs_queue, name: orders-queue, parent: reg-eu-central-1}
+- {id: orders-pipe, type: aws.res.aws_pipes_pipe, name: orders-pipe, parent: reg-eu-central-1, props: {role_arn: changeme, source: changeme, target: changeme}}
+- {id: enrich-customer, type: aws.lambda_function, name: enrich-customer, parent: reg-eu-central-1}
+- {id: customers, type: aws.dynamodb_table, name: customers, parent: reg-eu-central-1}
+- {id: process-order, type: aws.res.aws_sfn_state_machine, name: process-order, parent: reg-eu-central-1, props: {definition: changeme, role_arn: changeme}}
+- {id: orders-pipe-dlq, type: aws.sqs_queue, name: orders-pipe-dlq, parent: reg-eu-central-1}
+- {id: pipe-logs, type: aws.res.aws_cloudwatch_log_group, name: pipe-logs, parent: reg-eu-central-1}
+edges:
+- {from: client, to: orders-queue, label: SendMessage, step: '1'}
+- {from: orders-queue, to: orders-pipe, label: source with filter, step: '2'}
+- {from: orders-pipe, to: enrich-customer, label: enrichment invoke, step: '3'}
+- {from: enrich-customer, to: customers, label: GetItem customerId, step: '4'}
+- {from: orders-pipe, to: process-order, label: StartExecution target, step: '5'}
+- {from: orders-pipe, to: orders-pipe-dlq, label: failed events}
+- {from: orders-pipe, to: pipe-logs, label: execution logs}
+steps:
+- {n: '1', text: 'client → orders-queue: SendMessage'}
+- {n: '2', text: 'orders-queue → orders-pipe: source with filter'}
+- {n: '3', text: 'orders-pipe → enrich-customer: enrichment invoke'}
+- {n: '4', text: 'enrich-customer → customers: GetItem customerId'}
+- {n: '5', text: 'orders-pipe → process-order: StartExecution target'}

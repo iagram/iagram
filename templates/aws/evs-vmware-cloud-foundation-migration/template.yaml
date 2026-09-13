@@ -1,0 +1,59 @@
+# Generated from the official reference (https://docs.aws.amazon.com/evs/latest/userguide/what-is-evs.html); edit freely.
+title: VMware workload migration to Amazon Elastic VMware Service
+category: migration
+tags:
+- vmware
+- amazon evs
+- vmware cloud foundation
+- hcx
+- bare metal
+- direct connect
+- native services
+source: https://docs.aws.amazon.com/evs/latest/userguide/what-is-evs.html
+description: Amazon EVS deploys a VMware Cloud Foundation environment on EC2 bare-metal hosts inside the customer VPC, with VLAN subnets created from the CIDR ranges supplied at environment creation. Workloads
+  are migrated from the on-premises vSphere estate over Direct Connect with HCX without changing IP addresses, and once in the VPC they reach native services such as RDS, S3 and FSx for NetApp ONTAP over
+  the VPC network. (VMware Cloud on AWS is no longer resold by AWS since April 2024.)
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-evs-vpc, type: aws.vpc, name: evs-vpc, parent: reg-us-east-1, props: {cidr: 10.190.0.0/16}}
+- {id: az-evs-vpc-a, type: aws.availability_zone, name: a, parent: vpc-evs-vpc, props: {zone: a}}
+- {id: sub-evs-hosts-a, type: aws.subnet, name: evs-hosts-a, parent: az-evs-vpc-a, props: {cidr: 10.190.0.0/22, az: a, public: false}}
+- {id: sub-evs-services-a, type: aws.subnet, name: evs-services-a, parent: az-evs-vpc-a, props: {cidr: 10.190.10.0/24, az: a, public: false}}
+- {id: az-evs-vpc-b, type: aws.availability_zone, name: b, parent: vpc-evs-vpc, props: {zone: b}}
+- {id: sub-evs-services-b, type: aws.subnet, name: evs-services-b, parent: az-evs-vpc-b, props: {cidr: 10.190.11.0/24, az: b, public: false}}
+- {id: server, type: common.server, name: server}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: evs-dc-router, type: aws.res.aws_customer_gateway, name: evs-dc-router, parent: sub-reg-us-east-1-a, props: {type: changeme}}
+- {id: evs-dx, type: aws.res.aws_dx_connection, name: evs-dx, parent: reg-us-east-1, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: evs-dxgw, type: aws.res.aws_dx_gateway, name: evs-dxgw, parent: reg-us-east-1, props: {amazon_side_asn: changeme, name: changeme}}
+- {id: evs-tgw, type: aws.res.aws_ec2_transit_gateway, name: evs-tgw, parent: reg-us-east-1}
+- {id: esxi-host-1, type: aws.ec2_instance, name: esxi-host-1, parent: sub-evs-hosts-a}
+- {id: esxi-host-2, type: aws.ec2_instance, name: esxi-host-2, parent: sub-evs-hosts-a}
+- id: vm-datastore
+  type: aws.res.aws_fsx_ontap_file_system
+  name: vm-datastore
+  parent: sub-evs-services-a
+  props:
+    deployment_type: changeme
+    preferred_subnet_id: changeme
+    storage_capacity: 1
+    subnet_ids: []
+- {id: migrated-app-db, type: aws.rds_instance, name: migrated-app-db, parent: sub-evs-services-b}
+- {id: vm-backups, type: aws.s3_bucket, name: vm-backups, parent: reg-us-east-1}
+edges:
+- {from: evs-dc-router, to: evs-dx, label: Direct Connect, step: '1'}
+- {from: evs-dx, to: evs-dxgw, label: transit VIF}
+- {from: evs-dxgw, to: evs-tgw, link: aws_dx_gateway_association}
+- {from: evs-tgw, to: vpc-evs-vpc, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: esxi-host-1, to: migrated-app-db, label: VMs use native RDS, step: '4'}
+- {from: esxi-host-1, to: vm-backups, label: backups to S3}
+steps:
+- {n: '1', text: 'evs-dc-router → evs-dx: Direct Connect'}
+- {n: '4', text: 'esxi-host-1 → migrated-app-db: VMs use native RDS'}

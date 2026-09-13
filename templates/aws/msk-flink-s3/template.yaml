@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/streaming-data-solution-for-amazon-msk/welcome.html); edit freely.
+title: Amazon MSK with Managed Service for Apache Flink to S3
+category: data
+tags:
+- msk
+- kafka
+- managed service for apache flink
+- s3
+- streaming data solution
+source: https://docs.aws.amazon.com/solutions/latest/streaming-data-solution-for-amazon-msk/welcome.html
+description: Option 4 of the Streaming Data Solution for Amazon MSK. Producers write to an MSK cluster and a Managed Service for Apache Flink application connected to the VPC consumes the Kafka topic, processes
+  the events and writes the results to an S3 bucket.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-msk-vpc, type: aws.vpc, name: msk-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-msk-vpc-a, type: aws.availability_zone, name: a, parent: vpc-msk-vpc, props: {zone: a}}
+- {id: sub-broker-a, type: aws.subnet, name: broker-a, parent: az-msk-vpc-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: az-msk-vpc-b, type: aws.availability_zone, name: b, parent: vpc-msk-vpc, props: {zone: b}}
+- {id: sub-broker-b, type: aws.subnet, name: broker-b, parent: az-msk-vpc-b, props: {cidr: 10.0.2.0/24, az: b, public: false}}
+- {id: az-msk-vpc-c, type: aws.availability_zone, name: c, parent: vpc-msk-vpc, props: {zone: c}}
+- {id: sub-broker-c, type: aws.subnet, name: broker-c, parent: az-msk-vpc-c, props: {cidr: 10.0.3.0/24, az: c, public: false}}
+- {id: kafka-producer, type: aws.ec2_instance, name: kafka-producer, parent: sub-broker-a}
+- id: msk-cluster
+  type: aws.res.aws_msk_cluster
+  name: msk-cluster
+  parent: vpc-msk-vpc
+  props: {broker_node_group_info: {}, cluster_name: changeme, kafka_version: changeme, number_of_broker_nodes: 1}
+- {id: flink-app, type: aws.res.aws_kinesisanalyticsv2_application, name: flink-app, parent: vpc-msk-vpc, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: flink-code-bucket, type: aws.s3_bucket, name: flink-code-bucket, parent: reg-us-east-1}
+- {id: output-bucket, type: aws.s3_bucket, name: output-bucket, parent: reg-us-east-1}
+- {id: flink-logs, type: aws.res.aws_cloudwatch_log_group, name: flink-logs, parent: reg-us-east-1}
+edges:
+- {from: kafka-producer, to: msk-cluster, label: Kafka produce, step: '1'}
+- {from: msk-cluster, to: flink-app, label: Flink Kafka source, step: '2'}
+- {from: flink-code-bucket, to: flink-app, label: application JAR, step: '3'}
+- {from: flink-app, to: output-bucket, label: Flink FileSink, step: '4'}
+- {from: flink-app, to: flink-logs, label: application logs, step: '5'}
+steps:
+- {n: '1', text: 'kafka-producer → msk-cluster: Kafka produce'}
+- {n: '2', text: 'msk-cluster → flink-app: Flink Kafka source'}
+- {n: '3', text: 'flink-code-bucket → flink-app: application JAR'}
+- {n: '4', text: 'flink-app → output-bucket: Flink FileSink'}
+- {n: '5', text: 'flink-app → flink-logs: application logs'}

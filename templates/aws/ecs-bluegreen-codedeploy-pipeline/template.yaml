@@ -1,0 +1,71 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-bluegreen.html); edit freely.
+title: Blue/green ECS deployments with CodeDeploy and CodePipeline
+category: devops
+tags:
+- ecs
+- codedeploy
+- blue/green
+- canary
+- codepipeline
+- alb
+- ecr
+source: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-bluegreen.html
+description: An ECS service with the CODE_DEPLOY controller sits behind an ALB that has two target groups and a production plus a test listener; CodeDeploy creates a replacement task set in the green target
+  group, exposes it on the test listener, then shifts production traffic all at once, linearly or by canary. A CodePipeline triggered by a new ECR image pushes the task definition and appspec to CodeDeploy,
+  and a failed CloudWatch alarm rolls traffic back to the blue task set.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-main-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-main}
+- {id: app-alb, type: aws.alb, name: app-alb, parent: vpc-main}
+- {id: blue-tg, type: aws.res.aws_lb_target_group, name: blue-tg, parent: vpc-main}
+- {id: green-tg, type: aws.res.aws_lb_target_group, name: green-tg, parent: vpc-main}
+- {id: app-cluster, type: aws.res.aws_ecs_cluster, name: app-cluster, parent: vpc-main, props: {name: changeme}}
+- {id: app-service, type: aws.res.aws_ecs_service, name: app-service, parent: app-cluster, props: {name: changeme}}
+- {id: ecs-deploy-app, type: aws.res.aws_codedeploy_app, name: ecs-deploy-app, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: app-deployment-group, type: aws.res.aws_codedeploy_deployment_group, name: app-deployment-group, parent: reg-eu-west-1, props: {app_name: changeme, deployment_group_name: changeme, service_role_arn: changeme}}
+- id: release-pipeline
+  type: aws.res.aws_codepipeline
+  name: release-pipeline
+  parent: reg-eu-west-1
+  props:
+    artifact_store: []
+    name: changeme
+    role_arn: changeme
+    stage: []
+- {id: app-image, type: aws.res.aws_ecr_repository, name: app-image, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: reg-eu-west-1}
+- {id: green-5xx-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: green-5xx-alarm, parent: reg-eu-west-1, props: {alarm_name: changeme}}
+edges:
+- {from: user, to: app-image, label: docker push new tag, step: '1'}
+- {from: app-image, to: release-pipeline, label: ECR source action, step: '2'}
+- {from: release-pipeline, to: pipeline-artifacts, label: taskdef.json + appspec.yaml}
+- {from: release-pipeline, to: ecs-deploy-app, label: ECS blue/green deploy action, step: '3'}
+- {from: ecs-deploy-app, to: app-deployment-group, step: '4'}
+- {from: app-deployment-group, to: app-service, label: create replacement (green) task set, step: '5'}
+- {from: app-deployment-group, to: app-alb, label: 'test listener :8080 to green, then shift production listener', step: '6'}
+- {from: users, to: igw, label: HTTPS, step: '7'}
+- {from: igw, to: app-alb, step: '8'}
+- {from: app-alb, to: blue-tg, label: production listener (before cutover)}
+- {from: app-alb, to: green-tg, label: production listener (after cutover)}
+- {from: blue-tg, to: app-service, label: original task set}
+- {from: green-tg, to: app-service, label: replacement task set}
+- {from: green-5xx-alarm, to: app-deployment-group, label: alarm triggers rollback}
+steps:
+- {n: '1', text: 'user → app-image: docker push new tag'}
+- {n: '2', text: 'app-image → release-pipeline: ECR source action'}
+- {n: '3', text: 'release-pipeline → ecs-deploy-app: ECS blue/green deploy action'}
+- {n: '4', text: ecs-deploy-app → app-deployment-group}
+- {n: '5', text: 'app-deployment-group → app-service: create replacement (green) task set'}
+- {n: '6', text: 'app-deployment-group → app-alb: test listener :8080 to green, then shift production listener'}
+- {n: '7', text: 'users → igw: HTTPS'}
+- {n: '8', text: igw → app-alb}

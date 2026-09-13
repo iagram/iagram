@@ -1,0 +1,65 @@
+# Generated from the official reference (https://docs.aws.amazon.com/mgn/latest/ug/what-is-application-migration-service.html); edit freely.
+title: Rehost migration with Application Migration Service (MGN)
+category: migration
+tags:
+- application migration service
+- mgn
+- rehost
+- lift and shift
+- block-level replication
+- cutover
+- waves
+source: https://docs.aws.amazon.com/mgn/latest/ug/what-is-application-migration-service.html
+description: MGN agents on the source servers continuously replicate disks to replication servers in a staging area subnet, and servers are grouped into applications and waves for bulk operations. Test
+  and then cutover instances are launched from the launch template into the target subnets with cutover windows of minutes; after cutover the source servers are archived.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
+- {id: vpc-mgn-target, type: aws.vpc, name: mgn-target, parent: reg-eu-central-1, props: {cidr: 10.130.0.0/16}}
+- {id: az-mgn-target-a, type: aws.availability_zone, name: a, parent: vpc-mgn-target, props: {zone: a}}
+- {id: sub-mgn-staging-a, type: aws.subnet, name: mgn-staging-a, parent: az-mgn-target-a, props: {cidr: 10.130.100.0/24, az: a, public: false}}
+- {id: sub-mgn-public-a, type: aws.subnet, name: mgn-public-a, parent: az-mgn-target-a, props: {cidr: 10.130.0.0/24, az: a, public: true}}
+- {id: sub-mgn-app-a, type: aws.subnet, name: mgn-app-a, parent: az-mgn-target-a, props: {cidr: 10.130.10.0/24, az: a, public: false}}
+- {id: az-mgn-target-b, type: aws.availability_zone, name: b, parent: vpc-mgn-target, props: {zone: b}}
+- {id: sub-mgn-app-b, type: aws.subnet, name: mgn-app-b, parent: az-mgn-target-b, props: {cidr: 10.130.11.0/24, az: b, public: false}}
+- {id: server, type: common.server, name: server}
+- {id: database, type: common.database, name: database}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-eu-central-1, type: aws.vpc, name: main, parent: reg-eu-central-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-central-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-central-1, props: {zone: a}}
+- {id: sub-reg-eu-central-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-central-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-central-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-central-1, props: {zone: b}}
+- {id: sub-reg-eu-central-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-central-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: mgn-dc-router, type: aws.res.aws_customer_gateway, name: mgn-dc-router, parent: sub-reg-eu-central-1-a, props: {type: changeme}}
+- {id: mgn-dx, type: aws.res.aws_dx_connection, name: mgn-dx, parent: reg-eu-central-1, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: mgn-tgw, type: aws.res.aws_ec2_transit_gateway, name: mgn-tgw, parent: reg-eu-central-1}
+- {id: mgn-service-endpoint, type: aws.res.aws_vpc_endpoint, name: mgn-service-endpoint, parent: vpc-mgn-target, props: {vpc_id: changeme}}
+- {id: mgn-replication-server, type: aws.ec2_instance, name: mgn-replication-server, parent: sub-mgn-staging-a}
+- {id: mgn-launch-template, type: aws.res.aws_launch_template, name: mgn-launch-template, parent: reg-eu-central-1}
+- {id: web-cutover-1, type: aws.ec2_instance, name: web-cutover-1, parent: sub-mgn-app-a}
+- {id: web-cutover-2, type: aws.ec2_instance, name: web-cutover-2, parent: sub-mgn-app-b}
+- {id: db-cutover, type: aws.ec2_instance, name: db-cutover, parent: sub-mgn-app-a}
+- {id: migrated-alb, type: aws.alb, name: migrated-alb, parent: az-mgn-target-a}
+edges:
+- {from: mgn-dc-router, to: mgn-dx, label: private connectivity, step: '1'}
+- {from: mgn-dx, to: mgn-tgw, label: dx gateway association}
+- {from: mgn-tgw, to: vpc-mgn-target, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: server, to: mgn-replication-server, label: agent block-level replication over TCP 1500, step: '2'}
+- {from: database, to: mgn-replication-server, label: continuous replication}
+- {from: server, to: mgn-service-endpoint, label: agent control channel TCP 443}
+- {from: mgn-launch-template, to: web-cutover-1, label: test then cutover launch, step: '3'}
+- {from: mgn-launch-template, to: web-cutover-2}
+- {from: mgn-launch-template, to: db-cutover}
+- {from: mgn-replication-server, to: web-cutover-1, label: converted boot volumes}
+- {from: mgn-replication-server, to: db-cutover}
+- {from: users, to: migrated-alb, label: traffic after DNS cutover, step: '4'}
+- {from: migrated-alb, to: web-cutover-1, step: '5'}
+- {from: migrated-alb, to: web-cutover-2}
+- {from: web-cutover-1, to: db-cutover}
+steps:
+- {n: '1', text: 'mgn-dc-router → mgn-dx: private connectivity'}
+- {n: '2', text: 'server → mgn-replication-server: agent block-level replication over TCP 1500'}
+- {n: '3', text: 'mgn-launch-template → web-cutover-1: test then cutover launch'}
+- {n: '4', text: 'users → migrated-alb: traffic after DNS cutover'}
+- {n: '5', text: migrated-alb → web-cutover-1}

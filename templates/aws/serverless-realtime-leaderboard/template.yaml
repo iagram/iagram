@@ -1,0 +1,53 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/building-serverless-applications-with-streaming-data-part-4/); edit freely.
+title: Serverless real-time leaderboard with Kinesis tumbling windows
+category: serverless
+tags:
+- leaderboard
+- kinesis data streams
+- lambda tumbling window
+- dynamodb streams
+- iot core
+- api gateway
+source: https://aws.amazon.com/blogs/compute/building-serverless-applications-with-streaming-data-part-4/
+description: Race telemetry lands in a Kinesis data stream where a Lambda consumer with tumbling windows aggregates scores every few seconds and writes them to DynamoDB, while a second consumer persists
+  final results. DynamoDB Streams trigger a publisher Lambda that pushes updates to live leaderboards through IoT Core, and an API Gateway endpoint serves historical rankings sorted by a global secondary
+  index.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-stream-processing, type: common.group, name: stream processing, parent: reg-us-east-1}
+- {id: grp-serving, type: common.group, name: serving, parent: reg-us-east-1}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: race-telemetry, type: aws.res.aws_kinesis_stream, name: race-telemetry, parent: grp-stream-processing, props: {name: changeme}}
+- {id: tumbling-window-aggregator, type: aws.lambda_function, name: tumbling-window-aggregator, parent: grp-stream-processing}
+- {id: final-results, type: aws.lambda_function, name: final-results, parent: grp-stream-processing}
+- {id: leaderboard-table, type: aws.dynamodb_table, name: leaderboard-table, parent: grp-serving}
+- {id: publish-updates, type: aws.lambda_function, name: publish-updates, parent: grp-serving}
+- {id: leaderboard-topic, type: aws.res.aws_iot_topic_rule, name: leaderboard-topic, parent: grp-serving, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: leaderboard-api, type: aws.res.aws_api_gateway_rest_api, name: leaderboard-api, parent: grp-serving, props: {name: changeme}}
+- {id: get-leaderboard, type: aws.lambda_function, name: get-leaderboard, parent: grp-serving}
+edges:
+- {from: device, to: race-telemetry, label: competitor metrics, step: '1'}
+- {from: race-telemetry, to: tumbling-window-aggregator, step: '2', link: aws_lambda_event_source_mapping}
+- {from: race-telemetry, to: final-results, step: '3', link: aws_lambda_event_source_mapping}
+- {from: tumbling-window-aggregator, to: leaderboard-table, label: aggregated scores, step: '4'}
+- {from: final-results, to: leaderboard-table, label: final scores, step: '5'}
+- {from: leaderboard-table, to: publish-updates, step: '6', link: aws_lambda_event_source_mapping}
+- {from: publish-updates, to: leaderboard-topic, label: MQTT publish, step: '7'}
+- {from: leaderboard-topic, to: users, label: live leaderboard, step: '8'}
+- {from: users, to: leaderboard-api, label: historical results, step: '9'}
+- {from: leaderboard-api, to: get-leaderboard, label: Lambda proxy, step: '10'}
+- {from: get-leaderboard, to: leaderboard-table, label: query GSI, step: '11'}
+steps:
+- {n: '1', text: 'device → race-telemetry: competitor metrics'}
+- {n: '2', text: race-telemetry → tumbling-window-aggregator}
+- {n: '3', text: race-telemetry → final-results}
+- {n: '4', text: 'tumbling-window-aggregator → leaderboard-table: aggregated scores'}
+- {n: '5', text: 'final-results → leaderboard-table: final scores'}
+- {n: '6', text: leaderboard-table → publish-updates}
+- {n: '7', text: 'publish-updates → leaderboard-topic: MQTT publish'}
+- {n: '8', text: 'leaderboard-topic → users: live leaderboard'}
+- {n: '9', text: 'users → leaderboard-api: historical results'}
+- {n: '10', text: 'leaderboard-api → get-leaderboard: Lambda proxy'}
+- {n: '11', text: 'get-leaderboard → leaderboard-table: query GSI'}

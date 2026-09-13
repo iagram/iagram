@@ -1,0 +1,60 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/orchestrate-an-etl-pipeline-with-validation-transformation-and-partitioning-using-aws-step-functions.html); edit freely.
+title: Serverless ETL with validation, transformation and partitioning on Step Functions
+category: data
+tags:
+- step functions
+- glue
+- lambda
+- sns
+- s3
+- parquet
+- partitioning
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/orchestrate-an-etl-pipeline-with-validation-transformation-and-partitioning-using-aws-step-functions.html
+description: A CSV upload to the source folder triggers a Lambda that starts a Step Functions state machine; a validation Lambda checks schema and types, moving good files to a stage folder and bad files
+  to an error folder with an SNS alert. A Glue crawler catalogs the staged file, a Glue job converts it to compressed Parquet partitioned by year, month and day, a second crawl registers the result for
+  Athena and SNS reports success or failure.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-bucket-folders, type: common.group, name: bucket folders, parent: reg-us-east-1}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: etl-bucket, type: aws.s3_bucket, name: etl-bucket, parent: grp-bucket-folders}
+- {id: start-pipeline, type: aws.lambda_function, name: start-pipeline, parent: reg-us-east-1}
+- {id: etl-state-machine, type: aws.res.aws_sfn_state_machine, name: etl-state-machine, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: validate-csv, type: aws.lambda_function, name: validate-csv, parent: reg-us-east-1}
+- {id: move-file, type: aws.lambda_function, name: move-file, parent: reg-us-east-1}
+- {id: stage-crawler, type: aws.res.aws_glue_crawler, name: stage-crawler, parent: reg-us-east-1, props: {database_name: changeme, name: changeme, role: changeme}}
+- id: csv-to-parquet
+  type: aws.res.aws_glue_job
+  name: csv-to-parquet
+  parent: reg-us-east-1
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: etl-db, type: aws.res.aws_glue_catalog_database, name: etl-db, parent: reg-us-east-1, props: {name: changeme}}
+- {id: pipeline-notifications, type: aws.res.aws_sns_topic, name: pipeline-notifications, parent: reg-us-east-1}
+- {id: adhoc-queries, type: aws.res.aws_athena_workgroup, name: adhoc-queries, parent: reg-us-east-1, props: {name: changeme}}
+edges:
+- {from: user, to: etl-bucket, label: upload CSV to source folder, step: '1'}
+- {from: etl-bucket, to: start-pipeline, label: S3 event notification, step: '2'}
+- {from: start-pipeline, to: etl-state-machine, label: StartExecution, step: '2'}
+- {from: etl-state-machine, to: validate-csv, label: schema and type validation, step: '3'}
+- {from: etl-state-machine, to: move-file, label: stage or error folder, step: '4'}
+- {from: move-file, to: etl-bucket, step: '4'}
+- {from: etl-state-machine, to: stage-crawler, label: crawl staged CSV, step: '5'}
+- {from: stage-crawler, to: etl-db, step: '5'}
+- {from: etl-state-machine, to: csv-to-parquet, label: run Glue job, step: '6'}
+- {from: csv-to-parquet, to: etl-bucket, label: Parquet partitioned by year/month/day, step: '7'}
+- {from: stage-crawler, to: etl-bucket, label: crawl transform folder, step: '8'}
+- {from: etl-state-machine, to: pipeline-notifications, label: success or failure, step: '9'}
+- {from: pipeline-notifications, to: users, label: email}
+- {from: adhoc-queries, to: etl-db, label: ad hoc SQL}
+steps:
+- {n: '1', text: 'user → etl-bucket: upload CSV to source folder'}
+- {n: '2', text: 'etl-bucket → start-pipeline: S3 event notification'}
+- {n: '3', text: 'etl-state-machine → validate-csv: schema and type validation'}
+- {n: '4', text: 'etl-state-machine → move-file: stage or error folder'}
+- {n: '5', text: 'etl-state-machine → stage-crawler: crawl staged CSV'}
+- {n: '6', text: 'etl-state-machine → csv-to-parquet: run Glue job'}
+- {n: '7', text: 'csv-to-parquet → etl-bucket: Parquet partitioned by year/month/day'}
+- {n: '8', text: 'stage-crawler → etl-bucket: crawl transform folder'}
+- {n: '9', text: 'etl-state-machine → pipeline-notifications: success or failure'}

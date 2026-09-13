@@ -1,0 +1,58 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/architecture/managed-file-transfer-using-aws-transfer-family-and-amazon-s3/); edit freely.
+title: Managed file transfer with AWS Transfer Family and S3
+category: storage
+tags:
+- transfer family
+- sftp
+- s3
+- lambda
+- cognito
+- aurora
+- route 53
+source: https://aws.amazon.com/blogs/architecture/managed-file-transfer-using-aws-transfer-family-and-amazon-s3/
+description: Partners connect over SFTP or FTPS to a Transfer Family server resolved through Route 53; a custom identity provider built on API Gateway and Lambda authenticates them against Cognito, looks
+  up entitlements in Aurora and returns a scoped IAM policy with logical directory mappings into S3. Inbound files land in S3 and trigger a Lambda that queries subscriptions, optionally runs AWS Batch transformations
+  and pushes outputs to customer SFTP destinations.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-mft, type: aws.vpc, name: mft, parent: reg-us-east-1, props: {cidr: 10.140.0.0/16}}
+- {id: az-mft-a, type: aws.availability_zone, name: a, parent: vpc-mft, props: {zone: a}}
+- {id: sub-mft-public-a, type: aws.subnet, name: mft-public-a, parent: az-mft-a, props: {cidr: 10.140.0.0/24, az: a, public: true}}
+- {id: sub-mft-private-a, type: aws.subnet, name: mft-private-a, parent: az-mft-a, props: {cidr: 10.140.1.0/24, az: a, public: false}}
+- {id: client, type: common.client, name: client}
+- {id: saas, type: common.saas, name: saas}
+- {id: transfer-dns, type: aws.route53_zone, name: transfer-dns, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: sftp-server, type: aws.res.aws_transfer_server, name: sftp-server, parent: sub-mft-public-a}
+- {id: idp-api, type: aws.res.aws_api_gateway_rest_api, name: idp-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: authorizer, type: aws.lambda_function, name: authorizer, parent: reg-us-east-1}
+- {id: partner-users, type: aws.res.aws_cognito_user_pool, name: partner-users, parent: reg-us-east-1, props: {name: changeme}}
+- {id: entitlements-db, type: aws.res.aws_rds_cluster, name: entitlements-db, parent: sub-mft-private-a, props: {engine: changeme}}
+- {id: file-exchange, type: aws.s3_bucket, name: file-exchange, parent: reg-us-east-1}
+- {id: outbound-router, type: aws.lambda_function, name: outbound-router, parent: reg-us-east-1}
+- {id: transform-jobs, type: aws.res.aws_batch_job_queue, name: transform-jobs, parent: reg-us-east-1, props: {name: changeme, priority: 1, state: changeme}}
+- {id: az-vpc-mft-b, type: aws.availability_zone, name: b, parent: vpc-mft, props: {zone: b}}
+- {id: sub-vpc-mft-b, type: aws.subnet, name: private-b, parent: az-vpc-mft-b, props: {cidr: 10.140.251.0/24, az: b, public: false}}
+edges:
+- {from: client, to: transfer-dns, label: resolve SFTP hostname, step: '1'}
+- {from: client, to: sftp-server, label: 'SFTP/FTPS: user and key', step: '2'}
+- {from: sftp-server, to: idp-api, label: custom identity provider, step: '3'}
+- {from: idp-api, to: authorizer, step: '3'}
+- {from: authorizer, to: partner-users, label: validate credentials, step: '4'}
+- {from: authorizer, to: entitlements-db, label: lookup logical directories, step: '4'}
+- {from: authorizer, to: sftp-server, label: scoped IAM policy and home mappings, step: '5'}
+- {from: sftp-server, to: file-exchange, label: read and write files, step: '6'}
+- {from: file-exchange, to: outbound-router, label: S3 event, step: '7'}
+- {from: outbound-router, to: entitlements-db, label: subscriptions, step: '8'}
+- {from: outbound-router, to: transform-jobs, label: optional transformation, step: '8'}
+- {from: outbound-router, to: saas, label: deliver to customer SFTP, step: '9'}
+steps:
+- {n: '1', text: 'client → transfer-dns: resolve SFTP hostname'}
+- {n: '2', text: 'client → sftp-server: SFTP/FTPS: user and key'}
+- {n: '3', text: 'sftp-server → idp-api: custom identity provider'}
+- {n: '4', text: 'authorizer → partner-users: validate credentials'}
+- {n: '5', text: 'authorizer → sftp-server: scoped IAM policy and home mappings'}
+- {n: '6', text: 'sftp-server → file-exchange: read and write files'}
+- {n: '7', text: 'file-exchange → outbound-router: S3 event'}
+- {n: '8', text: 'outbound-router → entitlements-db: subscriptions'}
+- {n: '9', text: 'outbound-router → saas: deliver to customer SFTP'}

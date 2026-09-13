@@ -1,0 +1,40 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/aws/step-functions-distributed-map-a-serverless-solution-for-large-scale-parallel-data-processing/); edit freely.
+title: Large-scale S3 processing with Step Functions Distributed Map
+category: serverless
+tags:
+- step functions
+- distributed map
+- s3
+- parallel processing
+- etl
+source: https://aws.amazon.com/blogs/aws/step-functions-distributed-map-a-serverless-solution-for-large-scale-parallel-data-processing/
+description: An EventBridge rule starts a state machine when a manifest lands in S3; a Distributed Map state lists the objects under a prefix and runs up to 10,000 concurrent child executions, each invoking
+  a Lambda function per object or batch. Child results are written back to S3 and summarized by a final function.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: client, type: common.client, name: client}
+- {id: input-data, type: aws.s3_bucket, name: input-data, parent: reg-us-east-1}
+- {id: manifest-uploaded, type: aws.res.aws_cloudwatch_event_rule, name: manifest-uploaded, parent: reg-us-east-1}
+- {id: distributed-map-processor, type: aws.res.aws_sfn_state_machine, name: distributed-map-processor, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: transform-batch, type: aws.lambda_function, name: transform-batch, parent: reg-us-east-1}
+- {id: summarize-run, type: aws.lambda_function, name: summarize-run, parent: reg-us-east-1}
+- {id: map-results, type: aws.s3_bucket, name: map-results, parent: reg-us-east-1}
+- {id: processing-complete, type: aws.res.aws_sns_topic, name: processing-complete, parent: reg-us-east-1}
+edges:
+- {from: client, to: input-data, label: PutObject manifest, step: '1'}
+- {from: input-data, to: manifest-uploaded, label: Object Created event via EventBridge, step: '2'}
+- {from: manifest-uploaded, to: distributed-map-processor, link: aws_cloudwatch_event_target}
+- {from: distributed-map-processor, to: input-data, label: ListObjectsV2 prefix, step: '3'}
+- {from: distributed-map-processor, to: transform-batch, label: child executions, step: '4'}
+- {from: distributed-map-processor, to: map-results, label: ResultWriter, step: '5'}
+- {from: distributed-map-processor, to: summarize-run, step: '6'}
+- {from: summarize-run, to: processing-complete, label: Publish, step: '7'}
+steps:
+- {n: '1', text: 'client → input-data: PutObject manifest'}
+- {n: '2', text: 'input-data → manifest-uploaded: Object Created event via EventBridge'}
+- {n: '3', text: 'distributed-map-processor → input-data: ListObjectsV2 prefix'}
+- {n: '4', text: 'distributed-map-processor → transform-batch: child executions'}
+- {n: '5', text: 'distributed-map-processor → map-results: ResultWriter'}
+- {n: '6', text: distributed-map-processor → summarize-run}
+- {n: '7', text: 'summarize-run → processing-complete: Publish'}

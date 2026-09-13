@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GlobalTables.html); edit freely.
+title: Serverless API in two Regions on DynamoDB global tables
+category: resilience
+tags:
+- dynamodb global tables
+- multi-region
+- serverless
+- api gateway
+- lambda
+- route 53 latency
+- multi-active
+source: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GlobalTables.html
+description: Identical API Gateway and Lambda stacks are deployed in two Regions, each reading and writing its local DynamoDB replica of a global table. Route 53 latency records with health checks direct
+  clients to the nearest Region and drop an unhealthy one, giving low or zero RPO with last-writer-wins reconciliation (or multi-Region strong consistency when configured).
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: primary}
+- {id: reg-ap-southeast-1, type: aws.region, name: ap-southeast-1, parent: acct-prod, props: {region: ap-southeast-1}, caption: secondary}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: api-global-zone, type: aws.route53_zone, name: api-global-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: api-east-check, type: aws.res.aws_route53_health_check, name: api-east-check, parent: reg-us-east-1, props: {type: changeme}}
+- {id: api-sg-check, type: aws.res.aws_route53_health_check, name: api-sg-check, parent: reg-us-east-1, props: {type: changeme}}
+- {id: orders-api-east, type: aws.res.aws_api_gateway_rest_api, name: orders-api-east, parent: reg-us-east-1, props: {name: changeme}}
+- {id: orders-fn-east, type: aws.lambda_function, name: orders-fn-east, parent: reg-us-east-1}
+- {id: orders-us-east-1, type: aws.dynamodb_table, name: orders-us-east-1, parent: reg-us-east-1}
+- {id: orders-api-sg, type: aws.res.aws_api_gateway_rest_api, name: orders-api-sg, parent: reg-ap-southeast-1, props: {name: changeme}}
+- {id: orders-fn-sg, type: aws.lambda_function, name: orders-fn-sg, parent: reg-ap-southeast-1}
+- {id: orders-ap-southeast-1, type: aws.dynamodb_table, name: orders-ap-southeast-1, parent: reg-ap-southeast-1}
+edges:
+- {from: mobile, to: api-global-zone, label: DNS, step: '1'}
+- {from: api-global-zone, to: orders-api-east, label: latency record, step: '2'}
+- {from: api-global-zone, to: orders-api-sg, label: latency record}
+- {from: api-east-check, to: orders-api-east, label: health check}
+- {from: api-sg-check, to: orders-api-sg, label: health check}
+- {from: orders-api-east, to: orders-fn-east, step: '3'}
+- {from: orders-api-sg, to: orders-fn-sg}
+- {from: orders-fn-east, to: orders-us-east-1, label: local read/write, step: '4'}
+- {from: orders-fn-sg, to: orders-ap-southeast-1, label: local read/write}
+- {from: orders-us-east-1, to: orders-ap-southeast-1, label: global table replication (bidirectional)}
+steps:
+- {n: '1', text: 'mobile → api-global-zone: DNS'}
+- {n: '2', text: 'api-global-zone → orders-api-east: latency record'}
+- {n: '3', text: orders-api-east → orders-fn-east}
+- {n: '4', text: 'orders-fn-east → orders-us-east-1: local read/write'}

@@ -1,0 +1,43 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/implementing-serverless-manual-approval-steps-in-aws-step-functions-and-amazon-api-gateway/); edit freely.
+title: Human approval step with Step Functions task token
+category: serverless
+tags:
+- step functions
+- human approval
+- task token
+- callback
+- api gateway
+source: https://aws.amazon.com/blogs/compute/implementing-serverless-manual-approval-steps-in-aws-step-functions-and-amazon-api-gateway/
+description: The workflow pauses at a waitForTaskToken step and a Lambda function emails the approver links that embed the task token. Clicking a link calls an API Gateway endpoint that invokes SendTaskSuccess
+  or SendTaskFailure, and the workflow resumes without any long-running process waiting.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: user, type: common.user, name: user}
+- {id: client, type: common.client, name: client}
+- {id: request-api, type: aws.res.aws_api_gateway_rest_api, name: request-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: approval-workflow, type: aws.res.aws_sfn_state_machine, name: approval-workflow, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: send-approval-email, type: aws.lambda_function, name: send-approval-email, parent: reg-us-east-1}
+- {id: approvals-sender, type: aws.res.aws_ses_email_identity, name: approvals-sender, parent: reg-us-east-1, props: {email: changeme}}
+- {id: approval-callback-api, type: aws.res.aws_api_gateway_rest_api, name: approval-callback-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: fulfil-request, type: aws.lambda_function, name: fulfil-request, parent: reg-us-east-1}
+- {id: approval-requests, type: aws.dynamodb_table, name: approval-requests, parent: reg-us-east-1}
+edges:
+- {from: client, to: request-api, label: submit request, step: '1'}
+- {from: request-api, to: approval-workflow, label: StartExecution, step: '2'}
+- {from: approval-workflow, to: send-approval-email, label: waitForTaskToken, step: '3'}
+- {from: send-approval-email, to: approval-requests, label: store token}
+- {from: send-approval-email, to: approvals-sender, label: email approve/reject links, step: '4'}
+- {from: approvals-sender, to: user, label: approval email, step: '5'}
+- {from: user, to: approval-callback-api, label: 'GET /approve?token=', step: '6'}
+- {from: approval-callback-api, to: approval-workflow, label: SendTaskSuccess, step: '7'}
+- {from: approval-workflow, to: fulfil-request, step: '8'}
+steps:
+- {n: '1', text: 'client → request-api: submit request'}
+- {n: '2', text: 'request-api → approval-workflow: StartExecution'}
+- {n: '3', text: 'approval-workflow → send-approval-email: waitForTaskToken'}
+- {n: '4', text: 'send-approval-email → approvals-sender: email approve/reject links'}
+- {n: '5', text: 'approvals-sender → user: approval email'}
+- {n: '6', text: 'user → approval-callback-api: GET /approve?token='}
+- {n: '7', text: 'approval-callback-api → approval-workflow: SendTaskSuccess'}
+- {n: '8', text: approval-workflow → fulfil-request}

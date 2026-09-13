@@ -1,0 +1,39 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/perform-near-real-time-analytics-on-streaming-data-with-amazon-kinesis-and-amazon-elasticsearch-service/); edit freely.
+title: Near real-time clickstream anomaly detection to OpenSearch
+category: analytics-bi
+tags:
+- kinesis data streams
+- kinesis data analytics
+- random cut forest
+- firehose
+- opensearch
+- clickstream
+source: https://aws.amazon.com/blogs/big-data/perform-near-real-time-analytics-on-streaming-data-with-amazon-kinesis-and-amazon-elasticsearch-service/
+description: Web clickstream events are ingested into a Kinesis data stream and scored by a Kinesis Data Analytics application using the RANDOM_CUT_FOREST anomaly detection function. Scored records are
+  exported through a Firehose delivery stream into an OpenSearch Service domain, where dashboards visualize anomalies in near real time.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: clickstream, type: aws.res.aws_kinesis_stream, name: clickstream, parent: grp-ingestion, props: {name: changeme}}
+- {id: anomaly-detector, type: aws.res.aws_kinesisanalyticsv2_application, name: anomaly-detector, parent: grp-analytics, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: scored-stream, type: aws.res.aws_kinesis_stream, name: scored-stream, parent: grp-analytics, props: {name: changeme}}
+- {id: opensearch-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: opensearch-delivery, parent: grp-analytics, props: {destination: changeme, name: changeme}}
+- {id: clickstream-domain, type: aws.res.aws_opensearch_domain, name: clickstream-domain, parent: reg-us-east-1, props: {domain_name: changeme}}
+- {id: firehose-backup, type: aws.s3_bucket, name: firehose-backup, parent: reg-us-east-1}
+edges:
+- {from: users, to: clickstream, label: page views and clicks, step: '1'}
+- {from: clickstream, to: anomaly-detector, label: streaming SQL input, step: '2'}
+- {from: anomaly-detector, to: scored-stream, label: anomaly scores, step: '3'}
+- {from: scored-stream, to: opensearch-delivery, label: Firehose source, step: '4'}
+- {from: opensearch-delivery, to: clickstream-domain, label: index documents, step: '5'}
+- {from: opensearch-delivery, to: firehose-backup, label: failed records backup, step: '6'}
+steps:
+- {n: '1', text: 'users → clickstream: page views and clicks'}
+- {n: '2', text: 'clickstream → anomaly-detector: streaming SQL input'}
+- {n: '3', text: 'anomaly-detector → scored-stream: anomaly scores'}
+- {n: '4', text: 'scored-stream → opensearch-delivery: Firehose source'}
+- {n: '5', text: 'opensearch-delivery → clickstream-domain: index documents'}
+- {n: '6', text: 'opensearch-delivery → firehose-backup: failed records backup'}

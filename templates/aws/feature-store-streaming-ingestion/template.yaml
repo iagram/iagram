@@ -1,0 +1,59 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/using-streaming-ingestion-with-amazon-sagemaker-feature-store-to-make-ml-backed-decisions-in-near-real-time/); edit freely.
+title: Streaming feature ingestion into SageMaker Feature Store for real-time fraud scoring
+category: ml
+tags:
+- feature store
+- kinesis
+- managed flink
+- streaming aggregates
+- real-time inference
+source: https://aws.amazon.com/blogs/machine-learning/using-streaming-ingestion-with-amazon-sagemaker-feature-store-to-make-ml-backed-decisions-in-near-real-time/
+description: Credit card transactions arrive on a Kinesis data stream; a Managed Service for Apache Flink application computes sliding-window aggregates and a Lambda function writes them to an online Feature
+  Store group, which replicates to the offline S3 store. A second Lambda consumes the same stream, reads the latest aggregates with GetRecord and calls a SageMaker endpoint to score each transaction.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: device, type: common.device, name: device}
+- {id: cc-transactions, type: aws.res.aws_kinesis_stream, name: cc-transactions, parent: reg-us-east-1, props: {name: changeme}}
+- {id: window-aggregates, type: aws.res.aws_kinesisanalyticsv2_application, name: window-aggregates, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: ingest-features-fn, type: aws.lambda_function, name: ingest-features-fn, parent: reg-us-east-1}
+- id: cc-agg-features
+  type: aws.res.aws_sagemaker_feature_group
+  name: cc-agg-features
+  parent: reg-us-east-1
+  props:
+    event_time_feature_name: changeme
+    feature_definition: []
+    feature_group_name: changeme
+    record_identifier_feature_name: changeme
+    role_arn: changeme
+- id: cc-agg-batch-features
+  type: aws.res.aws_sagemaker_feature_group
+  name: cc-agg-batch-features
+  parent: reg-us-east-1
+  props:
+    event_time_feature_name: changeme
+    feature_definition: []
+    feature_group_name: changeme
+    record_identifier_feature_name: changeme
+    role_arn: changeme
+- {id: offline-feature-store, type: aws.s3_bucket, name: offline-feature-store, parent: reg-us-east-1}
+- {id: predict-fn, type: aws.lambda_function, name: predict-fn, parent: reg-us-east-1}
+- {id: fraud-endpoint, type: aws.res.aws_sagemaker_endpoint, name: fraud-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}}
+edges:
+- {from: device, to: cc-transactions, label: PutRecord transaction, step: '1'}
+- {from: cc-transactions, to: window-aggregates, label: Flink source, step: '2'}
+- {from: window-aggregates, to: ingest-features-fn, label: aggregated rows, step: '3'}
+- {from: ingest-features-fn, to: cc-agg-features, label: PutRecord online store, step: '4'}
+- {from: cc-agg-features, to: offline-feature-store, label: async replication}
+- {from: cc-agg-batch-features, to: offline-feature-store, label: historical features}
+- {from: cc-transactions, to: predict-fn, link: aws_lambda_event_source_mapping}
+- {from: predict-fn, to: cc-agg-features, label: GetRecord latest aggregates, step: '5'}
+- {from: predict-fn, to: fraud-endpoint, label: InvokeEndpoint, step: '6'}
+steps:
+- {n: '1', text: 'device → cc-transactions: PutRecord transaction'}
+- {n: '2', text: 'cc-transactions → window-aggregates: Flink source'}
+- {n: '3', text: 'window-aggregates → ingest-features-fn: aggregated rows'}
+- {n: '4', text: 'ingest-features-fn → cc-agg-features: PutRecord online store'}
+- {n: '5', text: 'predict-fn → cc-agg-features: GetRecord latest aggregates'}
+- {n: '6', text: 'predict-fn → fraud-endpoint: InvokeEndpoint'}

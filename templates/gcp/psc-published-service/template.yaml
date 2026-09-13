@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.cloud.google.com/vpc/docs/configure-private-service-connect-producer); edit freely.
+title: Private Service Connect published service (producer and consumer)
+category: networking
+tags:
+- private service connect
+- service attachment
+- producer
+- consumer
+- internal load balancer
+- nat subnet
+source: https://docs.cloud.google.com/vpc/docs/configure-private-service-connect-producer
+description: A service producer fronts its workload with an internal load balancer, allocates a PSC NAT subnet and publishes the load balancer through a service attachment with an accept list of consumer
+  projects. Consumers create an endpoint (a forwarding rule with an internal IP in their own VPC) that targets the service attachment, so traffic never leaves Google's network and address spaces need not
+  be unique.
+nodes:
+- {id: prj-producer, type: gcp.project, name: producer, props: {project_id: producer-123456, project: changeme, region: us-central1}}
+- {id: vpc-producer-vpc, type: gcp.vpc, name: producer-vpc, parent: prj-producer, props: {cidr: 10.70.0.0/16}}
+- {id: sub-producer-backend, type: gcp.subnetwork, name: producer-backend, parent: vpc-producer-vpc, props: {cidr: 10.70.0.0/24, region: us-central1}}
+- {id: sub-psc-nat-subnet, type: gcp.subnetwork, name: psc-nat-subnet, parent: vpc-producer-vpc, props: {cidr: 10.70.100.0/24, region: us-central1}}
+- {id: prj-consumer, type: gcp.project, name: consumer, props: {project_id: consumer-123456, project: changeme, region: us-central1}}
+- {id: vpc-consumer-vpc, type: gcp.vpc, name: consumer-vpc, parent: prj-consumer, props: {cidr: 10.70.0.0/16}}
+- {id: sub-consumer-app, type: gcp.subnetwork, name: consumer-app, parent: vpc-consumer-vpc, props: {cidr: 10.70.0.0/24, region: us-central1}}
+- {id: service-vm, type: gcp.compute_instance, name: service-vm, parent: sub-producer-backend}
+- {id: service-backend, type: gcp.res.google_compute_backend_service, name: service-backend, parent: vpc-producer-vpc, props: {name: changeme}}
+- {id: producer-ilb, type: gcp.res.google_compute_forwarding_rule, name: producer-ilb, parent: sub-producer-backend, props: {name: changeme}}
+- id: service-attachment
+  type: gcp.res.google_compute_service_attachment
+  name: service-attachment
+  parent: sub-psc-nat-subnet
+  props:
+    connection_preference: changeme
+    enable_proxy_protocol: true
+    name: changeme
+    nat_subnets: []
+    target_service: changeme
+- {id: endpoint-ip, type: gcp.res.google_compute_address, name: endpoint-ip, parent: sub-consumer-app, props: {name: changeme}}
+- {id: psc-endpoint, type: gcp.res.google_compute_forwarding_rule, name: psc-endpoint, parent: sub-consumer-app, props: {name: changeme}}
+- {id: consumer-vm, type: gcp.compute_instance, name: consumer-vm, parent: sub-consumer-app}
+- {id: consumer-private-zone, type: gcp.cloud_dns_zone, name: consumer-private-zone, parent: prj-consumer, props: {domain: example.com}}
+edges:
+- {from: consumer-vm, to: consumer-private-zone, label: resolve service name to endpoint IP, step: '1'}
+- {from: consumer-vm, to: psc-endpoint, label: connect to internal endpoint IP, step: '2'}
+- {from: psc-endpoint, to: service-attachment, label: PSC connection with NAT, step: '3'}
+- {from: service-attachment, to: producer-ilb, label: forward to producer load balancer, step: '4'}
+- {from: producer-ilb, to: service-backend, label: backend service, step: '5'}
+- {from: service-backend, to: service-vm, label: serve request, step: '6'}
+steps:
+- {n: '1', text: 'consumer-vm → consumer-private-zone: resolve service name to endpoint IP'}
+- {n: '2', text: 'consumer-vm → psc-endpoint: connect to internal endpoint IP'}
+- {n: '3', text: 'psc-endpoint → service-attachment: PSC connection with NAT'}
+- {n: '4', text: 'service-attachment → producer-ilb: forward to producer load balancer'}
+- {n: '5', text: 'producer-ilb → service-backend: backend service'}
+- {n: '6', text: 'service-backend → service-vm: serve request'}

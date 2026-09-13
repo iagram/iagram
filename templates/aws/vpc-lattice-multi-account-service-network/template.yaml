@@ -1,0 +1,56 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/build-secure-multi-account-multi-vpc-connectivity-for-your-applications-with-amazon-vpc-lattice/); edit freely.
+title: Multi-account service-to-service connectivity with Amazon VPC Lattice
+category: networking
+tags:
+- vpc lattice
+- service network
+- multi-account
+- ram
+- application networking
+- iam auth
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/build-secure-multi-account-multi-vpc-connectivity-for-your-applications-with-amazon-vpc-lattice/
+description: A central networking account owns a VPC Lattice service network and shares it with workload accounts through AWS RAM; each workload account associates its VPC with the service network and registers
+  its own services with target groups pointing at instances, containers, or Lambda functions. Consumers call services by their Lattice DNS names through the link-local Lattice prefix, with IAM auth policies
+  on the service network and services controlling who may invoke what, independent of VPC CIDRs.
+nodes:
+- {id: acct-networking, type: aws.account, name: networking}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-networking, props: {region: us-west-2}}
+- {id: acct-payments, type: aws.account, name: payments}
+- {id: reg-us-west-2-2, type: aws.region, name: us-west-2, parent: acct-payments, props: {region: us-west-2}}
+- {id: vpc-payments, type: aws.vpc, name: payments, parent: reg-us-west-2-2, props: {cidr: 10.1.0.0/16}}
+- {id: az-payments-a, type: aws.availability_zone, name: a, parent: vpc-payments, props: {zone: a}}
+- {id: sub-payments-private-a, type: aws.subnet, name: payments-private-a, parent: az-payments-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: acct-orders, type: aws.account, name: orders}
+- {id: reg-us-west-2-3, type: aws.region, name: us-west-2, parent: acct-orders, props: {region: us-west-2}}
+- {id: vpc-orders, type: aws.vpc, name: orders, parent: reg-us-west-2-3, props: {cidr: 10.1.0.0/16}}
+- {id: az-orders-a, type: aws.availability_zone, name: a, parent: vpc-orders, props: {zone: a}}
+- {id: sub-orders-private-a, type: aws.subnet, name: orders-private-a, parent: az-orders-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: corp-service-network, type: aws.res.aws_vpclattice_service_network, name: corp-service-network, parent: acct-networking, props: {name: changeme}}
+- {id: service-network-share, type: aws.res.aws_ram_resource_share, name: service-network-share, parent: acct-networking, props: {name: changeme}}
+- {id: payments-service, type: aws.res.aws_vpclattice_service, name: payments-service, parent: acct-payments, props: {name: changeme}}
+- {id: payments-targets, type: aws.res.aws_vpclattice_target_group, name: payments-targets, parent: vpc-payments, props: {name: changeme, type: changeme}}
+- {id: payments-api, type: aws.ec2_instance, name: payments-api, parent: sub-payments-private-a}
+- {id: orders-service, type: aws.res.aws_vpclattice_service, name: orders-service, parent: acct-orders, props: {name: changeme}}
+- {id: orders-handler, type: aws.lambda_function, name: orders-handler, parent: reg-us-west-2-3}
+- {id: orders-client, type: aws.ec2_instance, name: orders-client, parent: sub-orders-private-a}
+- {id: az-vpc-payments-b, type: aws.availability_zone, name: b, parent: vpc-payments, props: {zone: b}}
+- {id: sub-vpc-payments-b, type: aws.subnet, name: private-b, parent: az-vpc-payments-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-orders-b, type: aws.availability_zone, name: b, parent: vpc-orders, props: {zone: b}}
+- {id: sub-vpc-orders-b, type: aws.subnet, name: private-b, parent: az-vpc-orders-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+edges:
+- {from: corp-service-network, to: vpc-payments, label: vpclattice service network vpc association}
+- {from: corp-service-network, to: vpc-orders, label: vpclattice service network vpc association}
+- {from: corp-service-network, to: payments-service, label: vpclattice service network service association}
+- {from: corp-service-network, to: orders-service, label: vpclattice service network service association}
+- {from: service-network-share, to: acct-payments, label: RAM share}
+- {from: service-network-share, to: acct-orders, label: RAM share}
+- {from: orders-client, to: corp-service-network, label: 'HTTPS to payments Lattice DNS name, SigV4', step: '1'}
+- {from: corp-service-network, to: payments-service, label: auth policy evaluated, step: '2'}
+- {from: payments-service, to: payments-targets, step: '3'}
+- {from: payments-targets, to: payments-api, step: '4'}
+- {from: orders-service, to: orders-handler, label: Lambda target}
+steps:
+- {n: '1', text: 'orders-client → corp-service-network: HTTPS to payments Lattice DNS name, SigV4'}
+- {n: '2', text: 'corp-service-network → payments-service: auth policy evaluated'}
+- {n: '3', text: payments-service → payments-targets}
+- {n: '4', text: payments-targets → payments-api}

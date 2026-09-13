@@ -1,0 +1,37 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/database/build-scalable-event-driven-architectures-with-amazon-dynamodb-and-aws-lambda/); edit freely.
+title: DynamoDB Streams change data capture with Lambda
+category: serverless
+tags:
+- dynamodb streams
+- lambda
+- change data capture
+- event-driven
+- sns
+source: https://aws.amazon.com/blogs/database/build-scalable-event-driven-architectures-with-amazon-dynamodb-and-aws-lambda/
+description: Writes to an orders table are captured by DynamoDB Streams and delivered in order per partition key to a Lambda function through an event source mapping with filtering. The function publishes
+  domain events to SNS and indexes documents in OpenSearch; failed batches are routed to an SQS on-failure destination.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: client, type: common.client, name: client}
+- {id: orders-api, type: aws.res.aws_api_gateway_rest_api, name: orders-api, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: orders-handler, type: aws.lambda_function, name: orders-handler, parent: reg-eu-west-1}
+- {id: orders, type: aws.dynamodb_table, name: orders, parent: reg-eu-west-1}
+- {id: stream-processor, type: aws.lambda_function, name: stream-processor, parent: reg-eu-west-1}
+- {id: order-status-events, type: aws.res.aws_sns_topic, name: order-status-events, parent: reg-eu-west-1}
+- {id: orders-search, type: aws.res.aws_opensearch_domain, name: orders-search, parent: reg-eu-west-1, props: {domain_name: changeme}}
+- {id: stream-failures, type: aws.sqs_queue, name: stream-failures, parent: reg-eu-west-1}
+edges:
+- {from: client, to: orders-api, label: 'PUT /orders/{id}', step: '1'}
+- {from: orders-api, to: orders-handler, step: '2'}
+- {from: orders-handler, to: orders, label: UpdateItem, step: '3'}
+- {from: orders, to: stream-processor, link: aws_lambda_event_source_mapping}
+- {from: stream-processor, to: order-status-events, label: Publish MODIFY events, step: '4'}
+- {from: stream-processor, to: orders-search, label: index document, step: '5'}
+- {from: stream-processor, to: stream-failures, label: on-failure destination}
+steps:
+- {n: '1', text: 'client → orders-api: PUT /orders/{id}'}
+- {n: '2', text: orders-api → orders-handler}
+- {n: '3', text: 'orders-handler → orders: UpdateItem'}
+- {n: '4', text: 'stream-processor → order-status-events: Publish MODIFY events'}
+- {n: '5', text: 'stream-processor → orders-search: index document'}

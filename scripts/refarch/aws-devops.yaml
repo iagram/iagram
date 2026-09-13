@@ -1,0 +1,733 @@
+# AWS reference architectures: DevOps, CI/CD and observability.
+# Format: see FORMAT.md. 20 items, provider aws.
+# Sources: AWS docs (CodePipeline, CodeDeploy, SAM, CloudWatch, X-Ray, AMP, Incident Manager,
+# Config, CUR), AWS Solutions Library, AWS DevOps / Security / Cloud Operations blogs.
+
+- slug: cross-account-codepipeline-codedeploy-kms
+  title: Cross-account deployment pipeline with CodePipeline, KMS and CodeDeploy
+  category: devops
+  tags: [codepipeline, cross-account, codedeploy, kms, multi-account, s3 artifacts]
+  source: https://docs.aws.amazon.com/codepipeline/latest/userguide/pipelines-create-cross-account.html
+  description: A pipeline in the tooling account encrypts its S3 artifact store with a customer managed KMS key whose key policy and bucket policy grant the workload account access, and the CodePipeline service role is allowed to assume a cross-account role there. The deploy action runs with that role ARN against a CodeDeploy application and deployment group owned by the workload account, whose EC2 instance profile can read the artifact bucket and decrypt with the key.
+  containers:
+    - region: us-east-2
+      account: tooling
+      groups: [{label: pipeline}]
+    - region: us-east-2
+      account: workload
+      vpcs:
+        - name: app
+          cidr: 10.10.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.10.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_codecommit_repository, name: app-repo, in: group:pipeline}
+    - {tf: aws_codepipeline, name: cross-account-pipeline, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: app-build, in: group:pipeline}
+    - {tf: aws_s3_bucket, name: pipeline-artifact-bucket, in: group:pipeline}
+    - {tf: aws_kms_key, name: artifact-cmk, in: group:pipeline}
+    - {tf: aws_iam_role, name: codepipeline-service-role, in: account:tooling}
+    - {tf: aws_iam_role, name: cross-account-deploy-role, in: account:workload}
+    - {tf: aws_codedeploy_app, name: workload-codedeploy-app, in: account:workload}
+    - {tf: aws_autoscaling_group, name: app-asg, in: subnet:private-a}
+    - {tf: aws_iam_role, name: ec2-instance-role, in: account:workload}
+  actors: [user]
+  flows:
+    - {from: user, to: app-repo, label: git push, step: 1}
+    - {from: app-repo, to: cross-account-pipeline, label: source action, step: 2}
+    - {from: cross-account-pipeline, to: app-build, label: build action, step: 3}
+    - {from: app-build, to: pipeline-artifact-bucket, label: build artifact encrypted with CMK, step: 4}
+    - {from: artifact-cmk, to: pipeline-artifact-bucket, label: SSE-KMS}
+    - {from: codepipeline-service-role, to: cross-account-deploy-role, label: "sts:AssumeRole (roleArn on action)", step: 5}
+    - {from: cross-account-pipeline, to: workload-codedeploy-app, label: CodeDeploy deploy action in workload account, step: 6}
+    - {from: workload-codedeploy-app, to: app-asg, label: deployment group targets, step: 7}
+    - {from: app-asg, to: pipeline-artifact-bucket, label: agent GetObject + kms Decrypt, step: 8}
+    - {from: ec2-instance-role, to: app-asg, label: instance profile}
+
+- slug: lambda-canary-sam-codedeploy
+  title: Gradual Lambda deployment with AWS SAM and CodeDeploy canary traffic shifting
+  category: devops
+  tags: [lambda, sam, codedeploy, canary, alias, rollback]
+  source: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/automating-updates-to-serverless-apps.html
+  description: AWS SAM publishes a new Lambda version, keeps a live alias, and hands traffic shifting to a CodeDeploy application on the Lambda compute platform using a preference such as Canary10Percent10Minutes or Linear10PercentEvery1Minute. Pre-traffic and post-traffic hook functions validate the release, and CloudWatch alarms on the alias error metrics trigger an automatic rollback if they fire during the shift.
+  containers:
+    - region: us-east-1
+      groups: [{label: deployment}, {label: application}]
+  elements:
+    - {tf: aws_s3_bucket, name: sam-artifacts, in: group:deployment}
+    - {tf: aws_cloudformation_stack, name: sam-stack, in: group:deployment}
+    - {tf: aws_codedeploy_app, name: lambda-deploy-app, in: group:deployment}
+    - {tf: aws_lambda_function, name: pre-traffic-hook, in: group:deployment}
+    - {tf: aws_lambda_function, name: post-traffic-hook, in: group:deployment}
+    - {tf: aws_api_gateway_rest_api, name: orders-api, in: group:application}
+    - {tf: aws_lambda_function, name: orders-handler, in: group:application}
+    - {tf: aws_lambda_alias, name: live-alias, in: group:application}
+    - {tf: aws_cloudwatch_metric_alarm, name: alias-errors-alarm, in: group:application}
+  actors: [user, client]
+  flows:
+    - {from: user, to: sam-artifacts, label: sam deploy uploads code.zip, step: 1}
+    - {from: sam-artifacts, to: sam-stack, label: CloudFormation change set, step: 2}
+    - {from: sam-stack, to: orders-handler, label: publish new version (AutoPublishAlias), step: 3}
+    - {from: sam-stack, to: lambda-deploy-app, label: DeploymentPreference creates deployment, step: 4}
+    - {from: lambda-deploy-app, to: pre-traffic-hook, label: PreTraffic hook, step: 5}
+    - {from: lambda-deploy-app, to: live-alias, label: shift 10% then 100% of traffic, step: 6}
+    - {from: alias-errors-alarm, to: lambda-deploy-app, label: ALARM triggers rollback}
+    - {from: lambda-deploy-app, to: post-traffic-hook, label: PostTraffic hook, step: 7}
+    - {from: client, to: orders-api, label: HTTPS}
+    - {from: orders-api, to: live-alias, label: invoke alias}
+    - {from: live-alias, to: orders-handler, label: weighted versions}
+
+- slug: ec2-bluegreen-codedeploy-autoscaling
+  title: EC2 blue/green deployment with CodeDeploy, Auto Scaling and a load balancer
+  category: devops
+  tags: [codedeploy, ec2, auto scaling, blue/green, elb, codepipeline]
+  source: https://docs.aws.amazon.com/codedeploy/latest/userguide/deployments-create-console-blue-green.html
+  description: A CodeDeploy deployment group on the EC2/On-premises platform copies the current (blue) Auto Scaling group into a replacement (green) group, installs the revision from the pipeline artifact bucket on the new instances, and registers them with the load balancer target group once healthy. Traffic is rerouted from the original instances to the replacement instances, and the original Auto Scaling group is terminated after a configurable wait so a rollback simply reregisters the blue fleet.
+  containers:
+    - region: eu-west-1
+      groups: [{label: pipeline}]
+      vpcs:
+        - name: web
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.20.0.0/24, az: a, public: true}
+            - {name: private-a, cidr: 10.20.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.20.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_codecommit_repository, name: web-app-repo, in: group:pipeline}
+    - {tf: aws_codepipeline, name: web-pipeline, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: web-build, in: group:pipeline}
+    - {tf: aws_s3_bucket, name: revision-bucket, in: group:pipeline}
+    - {tf: aws_codedeploy_app, name: web-codedeploy-app, in: group:pipeline}
+    - {tf: aws_lb, name: web-alb, in: subnet:public-a}
+    - {tf: aws_launch_template, name: web-launch-template, in: vpc:web}
+    - {tf: aws_autoscaling_group, name: blue-asg, in: subnet:private-a}
+    - {tf: aws_autoscaling_group, name: green-asg, in: subnet:private-b}
+    - {tf: aws_iam_role, name: codedeploy-service-role, in: region}
+  actors: [user, users]
+  flows:
+    - {from: user, to: web-app-repo, label: git push, step: 1}
+    - {from: web-app-repo, to: web-pipeline, label: source action, step: 2}
+    - {from: web-pipeline, to: web-build, label: build appspec.yml bundle, step: 3}
+    - {from: web-build, to: revision-bucket, label: revision artifact, step: 4}
+    - {from: web-pipeline, to: web-codedeploy-app, label: CodeDeploy deploy action, step: 5}
+    - {from: web-codedeploy-app, to: green-asg, label: copy blue ASG and launch replacement instances, step: 6}
+    - {from: revision-bucket, to: green-asg, label: CodeDeploy agent pulls revision, step: 7}
+    - {from: web-codedeploy-app, to: web-alb, label: register green targets and reroute traffic, step: 8}
+    - {from: web-codedeploy-app, to: blue-asg, label: deregister and terminate after wait, step: 9}
+    - {from: users, to: web-alb, label: HTTPS}
+    - {from: web-launch-template, to: green-asg, label: launch template}
+
+- slug: eks-deploy-action-codepipeline
+  title: Continuous deployment to Amazon EKS with the CodePipeline EKS deploy action
+  category: devops
+  tags: [codepipeline, eks, kubernetes, helm, kubectl, ecr, codeconnections]
+  source: https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-EKS.html
+  description: A V2 CodePipeline pulls application source through a CodeConnections GitHub connection, builds and pushes the image with the ECRBuildAndPublish action, then runs the EKSDeploy action, which applies Kubernetes manifests or a Helm chart from the source artifact on CodePipeline-managed CodeBuild compute. The action reaches private clusters through subnets and security groups of the cluster VPC and authenticates with an EKS access entry granted to the pipeline service role.
+  containers:
+    - region: us-west-2
+      groups: [{label: pipeline}]
+      vpcs:
+        - name: eks
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.30.1.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.30.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_codestarconnections_connection, name: github-connection, in: group:pipeline}
+    - {tf: aws_codepipeline, name: eks-pipeline, in: group:pipeline}
+    - {tf: aws_ecr_repository, name: service-images, in: group:pipeline}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline}
+    - {tf: aws_cloudwatch_log_group, name: pipeline-action-logs, in: group:pipeline}
+    - {tf: aws_eks_cluster, name: prod-cluster, in: vpc:eks}
+    - {tf: aws_eks_access_entry, name: pipeline-access-entry, in: vpc:eks}
+    - {tf: aws_lb, name: ingress-alb, in: subnet:private-a}
+    - {tf: aws_iam_role, name: pipeline-service-role, in: region}
+  actors: [saas, users]
+  flows:
+    - {from: saas, to: github-connection, label: GitHub App webhook, step: 1}
+    - {from: github-connection, to: eks-pipeline, label: source action, step: 2}
+    - {from: eks-pipeline, to: service-images, label: ECRBuildAndPublish pushes image tagged with execution id, step: 3}
+    - {from: eks-pipeline, to: pipeline-artifacts, label: artifact store}
+    - {from: eks-pipeline, to: prod-cluster, label: "EKSDeploy: helm upgrade / kubectl apply via cluster VPC", step: 4}
+    - {from: pipeline-service-role, to: pipeline-access-entry, label: mapped to cluster RBAC}
+    - {from: eks-pipeline, to: pipeline-action-logs, label: /aws/codepipeline/<pipeline> logs}
+    - {from: prod-cluster, to: service-images, label: pull image, step: 5}
+    - {from: users, to: ingress-alb, label: HTTPS}
+    - {from: ingress-alb, to: prod-cluster, label: ingress to pods}
+
+- slug: stacksets-multi-account-multi-region-pipeline
+  title: Multi-account, multi-Region infrastructure pipeline with CloudFormation StackSets actions
+  category: devops
+  tags: [codepipeline, cloudformation, stacksets, multi-account, multi-region, organizations]
+  source: https://docs.aws.amazon.com/codepipeline/latest/userguide/tutorials-stackset-deployment.html
+  description: A pipeline in the administration account takes a zipped template, parameters file and accounts list from an S3 source bucket, then runs a CloudFormationStackSet action to create the stack set and a CloudFormationStackInstances action to roll the stacks out to target accounts and Regions with failure tolerance and concurrency limits. Self-managed permissions use AWSCloudFormationStackSetAdministrationRole in the administration account and AWSCloudFormationStackSetExecutionRole trusted from each target account.
+  containers:
+    - region: us-east-1
+      account: admin
+      groups: [{label: pipeline}]
+    - region: us-east-1
+      account: workload-a
+    - region: eu-central-1
+      account: workload-b
+  elements:
+    - {tf: aws_s3_bucket, name: template-source-bucket, in: group:pipeline}
+    - {tf: aws_codepipeline, name: stackset-pipeline, in: group:pipeline}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline}
+    - {tf: aws_cloudformation_stack_set, name: baseline-stackset, in: account:admin}
+    - {tf: aws_iam_role, name: stackset-admin-role, in: account:admin}
+    - {tf: aws_cloudformation_stack, name: baseline-stack-a, in: account:workload-a}
+    - {tf: aws_iam_role, name: stackset-exec-role-a, in: account:workload-a}
+    - {tf: aws_cloudformation_stack, name: baseline-stack-b, in: account:workload-b}
+    - {tf: aws_iam_role, name: stackset-exec-role-b, in: account:workload-b}
+  actors: [user]
+  flows:
+    - {from: user, to: template-source-bucket, label: upload template.yml + parameters + accounts zip, step: 1}
+    - {from: template-source-bucket, to: stackset-pipeline, label: S3 source action, step: 2}
+    - {from: stackset-pipeline, to: pipeline-artifacts, label: artifact store}
+    - {from: stackset-pipeline, to: baseline-stackset, label: CloudFormationStackSet action creates/updates stack set, step: 3}
+    - {from: stackset-admin-role, to: stackset-exec-role-a, label: sts AssumeRole}
+    - {from: stackset-admin-role, to: stackset-exec-role-b, label: sts AssumeRole}
+    - {from: baseline-stackset, to: baseline-stack-a, label: CloudFormationStackInstances us-east-1, step: 4}
+    - {from: baseline-stackset, to: baseline-stack-b, label: CloudFormationStackInstances eu-central-1, step: 5}
+
+- slug: codepipeline-multi-region-cross-region-actions
+  title: Multi-Region application deployment with CodePipeline cross-Region actions
+  category: devops
+  tags: [codepipeline, multi-region, cross-region actions, cloudformation, codedeploy, ec2]
+  source: https://aws.amazon.com/blogs/devops/using-aws-codepipeline-to-perform-multi-region-deployments/
+  description: A single pipeline in the primary Region takes application code from an S3 source bucket and declares one artifact store bucket per target Region; CodePipeline replicates the input artifact to the artifact store of each Region before a cross-Region action runs there. Parallel CloudFormation deploy actions in us-west-2, us-east-1 and ap-southeast-2 create or update stacks that provision EC2 instances with the CodeDeploy agent and hand the revision to CodeDeploy, so every Region receives the same release in one execution.
+  containers:
+    - region: us-west-2
+      groups: [{label: primary pipeline}]
+    - region: us-east-1
+    - region: ap-southeast-2
+  elements:
+    - {tf: aws_s3_bucket, name: source-bucket, in: group:primary pipeline}
+    - {tf: aws_codepipeline, name: multi-region-pipeline, in: group:primary pipeline}
+    - {tf: aws_s3_bucket, name: artifact-store-usw2, in: region:us-west-2}
+    - {tf: aws_cloudformation_stack, name: app-stack-usw2, in: region:us-west-2}
+    - {tf: aws_codedeploy_app, name: app-codedeploy-usw2, in: region:us-west-2}
+    - {tf: aws_s3_bucket, name: artifact-store-use1, in: region:us-east-1}
+    - {tf: aws_cloudformation_stack, name: app-stack-use1, in: region:us-east-1}
+    - {tf: aws_codedeploy_app, name: app-codedeploy-use1, in: region:us-east-1}
+    - {tf: aws_s3_bucket, name: artifact-store-apse2, in: region:ap-southeast-2}
+    - {tf: aws_cloudformation_stack, name: app-stack-apse2, in: region:ap-southeast-2}
+    - {tf: aws_codedeploy_app, name: app-codedeploy-apse2, in: region:ap-southeast-2}
+    - {tf: aws_iam_role, name: codepipeline-service-role, in: region:us-west-2}
+  actors: [user]
+  flows:
+    - {from: user, to: source-bucket, label: upload application revision zip, step: 1}
+    - {from: source-bucket, to: multi-region-pipeline, label: S3 source action, step: 2}
+    - {from: multi-region-pipeline, to: artifact-store-usw2, label: artifact store (primary), step: 3}
+    - {from: artifact-store-usw2, to: artifact-store-use1, label: CodePipeline replicates artifact, step: 4}
+    - {from: artifact-store-usw2, to: artifact-store-apse2, label: CodePipeline replicates artifact, step: 4}
+    - {from: multi-region-pipeline, to: app-stack-usw2, label: CloudFormation deploy action, step: 5}
+    - {from: multi-region-pipeline, to: app-stack-use1, label: cross-Region CloudFormation action, step: 5}
+    - {from: multi-region-pipeline, to: app-stack-apse2, label: cross-Region CloudFormation action, step: 5}
+    - {from: app-stack-usw2, to: app-codedeploy-usw2, label: EC2 instances with CodeDeploy agent, step: 6}
+    - {from: app-stack-use1, to: app-codedeploy-use1, label: EC2 instances with CodeDeploy agent, step: 6}
+    - {from: app-stack-apse2, to: app-codedeploy-apse2, label: EC2 instances with CodeDeploy agent, step: 6}
+    - {from: codepipeline-service-role, to: multi-region-pipeline, label: service role}
+
+- slug: cdk-pipelines-self-mutating-multi-account
+  title: CDK Pipelines self-mutating pipeline deploying stages to multiple accounts
+  category: devops
+  tags: [cdk, codepipeline, codebuild, self-mutation, multi-account, cloudformation]
+  source: https://docs.aws.amazon.com/cdk/v2/guide/cdk_pipeline.html
+  description: A CDK Pipelines construct provisions a CodePipeline whose synth step runs cdk synth in CodeBuild, a self-mutate step that updates the pipeline itself when its definition changes, and asset publishing steps that push Docker images and file assets to the bootstrapped buckets and ECR repositories of each target environment. Application stages then deploy CloudFormation stacks into the test and production accounts through the CDK bootstrap roles, optionally gated by manual approvals and grouped into waves.
+  containers:
+    - region: us-east-1
+      account: tooling
+      groups: [{label: pipeline}]
+    - region: us-east-1
+      account: test
+    - region: us-east-1
+      account: prod
+  elements:
+    - {tf: aws_codestarconnections_connection, name: github-connection, in: group:pipeline}
+    - {tf: aws_codepipeline, name: cdk-pipeline, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: synth-project, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: self-mutate-project, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: asset-publish-project, in: group:pipeline}
+    - {tf: aws_s3_bucket, name: cdk-staging-bucket, in: account:tooling}
+    - {tf: aws_ecr_repository, name: cdk-container-assets, in: account:tooling}
+    - {tf: aws_cloudformation_stack, name: app-stack-test, in: account:test}
+    - {tf: aws_iam_role, name: cdk-deploy-role-test, in: account:test}
+    - {tf: aws_cloudformation_stack, name: app-stack-prod, in: account:prod}
+    - {tf: aws_iam_role, name: cdk-deploy-role-prod, in: account:prod}
+  actors: [saas, user]
+  flows:
+    - {from: user, to: saas, label: push CDK app to GitHub, step: 1}
+    - {from: saas, to: github-connection, label: GitHub App event, step: 2}
+    - {from: github-connection, to: cdk-pipeline, label: source action, step: 3}
+    - {from: cdk-pipeline, to: synth-project, label: cdk synth produces cloud assembly, step: 4}
+    - {from: cdk-pipeline, to: self-mutate-project, label: cdk deploy PipelineStack (self-mutation), step: 5}
+    - {from: cdk-pipeline, to: asset-publish-project, label: cdk-assets publish, step: 6}
+    - {from: asset-publish-project, to: cdk-staging-bucket, label: file assets}
+    - {from: asset-publish-project, to: cdk-container-assets, label: docker image assets}
+    - {from: cdk-pipeline, to: app-stack-test, label: "stage Test: CloudFormation deploy", step: 7}
+    - {from: cdk-pipeline, to: app-stack-prod, label: "stage Prod: after manual approval", step: 8}
+    - {from: cdk-deploy-role-test, to: app-stack-test, label: cfn-exec role}
+    - {from: cdk-deploy-role-prod, to: app-stack-prod, label: cfn-exec role}
+
+- slug: github-actions-oidc-federated-deploy
+  title: GitHub Actions deploying to AWS with OIDC federation instead of access keys
+  category: devops
+  tags: [github actions, oidc, iam, sts, ecr, ecs, keyless]
+  source: https://aws.amazon.com/blogs/security/use-iam-roles-to-connect-github-actions-to-actions-in-aws/
+  description: An IAM OpenID Connect identity provider trusts token.actions.githubusercontent.com, and an IAM role trust policy restricts sts AssumeRoleWithWebIdentity to a specific repository and branch through the sub and aud claims. The workflow uses aws-actions/configure-aws-credentials to exchange the GitHub-issued JWT for short-lived credentials, then pushes an image to ECR and updates an ECS service, so no long-lived IAM user keys are stored as GitHub secrets.
+  containers:
+    - region: us-east-1
+      groups: [{label: identity}, {label: deployment target}]
+  elements:
+    - {tf: aws_iam_openid_connect_provider, name: github-oidc-provider, in: group:identity}
+    - {tf: aws_iam_role, name: github-deploy-role, in: group:identity}
+    - {tf: aws_ecr_repository, name: app-images, in: group:deployment target}
+    - {tf: aws_ecs_cluster, name: app-cluster, in: group:deployment target}
+    - {tf: aws_ecs_service, name: app-service, in: group:deployment target}
+    - {tf: aws_s3_bucket, name: static-assets, in: group:deployment target}
+    - {tf: aws_cloudtrail, name: api-audit-trail, in: region}
+  actors: [saas, user]
+  flows:
+    - {from: user, to: saas, label: push to main, step: 1}
+    - {from: saas, to: github-oidc-provider, label: "workflow requests JWT (aud: sts.amazonaws.com)", step: 2}
+    - {from: saas, to: github-deploy-role, label: "sts:AssumeRoleWithWebIdentity scoped by repo:org/repo:ref", step: 3}
+    - {from: saas, to: app-images, label: docker push with temporary credentials, step: 4}
+    - {from: saas, to: app-service, label: aws ecs update-service with new task definition, step: 5}
+    - {from: saas, to: static-assets, label: aws s3 sync}
+    - {from: github-deploy-role, to: api-audit-trail, label: role session logged}
+
+- slug: devsecops-pipeline-sca-sast-dast-security-hub
+  title: DevSecOps pipeline with SCA, SAST and DAST scans reporting to Security Hub
+  category: devops
+  tags: [devsecops, codepipeline, codebuild, security hub, sast, dast, sca, elastic beanstalk]
+  source: https://aws.amazon.com/blogs/devops/building-end-to-end-aws-devsecops-ci-cd-pipeline-with-open-source-sca-sast-and-dast-tools/
+  description: A CodeCommit push starts a CodePipeline in which CodeBuild projects run OWASP Dependency-Check (SCA) and SonarQube or PHPStan (SAST) in parallel; a Lambda function converts findings to the AWS Security Finding Format and imports them into Security Hub, failing the stage when vulnerabilities exceed the threshold. Clean builds are deployed by CodeDeploy to an Elastic Beanstalk staging environment where OWASP ZAP runs DAST, and after a manual approval the release is promoted to production while EventBridge, SNS and Parameter Store handle notifications and secrets.
+  containers:
+    - region: us-east-1
+      groups: [{label: pipeline}, {label: security}, {label: environments}]
+  elements:
+    - {tf: aws_codecommit_repository, name: app-repo, in: group:pipeline}
+    - {tf: aws_codepipeline, name: devsecops-pipeline, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: sca-dependency-check, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: sast-sonarqube, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: dast-owasp-zap, in: group:pipeline}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline}
+    - {tf: aws_lambda_function, name: findings-importer, in: group:security}
+    - {tf: aws_securityhub_account, name: security-hub, in: group:security}
+    - {tf: aws_ssm_parameter, name: scanner-credentials, in: group:security}
+    - {tf: aws_elastic_beanstalk_environment, name: staging-env, in: group:environments}
+    - {tf: aws_elastic_beanstalk_environment, name: prod-env, in: group:environments}
+    - {tf: aws_cloudwatch_event_rule, name: build-state-rule, in: region}
+    - {tf: aws_sns_topic, name: pipeline-notifications, in: region}
+  actors: [user]
+  flows:
+    - {from: user, to: app-repo, label: git push, step: 1}
+    - {from: app-repo, to: devsecops-pipeline, label: source stage, step: 2}
+    - {from: devsecops-pipeline, to: sca-dependency-check, label: SCA scan, step: 3}
+    - {from: devsecops-pipeline, to: sast-sonarqube, label: SAST scan (parallel), step: 3}
+    - {from: sca-dependency-check, to: findings-importer, label: scan report, step: 4}
+    - {from: sast-sonarqube, to: findings-importer, label: scan report, step: 4}
+    - {from: findings-importer, to: security-hub, label: BatchImportFindings (ASFF), step: 5}
+    - {from: scanner-credentials, to: sast-sonarqube, label: SonarQube token}
+    - {from: devsecops-pipeline, to: staging-env, label: CodeDeploy to staging, step: 6}
+    - {from: dast-owasp-zap, to: staging-env, label: DAST against staging URL, step: 7}
+    - {from: dast-owasp-zap, to: findings-importer, label: ZAP report, step: 8}
+    - {from: devsecops-pipeline, to: prod-env, label: manual approval then deploy, step: 9}
+    - {from: build-state-rule, to: pipeline-notifications, link: aws_cloudwatch_event_target}
+    - {from: devsecops-pipeline, to: pipeline-artifacts, label: artifacts}
+
+- slug: ecr-build-publish-container-image-pipeline
+  title: Container image pipeline with the ECRBuildAndPublish action and ECS deploy
+  category: devops
+  tags: [codepipeline, ecr, docker, container image, ecs, codeconnections, inspector]
+  source: https://docs.aws.amazon.com/codepipeline/latest/userguide/tutorials-ecr-build-publish.html
+  description: A V2 pipeline sources a repository containing a Dockerfile and imagedefinitions.json through a GitHub App connection, then the managed ECRBuildAndPublish build action logs in to ECR, builds the image on CodePipeline-managed CodeBuild compute and pushes it without a buildspec. An Amazon ECS standard deploy action registers a new task definition revision with the pushed image URI and updates the service; ECR enhanced scanning with Amazon Inspector evaluates each pushed image for vulnerabilities.
+  containers:
+    - region: us-east-1
+      groups: [{label: pipeline}, {label: runtime}]
+  elements:
+    - {tf: aws_codestarconnections_connection, name: github-connection, in: group:pipeline}
+    - {tf: aws_codepipeline, name: image-pipeline, in: group:pipeline}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline}
+    - {tf: aws_ecr_repository, name: hello-world-images, in: group:pipeline}
+    - {tf: aws_inspector2_enabler, name: ecr-enhanced-scanning, in: group:pipeline}
+    - {tf: aws_cloudwatch_log_group, name: build-action-logs, in: group:pipeline}
+    - {tf: aws_ecs_cluster, name: web-cluster, in: group:runtime}
+    - {tf: aws_ecs_service, name: hello-world-service, in: group:runtime}
+    - {tf: aws_lb, name: web-alb, in: group:runtime}
+  actors: [saas, users]
+  flows:
+    - {from: saas, to: github-connection, label: commit with Dockerfile + imagedefinitions.json, step: 1}
+    - {from: github-connection, to: image-pipeline, label: source action, step: 2}
+    - {from: image-pipeline, to: hello-world-images, label: ECRBuildAndPublish docker build and push, step: 3}
+    - {from: image-pipeline, to: build-action-logs, label: managed compute logs}
+    - {from: ecr-enhanced-scanning, to: hello-world-images, label: Inspector scan on push, step: 4}
+    - {from: image-pipeline, to: hello-world-service, label: Amazon ECS deploy action (new task definition revision), step: 5}
+    - {from: hello-world-service, to: hello-world-images, label: pull image, step: 6}
+    - {from: image-pipeline, to: pipeline-artifacts, label: artifacts}
+    - {from: users, to: web-alb, label: HTTP}
+    - {from: web-alb, to: hello-world-service, label: forward}
+
+- slug: terraform-module-test-pipeline-checkov
+  title: Terraform CI pipeline with Checkov static analysis and terraform test
+  category: devops
+  tags: [terraform, codepipeline, codebuild, checkov, terraform test, infrastructure testing]
+  source: https://aws.amazon.com/blogs/devops/terraform-ci-cd-and-testing-on-aws-with-the-new-terraform-test-framework/
+  description: Pushes to a CodeCommit repository trigger a CodePipeline whose first CodeBuild project runs Checkov static analysis against the Terraform module and whose second project runs terraform init, terraform validate and terraform test to create, assert and destroy ephemeral resources. Test runs use a CodeBuild service role scoped to the resources under test, and pipeline artifacts and test reports are stored in S3 so a failing check blocks promotion of the module.
+  containers:
+    - region: us-east-1
+      groups: [{label: pipeline}, {label: ephemeral test resources}]
+  elements:
+    - {tf: aws_codecommit_repository, name: terraform-module-repo, in: group:pipeline}
+    - {tf: aws_codepipeline, name: terraform-ci-pipeline, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: checkov-static-analysis, in: group:pipeline}
+    - {tf: aws_codebuild_project, name: terraform-test-runner, in: group:pipeline}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline}
+    - {tf: aws_cloudwatch_log_group, name: codebuild-logs, in: group:pipeline}
+    - {tf: aws_iam_role, name: terraform-test-role, in: region}
+    - {tf: aws_s3_bucket, name: module-under-test-bucket, in: group:ephemeral test resources}
+    - {tf: aws_sns_topic, name: ci-notifications, in: region}
+  actors: [user]
+  flows:
+    - {from: user, to: terraform-module-repo, label: git push module + tests/*.tftest.hcl, step: 1}
+    - {from: terraform-module-repo, to: terraform-ci-pipeline, label: source action, step: 2}
+    - {from: terraform-ci-pipeline, to: checkov-static-analysis, label: checkov -d ., step: 3}
+    - {from: terraform-ci-pipeline, to: terraform-test-runner, label: terraform init / validate / test, step: 4}
+    - {from: terraform-test-runner, to: module-under-test-bucket, label: apply, assert, destroy, step: 5}
+    - {from: terraform-test-role, to: terraform-test-runner, label: scoped service role}
+    - {from: terraform-test-runner, to: pipeline-artifacts, label: test reports}
+    - {from: checkov-static-analysis, to: codebuild-logs, label: logs}
+    - {from: terraform-test-runner, to: codebuild-logs, label: logs}
+    - {from: terraform-ci-pipeline, to: ci-notifications, label: pipeline state change notification}
+
+- slug: ssm-patch-policy-quick-setup-organization
+  title: Organization-wide EC2 patching with Systems Manager patch policies
+  category: devops
+  tags: [systems manager, patch manager, quick setup, state manager, compliance, organizations]
+  source: https://docs.aws.amazon.com/systems-manager/latest/userguide/patch-manager-policies.html
+  description: A Quick Setup patch policy defined in the management account creates State Manager associations in every target account and Region that run the AWS-RunPatchBaseline document on separate scan and install schedules against the patch baseline selected per operating system. Patch compliance results are reported per account-Region pair, exported as CSV to an S3 bucket, and can be forwarded to Security Hub, while custom baselines are shared through an S3 bucket of baseline overrides.
+  containers:
+    - region: us-east-1
+      account: management
+      groups: [{label: patch policy}]
+    - region: us-east-1
+      account: workload
+      vpcs:
+        - name: app
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.40.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_ssm_patch_baseline, name: linux-security-baseline, in: group:patch policy}
+    - {tf: aws_ssm_patch_baseline, name: windows-baseline, in: group:patch policy}
+    - {tf: aws_s3_bucket, name: baseline-overrides-bucket, in: group:patch policy}
+    - {tf: aws_s3_bucket, name: compliance-reports-bucket, in: group:patch policy}
+    - {tf: aws_ssm_association, name: scan-association, in: account:workload}
+    - {tf: aws_ssm_association, name: install-association, in: account:workload}
+    - {tf: aws_ssm_document, name: aws-runpatchbaseline, in: account:workload}
+    - {tf: aws_instance, name: app-server, in: subnet:private-a}
+    - {tf: aws_iam_role, name: ssm-instance-role, in: account:workload}
+  actors: [user]
+  flows:
+    - {from: user, to: linux-security-baseline, label: define approval rules in Quick Setup, step: 1}
+    - {from: linux-security-baseline, to: baseline-overrides-bucket, label: baseline override JSON, step: 2}
+    - {from: baseline-overrides-bucket, to: scan-association, label: policy deployed via StackSets to each account-Region, step: 3}
+    - {from: scan-association, to: aws-runpatchbaseline, label: "Operation=Scan daily", step: 4}
+    - {from: install-association, to: aws-runpatchbaseline, label: "Operation=Install weekly", step: 5}
+    - {from: aws-runpatchbaseline, to: app-server, label: SSM Agent runs patch command, step: 6}
+    - {from: ssm-instance-role, to: app-server, label: instance profile}
+    - {from: app-server, to: compliance-reports-bucket, label: patch compliance CSV report, step: 7}
+    - {from: windows-baseline, to: baseline-overrides-bucket, label: baseline override JSON}
+
+- slug: cloudwatch-cross-account-observability-oam
+  title: Central monitoring account with CloudWatch cross-account observability
+  category: observability
+  tags: [cloudwatch, oam, cross-account, dashboards, alarms, logs, x-ray]
+  source: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Unified-Cross-Account.html
+  description: A monitoring account creates an Observability Access Manager sink, and source accounts across the organization create links to it that share CloudWatch metrics, log groups, X-Ray traces and Application Signals data without copying it. Dashboards, metric alarms and Logs Insights queries in the monitoring account then span every linked account, and alarm actions publish to an SNS topic for the operations team.
+  containers:
+    - region: eu-west-1
+      account: monitoring
+      groups: [{label: central observability}]
+    - region: eu-west-1
+      account: workload-a
+    - region: eu-west-1
+      account: workload-b
+  elements:
+    - {tf: aws_oam_sink, name: observability-sink, in: group:central observability}
+    - {tf: aws_cloudwatch_dashboard, name: fleet-dashboard, in: group:central observability}
+    - {tf: aws_cloudwatch_metric_alarm, name: cross-account-error-alarm, in: group:central observability}
+    - {tf: aws_sns_topic, name: ops-alerts, in: group:central observability}
+    - {tf: aws_oam_link, name: link-a, in: account:workload-a}
+    - {tf: aws_lambda_function, name: order-service-a, in: account:workload-a}
+    - {tf: aws_cloudwatch_log_group, name: order-service-a-logs, in: account:workload-a}
+    - {tf: aws_oam_link, name: link-b, in: account:workload-b}
+    - {tf: aws_ecs_cluster, name: web-cluster-b, in: account:workload-b}
+    - {tf: aws_cloudwatch_log_group, name: web-cluster-b-logs, in: account:workload-b}
+  actors: [user]
+  flows:
+    - {from: order-service-a, to: order-service-a-logs, label: metrics, logs, traces, step: 1}
+    - {from: web-cluster-b, to: web-cluster-b-logs, label: metrics, logs, traces, step: 1}
+    - {from: link-a, to: observability-sink, label: share metrics, logs, traces, step: 2}
+    - {from: link-b, to: observability-sink, label: share metrics, logs, traces, step: 2}
+    - {from: observability-sink, to: fleet-dashboard, label: cross-account widgets, step: 3}
+    - {from: observability-sink, to: cross-account-error-alarm, label: alarm on source-account metric, step: 4}
+    - {from: cross-account-error-alarm, to: ops-alerts, label: ALARM action, step: 5}
+    - {from: user, to: fleet-dashboard, label: single-pane dashboard}
+
+- slug: xray-serverless-api-tracing
+  title: Distributed tracing of a serverless API with AWS X-Ray active tracing
+  category: observability
+  tags: [x-ray, lambda, api gateway, dynamodb, sqs, tracing, service map]
+  source: https://docs.aws.amazon.com/xray/latest/devguide/xray-services-lambda.html
+  description: API Gateway with X-Ray tracing enabled samples incoming requests and propagates the trace header to a Lambda function with active tracing, where the Lambda-managed daemon emits the invocation segment and the X-Ray SDK records subsegments for DynamoDB and SQS calls. A downstream Lambda consumer of the queue is linked to the producer trace so the service map and trace timeline show the whole request path, and an X-Ray group filters traces with faults for a CloudWatch alarm.
+  containers:
+    - region: us-east-1
+      groups: [{label: application}, {label: tracing}]
+  elements:
+    - {tf: aws_api_gateway_rest_api, name: orders-api, in: group:application}
+    - {tf: aws_lambda_function, name: create-order, in: group:application}
+    - {tf: aws_dynamodb_table, name: orders-table, in: group:application}
+    - {tf: aws_sqs_queue, name: fulfilment-queue, in: group:application}
+    - {tf: aws_lambda_function, name: fulfil-order, in: group:application}
+    - {tf: aws_xray_sampling_rule, name: api-sampling-rule, in: group:tracing}
+    - {tf: aws_xray_group, name: orders-faults-group, in: group:tracing}
+    - {tf: aws_cloudwatch_metric_alarm, name: fault-rate-alarm, in: group:tracing}
+    - {tf: aws_sns_topic, name: oncall-alerts, in: group:tracing}
+  actors: [client]
+  flows:
+    - {from: client, to: orders-api, label: POST /orders, step: 1}
+    - {from: orders-api, to: create-order, label: invoke with X-Amzn-Trace-Id, step: 2}
+    - {from: create-order, to: orders-table, label: PutItem (SDK subsegment), step: 3}
+    - {from: create-order, to: fulfilment-queue, label: SendMessage with trace header, step: 4}
+    - {from: fulfilment-queue, to: fulfil-order, link: aws_lambda_event_source_mapping, step: 5}
+    - {from: api-sampling-rule, to: orders-api, label: sampling decision}
+    - {from: create-order, to: orders-faults-group, label: "segments (filter: fault = true)", step: 6}
+    - {from: orders-faults-group, to: fault-rate-alarm, label: ApproximateTraceCount metric, step: 7}
+    - {from: fault-rate-alarm, to: oncall-alerts, label: ALARM action}
+
+- slug: amp-amg-eks-prometheus-monitoring
+  title: EKS metrics with Amazon Managed Service for Prometheus and Amazon Managed Grafana
+  category: observability
+  tags: [prometheus, grafana, eks, managed collector, remote write, alertmanager]
+  source: https://docs.aws.amazon.com/prometheus/latest/userguide/AMP-collector.html
+  description: An AWS managed collector (scraper) attached to the EKS cluster discovers Prometheus-compatible endpoints such as the API server, kube-state-metrics and application pods, and remote-writes the samples into an Amazon Managed Service for Prometheus workspace through ENIs in the cluster subnets and a VPC endpoint, with no agent to operate. Amazon Managed Grafana queries the workspace with SigV4 through the AWS data source configuration, and workspace alerting rules route firing alerts to an SNS topic.
+  containers:
+    - region: us-west-2
+      groups: [{label: managed observability}]
+      vpcs:
+        - name: eks
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.50.1.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.50.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_eks_cluster, name: platform-cluster, in: vpc:eks}
+    - {tf: aws_prometheus_scraper, name: eks-managed-collector, in: subnet:private-a}
+    - {tf: aws_vpc_endpoint, name: aps-workspaces-endpoint, in: subnet:private-b}
+    - {tf: aws_prometheus_workspace, name: platform-metrics, in: group:managed observability}
+    - {tf: aws_grafana_workspace, name: platform-grafana, in: group:managed observability}
+    - {tf: aws_sns_topic, name: prometheus-alerts, in: group:managed observability}
+    - {tf: aws_iam_role, name: grafana-workspace-role, in: region}
+    - {tf: aws_cloudwatch_log_group, name: scraper-vended-logs, in: region}
+  actors: [user, idp]
+  flows:
+    - {from: eks-managed-collector, to: platform-cluster, label: scrape /metrics via ENIs (access entry), step: 1}
+    - {from: eks-managed-collector, to: aps-workspaces-endpoint, label: remote_write, step: 2}
+    - {from: aps-workspaces-endpoint, to: platform-metrics, label: PrivateLink to aps-workspaces, step: 3}
+    - {from: platform-grafana, to: platform-metrics, label: PromQL query with SigV4, step: 4}
+    - {from: grafana-workspace-role, to: platform-grafana, label: aps:QueryMetrics}
+    - {from: platform-metrics, to: prometheus-alerts, label: alert manager definition routes alerts, step: 5}
+    - {from: eks-managed-collector, to: scraper-vended-logs, label: vended logs}
+    - {from: idp, to: platform-grafana, label: SAML / IAM Identity Center sign-in}
+    - {from: user, to: platform-grafana, label: dashboards, step: 6}
+
+- slug: adot-ecs-sidecar-traces-metrics
+  title: OpenTelemetry collection on Amazon ECS with the ADOT collector sidecar
+  category: observability
+  tags: [adot, opentelemetry, ecs, x-ray, cloudwatch, prometheus, sidecar]
+  source: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/trace-data.html
+  description: Each ECS task definition adds an aws-otel-collector sidecar container that receives OTLP spans and metrics from the instrumented application container over localhost, and its configuration is loaded from an SSM Parameter Store parameter. The collector exports traces to AWS X-Ray, application metrics to CloudWatch (EMF) or to an Amazon Managed Service for Prometheus workspace, and its own logs to CloudWatch Logs through the task role permissions.
+  containers:
+    - region: eu-central-1
+      groups: [{label: telemetry backends}]
+      vpcs:
+        - name: services
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.60.1.0/24, az: a, public: false}
+            - {name: public-a, cidr: 10.60.0.0/24, az: a, public: true}
+  elements:
+    - {tf: aws_lb, name: api-alb, in: subnet:public-a}
+    - {tf: aws_ecs_cluster, name: services-cluster, in: vpc:services}
+    - {tf: aws_ecs_task_definition, name: checkout-task-with-adot, in: subnet:private-a}
+    - {tf: aws_ecs_service, name: checkout-service, in: subnet:private-a}
+    - {tf: aws_ssm_parameter, name: otel-collector-config, in: region}
+    - {tf: aws_iam_role, name: ecs-task-role, in: region}
+    - {tf: aws_xray_group, name: checkout-traces, in: group:telemetry backends}
+    - {tf: aws_cloudwatch_log_group, name: adot-collector-logs, in: group:telemetry backends}
+    - {tf: aws_prometheus_workspace, name: app-metrics, in: group:telemetry backends}
+    - {tf: aws_cloudwatch_dashboard, name: checkout-dashboard, in: group:telemetry backends}
+  actors: [users]
+  flows:
+    - {from: users, to: api-alb, label: HTTPS, step: 1}
+    - {from: api-alb, to: checkout-service, label: forward, step: 2}
+    - {from: otel-collector-config, to: checkout-task-with-adot, label: AOT_CONFIG_CONTENT from Parameter Store, step: 3}
+    - {from: checkout-service, to: checkout-task-with-adot, label: "app container -> sidecar OTLP localhost:4317", step: 4}
+    - {from: checkout-task-with-adot, to: checkout-traces, label: awsxray exporter PutTraceSegments, step: 5}
+    - {from: checkout-task-with-adot, to: app-metrics, label: prometheusremotewrite exporter, step: 6}
+    - {from: checkout-task-with-adot, to: adot-collector-logs, label: awslogs driver}
+    - {from: ecs-task-role, to: checkout-task-with-adot, label: xray + logs + aps permissions}
+    - {from: app-metrics, to: checkout-dashboard, label: metrics widgets}
+
+- slug: centralized-logging-opensearch-fluent-bit
+  title: Centralized Logging with OpenSearch for application and AWS service logs
+  category: observability
+  tags: [opensearch, fluent bit, kinesis, lambda, centralized logging, solutions library]
+  source: https://docs.aws.amazon.com/solutions/latest/centralized-logging-with-opensearch/application-log-analytics-pipeline.html
+  description: Fluent Bit agents installed on EC2 instances and EKS nodes by Systems Manager ship application logs to a Kinesis Data Streams log buffer; a Log Processor Lambda function triggered by the buffer parses the records and bulk-indexes them into an Amazon OpenSearch Service domain, writing failed batches to an S3 backup bucket. A separate service log pipeline loads AWS service logs (ALB, CloudFront, CloudTrail, WAF) from S3 through SQS notifications, and the solution console built on CloudFront, AppSync, Cognito and DynamoDB provisions each pipeline on demand with Step Functions.
+  containers:
+    - region: us-east-1
+      groups: [{label: solution console}, {label: log pipelines}]
+      vpcs:
+        - name: logging
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.70.1.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.70.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_cloudfront_distribution, name: console-cdn, in: group:solution console}
+    - {tf: aws_appsync_graphql_api, name: console-api, in: group:solution console}
+    - {tf: aws_dynamodb_table, name: pipeline-metadata, in: group:solution console}
+    - {tf: aws_sfn_state_machine, name: pipeline-provisioner, in: group:solution console}
+    - {tf: aws_instance, name: app-server-fluent-bit, in: subnet:private-a}
+    - {tf: aws_eks_cluster, name: app-cluster-fluent-bit, in: subnet:private-b}
+    - {tf: aws_kinesis_stream, name: app-log-buffer, in: group:log pipelines}
+    - {tf: aws_lambda_function, name: log-processor, in: group:log pipelines}
+    - {tf: aws_s3_bucket, name: service-log-bucket, in: group:log pipelines}
+    - {tf: aws_sqs_queue, name: service-log-notifications, in: group:log pipelines}
+    - {tf: aws_s3_bucket, name: failed-records-backup, in: group:log pipelines}
+    - {tf: aws_opensearch_domain, name: central-logs, in: vpc:logging}
+    - {tf: aws_ssm_document, name: install-fluent-bit, in: region}
+  actors: [user]
+  flows:
+    - {from: user, to: console-cdn, label: create log pipeline, step: 1}
+    - {from: console-cdn, to: console-api, label: GraphQL}
+    - {from: console-api, to: pipeline-provisioner, label: deploy pipeline stack, step: 2}
+    - {from: install-fluent-bit, to: app-server-fluent-bit, label: SSM installs and configures Fluent Bit, step: 3}
+    - {from: app-server-fluent-bit, to: app-log-buffer, label: Fluent Bit kinesis output, step: 4}
+    - {from: app-cluster-fluent-bit, to: app-log-buffer, label: Fluent Bit DaemonSet, step: 4}
+    - {from: app-log-buffer, to: log-processor, link: aws_lambda_event_source_mapping, step: 5}
+    - {from: log-processor, to: central-logs, label: _bulk index, step: 6}
+    - {from: log-processor, to: failed-records-backup, label: failed records}
+    - {from: service-log-bucket, to: service-log-notifications, label: S3 event notification}
+    - {from: service-log-notifications, to: log-processor, link: aws_lambda_event_source_mapping}
+    - {from: console-api, to: pipeline-metadata, label: pipeline state}
+    - {from: user, to: central-logs, label: OpenSearch Dashboards}
+
+- slug: cloudwatch-synthetics-canary-endpoint-monitoring
+  title: Endpoint and user-journey monitoring with CloudWatch Synthetics canaries
+  category: observability
+  tags: [cloudwatch synthetics, canary, lambda, x-ray, alarms, vpc]
+  source: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries.html
+  description: Synthetics canaries are Node.js, Python or Java scripts that CloudWatch runs as Lambda functions on a rate or cron schedule to exercise a public API and a browser user journey with Playwright or Puppeteer, and an in-VPC canary checks an internal endpoint. Each run stores HAR files, screenshots and logs in an S3 artifact bucket and publishes SuccessPercent and Duration metrics in the CloudWatchSynthetics namespace; alarms on those metrics notify SNS, and X-Ray active tracing places the canaries on the trace map next to the services they call.
+  containers:
+    - region: us-east-1
+      groups: [{label: synthetic monitoring}]
+      vpcs:
+        - name: app
+          cidr: 10.80.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.80.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_synthetics_canary, name: api-heartbeat-canary, in: group:synthetic monitoring}
+    - {tf: aws_synthetics_canary, name: checkout-journey-canary, in: group:synthetic monitoring}
+    - {tf: aws_synthetics_canary, name: internal-service-canary, in: subnet:private-a}
+    - {tf: aws_s3_bucket, name: canary-artifacts, in: group:synthetic monitoring}
+    - {tf: aws_cloudwatch_metric_alarm, name: canary-success-alarm, in: group:synthetic monitoring}
+    - {tf: aws_sns_topic, name: availability-alerts, in: group:synthetic monitoring}
+    - {tf: aws_cloudwatch_dashboard, name: availability-dashboard, in: group:synthetic monitoring}
+    - {tf: aws_iam_role, name: canary-execution-role, in: region}
+    - {tf: aws_lb, name: public-api-alb, in: vpc:app}
+    - {tf: aws_lb, name: internal-service-alb, in: subnet:private-a}
+  actors: [internet]
+  flows:
+    - {from: api-heartbeat-canary, to: public-api-alb, label: GET /health every 1 minute, step: 1}
+    - {from: checkout-journey-canary, to: public-api-alb, label: headless browser flow with screenshots, step: 2}
+    - {from: internal-service-canary, to: internal-service-alb, label: in-VPC HTTP check, step: 3}
+    - {from: api-heartbeat-canary, to: canary-artifacts, label: HAR, screenshots, logs, step: 4}
+    - {from: api-heartbeat-canary, to: canary-success-alarm, label: SuccessPercent metric, step: 5}
+    - {from: canary-success-alarm, to: availability-alerts, label: ALARM action, step: 6}
+    - {from: canary-execution-role, to: api-heartbeat-canary, label: execution role}
+    - {from: checkout-journey-canary, to: availability-dashboard, label: Duration and SuccessPercent widgets}
+    - {from: internet, to: public-api-alb, label: real user traffic}
+
+- slug: incident-manager-alarm-response-plan-runbook
+  title: Automated incident response with CloudWatch alarms, EventBridge and Incident Manager
+  category: devops
+  tags: [incident manager, eventbridge, cloudwatch alarms, runbook, systems manager automation, on-call]
+  source: https://docs.aws.amazon.com/incident-manager/latest/userguide/incident-creation.html
+  description: A CloudWatch alarm with a Systems Manager action and an EventBridge rule targeting a response plan both create incidents in Incident Manager, which deduplicates them, records the involved resources and opens a linked OpsItem in OpsCenter. The response plan engages on-call contacts through an escalation plan, posts to a chat channel via SNS and AWS Chatbot, and automatically starts a Systems Manager Automation runbook that receives the incident ARN and involved resource ARNs as parameters to remediate the fault.
+  containers:
+    - region: us-east-1
+      groups: [{label: detection}, {label: incident response}, {label: workload}]
+  elements:
+    - {tf: aws_cloudwatch_metric_alarm, name: api-5xx-alarm, in: group:detection}
+    - {tf: aws_cloudwatch_event_rule, name: health-event-rule, in: group:detection}
+    - {tf: aws_ssmincidents_response_plan, name: sev2-response-plan, in: group:incident response}
+    - {tf: aws_ssmcontacts_contact, name: primary-oncall, in: group:incident response}
+    - {tf: aws_ssmcontacts_plan, name: escalation-plan, in: group:incident response}
+    - {tf: aws_sns_topic, name: incident-chat-topic, in: group:incident response}
+    - {tf: aws_chatbot_slack_channel_configuration, name: ops-slack-channel, in: group:incident response}
+    - {tf: aws_ssm_document, name: restart-service-runbook, in: group:incident response}
+    - {tf: aws_iam_role, name: runbook-service-role, in: region}
+    - {tf: aws_ecs_service, name: checkout-service, in: group:workload}
+  actors: [users]
+  flows:
+    - {from: checkout-service, to: api-5xx-alarm, label: HTTPCode_Target_5XX metric, step: 1}
+    - {from: api-5xx-alarm, to: sev2-response-plan, label: "Systems Manager action: create incident", step: 2}
+    - {from: health-event-rule, to: sev2-response-plan, link: aws_cloudwatch_event_target, label: AWS Health event}
+    - {from: sev2-response-plan, to: escalation-plan, label: start engagement, step: 3}
+    - {from: escalation-plan, to: primary-oncall, label: page via SMS / voice / email, step: 4}
+    - {from: sev2-response-plan, to: incident-chat-topic, label: incident updates, step: 5}
+    - {from: incident-chat-topic, to: ops-slack-channel, link: aws_sns_topic_subscription}
+    - {from: sev2-response-plan, to: restart-service-runbook, label: StartAutomationExecution with involved resources, step: 6}
+    - {from: runbook-service-role, to: restart-service-runbook, label: AssumeRole}
+    - {from: restart-service-runbook, to: checkout-service, label: force new deployment, step: 7}
+    - {from: users, to: checkout-service, label: HTTPS}
+
+- slug: cur-athena-quicksight-cost-observability
+  title: Cost observability with Cost and Usage Reports, Athena and QuickSight
+  category: analytics-bi
+  tags: [cost and usage report, athena, glue, quicksight, finops, cost intelligence]
+  source: https://docs.aws.amazon.com/cur/latest/userguide/cur-query-athena.html
+  description: A Cost and Usage Report configured for Athena integration is delivered in Parquet to an S3 bucket, and the CloudFormation template shipped alongside it creates a Glue database, a Glue crawler and two Lambda functions that are triggered by S3 event notifications to refresh partitions whenever a new report lands. Athena queries the resulting table through a dedicated workgroup and QuickSight connects to Athena as a data source to build cost dashboards, with query results and SPICE refreshes scheduled daily.
+  containers:
+    - region: us-east-1
+      groups: [{label: billing export}, {label: query and visualize}]
+  elements:
+    - {tf: aws_cur_report_definition, name: hourly-cur-parquet, in: group:billing export}
+    - {tf: aws_s3_bucket, name: cur-bucket, in: group:billing export}
+    - {tf: aws_lambda_function, name: cur-initializer, in: group:billing export}
+    - {tf: aws_lambda_function, name: cur-crawler-trigger, in: group:billing export}
+    - {tf: aws_glue_crawler, name: cur-crawler, in: group:billing export}
+    - {tf: aws_glue_catalog_database, name: athenacurcfn-db, in: group:query and visualize}
+    - {tf: aws_athena_workgroup, name: cost-analytics-workgroup, in: group:query and visualize}
+    - {tf: aws_s3_bucket, name: athena-results-bucket, in: group:query and visualize}
+    - {tf: aws_quicksight_data_source, name: athena-cost-datasource, in: group:query and visualize}
+    - {tf: aws_iam_role, name: glue-crawler-role, in: region}
+  actors: [user, users]
+  flows:
+    - {from: hourly-cur-parquet, to: cur-bucket, label: daily Parquet delivery, step: 1}
+    - {from: cur-bucket, to: cur-crawler-trigger, label: S3 event notification, step: 2}
+    - {from: cur-crawler-trigger, to: cur-crawler, label: StartCrawler, step: 3}
+    - {from: cur-crawler, to: athenacurcfn-db, label: update table and partitions, step: 4}
+    - {from: glue-crawler-role, to: cur-crawler, label: crawler role}
+    - {from: cur-initializer, to: cur-crawler, label: initial crawl on stack create}
+    - {from: cost-analytics-workgroup, to: athenacurcfn-db, label: SQL over CUR table, step: 5}
+    - {from: cost-analytics-workgroup, to: athena-results-bucket, label: query results}
+    - {from: athena-cost-datasource, to: cost-analytics-workgroup, label: QuickSight Athena connector, step: 6}
+    - {from: user, to: cost-analytics-workgroup, label: ad hoc cost queries}
+    - {from: users, to: athena-cost-datasource, label: cost dashboards (SPICE), step: 7}

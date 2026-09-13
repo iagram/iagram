@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.aws.amazon.com/controltower/latest/userguide/how-control-tower-works.html); edit freely.
+title: Control Tower multi-account landing zone
+category: security
+tags:
+- control tower
+- organizations
+- landing zone
+- scp
+- log archive
+- audit account
+source: https://docs.aws.amazon.com/controltower/latest/userguide/how-control-tower-works.html
+description: Control Tower creates a Security OU holding a Log Archive account and an Audit account, plus a Sandbox OU for workload accounts, under the organization root managed from the management account.
+  Preventive controls are enforced as service control policies on OUs, detective controls run as Config rules aggregated in the Audit account, and the organization trail lands in the Log Archive bucket.
+nodes:
+- {id: acct-management, type: aws.account, name: management}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}}
+- {id: grp-security-ou, type: common.group, name: Security OU, parent: reg-us-east-1}
+- {id: grp-sandbox-ou, type: common.group, name: Sandbox OU, parent: reg-us-east-1}
+- {id: acct-log-archive, type: aws.account, name: log-archive}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-log-archive, props: {region: us-east-1}}
+- {id: acct-audit, type: aws.account, name: audit}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-audit, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: security-ou, type: aws.res.aws_organizations_organizational_unit, name: security-ou, parent: grp-security-ou, props: {name: changeme, parent_id: changeme}}
+- {id: sandbox-ou, type: aws.res.aws_organizations_organizational_unit, name: sandbox-ou, parent: grp-sandbox-ou, props: {name: changeme, parent_id: changeme}}
+- {id: mandatory-guardrails-scp, type: aws.res.aws_organizations_policy, name: mandatory-guardrails-scp, parent: acct-management, props: {content: changeme, name: changeme}}
+- {id: org-trail, type: aws.res.aws_cloudtrail, name: org-trail, parent: acct-management, props: {name: changeme, s3_bucket_name: changeme}}
+- {id: admin-permission-set, type: aws.res.aws_ssoadmin_permission_set, name: admin-permission-set, parent: acct-management, props: {instance_arn: changeme, name: changeme}}
+- {id: cloudtrail-logs, type: aws.s3_bucket, name: cloudtrail-logs, parent: reg-us-east-1}
+- {id: config-snapshots, type: aws.s3_bucket, name: config-snapshots, parent: reg-us-east-1}
+- {id: org-config-aggregator, type: aws.res.aws_config_configuration_aggregator, name: org-config-aggregator, parent: acct-audit, props: {name: changeme}}
+- {id: security-notifications, type: aws.res.aws_sns_topic, name: security-notifications, parent: acct-audit}
+edges:
+- {from: mandatory-guardrails-scp, to: security-ou, link: aws_organizations_policy_attachment}
+- {from: mandatory-guardrails-scp, to: sandbox-ou, link: aws_organizations_policy_attachment}
+- {from: users, to: admin-permission-set, label: SSO sign-in, step: '1'}
+- {from: org-trail, to: cloudtrail-logs, label: log delivery, step: '2'}
+- {from: sandbox-ou, to: org-config-aggregator, label: Config data, step: '3'}
+- {from: sandbox-ou, to: config-snapshots, label: Config snapshots, step: '4'}
+- {from: org-config-aggregator, to: security-notifications, label: drift alerts, step: '5'}
+steps:
+- {n: '1', text: 'users → admin-permission-set: SSO sign-in'}
+- {n: '2', text: 'org-trail → cloudtrail-logs: log delivery'}
+- {n: '3', text: 'sandbox-ou → org-config-aggregator: Config data'}
+- {n: '4', text: 'sandbox-ou → config-snapshots: Config snapshots'}
+- {n: '5', text: 'org-config-aggregator → security-notifications: drift alerts'}

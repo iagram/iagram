@@ -1,0 +1,59 @@
+# Generated from the official reference (https://docs.aws.amazon.com/gamelift/latest/developerguide/gamelift-howitworks.html); edit freely.
+title: Session-based multiplayer game backend with Amazon GameLift Servers
+category: industry
+tags:
+- gamelift
+- game servers
+- matchmaking
+- game backend
+- dynamodb
+- lambda
+source: https://docs.aws.amazon.com/gamelift/latest/developerguide/gamelift-howitworks.html
+description: Game clients authenticate to a serverless backend service that requests game session placements from GameLift Servers rather than holding AWS credentials themselves. A game session queue places
+  sessions on managed EC2 fleets built from an uploaded server build, players connect directly to the assigned game server, and DynamoDB stores player profiles and session records.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-backend-service, type: common.group, name: backend service, parent: reg-us-east-1}
+- {id: grp-game-hosting, type: common.group, name: game hosting, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: player-identity, type: aws.res.aws_cognito_user_pool, name: player-identity, parent: grp-backend-service, props: {name: changeme}}
+- {id: game-backend-api, type: aws.res.aws_api_gateway_rest_api, name: game-backend-api, parent: grp-backend-service, props: {name: changeme}}
+- {id: session-placement, type: aws.lambda_function, name: session-placement, parent: grp-backend-service}
+- {id: player-profiles, type: aws.dynamodb_table, name: player-profiles, parent: grp-backend-service}
+- {id: game-sessions, type: aws.dynamodb_table, name: game-sessions, parent: grp-backend-service}
+- id: server-build
+  type: aws.res.aws_gamelift_build
+  name: server-build
+  parent: grp-game-hosting
+  props: {name: changeme, operating_system: changeme, storage_location: {}}
+- {id: game-fleet, type: aws.res.aws_gamelift_fleet, name: game-fleet, parent: grp-game-hosting, props: {ec2_instance_type: changeme, name: changeme}}
+- id: live-fleet-alias
+  type: aws.res.aws_gamelift_alias
+  name: live-fleet-alias
+  parent: grp-game-hosting
+  props: {name: changeme, routing_strategy: {}}
+- {id: placement-queue, type: aws.res.aws_gamelift_game_session_queue, name: placement-queue, parent: grp-game-hosting, props: {name: changeme}}
+- {id: build-artifacts, type: aws.s3_bucket, name: build-artifacts, parent: grp-game-hosting}
+edges:
+- {from: client, to: player-identity, label: sign in, step: '1'}
+- {from: client, to: game-backend-api, label: join request with latency data, step: '2'}
+- {from: game-backend-api, to: session-placement, label: proxy integration}
+- {from: session-placement, to: player-profiles, label: read player data, step: '3'}
+- {from: session-placement, to: placement-queue, label: StartGameSessionPlacement, step: '4'}
+- {from: placement-queue, to: live-fleet-alias, label: destination priority}
+- {from: live-fleet-alias, to: game-fleet, label: routing alias}
+- {from: build-artifacts, to: server-build, label: uploaded server binaries}
+- {from: server-build, to: game-fleet, label: deployed to fleet instances, step: '0'}
+- {from: game-fleet, to: session-placement, label: game session connection info, step: '5'}
+- {from: session-placement, to: game-sessions, label: record session and player sessions, step: '6'}
+- {from: client, to: game-fleet, label: connect directly to game server, step: '7'}
+steps:
+- {n: '0', text: 'server-build → game-fleet: deployed to fleet instances'}
+- {n: '1', text: 'client → player-identity: sign in'}
+- {n: '2', text: 'client → game-backend-api: join request with latency data'}
+- {n: '3', text: 'session-placement → player-profiles: read player data'}
+- {n: '4', text: 'session-placement → placement-queue: StartGameSessionPlacement'}
+- {n: '5', text: 'game-fleet → session-placement: game session connection info'}
+- {n: '6', text: 'session-placement → game-sessions: record session and player sessions'}
+- {n: '7', text: 'client → game-fleet: connect directly to game server'}

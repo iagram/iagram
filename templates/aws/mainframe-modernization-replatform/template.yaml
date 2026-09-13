@@ -1,0 +1,64 @@
+# Generated from the official reference (https://docs.aws.amazon.com/m2/latest/userguide/what-is-m2.html); edit freely.
+title: Mainframe replatform with AWS Mainframe Modernization
+category: migration
+tags:
+- mainframe modernization
+- replatform
+- cobol
+- managed runtime
+- rocket software
+- dms
+- aurora
+source: https://docs.aws.amazon.com/m2/latest/userguide/what-is-m2.html
+description: COBOL and PL/I applications are recompiled largely unchanged and deployed from S3 into an AWS Mainframe Modernization managed runtime environment (Rocket Software / Micro Focus replatform pattern)
+  fronted by a load balancer. DB2 and VSAM data is migrated with DMS into Aurora PostgreSQL, batch and application files move to EFS or FSx, and CI/CD is driven from CloudFormation.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-m2-vpc, type: aws.vpc, name: m2-vpc, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-m2-vpc-a, type: aws.availability_zone, name: a, parent: vpc-m2-vpc, props: {zone: a}}
+- {id: sub-m2-private-a, type: aws.subnet, name: m2-private-a, parent: az-m2-vpc-a, props: {cidr: 10.200.1.0/24, az: a, public: false}}
+- {id: az-m2-vpc-b, type: aws.availability_zone, name: b, parent: vpc-m2-vpc, props: {zone: b}}
+- {id: sub-m2-private-b, type: aws.subnet, name: m2-private-b, parent: az-m2-vpc-b, props: {cidr: 10.200.2.0/24, az: b, public: false}}
+- {id: sub-m2-db-a, type: aws.subnet, name: m2-db-a, parent: az-m2-vpc-a, props: {cidr: 10.200.10.0/24, az: a, public: false}}
+- {id: server, type: common.server, name: server}
+- {id: database, type: common.database, name: database}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.201.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.201.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.201.1.0/24, az: b, public: false}}
+- {id: m2-dc-router, type: aws.res.aws_customer_gateway, name: m2-dc-router, parent: sub-reg-us-east-1-a, props: {type: changeme}}
+- {id: application-binaries, type: aws.s3_bucket, name: application-binaries, parent: reg-us-east-1}
+- {id: cobol-runtime-env, type: aws.res.aws_m2_environment, name: cobol-runtime-env, parent: vpc-m2-vpc, props: {engine_type: changeme, instance_type: changeme, name: changeme}}
+- {id: cardholder-app, type: aws.res.aws_m2_application, name: cardholder-app, parent: reg-us-east-1, props: {engine_type: changeme, name: changeme}}
+- {id: m2-nlb, type: aws.alb, name: m2-nlb, parent: vpc-m2-vpc}
+- {id: cardholder-aurora-pg, type: aws.res.aws_rds_cluster, name: cardholder-aurora-pg, parent: sub-m2-db-a, props: {engine: changeme}}
+- {id: batch-files, type: aws.res.aws_efs_file_system, name: batch-files, parent: vpc-m2-vpc}
+- {id: db2-repl, type: aws.res.aws_dms_replication_instance, name: db2-repl, parent: sub-m2-private-a, props: {replication_instance_class: changeme, replication_instance_id: changeme}}
+- {id: db2-to-aurora, type: aws.res.aws_dms_replication_task, name: db2-to-aurora, parent: reg-us-east-1, props: {migration_type: changeme, replication_instance_arn: changeme, replication_task_id: changeme,
+    source_endpoint_arn: changeme, table_mappings: changeme, target_endpoint_arn: changeme}}
+- {id: m2-cicd-stack, type: aws.res.aws_cloudformation_stack, name: m2-cicd-stack, parent: reg-us-east-1, props: {name: changeme}}
+edges:
+- {from: m2-dc-router, to: vpc-m2-vpc, label: Site-to-Site VPN}
+- {from: server, to: application-binaries, label: recompiled COBOL/PL-I artifacts and definitions, step: '1'}
+- {from: m2-cicd-stack, to: cardholder-app, label: create / deploy application version, step: '2'}
+- {from: application-binaries, to: cardholder-app, label: application definition and binaries}
+- {from: cardholder-app, to: cobol-runtime-env, label: deployed to managed runtime, step: '3'}
+- {from: db2-to-aurora, to: db2-repl, label: full load + CDC task}
+- {from: db2-repl, to: database, label: read DB2 / VSAM source, step: '4'}
+- {from: db2-repl, to: cardholder-aurora-pg, label: load migrated data, step: '5'}
+- {from: cobol-runtime-env, to: cardholder-aurora-pg, label: data layer}
+- {from: cobol-runtime-env, to: batch-files, label: application and batch files}
+- {from: users, to: m2-nlb, label: TN3270 / API traffic, step: '6'}
+- {from: m2-nlb, to: cobol-runtime-env, step: '7'}
+steps:
+- {n: '1', text: 'server → application-binaries: recompiled COBOL/PL-I artifacts and definitions'}
+- {n: '2', text: 'm2-cicd-stack → cardholder-app: create / deploy application version'}
+- {n: '3', text: 'cardholder-app → cobol-runtime-env: deployed to managed runtime'}
+- {n: '4', text: 'db2-repl → database: read DB2 / VSAM source'}
+- {n: '5', text: 'db2-repl → cardholder-aurora-pg: load migrated data'}
+- {n: '6', text: 'users → m2-nlb: TN3270 / API traffic'}
+- {n: '7', text: m2-nlb → cobol-runtime-env}

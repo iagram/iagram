@@ -1,0 +1,34 @@
+# Generated from the official reference (https://docs.cloud.google.com/transfer-appliance/docs/4.0/overview); edit freely.
+title: Offline petabyte migration with Transfer Appliance
+category: migration
+tags:
+- transfer appliance
+- offline migration
+- cloud storage
+- dataproc
+- kms
+source: https://docs.cloud.google.com/transfer-appliance/docs/4.0/overview
+description: An on-premises team copies data to a Transfer Appliance over NFS or SCP; the appliance encrypts it with AES-256 under a customer-managed Cloud KMS key and is shipped to Google, where the data
+  is uploaded to the customer's Cloud Storage bucket. Once landed, a Dataproc cluster and BigQuery load jobs process the archive into analytics-ready tables.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-appliance-migration, type: gcp.project, name: appliance-migration, props: {project_id: appliance-migration-123456, project: changeme, region: us-central1}}
+- {id: server, type: common.server, name: server}
+- {id: users, type: common.users, name: users}
+- {id: appliance-key-ring, type: gcp.res.google_kms_key_ring, name: appliance-key-ring, parent: prj-appliance-migration, props: {location: westeurope, name: changeme}}
+- {id: appliance-landing-bucket, type: gcp.storage_bucket, name: appliance-landing-bucket, parent: prj-appliance-migration}
+- {id: processed-bucket, type: gcp.storage_bucket, name: processed-bucket, parent: prj-appliance-migration}
+- {id: archive-processing-cluster, type: gcp.res.google_dataproc_cluster, name: archive-processing-cluster, parent: prj-appliance-migration, props: {name: changeme}}
+- {id: archive-dataset, type: gcp.bigquery_dataset, name: archive-dataset, parent: prj-appliance-migration}
+edges:
+- {from: server, to: dc-on-premises, label: copy to appliance via NFS/SCP, step: '1'}
+- {from: dc-on-premises, to: appliance-landing-bucket, label: ship appliance, step: '2'}
+- {from: archive-processing-cluster, to: appliance-landing-bucket, label: read archive, step: '4'}
+- {from: archive-processing-cluster, to: processed-bucket, label: write Parquet, step: '5'}
+- {from: users, to: archive-dataset, label: query, step: '7'}
+steps:
+- {n: '1', text: 'server → datacenter: copy to appliance via NFS/SCP'}
+- {n: '2', text: 'datacenter → appliance-landing-bucket: ship appliance'}
+- {n: '4', text: 'archive-processing-cluster → appliance-landing-bucket: read archive'}
+- {n: '5', text: 'archive-processing-cluster → processed-bucket: write Parquet'}
+- {n: '7', text: 'users → archive-dataset: query'}

@@ -1,0 +1,43 @@
+# Generated from the official reference (https://docs.cloud.google.com/dataform/docs/overview); edit freely.
+title: ELT in BigQuery with Dataform and scheduled workflows
+category: data
+tags:
+- elt
+- dataform
+- bigquery
+- sqlx
+- scheduled queries
+- looker
+source: https://docs.cloud.google.com/dataform/docs/overview
+description: Raw data is loaded into BigQuery staging datasets from Cloud Storage and BigQuery Data Transfer Service, and a Dataform repository of SQLX definitions compiles into a dependency tree of tables,
+  views and assertions executed inside BigQuery. A Dataform workflow configuration runs the release on a schedule and Looker models the resulting marts for business users.
+nodes:
+- {id: prj-analytics, type: gcp.project, name: analytics, props: {project_id: analytics-123456, project: changeme, region: europe-west1}}
+- {id: grp-load, type: common.group, name: load, parent: prj-analytics}
+- {id: grp-transform, type: common.group, name: transform, parent: prj-analytics}
+- {id: grp-serve, type: common.group, name: serve, parent: prj-analytics}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: raw-export-bucket, type: gcp.storage_bucket, name: raw-export-bucket, parent: grp-load}
+- id: saas-transfer
+  type: gcp.res.google_bigquery_data_transfer_config
+  name: saas-transfer
+  parent: grp-load
+  props: {data_source_id: changeme, display_name: changeme, params: {}}
+- {id: staging-dataset, type: gcp.bigquery_dataset, name: staging-dataset, parent: grp-load}
+- {id: marts-dataset, type: gcp.bigquery_dataset, name: marts-dataset, parent: grp-serve}
+- id: analytics-looker
+  type: gcp.res.google_looker_instance
+  name: analytics-looker
+  parent: grp-serve
+  props: {name: changeme, oauth_config: {}}
+edges:
+- {from: saas, to: saas-transfer, label: API extract, step: '1'}
+- {from: saas-transfer, to: staging-dataset, label: load, step: '2'}
+- {from: raw-export-bucket, to: staging-dataset, label: load CSV/Parquet, step: '3'}
+- {from: users, to: analytics-looker, label: explore, step: '9'}
+steps:
+- {n: '1', text: 'saas → saas-transfer: API extract'}
+- {n: '2', text: 'saas-transfer → staging-dataset: load'}
+- {n: '3', text: 'raw-export-bucket → staging-dataset: load CSV/Parquet'}
+- {n: '9', text: 'users → analytics-looker: explore'}

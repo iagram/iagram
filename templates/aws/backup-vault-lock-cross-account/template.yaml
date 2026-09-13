@@ -1,0 +1,58 @@
+# Generated from the official reference (https://docs.aws.amazon.com/aws-backup/latest/devguide/manage-cross-account.html); edit freely.
+title: Immutable cross-account backups with Backup Vault Lock
+category: security
+tags:
+- aws backup
+- vault lock
+- immutable
+- cross-account copy
+- organizations backup policy
+- ransomware
+source: https://docs.aws.amazon.com/aws-backup/latest/devguide/manage-cross-account.html
+description: An Organizations backup policy applied to workload OUs creates backup plans in every member account, and each plan copies recovery points to a locked vault in a dedicated backup account encrypted
+  with its own KMS key. Vault Lock in compliance mode and cross-account monitoring from the delegated backup administrator guarantee retention that cannot be shortened even by account administrators.
+nodes:
+- {id: acct-management, type: aws.account, name: management}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}}
+- {id: grp-workloads-ou, type: common.group, name: Workloads OU, parent: reg-us-east-1}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: acct-central-backup, type: aws.account, name: central-backup}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-central-backup, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: workloads-ou, type: aws.res.aws_organizations_organizational_unit, name: workloads-ou, parent: grp-workloads-ou, props: {name: changeme, parent_id: changeme}}
+- {id: daily-backup-policy, type: aws.res.aws_organizations_policy, name: daily-backup-policy, parent: acct-management, props: {content: changeme, name: changeme}}
+- {id: local-vault, type: aws.res.aws_backup_vault, name: local-vault, parent: acct-workload, props: {name: changeme}}
+- id: daily-plan
+  type: aws.res.aws_backup_plan
+  name: daily-plan
+  parent: acct-workload
+  props:
+    name: changeme
+    rule: []
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: orders-db, type: aws.rds_instance, name: orders-db, parent: sub-reg-us-east-1-a}
+- {id: app-data-volume, type: aws.res.aws_ebs_volume, name: app-data-volume, parent: acct-workload, props: {availability_zone: changeme}}
+- {id: locked-vault, type: aws.res.aws_backup_vault, name: locked-vault, parent: acct-central-backup, props: {name: changeme}}
+- {id: backup-cmk, type: aws.res.aws_kms_key, name: backup-cmk, parent: acct-central-backup}
+- {id: backup-job-events, type: aws.res.aws_sns_topic, name: backup-job-events, parent: acct-central-backup}
+edges:
+- {from: daily-backup-policy, to: workloads-ou, link: aws_organizations_policy_attachment}
+- {from: workloads-ou, to: daily-plan, label: effective backup plan, step: '1'}
+- {from: daily-plan, to: orders-db, label: snapshot, step: '2'}
+- {from: daily-plan, to: app-data-volume, label: snapshot, step: '2'}
+- {from: daily-plan, to: local-vault, label: recovery point, step: '3'}
+- {from: local-vault, to: locked-vault, label: cross-account copy, step: '4'}
+- {from: backup-cmk, to: locked-vault, label: encrypts}
+- {from: locked-vault, to: backup-job-events, label: copy job status, step: '5'}
+- {from: users, to: backup-job-events, label: monitor}
+steps:
+- {n: '1', text: 'workloads-ou → daily-plan: effective backup plan'}
+- {n: '2', text: 'daily-plan → orders-db: snapshot'}
+- {n: '3', text: 'daily-plan → local-vault: recovery point'}
+- {n: '4', text: 'local-vault → locked-vault: cross-account copy'}
+- {n: '5', text: 'locked-vault → backup-job-events: copy job status'}

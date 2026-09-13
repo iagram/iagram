@@ -1,0 +1,61 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/centralized-network-security-for-vpc-to-vpc-and-on-premises-to-vpc-traffic.html); edit freely.
+title: Centralized east-west and hybrid inspection with an inspection VPC
+category: networking
+tags:
+- transit gateway
+- inspection vpc
+- network firewall
+- east-west
+- appliance mode
+- hybrid
+source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/centralized-network-security-for-vpc-to-vpc-and-on-premises-to-vpc-traffic.html
+description: A Transit Gateway with two route tables steers all VPC-to-VPC and on-premises-to-VPC traffic through a dedicated inspection VPC that hosts AWS Network Firewall endpoints in their own subnets,
+  separate from the TGW attachment subnets. Appliance mode on the inspection VPC attachment keeps both directions of a flow on the same Availability Zone so the stateful firewall sees symmetric traffic.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-inspection, type: aws.vpc, name: inspection, parent: reg-us-east-1, props: {cidr: 100.64.0.0/16}}
+- {id: az-inspection-a, type: aws.availability_zone, name: a, parent: vpc-inspection, props: {zone: a}}
+- {id: sub-insp-tgw-a, type: aws.subnet, name: insp-tgw-a, parent: az-inspection-a, props: {cidr: 100.64.0.0/28, az: a, public: false}}
+- {id: sub-insp-firewall-a, type: aws.subnet, name: insp-firewall-a, parent: az-inspection-a, props: {cidr: 100.64.1.0/28, az: a, public: false}}
+- {id: az-inspection-b, type: aws.availability_zone, name: b, parent: vpc-inspection, props: {zone: b}}
+- {id: sub-insp-tgw-b, type: aws.subnet, name: insp-tgw-b, parent: az-inspection-b, props: {cidr: 100.64.2.0/28, az: b, public: false}}
+- {id: sub-insp-firewall-b, type: aws.subnet, name: insp-firewall-b, parent: az-inspection-b, props: {cidr: 100.64.3.0/28, az: b, public: false}}
+- {id: vpc-spoke-prod, type: aws.vpc, name: spoke-prod, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-spoke-prod-a, type: aws.availability_zone, name: a, parent: vpc-spoke-prod, props: {zone: a}}
+- {id: sub-prod-private-a, type: aws.subnet, name: prod-private-a, parent: az-spoke-prod-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-spoke-dev, type: aws.vpc, name: spoke-dev, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}}
+- {id: az-spoke-dev-a, type: aws.availability_zone, name: a, parent: vpc-spoke-dev, props: {zone: a}}
+- {id: sub-dev-private-a, type: aws.subnet, name: dev-private-a, parent: az-spoke-dev-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1}
+- {id: spoke-rt, type: aws.res.aws_ec2_transit_gateway_route_table, name: spoke-rt, parent: reg-us-east-1, props: {transit_gateway_id: changeme}}
+- {id: firewall-rt, type: aws.res.aws_ec2_transit_gateway_route_table, name: firewall-rt, parent: reg-us-east-1, props: {transit_gateway_id: changeme}}
+- {id: inspection-firewall, type: aws.res.aws_networkfirewall_firewall, name: inspection-firewall, parent: sub-insp-firewall-a, props: {firewall_policy_arn: changeme, name: changeme}}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-us-east-1-a, props: {type: changeme}}
+- {id: prod-app, type: aws.ec2_instance, name: prod-app, parent: sub-prod-private-a}
+- {id: dev-app, type: aws.ec2_instance, name: dev-app, parent: sub-dev-private-a}
+- {id: az-vpc-spoke-prod-b, type: aws.availability_zone, name: b, parent: vpc-spoke-prod, props: {zone: b}}
+- {id: sub-vpc-spoke-prod-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-prod-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-spoke-dev-b, type: aws.availability_zone, name: b, parent: vpc-spoke-dev, props: {zone: b}}
+- {id: sub-vpc-spoke-dev-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-dev-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+edges:
+- {from: hub-tgw, to: vpc-spoke-prod, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-spoke-dev, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-inspection, label: appliance mode, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: prod-app, to: hub-tgw, label: spoke-rt default to inspection, step: '1'}
+- {from: hub-tgw, to: inspection-firewall, label: stateful inspection, step: '2'}
+- {from: inspection-firewall, to: hub-tgw, label: firewall-rt to destination, step: '3'}
+- {from: hub-tgw, to: dev-app, step: '4'}
+- {from: dc-on-premises, to: dc-cgw, label: on-prem to VPC also inspected}
+- {from: dc-cgw, to: hub-tgw, label: IPsec, link: aws_vpn_connection}
+steps:
+- {n: '1', text: 'prod-app → hub-tgw: spoke-rt default to inspection'}
+- {n: '2', text: 'hub-tgw → inspection-firewall: stateful inspection'}
+- {n: '3', text: 'inspection-firewall → hub-tgw: firewall-rt to destination'}
+- {n: '4', text: hub-tgw → dev-app}

@@ -1,0 +1,43 @@
+# Generated from the official reference (https://docs.cloud.google.com/network-connectivity/docs/interconnect/tutorials/dedicated-creating-9999-availability); edit freely.
+title: Dedicated Interconnect with 99.99% availability
+category: networking
+tags:
+- dedicated interconnect
+- vlan attachment
+- redundancy
+- two metros
+- cloud router
+source: https://docs.cloud.google.com/network-connectivity/docs/interconnect/tutorials/dedicated-creating-9999-availability
+description: Four Dedicated Interconnect connections are provisioned in two metropolitan areas, two per metro in separate edge availability domains, with one VLAN attachment each terminating on two Cloud
+  Routers in two Google Cloud regions. The VPC uses global dynamic routing so any region reaches on-premises over any surviving path.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-east4}}
+- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-net-hub, props: {cidr: 10.40.0.0/16}}
+- {id: sub-hybrid-use4, type: gcp.subnetwork, name: hybrid-use4, parent: vpc-hybrid-vpc, props: {cidr: 10.40.0.0/24, region: us-east4}}
+- {id: sub-hybrid-usw2, type: gcp.subnetwork, name: hybrid-usw2, parent: vpc-hybrid-vpc, props: {cidr: 10.40.1.0/24, region: us-west2}}
+- {id: router-use4, type: gcp.res.google_compute_router, name: router-use4, parent: sub-hybrid-use4, props: {name: changeme, network: changeme}}
+- {id: router-usw2, type: gcp.res.google_compute_router, name: router-usw2, parent: sub-hybrid-usw2, props: {name: changeme, network: changeme}}
+- {id: vlan-metro1-ead1, type: gcp.res.google_compute_interconnect_attachment, name: vlan-metro1-ead1, parent: sub-hybrid-use4, props: {name: changeme, router: changeme}}
+- {id: vlan-metro1-ead2, type: gcp.res.google_compute_interconnect_attachment, name: vlan-metro1-ead2, parent: sub-hybrid-use4, props: {name: changeme, router: changeme}}
+- {id: vlan-metro2-ead1, type: gcp.res.google_compute_interconnect_attachment, name: vlan-metro2-ead1, parent: sub-hybrid-usw2, props: {name: changeme, router: changeme}}
+- {id: vlan-metro2-ead2, type: gcp.res.google_compute_interconnect_attachment, name: vlan-metro2-ead2, parent: sub-hybrid-usw2, props: {name: changeme, router: changeme}}
+- {id: app-use4, type: gcp.compute_instance, name: app-use4, parent: sub-hybrid-use4}
+- {id: app-usw2, type: gcp.compute_instance, name: app-usw2, parent: sub-hybrid-usw2}
+- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub}
+- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: onprem-router-metro1, type: gcp.res.google_compute_router, name: onprem-router-metro1, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}}
+- {id: onprem-router-metro2, type: gcp.res.google_compute_router, name: onprem-router-metro2, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}}
+edges:
+- {from: onprem-router-metro1, to: vlan-metro1-ead1, label: 10G Dedicated Interconnect, step: '1'}
+- {from: onprem-router-metro1, to: vlan-metro1-ead2, label: 10G Dedicated Interconnect, step: '1'}
+- {from: onprem-router-metro2, to: vlan-metro2-ead1, label: 10G Dedicated Interconnect, step: '2'}
+- {from: onprem-router-metro2, to: vlan-metro2-ead2, label: 10G Dedicated Interconnect, step: '2'}
+- {from: router-use4, to: onprem-router-metro1, label: BGP, step: '3'}
+- {from: router-usw2, to: onprem-router-metro2, label: BGP, step: '3'}
+- {from: app-use4, to: onprem-router-metro1, label: private traffic, step: '4'}
+steps:
+- {n: '1', text: 'onprem-router-metro1 → vlan-metro1-ead1: 10G Dedicated Interconnect'}
+- {n: '2', text: 'onprem-router-metro2 → vlan-metro2-ead1: 10G Dedicated Interconnect'}
+- {n: '3', text: 'router-use4 → onprem-router-metro1: BGP'}
+- {n: '4', text: 'app-use4 → onprem-router-metro1: private traffic'}

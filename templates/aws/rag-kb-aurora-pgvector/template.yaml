@@ -1,0 +1,43 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.VectorDB.html); edit freely.
+title: RAG with Bedrock Knowledge Bases on Aurora PostgreSQL pgvector
+category: ml
+tags:
+- rag
+- aurora postgresql
+- pgvector
+- bedrock knowledge bases
+- vector store
+source: https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.VectorDB.html
+description: An Aurora PostgreSQL Serverless v2 cluster with the pgvector extension is the vector store for a Bedrock knowledge base; Bedrock reaches it through the RDS Data API using credentials in Secrets
+  Manager. Embeddings from S3 documents land in a table with an HNSW index and are retrieved at query time by a Lambda function that calls the knowledge base.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-data, type: aws.vpc, name: data, parent: reg-us-east-1, props: {cidr: 10.20.0.0/16}}
+- {id: az-data-a, type: aws.availability_zone, name: a, parent: vpc-data, props: {zone: a}}
+- {id: sub-db-a, type: aws.subnet, name: db-a, parent: az-data-a, props: {cidr: 10.20.1.0/24, az: a, public: false}}
+- {id: az-data-b, type: aws.availability_zone, name: b, parent: vpc-data, props: {zone: b}}
+- {id: sub-db-b, type: aws.subnet, name: db-b, parent: az-data-b, props: {cidr: 10.20.2.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: aurora-pgvector, type: aws.res.aws_rds_cluster, name: aurora-pgvector, parent: sub-db-a, props: {engine: changeme}}
+- {id: pgvector-credentials, type: aws.res.aws_secretsmanager_secret, name: pgvector-credentials, parent: reg-us-east-1}
+- {id: pg-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: pg-kb, parent: reg-us-east-1, props: {name: changeme, role_arn: changeme}}
+- {id: source-docs, type: aws.s3_bucket, name: source-docs, parent: reg-us-east-1}
+- {id: chat-api, type: aws.res.aws_api_gateway_rest_api, name: chat-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: query-fn, type: aws.lambda_function, name: query-fn, parent: reg-us-east-1}
+- {id: app-users, type: aws.res.aws_cognito_user_pool, name: app-users, parent: reg-us-east-1, props: {name: changeme}}
+edges:
+- {from: source-docs, to: pg-kb, label: bedrockagent data source}
+- {from: pg-kb, to: pgvector-credentials, label: read DB secret, step: '1'}
+- {from: pg-kb, to: aurora-pgvector, label: RDS Data API insert embeddings, step: '2'}
+- {from: users, to: chat-api, label: HTTPS, step: '3'}
+- {from: chat-api, to: query-fn, step: '4'}
+- {from: query-fn, to: pg-kb, label: Retrieve, step: '5'}
+- {from: pg-kb, to: aurora-pgvector, label: SELECT ... ORDER BY embedding <=> query, step: '6'}
+steps:
+- {n: '1', text: 'pg-kb → pgvector-credentials: read DB secret'}
+- {n: '2', text: 'pg-kb → aurora-pgvector: RDS Data API insert embeddings'}
+- {n: '3', text: 'users → chat-api: HTTPS'}
+- {n: '4', text: chat-api → query-fn}
+- {n: '5', text: 'query-fn → pg-kb: Retrieve'}
+- {n: '6', text: 'pg-kb → aurora-pgvector: SELECT ... ORDER BY embedding <=> query'}

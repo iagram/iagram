@@ -1,0 +1,37 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/using-amazon-sqs-dead-letter-queues-to-replay-messages); edit freely.
+title: Dead-letter queue replay with exponential backoff
+category: resilience
+tags:
+- sqs
+- dead-letter queue
+- replay
+- redrive
+- exponential backoff
+source: https://aws.amazon.com/blogs/compute/using-amazon-sqs-dead-letter-queues-to-replay-messages
+description: Messages that fail processing land in a dead-letter queue; a replay Lambda function moves them back to the main queue with a delay computed by exponential backoff and a retry counter in message
+  attributes. Messages that exceed the retry limit are parked in a second dead-letter queue for manual inspection, and an alarm tracks its depth.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: client, type: common.client, name: client}
+- {id: main-queue, type: aws.sqs_queue, name: main-queue, parent: reg-us-east-1}
+- {id: main-dlq, type: aws.sqs_queue, name: main-dlq, parent: reg-us-east-1}
+- {id: manual-review-dlq, type: aws.sqs_queue, name: manual-review-dlq, parent: reg-us-east-1}
+- {id: message-consumer, type: aws.lambda_function, name: message-consumer, parent: reg-us-east-1}
+- {id: dlq-replay, type: aws.lambda_function, name: dlq-replay, parent: reg-us-east-1}
+- {id: manual-dlq-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: manual-dlq-alarm, parent: reg-us-east-1, props: {alarm_name: changeme}}
+- {id: operator-alerts, type: aws.res.aws_sns_topic, name: operator-alerts, parent: reg-us-east-1}
+edges:
+- {from: client, to: main-queue, label: SendMessage, step: '1'}
+- {from: main-queue, to: message-consumer, link: aws_lambda_event_source_mapping}
+- {from: main-queue, to: main-dlq, label: maxReceiveCount exceeded, step: '2'}
+- {from: main-dlq, to: dlq-replay, link: aws_lambda_event_source_mapping}
+- {from: dlq-replay, to: main-queue, label: SendMessage with DelaySeconds backoff, step: '3'}
+- {from: dlq-replay, to: manual-review-dlq, label: retry limit reached, step: '4'}
+- {from: manual-review-dlq, to: manual-dlq-alarm, label: queue depth metric}
+- {from: manual-dlq-alarm, to: operator-alerts, label: ALARM action}
+steps:
+- {n: '1', text: 'client → main-queue: SendMessage'}
+- {n: '2', text: 'main-queue → main-dlq: maxReceiveCount exceeded'}
+- {n: '3', text: 'dlq-replay → main-queue: SendMessage with DelaySeconds backoff'}
+- {n: '4', text: 'dlq-replay → manual-review-dlq: retry limit reached'}

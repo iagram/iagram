@@ -1,0 +1,43 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/sending-and-receiving-webhooks-on-aws-innovate-with-event-notifications/); edit freely.
+title: Webhook ingestion with verification, storage and routing
+category: serverless
+tags:
+- webhooks
+- api gateway
+- hmac verification
+- dynamodb streams
+- eventbridge pipes
+source: https://aws.amazon.com/blogs/compute/sending-and-receiving-webhooks-on-aws-innovate-with-event-notifications/
+description: A SaaS provider posts webhooks to an API Gateway endpoint; a Lambda function verifies the HMAC signature with a secret from Secrets Manager, deduplicates by event ID, stores the payload in
+  S3 and the metadata in DynamoDB. An EventBridge pipe reads the DynamoDB stream and routes each event type to a Step Functions workflow or a Lambda handler.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: saas, type: common.saas, name: saas}
+- {id: webhook-api, type: aws.res.aws_api_gateway_rest_api, name: webhook-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: verify-and-store, type: aws.lambda_function, name: verify-and-store, parent: reg-us-east-1}
+- {id: webhook-hmac-secret, type: aws.res.aws_secretsmanager_secret, name: webhook-hmac-secret, parent: reg-us-east-1}
+- {id: webhook-payloads, type: aws.s3_bucket, name: webhook-payloads, parent: reg-us-east-1}
+- {id: webhook-events, type: aws.dynamodb_table, name: webhook-events, parent: reg-us-east-1}
+- {id: route-webhook-events, type: aws.res.aws_pipes_pipe, name: route-webhook-events, parent: reg-us-east-1, props: {role_arn: changeme, source: changeme, target: changeme}}
+- {id: handle-payment-event, type: aws.res.aws_sfn_state_machine, name: handle-payment-event, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: handle-refund-event, type: aws.lambda_function, name: handle-refund-event, parent: reg-us-east-1}
+- {id: routing-dlq, type: aws.sqs_queue, name: routing-dlq, parent: reg-us-east-1}
+edges:
+- {from: saas, to: webhook-api, label: POST /webhook with signature header, step: '1'}
+- {from: webhook-api, to: verify-and-store, step: '2'}
+- {from: verify-and-store, to: webhook-hmac-secret, label: fetch signing secret, step: '3'}
+- {from: verify-and-store, to: webhook-payloads, label: PutObject payload, step: '4'}
+- {from: verify-and-store, to: webhook-events, label: PutItem idempotent on eventId, step: '5'}
+- {from: webhook-events, to: route-webhook-events, label: DynamoDB stream source, step: '6'}
+- {from: route-webhook-events, to: handle-payment-event, label: filter eventType payment, step: '7'}
+- {from: route-webhook-events, to: handle-refund-event, label: filter eventType refund}
+- {from: route-webhook-events, to: routing-dlq, label: failed deliveries}
+steps:
+- {n: '1', text: 'saas → webhook-api: POST /webhook with signature header'}
+- {n: '2', text: webhook-api → verify-and-store}
+- {n: '3', text: 'verify-and-store → webhook-hmac-secret: fetch signing secret'}
+- {n: '4', text: 'verify-and-store → webhook-payloads: PutObject payload'}
+- {n: '5', text: 'verify-and-store → webhook-events: PutItem idempotent on eventId'}
+- {n: '6', text: 'webhook-events → route-webhook-events: DynamoDB stream source'}
+- {n: '7', text: 'route-webhook-events → handle-payment-event: filter eventType payment'}

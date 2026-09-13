@@ -1,0 +1,62 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/architecture/integrating-salesforce-with-aws-dynamodb-using-amazon-appflow-bi-directionally/); edit freely.
+title: Bidirectional Salesforce integration with AppFlow and EventBridge
+category: serverless
+tags:
+- appflow
+- salesforce
+- eventbridge
+- dynamodb
+- saas integration
+source: https://aws.amazon.com/blogs/architecture/integrating-salesforce-with-aws-dynamodb-using-amazon-appflow-bi-directionally/
+description: An event-triggered AppFlow flow forwards Salesforce change events to an EventBridge partner event bus, where a rule invokes a Lambda function that upserts the record into DynamoDB. A DynamoDB
+  stream handler writes status CSV files to S3, and a scheduled AppFlow flow pushes them back to Salesforce while SNS notifies users.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: saas, type: common.saas, name: saas}
+- id: salesforce-to-eventbridge
+  type: aws.res.aws_appflow_flow
+  name: salesforce-to-eventbridge
+  parent: reg-us-east-1
+  props:
+    destination_flow_config: []
+    name: changeme
+    source_flow_config: {}
+    task: []
+    trigger_config: {}
+- {id: appflow-partner-bus, type: aws.res.aws_cloudwatch_event_bus, name: appflow-partner-bus, parent: reg-us-east-1, props: {name: changeme}}
+- {id: account-changed, type: aws.res.aws_cloudwatch_event_rule, name: account-changed, parent: reg-us-east-1}
+- {id: upsert-account, type: aws.lambda_function, name: upsert-account, parent: reg-us-east-1}
+- {id: accounts, type: aws.dynamodb_table, name: accounts, parent: reg-us-east-1}
+- {id: write-status-csv, type: aws.lambda_function, name: write-status-csv, parent: reg-us-east-1}
+- {id: sync-status-files, type: aws.s3_bucket, name: sync-status-files, parent: reg-us-east-1}
+- id: s3-to-salesforce
+  type: aws.res.aws_appflow_flow
+  name: s3-to-salesforce
+  parent: reg-us-east-1
+  props:
+    destination_flow_config: []
+    name: changeme
+    source_flow_config: {}
+    task: []
+    trigger_config: {}
+- {id: sync-notifications, type: aws.res.aws_sns_topic, name: sync-notifications, parent: reg-us-east-1}
+edges:
+- {from: saas, to: salesforce-to-eventbridge, label: Salesforce change event, step: '1'}
+- {from: salesforce-to-eventbridge, to: appflow-partner-bus, label: PutEvents, step: '2'}
+- {from: appflow-partner-bus, to: account-changed, step: '3'}
+- {from: account-changed, to: upsert-account, link: aws_cloudwatch_event_target}
+- {from: upsert-account, to: accounts, label: UpdateItem, step: '4'}
+- {from: accounts, to: write-status-csv, link: aws_lambda_event_source_mapping}
+- {from: write-status-csv, to: sync-status-files, label: PutObject status.csv, step: '5'}
+- {from: sync-status-files, to: s3-to-salesforce, label: scheduled flow source, step: '6'}
+- {from: s3-to-salesforce, to: saas, label: update Salesforce records, step: '7'}
+- {from: write-status-csv, to: sync-notifications, label: Publish}
+steps:
+- {n: '1', text: 'saas → salesforce-to-eventbridge: Salesforce change event'}
+- {n: '2', text: 'salesforce-to-eventbridge → appflow-partner-bus: PutEvents'}
+- {n: '3', text: appflow-partner-bus → account-changed}
+- {n: '4', text: 'upsert-account → accounts: UpdateItem'}
+- {n: '5', text: 'write-status-csv → sync-status-files: PutObject status.csv'}
+- {n: '6', text: 'sync-status-files → s3-to-salesforce: scheduled flow source'}
+- {n: '7', text: 's3-to-salesforce → saas: update Salesforce records'}

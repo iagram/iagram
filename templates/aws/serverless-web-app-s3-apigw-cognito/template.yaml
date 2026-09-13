@@ -1,0 +1,48 @@
+# Generated from the official reference (https://aws.amazon.com/getting-started/hands-on/build-serverless-web-app-lambda-apigateway-s3-dynamodb-cognito/); edit freely.
+title: Serverless web application with S3, Cognito, API Gateway, Lambda, and DynamoDB
+category: web
+tags:
+- jamstack
+- static frontend
+- serverless backend
+- cognito
+- api gateway
+- dynamodb
+source: https://aws.amazon.com/getting-started/hands-on/build-serverless-web-app-lambda-apigateway-s3-dynamodb-cognito/
+description: A static single-page frontend is served from S3 through CloudFront while users register and sign in against a Cognito user pool. The browser calls a REST API on API Gateway with the Cognito
+  JWT, and Lambda functions behind the API read and write application state in a DynamoDB table.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: grp-backend, type: common.group, name: backend, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: app-zone, type: aws.route53_zone, name: app-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: app-cert, type: aws.res.aws_acm_certificate, name: app-cert, parent: reg-us-east-1}
+- {id: app-cdn, type: aws.cloudfront_distribution, name: app-cdn, parent: grp-global-edge}
+- {id: frontend-bucket, type: aws.s3_bucket, name: frontend-bucket, parent: reg-us-east-1}
+- {id: app-users, type: aws.res.aws_cognito_user_pool, name: app-users, parent: grp-backend, props: {name: changeme}}
+- {id: app-api, type: aws.res.aws_api_gateway_rest_api, name: app-api, parent: grp-backend, props: {name: changeme}}
+- {id: request-handler, type: aws.lambda_function, name: request-handler, parent: grp-backend}
+- {id: app-table, type: aws.dynamodb_table, name: app-table, parent: grp-backend}
+edges:
+- {from: users, to: app-zone, label: DNS, step: '1'}
+- {from: users, to: app-cdn, label: GET static SPA, step: '2'}
+- {from: app-cert, to: app-cdn, label: TLS certificate}
+- {from: app-cdn, to: frontend-bucket, label: origin via OAC, step: '3'}
+- {from: users, to: app-users, label: sign up / sign in, step: '4'}
+- {from: app-users, to: users, label: JWT id token, step: '5'}
+- {from: users, to: app-api, label: HTTPS with Authorization header, step: '6'}
+- {from: app-api, to: app-users, label: Cognito authorizer validates token, step: '7'}
+- {from: app-api, to: request-handler, label: Lambda proxy integration, step: '8'}
+- {from: request-handler, to: app-table, label: PutItem / Query, step: '9'}
+steps:
+- {n: '1', text: 'users → app-zone: DNS'}
+- {n: '2', text: 'users → app-cdn: GET static SPA'}
+- {n: '3', text: 'app-cdn → frontend-bucket: origin via OAC'}
+- {n: '4', text: 'users → app-users: sign up / sign in'}
+- {n: '5', text: 'app-users → users: JWT id token'}
+- {n: '6', text: 'users → app-api: HTTPS with Authorization header'}
+- {n: '7', text: 'app-api → app-users: Cognito authorizer validates token'}
+- {n: '8', text: 'app-api → request-handler: Lambda proxy integration'}
+- {n: '9', text: 'request-handler → app-table: PutItem / Query'}

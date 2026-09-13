@@ -1,0 +1,55 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/aws-best-practices-ddos-resiliency/aws-best-practices-ddos-resiliency.html); edit freely.
+title: DDoS-resilient web application with WAF and Shield Advanced
+category: security
+tags:
+- ddos
+- shield advanced
+- waf
+- cloudfront
+- route 53
+- edge protection
+source: https://docs.aws.amazon.com/whitepapers/latest/aws-best-practices-ddos-resiliency/aws-best-practices-ddos-resiliency.html
+description: The DDoS-resilient reference architecture fronts the application with Route 53 and CloudFront, attaches a WAF web ACL with rate-based and managed rules, and enrols the edge and load balancer
+  resources in Shield Advanced. Traffic reaches an Application Load Balancer in public subnets while EC2 targets sit in private subnets, and Shield Advanced health-based detection plus the Shield Response
+  Team cover layer 3 to layer 7 events.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-web, type: aws.vpc, name: web, parent: reg-us-east-1, props: {cidr: 10.40.0.0/16}}
+- {id: az-web-a, type: aws.availability_zone, name: a, parent: vpc-web, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-web-a, props: {cidr: 10.40.0.0/24, az: a, public: true}}
+- {id: az-web-b, type: aws.availability_zone, name: b, parent: vpc-web, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-web-b, props: {cidr: 10.40.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-web-a, props: {cidr: 10.40.10.0/24, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-web-b, props: {cidr: 10.40.11.0/24, az: b, public: false}}
+- {id: internet, type: common.internet, name: internet}
+- {id: users, type: common.users, name: users}
+- {id: public-zone, type: aws.route53_zone, name: public-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: edge-distribution, type: aws.cloudfront_distribution, name: edge-distribution, parent: reg-us-east-1}
+- id: edge-web-acl
+  type: aws.res.aws_wafv2_web_acl
+  name: edge-web-acl
+  parent: reg-us-east-1
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+- {id: cloudfront-shield, type: aws.res.aws_shield_protection, name: cloudfront-shield, parent: reg-us-east-1, props: {name: changeme, resource_arn: changeme}}
+- {id: alb-shield, type: aws.res.aws_shield_protection, name: alb-shield, parent: reg-us-east-1, props: {name: changeme, resource_arn: changeme}}
+- {id: web-alb, type: aws.alb, name: web-alb, parent: az-web-a}
+- {id: web-asg, type: aws.res.aws_autoscaling_group, name: web-asg, parent: sub-private-a, props: {max_size: 1, min_size: 1}}
+- {id: static-assets, type: aws.s3_bucket, name: static-assets, parent: reg-us-east-1}
+- {id: ddos-detected-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: ddos-detected-alarm, parent: reg-us-east-1, props: {alarm_name: changeme}}
+edges:
+- {from: users, to: public-zone, label: DNS, step: '1'}
+- {from: users, to: edge-distribution, label: HTTPS, step: '2'}
+- {from: internet, to: edge-distribution, label: attack traffic}
+- {from: edge-web-acl, to: edge-distribution, label: wafv2 web acl association}
+- {from: cloudfront-shield, to: edge-distribution, label: protects}
+- {from: alb-shield, to: web-alb, label: protects}
+- {from: edge-distribution, to: web-alb, label: origin request, step: '3'}
+- {from: edge-distribution, to: static-assets, label: static origin}
+- {from: web-alb, to: web-asg, label: HTTP, step: '4'}
+- {from: cloudfront-shield, to: ddos-detected-alarm, label: DDoSDetected metric}
+steps:
+- {n: '1', text: 'users → public-zone: DNS'}
+- {n: '2', text: 'users → edge-distribution: HTTPS'}
+- {n: '3', text: 'edge-distribution → web-alb: origin request'}
+- {n: '4', text: 'web-alb → web-asg: HTTP'}

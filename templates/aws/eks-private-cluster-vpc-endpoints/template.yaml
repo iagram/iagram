@@ -1,0 +1,68 @@
+# Generated from the official reference (https://docs.aws.amazon.com/eks/latest/userguide/private-clusters.html); edit freely.
+title: Fully private EKS cluster with VPC endpoints and no internet egress
+category: containers
+tags:
+- eks
+- private cluster
+- vpc endpoints
+- privatelink
+- ecr
+- air gap
+source: https://docs.aws.amazon.com/eks/latest/userguide/private-clusters.html
+description: The cluster has only private API endpoint access and its nodes live in subnets with no route to the internet, so every dependency is reached through interface endpoints (ECR API and DKR, EC2,
+  STS, CloudWatch Logs, EKS Auth) and an S3 gateway endpoint for image layers. Images are copied into an ECR registry in the same account, and operators reach the API server from a bastion or over Direct
+  Connect rather than from the internet.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-private-eks, type: aws.vpc, name: private-eks, parent: reg-eu-west-1, props: {cidr: 10.50.0.0/16}}
+- {id: az-private-eks-a, type: aws.availability_zone, name: a, parent: vpc-private-eks, props: {zone: a}}
+- {id: sub-nodes-a, type: aws.subnet, name: nodes-a, parent: az-private-eks-a, props: {cidr: 10.50.0.0/20, az: a, public: false}}
+- {id: az-private-eks-b, type: aws.availability_zone, name: b, parent: vpc-private-eks, props: {zone: b}}
+- {id: sub-nodes-b, type: aws.subnet, name: nodes-b, parent: az-private-eks-b, props: {cidr: 10.50.16.0/20, az: b, public: false}}
+- {id: sub-endpoints-a, type: aws.subnet, name: endpoints-a, parent: az-private-eks-a, props: {cidr: 10.50.32.0/24, az: a, public: false}}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: onprem-router, type: aws.res.aws_customer_gateway, name: onprem-router, parent: sub-reg-eu-west-1-a, props: {type: changeme}}
+- {id: vgw, type: aws.res.aws_vpn_gateway, name: vgw, parent: vpc-private-eks}
+- {id: private-cluster, type: aws.eks_cluster, name: private-cluster, parent: vpc-private-eks}
+- id: private-nodes
+  type: aws.res.aws_eks_node_group
+  name: private-nodes
+  parent: private-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- {id: ecr-api-endpoint, type: aws.res.aws_vpc_endpoint, name: ecr-api-endpoint, parent: sub-endpoints-a, props: {vpc_id: changeme}}
+- {id: ecr-dkr-endpoint, type: aws.res.aws_vpc_endpoint, name: ecr-dkr-endpoint, parent: sub-endpoints-a, props: {vpc_id: changeme}}
+- {id: s3-gateway-endpoint, type: aws.res.aws_vpc_endpoint, name: s3-gateway-endpoint, parent: vpc-private-eks, props: {vpc_id: changeme}}
+- {id: sts-endpoint, type: aws.res.aws_vpc_endpoint, name: sts-endpoint, parent: sub-endpoints-a, props: {vpc_id: changeme}}
+- {id: ec2-endpoint, type: aws.res.aws_vpc_endpoint, name: ec2-endpoint, parent: sub-endpoints-a, props: {vpc_id: changeme}}
+- {id: logs-endpoint, type: aws.res.aws_vpc_endpoint, name: logs-endpoint, parent: sub-endpoints-a, props: {vpc_id: changeme}}
+- {id: mirrored-images, type: aws.res.aws_ecr_repository, name: mirrored-images, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: cluster-logs, type: aws.res.aws_cloudwatch_log_group, name: cluster-logs, parent: reg-eu-west-1}
+edges:
+- {from: onprem-router, to: vgw, label: kubectl over Site-to-Site VPN, step: '1', link: aws_vpn_connection}
+- {from: vgw, to: private-cluster, label: private API endpoint only, step: '2'}
+- {from: private-nodes, to: private-cluster, label: node registration via private endpoint, step: '3'}
+- {from: private-nodes, to: ecr-api-endpoint, label: GetAuthorizationToken, step: '4'}
+- {from: private-nodes, to: ecr-dkr-endpoint, label: image manifest pull, step: '5'}
+- {from: private-nodes, to: s3-gateway-endpoint, label: image layers from ECR S3 buckets, step: '6'}
+- {from: ecr-dkr-endpoint, to: mirrored-images, label: PrivateLink}
+- {from: private-nodes, to: sts-endpoint, label: AssumeRoleWithWebIdentity (IRSA)}
+- {from: private-nodes, to: ec2-endpoint, label: DescribeInstances (node DNS name)}
+- {from: private-nodes, to: logs-endpoint, label: PutLogEvents}
+- {from: logs-endpoint, to: cluster-logs}
+steps:
+- {n: '1', text: 'onprem-router → vgw: kubectl over Site-to-Site VPN'}
+- {n: '2', text: 'vgw → private-cluster: private API endpoint only'}
+- {n: '3', text: 'private-nodes → private-cluster: node registration via private endpoint'}
+- {n: '4', text: 'private-nodes → ecr-api-endpoint: GetAuthorizationToken'}
+- {n: '5', text: 'private-nodes → ecr-dkr-endpoint: image manifest pull'}
+- {n: '6', text: 'private-nodes → s3-gateway-endpoint: image layers from ECR S3 buckets'}

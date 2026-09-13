@@ -1,0 +1,39 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/increasing-real-time-stream-processing-performance-with-amazon-kinesis-data-streams-enhanced-fan-out-and-aws-lambda/); edit freely.
+title: Kinesis Data Streams with Lambda enhanced fan-out consumers
+category: serverless
+tags:
+- kinesis
+- lambda
+- enhanced fan-out
+- stream processing
+- event source mapping
+source: https://aws.amazon.com/blogs/compute/increasing-real-time-stream-processing-performance-with-amazon-kinesis-data-streams-enhanced-fan-out-and-aws-lambda/
+description: Producers write clickstream records to a Kinesis data stream; two Lambda functions consume the same stream through registered enhanced fan-out consumers so each gets dedicated 2 MB/s per shard
+  over HTTP/2. Batches that exhaust retries are sent to an SQS on-failure destination and raw records are archived to S3 through Firehose.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: clickstream, type: aws.res.aws_kinesis_stream, name: clickstream, parent: reg-us-east-1, props: {name: changeme}}
+- {id: metrics-consumer, type: aws.res.aws_kinesis_stream_consumer, name: metrics-consumer, parent: reg-us-east-1, props: {name: changeme, stream_arn: changeme}}
+- {id: fraud-consumer, type: aws.res.aws_kinesis_stream_consumer, name: fraud-consumer, parent: reg-us-east-1, props: {name: changeme, stream_arn: changeme}}
+- {id: aggregate-metrics, type: aws.lambda_function, name: aggregate-metrics, parent: reg-us-east-1}
+- {id: detect-fraud, type: aws.lambda_function, name: detect-fraud, parent: reg-us-east-1}
+- {id: realtime-metrics, type: aws.dynamodb_table, name: realtime-metrics, parent: reg-us-east-1}
+- {id: stream-failures, type: aws.sqs_queue, name: stream-failures, parent: reg-us-east-1}
+- {id: raw-archive, type: aws.res.aws_kinesis_firehose_delivery_stream, name: raw-archive, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
+- {id: clickstream-archive, type: aws.s3_bucket, name: clickstream-archive, parent: reg-us-east-1}
+edges:
+- {from: mobile, to: clickstream, label: PutRecords, step: '1'}
+- {from: clickstream, to: metrics-consumer, label: SubscribeToShard HTTP/2, step: '2'}
+- {from: clickstream, to: fraud-consumer, label: SubscribeToShard HTTP/2}
+- {from: metrics-consumer, to: aggregate-metrics, label: lambda event source mapping}
+- {from: fraud-consumer, to: detect-fraud, label: lambda event source mapping}
+- {from: aggregate-metrics, to: realtime-metrics, label: UpdateItem counters, step: '3'}
+- {from: aggregate-metrics, to: stream-failures, label: on-failure destination}
+- {from: clickstream, to: raw-archive, label: Firehose source}
+- {from: raw-archive, to: clickstream-archive, label: buffered PutObject}
+steps:
+- {n: '1', text: 'mobile → clickstream: PutRecords'}
+- {n: '2', text: 'clickstream → metrics-consumer: SubscribeToShard HTTP/2'}
+- {n: '3', text: 'aggregate-metrics → realtime-metrics: UpdateItem counters'}

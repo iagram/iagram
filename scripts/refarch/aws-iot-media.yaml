@@ -1,0 +1,711 @@
+- slug: iot-telemetry-rules-kinesis-firehose
+  title: IoT Core telemetry pipeline with rules, Kinesis, Firehose and Timestream
+  category: iot
+  tags: [iot core, rules engine, kinesis, firehose, timestream, telemetry]
+  source: https://docs.aws.amazon.com/wellarchitected/latest/iot-lens/device-telemetry.html
+  description: Devices publish read-only telemetry on a data/ topic namespace to the IoT Core message broker; topic rules fan the same messages out to a Kinesis data stream for real-time processing, a Firehose delivery stream that lands raw records in S3, and a Timestream table for time-series queries. A Lambda consumer on the Kinesis stream writes latest-state records to DynamoDB while Glue and Athena query the S3 archive.
+  containers:
+    - region: eu-west-1
+      groups: [{label: ingestion}, {label: hot path}, {label: cold path}]
+  elements:
+    - {tf: aws_iot_thing, name: sensor-thing, in: group:ingestion}
+    - {tf: aws_iot_topic_rule, name: telemetry-rule, in: group:ingestion}
+    - {tf: aws_kinesis_stream, name: telemetry-stream, in: group:hot path}
+    - {tf: aws_lambda_function, name: state-processor, in: group:hot path}
+    - {tf: aws_dynamodb_table, name: device-state, in: group:hot path}
+    - {tf: aws_timestreamwrite_database, name: telemetry-tsdb, in: group:hot path}
+    - {tf: aws_grafana_workspace, name: ops-dashboards, in: group:hot path}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: telemetry-firehose, in: group:cold path}
+    - {tf: aws_s3_bucket, name: telemetry-lake, in: group:cold path}
+    - {tf: aws_glue_catalog_database, name: telemetry-catalog, in: group:cold path}
+    - {tf: aws_athena_workgroup, name: telemetry-athena, in: group:cold path}
+  actors: [device]
+  flows:
+    - {from: device, to: sensor-thing, label: "MQTT publish data/<device>/<sensor>", step: 1}
+    - {from: sensor-thing, to: telemetry-rule, label: rules engine SQL select, step: 2}
+    - {from: telemetry-rule, to: telemetry-stream, label: kinesis action, step: 3}
+    - {from: telemetry-rule, to: telemetry-firehose, label: firehose action, step: 3}
+    - {from: telemetry-rule, to: telemetry-tsdb, label: timestream action, step: 3}
+    - {from: telemetry-stream, to: state-processor, link: aws_lambda_event_source_mapping}
+    - {from: state-processor, to: device-state, label: put latest state, step: 4}
+    - {from: telemetry-firehose, to: telemetry-lake, label: buffered parquet objects, step: 4}
+    - {from: telemetry-catalog, to: telemetry-lake, label: crawled schema}
+    - {from: telemetry-athena, to: telemetry-catalog, label: SQL over archive}
+    - {from: ops-dashboards, to: telemetry-tsdb, label: time-series queries}
+
+- slug: iot-fleet-provisioning-by-claim
+  title: IoT fleet provisioning by claim with pre-provisioning hook
+  category: iot
+  tags: [iot core, fleet provisioning, claim certificate, provisioning template, pre-provisioning hook]
+  source: https://docs.aws.amazon.com/iot/latest/developerguide/provision-wo-cert.html
+  description: Devices leave the factory with a shared claim certificate; on first connection they call CreateKeysAndCertificate and RegisterThing against a provisioning template, and IoT Core issues a unique X.509 certificate signed by the Amazon Root CA. A pre-provisioning hook Lambda validates the device serial against an allow-list in DynamoDB before the template creates the thing, attaches the policy and activates the certificate.
+  containers:
+    - region: us-east-1
+      groups: [{label: provisioning}, {label: registry}]
+  elements:
+    - {tf: aws_iot_certificate, name: claim-certificate, in: group:provisioning}
+    - {tf: aws_iot_policy, name: claim-policy, in: group:provisioning}
+    - {tf: aws_iot_provisioning_template, name: fleet-template, in: group:provisioning}
+    - {tf: aws_lambda_function, name: pre-provisioning-hook, in: group:provisioning}
+    - {tf: aws_dynamodb_table, name: device-allowlist, in: group:provisioning}
+    - {tf: aws_iot_thing, name: provisioned-thing, in: group:registry}
+    - {tf: aws_iot_thing_group, name: production-fleet, in: group:registry}
+    - {tf: aws_iot_policy, name: device-policy, in: group:registry}
+    - {tf: aws_sns_topic, name: provisioning-alerts, in: group:registry}
+  actors: [device]
+  flows:
+    - {from: device, to: claim-certificate, label: mTLS connect with claim cert, step: 1}
+    - {from: claim-certificate, to: claim-policy, label: restricted to provisioning topics}
+    - {from: device, to: fleet-template, label: "CreateKeysAndCertificate + RegisterThing", step: 2}
+    - {from: fleet-template, to: pre-provisioning-hook, label: invoke hook with device parameters, step: 3}
+    - {from: pre-provisioning-hook, to: device-allowlist, label: check serial number, step: 4}
+    - {from: fleet-template, to: provisioned-thing, label: create thing from template, step: 5}
+    - {from: provisioned-thing, to: production-fleet, label: add to thing group}
+    - {from: fleet-template, to: device-policy, label: attach policy to new cert, step: 5}
+    - {from: pre-provisioning-hook, to: provisioning-alerts, label: rejected device notification}
+    - {from: device, to: provisioned-thing, label: reconnect with unique cert, step: 6}
+
+- slug: iot-just-in-time-provisioning
+  title: IoT just-in-time provisioning with a registered CA
+  category: iot
+  tags: [iot core, jitp, ca certificate, provisioning template, x509]
+  source: https://docs.aws.amazon.com/iot/latest/developerguide/jit-provisioning.html
+  description: A customer CA certificate is registered in IoT Core with auto-registration enabled and a JITP provisioning template attached. When a device presents a certificate signed by that CA for the first time, IoT Core registers the certificate as PENDING_ACTIVATION, runs RegisterThing with values extracted from the certificate subject, creates the thing, policy and thing-group membership, and flips the certificate to ACTIVE.
+  containers:
+    - region: eu-central-1
+      groups: [{label: trust}, {label: registry}, {label: audit}]
+  elements:
+    - {tf: aws_iot_ca_certificate, name: manufacturer-ca, in: group:trust}
+    - {tf: aws_iot_provisioning_template, name: jitp-template, in: group:trust}
+    - {tf: aws_iot_thing_type, name: lightbulb-v1, in: group:registry}
+    - {tf: aws_iot_thing, name: bulb-thing, in: group:registry}
+    - {tf: aws_iot_thing_group, name: v1-lightbulbs, in: group:registry}
+    - {tf: aws_iot_policy, name: bulb-policy, in: group:registry}
+    - {tf: aws_iot_topic_rule, name: registration-events-rule, in: group:audit}
+    - {tf: aws_lambda_function, name: registration-auditor, in: group:audit}
+    - {tf: aws_dynamodb_table, name: registration-log, in: group:audit}
+  actors: [device]
+  flows:
+    - {from: device, to: manufacturer-ca, label: TLS with CA-signed device cert, step: 1}
+    - {from: manufacturer-ca, to: jitp-template, label: template associated with CA, step: 2}
+    - {from: jitp-template, to: bulb-thing, label: create thing from cert CommonName, step: 3}
+    - {from: bulb-thing, to: lightbulb-v1, label: thing type}
+    - {from: bulb-thing, to: v1-lightbulbs, label: thing group}
+    - {from: jitp-template, to: bulb-policy, label: attach policy and activate cert, step: 4}
+    - {from: jitp-template, to: registration-events-rule, label: "$aws/events/certificates/registered", step: 5}
+    - {from: registration-events-rule, to: registration-auditor, label: lambda action}
+    - {from: registration-auditor, to: registration-log, label: record provisioning result}
+
+- slug: greengrass-edge-ml-inference
+  title: IoT Greengrass edge ML inference with cloud-trained models
+  category: iot
+  tags: [greengrass, edge inference, sagemaker, ml components, iot core]
+  source: https://docs.aws.amazon.com/greengrass/v2/developerguide/perform-machine-learning-inference.html
+  description: Models are trained in SageMaker and stored in S3, then deployed to Greengrass core devices as model, runtime and inference components so that inference runs locally on camera or sensor data. Inference results and low-confidence samples are published through IoT Core to a Kinesis stream and an S3 bucket that feeds the next training round.
+  containers:
+    - datacenter: factory-site
+    - region: eu-west-1
+      groups: [{label: model build}, {label: results}]
+  elements:
+    - {tf: aws_iot_thing, name: greengrass-core, in: datacenter}
+    - {tf: aws_iot_thing_group, name: edge-fleet, in: region}
+    - {tf: aws_sagemaker_model, name: defect-detector, in: group:model build}
+    - {tf: aws_sagemaker_endpoint, name: model-validation-endpoint, in: group:model build}
+    - {tf: aws_s3_bucket, name: model-artifacts, in: group:model build}
+    - {tf: aws_iot_topic_rule, name: inference-results-rule, in: group:results}
+    - {tf: aws_kinesis_stream, name: inference-stream, in: group:results}
+    - {tf: aws_lambda_function, name: results-aggregator, in: group:results}
+    - {tf: aws_dynamodb_table, name: inference-results, in: group:results}
+    - {tf: aws_s3_bucket, name: retraining-samples, in: group:results}
+  actors: [device]
+  flows:
+    - {from: defect-detector, to: model-artifacts, label: export compiled model, step: 1}
+    - {from: model-artifacts, to: greengrass-core, label: model component artifact download, step: 2}
+    - {from: edge-fleet, to: greengrass-core, label: component deployment target}
+    - {from: device, to: greengrass-core, label: camera frames over local network, step: 3}
+    - {from: greengrass-core, to: inference-results-rule, label: MQTT inference results, step: 4}
+    - {from: inference-results-rule, to: inference-stream, label: kinesis action}
+    - {from: inference-stream, to: results-aggregator, link: aws_lambda_event_source_mapping}
+    - {from: results-aggregator, to: inference-results, label: per-line quality metrics, step: 5}
+    - {from: greengrass-core, to: retraining-samples, label: low-confidence images via stream manager, step: 6}
+    - {from: retraining-samples, to: defect-detector, label: next training dataset}
+    - {from: model-validation-endpoint, to: defect-detector, label: cloud validation of candidate model}
+
+- slug: smart-farm-on-aws
+  title: Smart Farm on AWS
+  category: industry
+  tags: [agriculture, greengrass, kinesis, kinesis video streams, flink, opensearch, sagemaker]
+  source: https://docs.aws.amazon.com/architecture-diagrams/latest/smart-farm-on-aws/smart-farm-on-aws.html
+  description: Field sensors and cameras send data through Greengrass stream manager into Kinesis Data Streams and Kinesis Video Streams; Managed Service for Apache Flink derives real-time insights and notifies users through SNS, while S3, Glue, Athena and OpenSearch form the analytics layer. SageMaker trains edge-inference models and a Lambda importer forwards Device Defender reports to Security Hub.
+  containers:
+    - datacenter: farm
+    - region: us-east-1
+      groups: [{label: ingestion}, {label: analytics}, {label: ml}]
+  elements:
+    - {tf: aws_iot_thing, name: greengrass-gateway, in: datacenter}
+    - {tf: aws_lambda_function, name: protocol-converter, in: group:ingestion}
+    - {tf: aws_kinesis_stream, name: sensor-stream, in: group:ingestion}
+    - {tf: aws_kinesis_video_stream, name: field-camera-stream, in: group:ingestion}
+    - {tf: aws_kinesisanalyticsv2_application, name: flink-insights, in: group:analytics}
+    - {tf: aws_sns_topic, name: farmer-alerts, in: group:analytics}
+    - {tf: aws_opensearch_domain, name: farm-search, in: group:analytics}
+    - {tf: aws_s3_bucket, name: farm-data-lake, in: group:analytics}
+    - {tf: aws_glue_crawler, name: lake-crawler, in: group:analytics}
+    - {tf: aws_athena_workgroup, name: farm-athena, in: group:analytics}
+    - {tf: aws_api_gateway_rest_api, name: insights-api, in: group:analytics}
+    - {tf: aws_sagemaker_endpoint, name: crop-model-endpoint, in: group:ml}
+  actors: [device, users]
+  flows:
+    - {from: device, to: protocol-converter, label: third-party sensors and drones, step: 1}
+    - {from: device, to: greengrass-gateway, label: FreeRTOS sensors and cameras, step: 2}
+    - {from: greengrass-gateway, to: sensor-stream, label: stream manager export, step: 3}
+    - {from: greengrass-gateway, to: field-camera-stream, label: live video, step: 4}
+    - {from: protocol-converter, to: sensor-stream, label: normalised records}
+    - {from: sensor-stream, to: flink-insights, label: real-time analytics, step: 5}
+    - {from: flink-insights, to: farmer-alerts, label: threshold notifications, step: 5}
+    - {from: flink-insights, to: farm-search, label: indexed events, step: 6}
+    - {from: sensor-stream, to: farm-data-lake, label: raw archive, step: 6}
+    - {from: lake-crawler, to: farm-data-lake, label: infer schema on new objects, step: 11}
+    - {from: farm-athena, to: farm-data-lake, label: on-demand SQL}
+    - {from: users, to: insights-api, label: insights and dashboards, step: 9}
+    - {from: farm-data-lake, to: crop-model-endpoint, label: labelled training data, step: 10}
+    - {from: crop-model-endpoint, to: greengrass-gateway, label: model deployed for edge inference}
+
+- slug: connected-vehicle-ingestion-pipeline
+  title: Connected vehicle ingestion pipeline
+  category: industry
+  tags: [connected vehicle, iot core, msk, flink, dynamodb, appsync, automotive]
+  source: https://docs.aws.amazon.com/solutions/connected-mobility-on-aws/
+  description: Vehicles authenticate to IoT Core with X.509 mTLS and publish compressed telemetry; an IoT rule with Basic Ingest writes directly to an Amazon MSK topic using SCRAM credentials from Secrets Manager, while bulk telemetry is uploaded to S3 through pre-signed URLs. Managed Service for Apache Flink decodes and enriches the Kafka stream and sinks the last known vehicle state to DynamoDB, which AppSync exposes to the companion app as a GraphQL API behind CloudFront.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: telemetry
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: streaming-a, cidr: 10.20.1.0/24, az: a, public: false}
+            - {name: streaming-b, cidr: 10.20.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_iot_thing, name: vehicle-thing, in: region}
+    - {tf: aws_iot_topic_rule, name: telemetry-to-kafka, in: region}
+    - {tf: aws_secretsmanager_secret, name: msk-scram-credentials, in: region}
+    - {tf: aws_msk_cluster, name: vehicle-telemetry-msk, in: subnet:streaming-a}
+    - {tf: aws_kinesisanalyticsv2_application, name: telemetry-decoder, in: subnet:streaming-b}
+    - {tf: aws_s3_bucket, name: batch-telemetry-uploads, in: region}
+    - {tf: aws_dynamodb_table, name: vehicle-last-known-state, in: region}
+    - {tf: aws_appsync_graphql_api, name: companion-graphql-api, in: region}
+    - {tf: aws_cloudfront_distribution, name: companion-edge, in: region}
+    - {tf: aws_elasticache_replication_group, name: connection-state-cache, in: subnet:streaming-a}
+  actors: [device, mobile]
+  flows:
+    - {from: device, to: vehicle-thing, label: MQTT over mTLS, step: 1}
+    - {from: vehicle-thing, to: telemetry-to-kafka, label: Basic Ingest topic, step: 2}
+    - {from: telemetry-to-kafka, to: vehicle-telemetry-msk, label: kafka rule action, step: 2}
+    - {from: telemetry-to-kafka, to: msk-scram-credentials, label: SASL/SCRAM secret lookup, step: 3}
+    - {from: device, to: batch-telemetry-uploads, label: pre-signed URL batch upload, step: 4}
+    - {from: vehicle-telemetry-msk, to: telemetry-decoder, label: consume raw topic, step: 5}
+    - {from: telemetry-decoder, to: vehicle-telemetry-msk, label: republish enriched topic, step: 5}
+    - {from: telemetry-decoder, to: vehicle-last-known-state, label: DynamoDB sink connector, step: 6}
+    - {from: companion-graphql-api, to: vehicle-last-known-state, label: GraphQL resolvers}
+    - {from: companion-graphql-api, to: connection-state-cache, label: subscriber connection state}
+    - {from: mobile, to: companion-edge, label: HTTPS, step: 7}
+    - {from: companion-edge, to: companion-graphql-api, label: lowest-latency region origin}
+
+- slug: iot-sitewise-smart-factory
+  title: Smart factory with IoT SiteWise Edge and asset models
+  category: iot
+  tags: [iot sitewise, opc ua, greengrass, industrial iot, oee, smart factory]
+  source: https://docs.aws.amazon.com/iot-sitewise/latest/userguide/what-is-sitewise.html
+  description: A SiteWise Edge gateway running on Greengrass V2 reads OPC UA servers on the plant floor and streams equipment data to the cloud, where asset models compute transforms and metrics such as OEE and SiteWise Monitor renders operator dashboards. IoT Core rules ingest MQTT devices into asset properties, alarms notify through SNS, and cold-tier data is exported to a customer S3 bucket for Athena queries.
+  containers:
+    - datacenter: plant
+    - region: eu-central-1
+      groups: [{label: ingestion}, {label: storage and analytics}]
+  elements:
+    - {tf: aws_iot_thing, name: sitewise-edge-gateway, in: datacenter}
+    - {tf: aws_instance, name: opc-ua-server, in: datacenter}
+    - {tf: aws_iot_thing, name: mqtt-plc-thing, in: group:ingestion}
+    - {tf: aws_iot_topic_rule, name: to-sitewise-rule, in: group:ingestion}
+    - {tf: aws_lambda_function, name: asset-model-sync, in: group:ingestion}
+    - {tf: aws_sns_topic, name: equipment-alarms, in: group:ingestion}
+    - {tf: aws_s3_bucket, name: sitewise-cold-tier, in: group:storage and analytics}
+    - {tf: aws_glue_catalog_database, name: sitewise-catalog, in: group:storage and analytics}
+    - {tf: aws_athena_workgroup, name: plant-analytics, in: group:storage and analytics}
+    - {tf: aws_grafana_workspace, name: plant-dashboards, in: group:storage and analytics}
+  actors: [users]
+  flows:
+    - {from: opc-ua-server, to: sitewise-edge-gateway, label: OPC UA subscriptions, step: 1}
+    - {from: sitewise-edge-gateway, to: asset-model-sync, label: Greengrass stream to SiteWise asset properties, step: 2}
+    - {from: mqtt-plc-thing, to: to-sitewise-rule, label: MQTT device data, step: 3}
+    - {from: to-sitewise-rule, to: asset-model-sync, label: iotSiteWise rule action BatchPutAssetPropertyValue, step: 3}
+    - {from: asset-model-sync, to: equipment-alarms, label: alarm state change, step: 4}
+    - {from: asset-model-sync, to: sitewise-cold-tier, label: cold tier export, step: 5}
+    - {from: sitewise-catalog, to: sitewise-cold-tier, label: table over exported data}
+    - {from: plant-analytics, to: sitewise-catalog, label: historical SQL}
+    - {from: users, to: plant-dashboards, label: OEE and MTBF dashboards, step: 6}
+    - {from: plant-dashboards, to: asset-model-sync, label: SiteWise datasource queries}
+
+- slug: iot-twinmaker-digital-twin
+  title: Digital twin with IoT TwinMaker, SiteWise and Kinesis Video Streams
+  category: iot
+  tags: [iot twinmaker, digital twin, sitewise, kinesis video streams, grafana, scene composer]
+  source: https://docs.aws.amazon.com/iot-twinmaker/latest/guide/what-is-twinmaker.html
+  description: A TwinMaker workspace stores its entity-component knowledge graph and 3D scene assets in an S3 bucket, with built-in connectors to SiteWise time series and Kinesis Video Streams camera feeds plus a Lambda-backed custom connector to Timestream telemetry. Operators view the scenes with data overlays in Amazon Managed Grafana through the TwinMaker plugin.
+  containers:
+    - region: us-east-1
+      groups: [{label: data sources}, {label: twin}, {label: visualisation}]
+  elements:
+    - {tf: aws_iot_thing, name: plant-gateway, in: group:data sources}
+    - {tf: aws_iot_topic_rule, name: telemetry-rule, in: group:data sources}
+    - {tf: aws_timestreamwrite_database, name: telemetry-tsdb, in: group:data sources}
+    - {tf: aws_kinesis_video_stream, name: line-camera, in: group:data sources}
+    - {tf: aws_s3_bucket, name: twinmaker-workspace-bucket, in: group:twin}
+    - {tf: aws_lambda_function, name: timestream-connector, in: group:twin}
+    - {tf: aws_lambda_function, name: alarm-connector, in: group:twin}
+    - {tf: aws_grafana_workspace, name: twin-dashboards, in: group:visualisation}
+    - {tf: aws_sns_topic, name: twin-alarms, in: group:visualisation}
+  actors: [device, users]
+  flows:
+    - {from: device, to: plant-gateway, label: equipment telemetry, step: 1}
+    - {from: plant-gateway, to: telemetry-rule, label: MQTT}
+    - {from: telemetry-rule, to: telemetry-tsdb, label: timestream action, step: 2}
+    - {from: device, to: line-camera, label: RTSP camera via KVS producer, step: 2}
+    - {from: twinmaker-workspace-bucket, to: timestream-connector, label: component data reader, step: 3}
+    - {from: timestream-connector, to: telemetry-tsdb, label: query time-series property, step: 3}
+    - {from: twinmaker-workspace-bucket, to: line-camera, label: built-in video component}
+    - {from: alarm-connector, to: twin-alarms, label: alarm notifications}
+    - {from: twinmaker-workspace-bucket, to: alarm-connector, label: alarm component}
+    - {from: users, to: twin-dashboards, label: 3D scene with tags, step: 4}
+    - {from: twin-dashboards, to: twinmaker-workspace-bucket, label: TwinMaker Grafana plugin queries, step: 4}
+
+- slug: kinesis-video-streams-ingestion
+  title: Video ingestion and analytics with Kinesis Video Streams
+  category: media
+  tags: [kinesis video streams, cameras, video analytics, sagemaker, computer vision]
+  source: https://docs.aws.amazon.com/kinesisvideostreams/latest/dg/how-it-works.html
+  description: Cameras and other producers push time-encoded media into Kinesis video streams with the producer SDK; the service durably stores and time-indexes fragments for the configured retention. Consumer applications on EC2 read fragments with the parser library and call a SageMaker endpoint for frame-level inference, publishing detections to a Kinesis data stream that a Lambda function writes to DynamoDB and, for alerts, to SNS.
+  containers:
+    - region: us-west-2
+      vpcs:
+        - name: analytics
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: consumers-a, cidr: 10.30.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_kinesis_video_stream, name: camera-stream, in: region}
+    - {tf: aws_instance, name: kvs-consumer-app, in: subnet:consumers-a}
+    - {tf: aws_sagemaker_endpoint, name: object-detection-endpoint, in: region}
+    - {tf: aws_kinesis_stream, name: detections-stream, in: region}
+    - {tf: aws_lambda_function, name: detections-writer, in: region}
+    - {tf: aws_dynamodb_table, name: detections-table, in: region}
+    - {tf: aws_sns_topic, name: security-alerts, in: region}
+    - {tf: aws_s3_bucket, name: clip-archive, in: region}
+  actors: [device, users]
+  flows:
+    - {from: device, to: camera-stream, label: PutMedia via producer SDK, step: 1}
+    - {from: camera-stream, to: kvs-consumer-app, label: GetMedia fragments, step: 2}
+    - {from: kvs-consumer-app, to: object-detection-endpoint, label: frame inference, step: 3}
+    - {from: kvs-consumer-app, to: detections-stream, label: detection events, step: 4}
+    - {from: detections-stream, to: detections-writer, link: aws_lambda_event_source_mapping}
+    - {from: detections-writer, to: detections-table, label: persist detections, step: 5}
+    - {from: detections-writer, to: security-alerts, label: high-severity alert, step: 5}
+    - {from: kvs-consumer-app, to: clip-archive, label: export clips of interest}
+    - {from: users, to: camera-stream, label: HLS/DASH playback of live or archived video}
+
+- slug: live-streaming-on-aws
+  title: Live Streaming on AWS
+  category: media
+  tags: [medialive, mediapackage, cloudfront, hls, dash, live streaming]
+  source: https://docs.aws.amazon.com/solutions/latest/live-streaming-on-aws/architecture-overview.html
+  description: MediaLive ingests two redundant contribution feeds and transcodes them into adaptive bitrate HLS; MediaPackage packages the output into HLS, DASH and CMAF endpoints and acts as the origin. CloudFront delivers the stream to viewers, authenticating to MediaPackage with a CDN identifier header stored in Secrets Manager, and a demo player is hosted from an S3 bucket.
+  containers:
+    - region: us-east-1
+      groups: [{label: ingest and transcode}, {label: package and deliver}]
+  elements:
+    - {tf: aws_medialive_input_security_group, name: contribution-allowlist, in: group:ingest and transcode}
+    - {tf: aws_medialive_input, name: primary-input, in: group:ingest and transcode}
+    - {tf: aws_medialive_channel, name: live-channel, in: group:ingest and transcode}
+    - {tf: aws_media_package_channel, name: live-package-channel, in: group:package and deliver}
+    - {tf: aws_secretsmanager_secret, name: cdn-identifier, in: group:package and deliver}
+    - {tf: aws_cloudfront_distribution, name: live-cdn, in: group:package and deliver}
+    - {tf: aws_s3_bucket, name: demo-player-site, in: group:package and deliver}
+    - {tf: aws_lambda_function, name: stack-custom-resources, in: group:package and deliver}
+  actors: [server, users]
+  flows:
+    - {from: server, to: primary-input, label: RTMP/RTP/HLS primary and backup feeds, step: 1}
+    - {from: primary-input, to: contribution-allowlist, label: allowed encoder CIDRs}
+    - {from: primary-input, to: live-channel, label: attached input, step: 1}
+    - {from: live-channel, to: live-package-channel, label: ABR HLS output, step: 2}
+    - {from: live-package-channel, to: live-cdn, label: HLS, DASH and CMAF origin endpoints, step: 3}
+    - {from: live-cdn, to: cdn-identifier, label: CDN authorization header}
+    - {from: live-cdn, to: demo-player-site, label: static player origin, step: 5}
+    - {from: users, to: live-cdn, label: playback, step: 4}
+    - {from: stack-custom-resources, to: live-package-channel, label: configure endpoints at deploy}
+
+- slug: video-on-demand-on-aws
+  title: Video on Demand on AWS
+  category: media
+  tags: [mediaconvert, step functions, vod, transcoding, cloudfront, dynamodb]
+  source: https://docs.aws.amazon.com/solutions/latest/video-on-demand-on-aws/architecture-overview.html
+  description: Uploading a source video or a video plus metadata file to the source S3 bucket starts Step Functions ingest, process and publish workflows implemented with Lambda functions. MediaConvert transcodes the asset into the destination bucket, EventBridge rules capture job status changes, DynamoDB tracks workflow state, SNS sends notifications, SQS captures outputs, and CloudFront delivers the encoded content.
+  containers:
+    - region: us-east-1
+      groups: [{label: ingest}, {label: process}, {label: publish}]
+  elements:
+    - {tf: aws_s3_bucket, name: source-bucket, in: group:ingest}
+    - {tf: aws_sfn_state_machine, name: ingest-workflow, in: group:ingest}
+    - {tf: aws_lambda_function, name: workflow-steps, in: group:ingest}
+    - {tf: aws_dynamodb_table, name: vod-workflow-table, in: group:ingest}
+    - {tf: aws_sfn_state_machine, name: process-workflow, in: group:process}
+    - {tf: aws_media_convert_queue, name: transcode-queue, in: group:process}
+    - {tf: aws_cloudwatch_event_rule, name: mediaconvert-status-rule, in: group:process}
+    - {tf: aws_sfn_state_machine, name: publish-workflow, in: group:publish}
+    - {tf: aws_s3_bucket, name: destination-bucket, in: group:publish}
+    - {tf: aws_cloudfront_distribution, name: vod-cdn, in: group:publish}
+    - {tf: aws_sns_topic, name: workflow-notifications, in: group:publish}
+    - {tf: aws_sqs_queue, name: workflow-outputs, in: group:publish}
+  actors: [users, client]
+  flows:
+    - {from: client, to: source-bucket, label: upload source video and metadata, step: 1}
+    - {from: source-bucket, to: ingest-workflow, label: S3 event starts ingest, step: 2}
+    - {from: ingest-workflow, to: workflow-steps, label: Lambda tasks, step: 3}
+    - {from: workflow-steps, to: vod-workflow-table, label: record asset state, step: 4}
+    - {from: ingest-workflow, to: process-workflow, label: encoding profile selected}
+    - {from: process-workflow, to: transcode-queue, label: submit MediaConvert job, step: 5}
+    - {from: transcode-queue, to: destination-bucket, label: HLS/DASH/MP4 outputs, step: 9}
+    - {from: mediaconvert-status-rule, to: publish-workflow, link: aws_cloudwatch_event_target}
+    - {from: publish-workflow, to: workflow-notifications, label: publish complete, step: 7}
+    - {from: workflow-notifications, to: workflow-outputs, link: aws_sns_topic_subscription}
+    - {from: vod-cdn, to: destination-bucket, label: origin access, step: 10}
+    - {from: users, to: vod-cdn, label: playback}
+
+- slug: media2cloud-asset-management
+  title: Media asset management with Media2Cloud on AWS
+  category: media
+  tags: [media asset management, media2cloud, rekognition, transcribe, opensearch, step functions]
+  source: https://docs.aws.amazon.com/solutions/latest/media2cloud-on-aws/architecture-overview.html
+  description: Uploaded media triggers a main Step Functions state machine whose ingestion sub-workflow creates proxies with MediaConvert and whose analysis sub-workflow runs Rekognition, Transcribe, Comprehend and Textract jobs. DynamoDB holds workflow artifacts, OpenSearch indexes the extracted metadata for search, an IoT Core topic pushes progress to the web app served through CloudFront and API Gateway behind Cognito, and SNS publishes ingest and analysis completion events.
+  containers:
+    - region: us-east-1
+      groups: [{label: web tier}, {label: workflows}, {label: storage and search}]
+  elements:
+    - {tf: aws_cognito_user_pool, name: m2c-users, in: group:web tier}
+    - {tf: aws_api_gateway_rest_api, name: m2c-api, in: group:web tier}
+    - {tf: aws_cloudfront_distribution, name: m2c-web, in: group:web tier}
+    - {tf: aws_iot_topic_rule, name: workflow-progress-topic, in: group:web tier}
+    - {tf: aws_sfn_state_machine, name: main-state-machine, in: group:workflows}
+    - {tf: aws_sfn_state_machine, name: ingestion-workflow, in: group:workflows}
+    - {tf: aws_sfn_state_machine, name: analysis-workflow, in: group:workflows}
+    - {tf: aws_media_convert_queue, name: proxy-transcode-queue, in: group:workflows}
+    - {tf: aws_rekognition_collection, name: face-collection, in: group:workflows}
+    - {tf: aws_cloudwatch_event_rule, name: job-state-change-rule, in: group:workflows}
+    - {tf: aws_s3_bucket, name: ingest-bucket, in: group:storage and search}
+    - {tf: aws_s3_bucket, name: proxy-bucket, in: group:storage and search}
+    - {tf: aws_dynamodb_table, name: ingest-table, in: group:storage and search}
+    - {tf: aws_opensearch_domain, name: media-search, in: group:storage and search}
+    - {tf: aws_sns_topic, name: m2c-events, in: group:storage and search}
+  actors: [users]
+  flows:
+    - {from: users, to: m2c-web, label: web application, step: 3}
+    - {from: m2c-web, to: m2c-api, label: IAM-authenticated REST calls, step: 2}
+    - {from: m2c-api, to: m2c-users, label: Cognito sign-in, step: 1}
+    - {from: m2c-api, to: main-state-machine, label: start ingestion, step: 4}
+    - {from: users, to: ingest-bucket, label: upload media}
+    - {from: main-state-machine, to: ingestion-workflow, label: sub-state machine, step: 5}
+    - {from: ingestion-workflow, to: proxy-transcode-queue, label: proxy generation}
+    - {from: proxy-transcode-queue, to: proxy-bucket, label: proxies and thumbnails}
+    - {from: main-state-machine, to: analysis-workflow, label: sub-state machine, step: 6}
+    - {from: analysis-workflow, to: face-collection, label: Rekognition face search}
+    - {from: job-state-change-rule, to: analysis-workflow, link: aws_cloudwatch_event_target}
+    - {from: analysis-workflow, to: ingest-table, label: status and artifact pointers, step: 7}
+    - {from: analysis-workflow, to: media-search, label: index ML metadata, step: 8}
+    - {from: analysis-workflow, to: workflow-progress-topic, label: MQTT progress to front end, step: 12}
+    - {from: analysis-workflow, to: m2c-events, label: analysis_completed, step: 13}
+
+- slug: gamelift-multiplayer-backend
+  title: Session-based multiplayer game backend with Amazon GameLift Servers
+  category: industry
+  tags: [gamelift, game servers, matchmaking, game backend, dynamodb, lambda]
+  source: https://docs.aws.amazon.com/gamelift/latest/developerguide/gamelift-howitworks.html
+  description: Game clients authenticate to a serverless backend service that requests game session placements from GameLift Servers rather than holding AWS credentials themselves. A game session queue places sessions on managed EC2 fleets built from an uploaded server build, players connect directly to the assigned game server, and DynamoDB stores player profiles and session records.
+  containers:
+    - region: us-east-1
+      groups: [{label: backend service}, {label: game hosting}]
+  elements:
+    - {tf: aws_cognito_user_pool, name: player-identity, in: group:backend service}
+    - {tf: aws_api_gateway_rest_api, name: game-backend-api, in: group:backend service}
+    - {tf: aws_lambda_function, name: session-placement, in: group:backend service}
+    - {tf: aws_dynamodb_table, name: player-profiles, in: group:backend service}
+    - {tf: aws_dynamodb_table, name: game-sessions, in: group:backend service}
+    - {tf: aws_gamelift_build, name: server-build, in: group:game hosting}
+    - {tf: aws_gamelift_fleet, name: game-fleet, in: group:game hosting}
+    - {tf: aws_gamelift_alias, name: live-fleet-alias, in: group:game hosting}
+    - {tf: aws_gamelift_game_session_queue, name: placement-queue, in: group:game hosting}
+    - {tf: aws_s3_bucket, name: build-artifacts, in: group:game hosting}
+  actors: [client]
+  flows:
+    - {from: client, to: player-identity, label: sign in, step: 1}
+    - {from: client, to: game-backend-api, label: join request with latency data, step: 2}
+    - {from: game-backend-api, to: session-placement, label: proxy integration}
+    - {from: session-placement, to: player-profiles, label: read player data, step: 3}
+    - {from: session-placement, to: placement-queue, label: StartGameSessionPlacement, step: 4}
+    - {from: placement-queue, to: live-fleet-alias, label: destination priority}
+    - {from: live-fleet-alias, to: game-fleet, label: routing alias}
+    - {from: build-artifacts, to: server-build, label: uploaded server binaries}
+    - {from: server-build, to: game-fleet, label: deployed to fleet instances, step: 0}
+    - {from: game-fleet, to: session-placement, label: game session connection info, step: 5}
+    - {from: session-placement, to: game-sessions, label: record session and player sessions, step: 6}
+    - {from: client, to: game-fleet, label: connect directly to game server, step: 7}
+
+- slug: wavelength-5g-edge-application
+  title: 5G edge application in an AWS Wavelength Zone
+  category: edge
+  tags: [wavelength, 5g, carrier gateway, edge compute, low latency]
+  source: https://docs.aws.amazon.com/wavelength/latest/developerguide/how-wavelengths-work.html
+  description: A VPC in the parent region is extended with a subnet in a Wavelength Zone inside the carrier network; EC2 instances there serve mobile devices through a carrier gateway that NATs Carrier IP addresses and admits only traffic from the carrier network. Latency-sensitive inference runs at the edge while state, control plane and analytics stay in regional subnets reached over the VPC local route.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: edge-app
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: wavelength-bos, cidr: 10.40.10.0/24, az: wl1-bos-wlz-1, public: true}
+            - {name: region-private-a, cidr: 10.40.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_ec2_carrier_gateway, name: carrier-gw, in: vpc:edge-app}
+    - {tf: aws_instance, name: edge-inference-server, in: subnet:wavelength-bos}
+    - {tf: aws_autoscaling_group, name: edge-server-asg, in: subnet:wavelength-bos}
+    - {tf: aws_ecs_cluster, name: edge-container-cluster, in: subnet:wavelength-bos}
+    - {tf: aws_instance, name: control-plane-api, in: subnet:region-private-a}
+    - {tf: aws_rds_cluster, name: session-db, in: subnet:region-private-a}
+    - {tf: aws_s3_bucket, name: model-artifacts, in: region}
+    - {tf: aws_route53_zone, name: edge-dns, in: region}
+  actors: [mobile]
+  flows:
+    - {from: mobile, to: carrier-gw, label: 5G traffic to Carrier IP, step: 1}
+    - {from: carrier-gw, to: edge-inference-server, label: NAT to instance private IP, step: 2}
+    - {from: edge-server-asg, to: edge-inference-server, label: scales edge instances}
+    - {from: edge-inference-server, to: control-plane-api, label: VPC local route to region, step: 3}
+    - {from: control-plane-api, to: session-db, label: session state, step: 4}
+    - {from: model-artifacts, to: edge-container-cluster, label: model pull at task start}
+    - {from: mobile, to: edge-dns, label: resolve edge endpoint}
+    - {from: edge-inference-server, to: carrier-gw, label: 0.0.0.0/0 route for outbound}
+
+- slug: local-zones-low-latency-application
+  title: Low-latency application tier in an AWS Local Zone
+  category: edge
+  tags: [local zones, low latency, hybrid, direct connect, edge compute]
+  source: https://docs.aws.amazon.com/local-zones/latest/ug/how-local-zones-work.html
+  description: A regional VPC is extended with a subnet in a Local Zone close to end users; an Application Load Balancer and EC2 instances there terminate user traffic through the Local Zone's own internet connection while the database and asynchronous processing remain in the parent region. Direct Connect from an on-premises site takes the shortest path to the Local Zone without hairpinning through the region.
+  containers:
+    - datacenter: on-premises
+    - region: us-west-2
+      vpcs:
+        - name: app
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: lax-public, cidr: 10.50.100.0/24, az: lax-1a, public: true}
+            - {name: lax-private, cidr: 10.50.101.0/24, az: lax-1a, public: false}
+            - {name: region-private-a, cidr: 10.50.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: app-igw, in: vpc:app}
+    - {tf: aws_lb, name: lax-alb, in: subnet:lax-public}
+    - {tf: aws_autoscaling_group, name: lax-web-asg, in: subnet:lax-private}
+    - {tf: aws_instance, name: lax-web-server, in: subnet:lax-private}
+    - {tf: aws_db_instance, name: app-db, in: subnet:region-private-a}
+    - {tf: aws_sqs_queue, name: async-jobs, in: region}
+    - {tf: aws_lambda_function, name: job-worker, in: region}
+    - {tf: aws_dx_connection, name: onprem-dx, in: region}
+    - {tf: aws_instance, name: legacy-app-server, in: datacenter}
+  actors: [users]
+  flows:
+    - {from: users, to: app-igw, label: HTTPS via Local Zone internet egress, step: 1}
+    - {from: app-igw, to: lax-alb, step: 1}
+    - {from: lax-alb, to: lax-web-server, label: target group, step: 2}
+    - {from: lax-web-asg, to: lax-web-server, label: capacity in Local Zone}
+    - {from: lax-web-server, to: app-db, label: reads and writes to parent region, step: 3}
+    - {from: lax-web-server, to: async-jobs, label: enqueue background work, step: 4}
+    - {from: async-jobs, to: job-worker, link: aws_lambda_event_source_mapping}
+    - {from: legacy-app-server, to: onprem-dx, label: private connectivity, step: 5}
+    - {from: onprem-dx, to: lax-web-server, label: shortest path to Local Zone subnet, step: 5}
+
+- slug: outposts-on-premises-extension
+  title: On-premises workloads on AWS Outposts racks
+  category: edge
+  tags: [outposts, hybrid, local gateway, service link, data residency]
+  source: https://docs.aws.amazon.com/outposts/latest/userguide/how-outposts-works.html
+  description: An Outpost rack at the customer site is homed to an Availability Zone and extends a regional VPC with Outpost subnets that host EC2, ECS, RDS and S3 on Outposts resources for low-latency and data-residency workloads. The service link carries encrypted VPC and management traffic back to the region, while the local gateway routes traffic between Outpost subnets and the on-premises network.
+  containers:
+    - datacenter: customer-site
+    - region: eu-west-1
+      vpcs:
+        - name: hybrid
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: outpost-app, cidr: 10.60.10.0/24, az: outpost, public: false}
+            - {name: outpost-data, cidr: 10.60.11.0/24, az: outpost, public: false}
+            - {name: region-private-a, cidr: 10.60.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_instance, name: outpost-app-server, in: subnet:outpost-app}
+    - {tf: aws_ecs_cluster, name: outpost-ecs, in: subnet:outpost-app}
+    - {tf: aws_lb, name: outpost-alb, in: subnet:outpost-app}
+    - {tf: aws_db_instance, name: outpost-rds, in: subnet:outpost-data}
+    - {tf: aws_s3control_bucket, name: outpost-s3, in: subnet:outpost-data}
+    - {tf: aws_ec2_local_gateway_route_table_vpc_association, name: lgw-association, in: vpc:hybrid}
+    - {tf: aws_instance, name: regional-batch-server, in: subnet:region-private-a}
+    - {tf: aws_s3_bucket, name: regional-archive, in: region}
+    - {tf: aws_instance, name: factory-mes-server, in: datacenter}
+  actors: [users]
+  flows:
+    - {from: factory-mes-server, to: lgw-association, label: on-premises LAN to local gateway, step: 1}
+    - {from: lgw-association, to: outpost-alb, label: local gateway route, step: 2}
+    - {from: outpost-alb, to: outpost-app-server, label: target group, step: 3}
+    - {from: outpost-ecs, to: outpost-app-server, label: container instances}
+    - {from: outpost-app-server, to: outpost-rds, label: local database, step: 4}
+    - {from: outpost-app-server, to: outpost-s3, label: local object storage, step: 4}
+    - {from: outpost-app-server, to: regional-batch-server, label: service link VPN to region, step: 5}
+    - {from: outpost-s3, to: regional-archive, label: DataSync replication of cold data, step: 6}
+    - {from: users, to: outpost-alb, label: plant users over LAN}
+
+- slug: snowball-edge-data-transfer
+  title: Offline data transfer and edge compute with Snowball Edge
+  category: edge
+  tags: [snow family, snowball edge, data migration, offline transfer, edge compute]
+  source: https://docs.aws.amazon.com/snowball/latest/developer-guide/how-it-works.html
+  description: An import job ships a Snowball Edge device to a disconnected or bandwidth-constrained site, where local servers copy data onto it through the S3 adapter or NFS interface while EC2-compatible instances and Lambda functions run on the device for local processing. The device is shipped back and AWS imports the data into the target S3 bucket, after which Glue and Athena catalog and query it and lifecycle rules move it to cold storage.
+  containers:
+    - datacenter: remote-site
+    - region: us-east-1
+      groups: [{label: landing}, {label: analytics}]
+  elements:
+    - {tf: aws_instance, name: site-file-server, in: datacenter}
+    - {tf: aws_instance, name: on-device-compute, in: datacenter}
+    - {tf: aws_s3_bucket, name: import-bucket, in: group:landing}
+    - {tf: aws_kms_key, name: import-key, in: group:landing}
+    - {tf: aws_sns_topic, name: job-status, in: group:landing}
+    - {tf: aws_lambda_function, name: post-import-validator, in: group:landing}
+    - {tf: aws_glue_crawler, name: imported-data-crawler, in: group:analytics}
+    - {tf: aws_glue_catalog_database, name: imported-catalog, in: group:analytics}
+    - {tf: aws_athena_workgroup, name: imported-athena, in: group:analytics}
+  actors: [users, server]
+  flows:
+    - {from: users, to: import-bucket, label: create import job for target bucket, step: 1}
+    - {from: import-bucket, to: import-key, label: encryption key for the job}
+    - {from: server, to: site-file-server, label: data sources at the site}
+    - {from: site-file-server, to: on-device-compute, label: copy via S3 adapter or NFS to device, step: 2}
+    - {from: on-device-compute, to: import-bucket, label: device shipped back and imported by AWS, step: 3}
+    - {from: job-status, to: post-import-validator, link: aws_sns_topic_subscription}
+    - {from: post-import-validator, to: import-bucket, label: verify manifest checksums, step: 4}
+    - {from: imported-data-crawler, to: import-bucket, label: crawl imported objects, step: 5}
+    - {from: imported-data-crawler, to: imported-catalog, label: tables}
+    - {from: imported-athena, to: imported-catalog, label: SQL queries, step: 6}
+
+- slug: location-asset-tracking-geofences
+  title: Asset tracking with Amazon Location Service trackers and geofences
+  category: iot
+  tags: [amazon location, trackers, geofences, maps, eventbridge, fleet tracking]
+  source: https://docs.aws.amazon.com/location/latest/developerguide/what-is.html
+  description: Mobile devices and vehicles send position updates to a Location Service tracker, which evaluates them against a linked geofence collection and emits ENTER and EXIT events to EventBridge. A Lambda target persists position history in DynamoDB and notifies dispatchers through SNS, while a web app renders map tiles, place search and routes through API Gateway.
+  containers:
+    - region: eu-west-1
+      groups: [{label: location resources}, {label: events}, {label: app}]
+  elements:
+    - {tf: aws_location_tracker, name: fleet-tracker, in: group:location resources}
+    - {tf: aws_location_geofence_collection, name: depot-geofences, in: group:location resources}
+    - {tf: aws_location_map, name: fleet-map, in: group:location resources}
+    - {tf: aws_location_place_index, name: address-search, in: group:location resources}
+    - {tf: aws_location_route_calculator, name: delivery-routes, in: group:location resources}
+    - {tf: aws_cloudwatch_event_rule, name: geofence-events-rule, in: group:events}
+    - {tf: aws_lambda_function, name: geofence-handler, in: group:events}
+    - {tf: aws_dynamodb_table, name: position-history, in: group:events}
+    - {tf: aws_sns_topic, name: dispatch-notifications, in: group:events}
+    - {tf: aws_api_gateway_rest_api, name: fleet-api, in: group:app}
+    - {tf: aws_cognito_user_pool, name: dispatcher-users, in: group:app}
+  actors: [mobile, users]
+  flows:
+    - {from: mobile, to: fleet-tracker, label: BatchUpdateDevicePosition, step: 1}
+    - {from: fleet-tracker, to: depot-geofences, label: tracker association evaluates geofences, step: 2}
+    - {from: depot-geofences, to: geofence-events-rule, label: ENTER/EXIT events to EventBridge, step: 3}
+    - {from: geofence-events-rule, to: geofence-handler, link: aws_cloudwatch_event_target}
+    - {from: geofence-handler, to: position-history, label: store arrival and departure, step: 4}
+    - {from: geofence-handler, to: dispatch-notifications, label: notify dispatch, step: 4}
+    - {from: users, to: fleet-api, label: dispatcher console, step: 5}
+    - {from: fleet-api, to: dispatcher-users, label: Cognito authorizer}
+    - {from: fleet-api, to: fleet-map, label: map tiles}
+    - {from: fleet-api, to: address-search, label: geocode delivery addresses}
+    - {from: fleet-api, to: delivery-routes, label: calculate routes}
+    - {from: fleet-api, to: fleet-tracker, label: GetDevicePosition}
+
+- slug: chime-sdk-meetings-with-capture
+  title: Chime SDK meetings with media capture pipelines
+  category: media
+  tags: [chime sdk, webrtc, meetings, media capture pipeline, transcription, recording]
+  source: https://docs.aws.amazon.com/chime-sdk/latest/dg/capture-pipe-config.html
+  description: A serverless backend creates Chime SDK meetings and attendees and returns join tokens to browser and mobile clients that exchange WebRTC media with the Chime media service. A media capture pipeline records audio, video, content share and data messages into an S3 bucket, a concatenation step assembles the artifacts, and a media insights pipeline configuration streams call analytics into Kinesis.
+  containers:
+    - region: us-east-1
+      groups: [{label: meeting backend}, {label: media pipelines}]
+  elements:
+    - {tf: aws_cognito_user_pool, name: meeting-users, in: group:meeting backend}
+    - {tf: aws_api_gateway_rest_api, name: meetings-api, in: group:meeting backend}
+    - {tf: aws_lambda_function, name: create-meeting, in: group:meeting backend}
+    - {tf: aws_dynamodb_table, name: meetings-table, in: group:meeting backend}
+    - {tf: aws_cloudwatch_event_rule, name: meeting-lifecycle-rule, in: group:meeting backend}
+    - {tf: aws_lambda_function, name: pipeline-controller, in: group:media pipelines}
+    - {tf: aws_s3_bucket, name: capture-bucket, in: group:media pipelines}
+    - {tf: aws_kms_key, name: capture-key, in: group:media pipelines}
+    - {tf: aws_chimesdkmediapipelines_media_insights_pipeline_configuration, name: call-insights-config, in: group:media pipelines}
+    - {tf: aws_kinesis_stream, name: insights-stream, in: group:media pipelines}
+    - {tf: aws_media_convert_queue, name: recording-postprocess, in: group:media pipelines}
+  actors: [users]
+  flows:
+    - {from: users, to: meetings-api, label: join request, step: 1}
+    - {from: meetings-api, to: meeting-users, label: Cognito authorizer}
+    - {from: meetings-api, to: create-meeting, label: proxy integration, step: 2}
+    - {from: create-meeting, to: meetings-table, label: "CreateMeeting + CreateAttendee tokens", step: 3}
+    - {from: create-meeting, to: pipeline-controller, label: CreateMediaCapturePipeline, step: 4}
+    - {from: pipeline-controller, to: capture-bucket, label: audio, video and data-channel artifacts, step: 5}
+    - {from: capture-bucket, to: capture-key, label: SSE-KMS}
+    - {from: meeting-lifecycle-rule, to: pipeline-controller, link: aws_cloudwatch_event_target}
+    - {from: pipeline-controller, to: recording-postprocess, label: concatenate and transcode recording, step: 6}
+    - {from: call-insights-config, to: insights-stream, label: transcription and analytics events, step: 7}
+
+- slug: ivs-interactive-live-streaming
+  title: Interactive live streaming with Amazon IVS, chat and auto-record to S3
+  category: media
+  tags: [amazon ivs, low latency, live chat, auto-record, eventbridge, cloudfront]
+  source: https://docs.aws.amazon.com/ivs/latest/LowLatencyUserGuide/record-to-s3.html
+  description: Broadcasters push RTMPS to an IVS channel whose recording configuration auto-records HLS renditions and thumbnails into an S3 bucket; IVS emits Recording State Change events to EventBridge, and a Lambda target reads the recording metadata to publish VOD playlists through CloudFront with origin access control. An IVS Chat room with a Lambda message-review handler provides moderated chat, and a serverless API issues stream keys and chat tokens.
+  containers:
+    - region: us-west-2
+      groups: [{label: live}, {label: recordings}, {label: app}]
+  elements:
+    - {tf: aws_ivs_channel, name: creator-channel, in: group:live}
+    - {tf: aws_ivs_recording_configuration, name: auto-record-config, in: group:live}
+    - {tf: aws_ivschat_room, name: creator-chat-room, in: group:live}
+    - {tf: aws_lambda_function, name: chat-message-review, in: group:live}
+    - {tf: aws_s3_bucket, name: recordings-bucket, in: group:recordings}
+    - {tf: aws_cloudwatch_event_rule, name: recording-state-rule, in: group:recordings}
+    - {tf: aws_lambda_function, name: vod-publisher, in: group:recordings}
+    - {tf: aws_dynamodb_table, name: vod-catalog, in: group:recordings}
+    - {tf: aws_cloudfront_distribution, name: vod-cdn, in: group:recordings}
+    - {tf: aws_api_gateway_rest_api, name: streaming-app-api, in: group:app}
+    - {tf: aws_lambda_function, name: token-issuer, in: group:app}
+    - {tf: aws_cognito_user_pool, name: viewer-users, in: group:app}
+  actors: [users, client]
+  flows:
+    - {from: client, to: creator-channel, label: RTMPS ingest with stream key, step: 1}
+    - {from: creator-channel, to: auto-record-config, label: recording configuration}
+    - {from: auto-record-config, to: recordings-bucket, label: HLS renditions and thumbnails, step: 2}
+    - {from: creator-channel, to: recording-state-rule, label: IVS Recording State Change, step: 3}
+    - {from: recording-state-rule, to: vod-publisher, link: aws_cloudwatch_event_target}
+    - {from: vod-publisher, to: recordings-bucket, label: read recording-ended.json, step: 4}
+    - {from: vod-publisher, to: vod-catalog, label: register VOD asset, step: 4}
+    - {from: vod-cdn, to: recordings-bucket, label: origin access control, step: 5}
+    - {from: users, to: creator-channel, label: low-latency playback, step: 6}
+    - {from: users, to: vod-cdn, label: on-demand playback}
+    - {from: users, to: streaming-app-api, label: chat and stream tokens}
+    - {from: streaming-app-api, to: token-issuer, label: CreateChatToken}
+    - {from: token-issuer, to: viewer-users, label: verify viewer identity}
+    - {from: users, to: creator-chat-room, label: WebSocket chat}
+    - {from: creator-chat-room, to: chat-message-review, label: message review handler}

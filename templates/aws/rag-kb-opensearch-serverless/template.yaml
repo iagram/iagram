@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prescriptive-guidance/latest/retrieval-augmented-generation-options/rag-fully-managed-bedrock.html); edit freely.
+title: Fully managed RAG with Bedrock Knowledge Bases on OpenSearch Serverless
+category: ml
+tags:
+- rag
+- bedrock knowledge bases
+- opensearch serverless
+- vector search
+- generative ai
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/retrieval-augmented-generation-options/rag-fully-managed-bedrock.html
+description: Documents in S3 are chunked, embedded and indexed by a Bedrock knowledge base into an OpenSearch Serverless vector collection during ingestion. A Lambda function behind API Gateway calls RetrieveAndGenerate
+  so the foundation model answers with retrieved passages as context; Cognito authenticates callers and DynamoDB keeps chat history.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-retrieval, type: common.group, name: retrieval, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: source-docs, type: aws.s3_bucket, name: source-docs, parent: grp-ingestion}
+- {id: docs-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: docs-kb, parent: grp-ingestion, props: {name: changeme, role_arn: changeme}}
+- {id: vector-collection, type: aws.res.aws_opensearchserverless_collection, name: vector-collection, parent: grp-ingestion, props: {name: changeme}}
+- {id: app-users, type: aws.res.aws_cognito_user_pool, name: app-users, parent: grp-retrieval, props: {name: changeme}}
+- {id: chat-api, type: aws.res.aws_api_gateway_rest_api, name: chat-api, parent: grp-retrieval, props: {name: changeme}}
+- {id: query-fn, type: aws.lambda_function, name: query-fn, parent: grp-retrieval}
+- {id: chat-history, type: aws.dynamodb_table, name: chat-history, parent: grp-retrieval}
+edges:
+- {from: source-docs, to: docs-kb, label: bedrockagent data source}
+- {from: docs-kb, to: vector-collection, label: Titan embeddings written to vector index, step: '1'}
+- {from: users, to: chat-api, label: HTTPS with Cognito JWT, step: '2'}
+- {from: chat-api, to: query-fn, step: '3'}
+- {from: query-fn, to: docs-kb, label: RetrieveAndGenerate, step: '4'}
+- {from: docs-kb, to: vector-collection, label: k-NN similarity search, step: '5'}
+- {from: query-fn, to: chat-history, label: store turn}
+steps:
+- {n: '1', text: 'docs-kb → vector-collection: Titan embeddings written to vector index'}
+- {n: '2', text: 'users → chat-api: HTTPS with Cognito JWT'}
+- {n: '3', text: chat-api → query-fn}
+- {n: '4', text: 'query-fn → docs-kb: RetrieveAndGenerate'}
+- {n: '5', text: 'docs-kb → vector-collection: k-NN similarity search'}

@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.cloud.google.com/network-connectivity/docs/router/concepts/overview); edit freely.
+title: Cloud Router BGP dynamic routing with global routing mode
+category: networking
+tags:
+- cloud router
+- bgp
+- dynamic routing
+- global routing mode
+- custom route advertisement
+- md5
+source: https://docs.cloud.google.com/network-connectivity/docs/router/concepts/overview
+description: Cloud Router is the managed BGP speaker for Cloud VPN, Cloud Interconnect and router appliances; it learns on-premises prefixes as dynamic routes and advertises VPC subnet ranges plus custom
+  prefixes. With the VPC in global dynamic routing mode, routes learned by a Cloud Router in one region are programmed into all regions of the VPC.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west1}}
+- {id: vpc-global-vpc, type: gcp.vpc, name: global-vpc, parent: prj-net-hub, props: {cidr: 10.190.0.0/16}}
+- {id: sub-app-ew1, type: gcp.subnetwork, name: app-ew1, parent: vpc-global-vpc, props: {cidr: 10.190.0.0/24, region: europe-west1}}
+- {id: sub-app-asse1, type: gcp.subnetwork, name: app-asse1, parent: vpc-global-vpc, props: {cidr: 10.190.1.0/24, region: asia-southeast1}}
+- {id: cloud-router-ew1, type: gcp.res.google_compute_router, name: cloud-router-ew1, parent: sub-app-ew1, props: {name: changeme, network: changeme}}
+- {id: ha-vpn-gw-ew1, type: gcp.res.google_compute_ha_vpn_gateway, name: ha-vpn-gw-ew1, parent: sub-app-ew1, props: {name: changeme, network: changeme}}
+- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub}
+- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: onprem-peer-gw, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-peer-gw, parent: sub-prj-net-hub, props: {name: changeme}}
+- {id: onprem-bgp-router, type: gcp.res.google_compute_router, name: onprem-bgp-router, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}}
+- {id: app-ew1-vm, type: gcp.compute_instance, name: app-ew1-vm, parent: sub-app-ew1}
+- {id: app-asse1-vm, type: gcp.compute_instance, name: app-asse1-vm, parent: sub-app-asse1}
+edges:
+- {from: onprem-peer-gw, to: ha-vpn-gw-ew1, label: IPsec tunnels, step: '1'}
+- {from: cloud-router-ew1, to: onprem-bgp-router, label: BGP session with MD5 auth, step: '2'}
+- {from: onprem-bgp-router, to: cloud-router-ew1, label: advertise on-premises prefixes, step: '3'}
+- {from: cloud-router-ew1, to: onprem-bgp-router, label: advertise all subnets plus custom ranges, step: '4'}
+- {from: app-asse1-vm, to: onprem-bgp-router, label: uses route learned in europe-west1 via global routing, step: '5'}
+steps:
+- {n: '1', text: 'onprem-peer-gw → ha-vpn-gw-ew1: IPsec tunnels'}
+- {n: '2', text: 'cloud-router-ew1 → onprem-bgp-router: BGP session with MD5 auth'}
+- {n: '3', text: 'onprem-bgp-router → cloud-router-ew1: advertise on-premises prefixes'}
+- {n: '4', text: 'cloud-router-ew1 → onprem-bgp-router: advertise all subnets plus custom ranges'}
+- {n: '5', text: 'app-asse1-vm → onprem-bgp-router: uses route learned in europe-west1 via global routing'}

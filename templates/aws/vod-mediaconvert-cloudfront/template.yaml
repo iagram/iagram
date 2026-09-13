@@ -1,0 +1,51 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/video-on-demand-on-aws-foundation/architecture-overview.html); edit freely.
+title: Video on demand with S3, MediaConvert, and CloudFront
+category: media
+tags:
+- video on demand
+- mediaconvert
+- hls
+- cloudfront
+- s3
+- lambda
+- sns
+source: https://docs.aws.amazon.com/solutions/latest/video-on-demand-on-aws-foundation/architecture-overview.html
+description: Uploading a source video to an S3 bucket triggers a Lambda function that submits a transcoding job to AWS Elemental MediaConvert using a stored job template. MediaConvert writes HLS adaptive-bitrate
+  renditions to a destination bucket that a CloudFront distribution serves to players, a completion Lambda publishes job status to SNS, and CloudWatch logs and job metadata are kept for tracking.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: grp-ingest, type: common.group, name: ingest, parent: reg-us-east-1}
+- {id: grp-transcode, type: common.group, name: transcode, parent: reg-us-east-1}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: source-bucket, type: aws.s3_bucket, name: source-bucket, parent: grp-ingest}
+- {id: job-submit, type: aws.lambda_function, name: job-submit, parent: grp-ingest}
+- {id: vod-queue, type: aws.res.aws_media_convert_queue, name: vod-queue, parent: grp-transcode, props: {name: changeme}}
+- {id: destination-bucket, type: aws.s3_bucket, name: destination-bucket, parent: grp-transcode}
+- {id: job-complete, type: aws.lambda_function, name: job-complete, parent: grp-transcode}
+- {id: job-notifications, type: aws.res.aws_sns_topic, name: job-notifications, parent: grp-transcode}
+- {id: mediaconvert-status, type: aws.res.aws_cloudwatch_event_rule, name: mediaconvert-status, parent: grp-transcode}
+- {id: vod-cdn, type: aws.cloudfront_distribution, name: vod-cdn, parent: grp-global-edge}
+edges:
+- {from: user, to: source-bucket, label: upload source video, step: '1'}
+- {from: source-bucket, to: job-submit, label: 's3:ObjectCreated event', step: '2'}
+- {from: job-submit, to: vod-queue, label: CreateJob with template, step: '3'}
+- {from: vod-queue, to: source-bucket, label: read source}
+- {from: vod-queue, to: destination-bucket, label: write HLS renditions and thumbnails, step: '4'}
+- {from: vod-queue, to: mediaconvert-status, label: job state change event, step: '5'}
+- {from: mediaconvert-status, to: job-complete, label: EventBridge target, step: '6'}
+- {from: job-complete, to: job-notifications, label: publish COMPLETE/ERROR, step: '7'}
+- {from: users, to: vod-cdn, label: HLS playback, step: '8'}
+- {from: vod-cdn, to: destination-bucket, label: origin via OAC, step: '9'}
+steps:
+- {n: '1', text: 'user → source-bucket: upload source video'}
+- {n: '2', text: 'source-bucket → job-submit: s3:ObjectCreated event'}
+- {n: '3', text: 'job-submit → vod-queue: CreateJob with template'}
+- {n: '4', text: 'vod-queue → destination-bucket: write HLS renditions and thumbnails'}
+- {n: '5', text: 'vod-queue → mediaconvert-status: job state change event'}
+- {n: '6', text: 'mediaconvert-status → job-complete: EventBridge target'}
+- {n: '7', text: 'job-complete → job-notifications: publish COMPLETE/ERROR'}
+- {n: '8', text: 'users → vod-cdn: HLS playback'}
+- {n: '9', text: 'vod-cdn → destination-bucket: origin via OAC'}

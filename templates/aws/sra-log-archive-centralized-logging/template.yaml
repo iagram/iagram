@@ -1,0 +1,51 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/log-archive.html); edit freely.
+title: SRA Log Archive account centralized logging
+category: security
+tags:
+- security reference architecture
+- log archive
+- cloudtrail
+- config
+- object lock
+- kms
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/log-archive.html
+description: The Log Archive account receives the CloudTrail organization trail, Config snapshots, VPC flow logs and GuardDuty findings in dedicated S3 buckets encrypted with a controlled KMS key and protected
+  by Object Lock and lifecycle rules. Access is limited to automated, monitored roles; the CloudTrail delegated administrator lives in the Security Tooling account while the buckets stay in Log Archive
+  to separate duties.
+nodes:
+- {id: acct-management, type: aws.account, name: management}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}}
+- {id: acct-security-tooling, type: aws.account, name: security-tooling}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}}
+- {id: acct-log-archive, type: aws.account, name: log-archive}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-log-archive, props: {region: us-east-1}}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1-4, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1-4, props: {cidr: 10.20.0.0/16}}
+- {id: users, type: common.users, name: users}
+- {id: org-trail, type: aws.res.aws_cloudtrail, name: org-trail, parent: acct-security-tooling, props: {name: changeme, s3_bucket_name: changeme}}
+- {id: config-aggregator, type: aws.res.aws_config_configuration_aggregator, name: config-aggregator, parent: acct-security-tooling, props: {name: changeme}}
+- {id: guardduty-admin, type: aws.res.aws_guardduty_detector, name: guardduty-admin, parent: acct-security-tooling}
+- {id: cloudtrail-archive, type: aws.s3_bucket, name: cloudtrail-archive, parent: reg-us-east-1}
+- {id: config-archive, type: aws.s3_bucket, name: config-archive, parent: reg-us-east-1}
+- {id: guardduty-findings-archive, type: aws.s3_bucket, name: guardduty-findings-archive, parent: reg-us-east-1}
+- {id: flow-logs-archive, type: aws.s3_bucket, name: flow-logs-archive, parent: reg-us-east-1}
+- {id: log-archive-cmk, type: aws.res.aws_kms_key, name: log-archive-cmk, parent: acct-log-archive}
+- {id: cloudtrail-events, type: aws.res.aws_cloudwatch_log_group, name: cloudtrail-events, parent: acct-log-archive}
+- {id: app-vpc-flow-log, type: aws.res.aws_flow_log, name: app-vpc-flow-log, parent: vpc-app}
+- {id: sub-vpc-app-a, type: aws.subnet, name: private-a, parent: vpc-app, props: {cidr: 10.20.250.0/24, az: a, public: false}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: vpc-app, props: {cidr: 10.20.251.0/24, az: b, public: false}}
+edges:
+- {from: org-trail, to: cloudtrail-archive, label: org trail SSE-KMS, step: '1'}
+- {from: org-trail, to: cloudtrail-events, label: CloudWatch Logs, step: '2'}
+- {from: config-aggregator, to: config-archive, label: delivery channel, step: '3'}
+- {from: guardduty-admin, to: guardduty-findings-archive, label: findings export, step: '4'}
+- {from: app-vpc-flow-log, to: flow-logs-archive, label: flow logs, step: '5'}
+- {from: log-archive-cmk, to: cloudtrail-archive, label: encrypts}
+- {from: users, to: cloudtrail-archive, label: read via least-privilege role}
+steps:
+- {n: '1', text: 'org-trail → cloudtrail-archive: org trail SSE-KMS'}
+- {n: '2', text: 'org-trail → cloudtrail-events: CloudWatch Logs'}
+- {n: '3', text: 'config-aggregator → config-archive: delivery channel'}
+- {n: '4', text: 'guardduty-admin → guardduty-findings-archive: findings export'}
+- {n: '5', text: 'app-vpc-flow-log → flow-logs-archive: flow logs'}

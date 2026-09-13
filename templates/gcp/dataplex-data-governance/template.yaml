@@ -1,0 +1,30 @@
+# Generated from the official reference (https://docs.cloud.google.com/dataplex/docs/introduction); edit freely.
+title: Data governance with Dataplex lakes, zones and data quality scans
+category: data
+tags:
+- dataplex
+- governance
+- data catalog
+- data quality
+- biglake
+source: https://docs.cloud.google.com/dataplex/docs/introduction
+description: A Dataplex lake groups Cloud Storage buckets and BigQuery datasets into raw and curated zones as assets, automatically discovering schemas and registering metadata in the catalog. Data profiling
+  and data quality scans run on a schedule against curated tables, and Dataplex-managed IAM applies consistent access policies across the underlying storage.
+nodes:
+- {id: prj-governance, type: gcp.project, name: governance, props: {project_id: governance-123456, project: changeme, region: us-central1}}
+- {id: grp-raw-zone, type: common.group, name: raw zone, parent: prj-governance}
+- {id: grp-curated-zone, type: common.group, name: curated zone, parent: prj-governance}
+- {id: grp-governance, type: common.group, name: governance, parent: prj-governance}
+- {id: users, type: common.users, name: users}
+- {id: raw-zone-bucket, type: gcp.storage_bucket, name: raw-zone-bucket, parent: grp-raw-zone}
+- {id: curated-zone-dataset, type: gcp.bigquery_dataset, name: curated-zone-dataset, parent: grp-curated-zone}
+- {id: enterprise-lake, type: gcp.res.google_dataplex_lake, name: enterprise-lake, parent: grp-governance, props: {location: westeurope, name: changeme}}
+- id: customers-quality-scan
+  type: gcp.res.google_dataplex_datascan
+  name: customers-quality-scan
+  parent: grp-governance
+  props: {data: {}, data_scan_id: changeme, execution_spec: {}, location: westeurope}
+edges:
+- {from: users, to: enterprise-lake, label: search catalog, step: '7'}
+steps:
+- {n: '7', text: 'users → enterprise-lake: search catalog'}

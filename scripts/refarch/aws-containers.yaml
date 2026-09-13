@@ -1,0 +1,929 @@
+- slug: ecs-ec2-capacity-provider-alb
+  title: ECS on EC2 with an Auto Scaling group capacity provider behind an ALB
+  category: containers
+  tags: [ecs, ec2 launch type, capacity provider, cluster auto scaling, alb]
+  source: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html
+  description: An ECS cluster registers container instances from an Auto Scaling group that is wrapped in a capacity provider with managed scaling, so ECS publishes a CapacityProviderReservation metric and a target-tracking policy grows or shrinks the group as tasks are placed. An internet-facing ALB in the public subnets forwards to a target group of instance targets in private subnets, and a NAT gateway gives the instances outbound access for image pulls and agent traffic.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: main
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:main}
+    - {tf: aws_lb, name: web-alb, in: vpc:main}
+    - {tf: aws_lb_target_group, name: web-tg, in: vpc:main}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_ecs_cluster, name: ec2-cluster, in: vpc:main}
+    - {tf: aws_ecs_capacity_provider, name: asg-capacity-provider, in: region}
+    - {tf: aws_autoscaling_group, name: container-instances-asg, in: vpc:main}
+    - {tf: aws_launch_template, name: ecs-optimized-lt, in: region}
+    - {tf: aws_ecs_service, name: web-service, in: subnet:private-a}
+    - {tf: aws_ecr_repository, name: web-image, in: region}
+    - {tf: aws_cloudwatch_log_group, name: web-logs, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: igw, label: HTTPS, step: 1}
+    - {from: igw, to: web-alb, step: 2}
+    - {from: web-alb, to: web-tg, label: listener forward, step: 3}
+    - {from: web-tg, to: web-service, label: HTTP to bridge-mode host ports, step: 4}
+    - {from: web-service, to: ec2-cluster, label: tasks placed on container instances}
+    - {from: ec2-cluster, to: asg-capacity-provider, label: CapacityProviderReservation metric}
+    - {from: asg-capacity-provider, to: container-instances-asg, label: managed scaling target tracking}
+    - {from: ecs-optimized-lt, to: container-instances-asg, label: ECS-optimized AMI + agent config}
+    - {from: web-image, to: web-service, label: image pull}
+    - {from: container-instances-asg, to: nat-a, label: outbound (ECR, ECS agent)}
+    - {from: web-service, to: web-logs, label: awslogs driver}
+
+- slug: ecs-cloud-map-service-discovery
+  title: ECS service discovery with an AWS Cloud Map private DNS namespace
+  category: containers
+  tags: [ecs, cloud map, service discovery, private dns, route 53, fargate]
+  source: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-discovery.html
+  description: Each ECS service registers its task IP addresses as instances of an AWS Cloud Map service inside a private DNS namespace, which is backed by a Route 53 private hosted zone that only the VPC can resolve. The frontend calls backend.internal by name; ECS keeps the A and SRV records current as tasks start, stop or fail health checks, so no internal load balancer is needed.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: main
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:main}
+    - {tf: aws_lb, name: frontend-alb, in: vpc:main}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_ecs_cluster, name: app-cluster, in: vpc:main}
+    - {tf: aws_ecs_service, name: frontend-service, in: subnet:private-a}
+    - {tf: aws_ecs_service, name: backend-service, in: subnet:private-b}
+    - {tf: aws_service_discovery_private_dns_namespace, name: internal-namespace, in: vpc:main}
+    - {tf: aws_service_discovery_service, name: backend-discovery, in: region}
+    - {tf: aws_route53_zone, name: internal-zone, in: vpc:main}
+    - {tf: aws_ecr_repository, name: frontend-image, in: region}
+    - {tf: aws_ecr_repository, name: backend-image, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: igw, label: HTTPS, step: 1}
+    - {from: igw, to: frontend-alb, step: 2}
+    - {from: frontend-alb, to: frontend-service, label: HTTP :3000, step: 3}
+    - {from: frontend-service, to: internal-zone, label: resolve backend.internal, step: 4}
+    - {from: frontend-service, to: backend-service, label: HTTP :8080 to task IPs, step: 5}
+    - {from: backend-service, to: backend-discovery, label: register / deregister task IPs}
+    - {from: backend-discovery, to: internal-namespace, label: service in namespace}
+    - {from: internal-namespace, to: internal-zone, label: creates private hosted zone}
+    - {from: frontend-image, to: frontend-service, label: image pull}
+    - {from: backend-image, to: backend-service, label: image pull}
+    - {from: backend-service, to: nat-a, label: outbound}
+
+- slug: ecs-service-connect-microservices
+  title: Microservices on ECS Fargate connected with ECS Service Connect
+  category: containers
+  tags: [ecs, service connect, cloud map, envoy, fargate, microservices]
+  source: https://aws.amazon.com/blogs/aws/new-amazon-ecs-service-connect-enabling-easy-communication-between-microservices/
+  description: ECS Service Connect adds an ECS-managed Envoy proxy container to every task and registers each service under a logical name in a Cloud Map HTTP namespace, so the checkout service reaches orders and catalog by short name with client-side load balancing, retries and outlier detection. Only the UI service is exposed through an ALB; all other traffic stays service to service, and Service Connect publishes per-service request, error and latency metrics to CloudWatch.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: main
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:main}
+    - {tf: aws_lb, name: ui-alb, in: vpc:main}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_ecs_cluster, name: shop-cluster, in: vpc:main}
+    - {tf: aws_service_discovery_http_namespace, name: shop-namespace, in: region}
+    - {tf: aws_ecs_service, name: ui-service, in: subnet:private-a}
+    - {tf: aws_ecs_service, name: checkout-service, in: subnet:private-a}
+    - {tf: aws_ecs_service, name: orders-service, in: subnet:private-b}
+    - {tf: aws_ecs_service, name: catalog-service, in: subnet:private-b}
+    - {tf: aws_dynamodb_table, name: orders-table, in: region}
+    - {tf: aws_cloudwatch_log_group, name: service-connect-logs, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: igw, label: HTTPS, step: 1}
+    - {from: igw, to: ui-alb, step: 2}
+    - {from: ui-alb, to: ui-service, label: HTTP :80, step: 3}
+    - {from: ui-service, to: checkout-service, label: "http://checkout via Envoy proxy", step: 4}
+    - {from: checkout-service, to: orders-service, label: "http://orders", step: 5}
+    - {from: checkout-service, to: catalog-service, label: "http://catalog", step: 5}
+    - {from: orders-service, to: orders-table, label: PutItem, step: 6}
+    - {from: shop-cluster, to: shop-namespace, label: default Service Connect namespace}
+    - {from: orders-service, to: shop-namespace, label: registers logical name orders}
+    - {from: catalog-service, to: shop-namespace, label: registers logical name catalog}
+    - {from: checkout-service, to: service-connect-logs, label: proxy access logs + metrics}
+    - {from: catalog-service, to: nat-a, label: outbound}
+
+- slug: ecs-app-mesh-envoy-sidecars
+  title: Service mesh on ECS with AWS App Mesh and Envoy sidecars
+  category: containers
+  tags: [app mesh, envoy, service mesh, ecs, cloud map, x-ray]
+  source: https://aws.amazon.com/blogs/architecture/deploying-service-mesh-based-architectures-using-aws-app-mesh-and-amazon-ecs/
+  description: An App Mesh mesh models each ECS service as a virtual node discovered through Cloud Map, and a virtual router with weighted routes fronts the backend as a virtual service that the frontend addresses by name. Every task runs an Envoy sidecar that App Mesh configures, so all service-to-service traffic is intercepted, routed and exported as metrics, logs and traces to CloudWatch and X-Ray without code changes.
+  containers:
+    - region: us-west-2
+      vpcs:
+        - name: main
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:main}
+    - {tf: aws_lb, name: edge-alb, in: vpc:main}
+    - {tf: aws_ecs_cluster, name: mesh-cluster, in: vpc:main}
+    - {tf: aws_ecs_service, name: frontend-service, in: subnet:private-a}
+    - {tf: aws_ecs_service, name: backend-v1-service, in: subnet:private-b}
+    - {tf: aws_ecs_service, name: backend-v2-service, in: subnet:private-b}
+    - {tf: aws_service_discovery_private_dns_namespace, name: mesh-namespace, in: vpc:main}
+    - {tf: aws_appmesh_mesh, name: app-mesh, in: region}
+    - {tf: aws_appmesh_virtual_node, name: backend-v1-node, in: region}
+    - {tf: aws_appmesh_virtual_node, name: backend-v2-node, in: region}
+    - {tf: aws_appmesh_virtual_router, name: backend-router, in: region}
+    - {tf: aws_appmesh_virtual_service, name: backend-virtual-service, in: region}
+    - {tf: aws_cloudwatch_log_group, name: envoy-logs, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: igw, label: HTTPS, step: 1}
+    - {from: igw, to: edge-alb, step: 2}
+    - {from: edge-alb, to: frontend-service, label: HTTP :8080, step: 3}
+    - {from: frontend-service, to: backend-virtual-service, label: "backend.mesh.local via Envoy", step: 4}
+    - {from: backend-virtual-service, to: backend-router, label: provider, step: 5}
+    - {from: backend-router, to: backend-v1-node, label: route weight 90, step: 6}
+    - {from: backend-router, to: backend-v2-node, label: route weight 10, step: 6}
+    - {from: backend-v1-node, to: backend-v1-service, label: Cloud Map service discovery}
+    - {from: backend-v2-node, to: backend-v2-service, label: Cloud Map service discovery}
+    - {from: backend-v1-service, to: mesh-namespace, label: registers tasks}
+    - {from: app-mesh, to: backend-router, label: mesh owns router and nodes}
+    - {from: frontend-service, to: envoy-logs, label: Envoy access logs, X-Ray segments}
+
+- slug: ecs-bluegreen-codedeploy-pipeline
+  title: Blue/green ECS deployments with CodeDeploy and CodePipeline
+  category: devops
+  tags: [ecs, codedeploy, blue/green, canary, codepipeline, alb, ecr]
+  source: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-bluegreen.html
+  description: An ECS service with the CODE_DEPLOY controller sits behind an ALB that has two target groups and a production plus a test listener; CodeDeploy creates a replacement task set in the green target group, exposes it on the test listener, then shifts production traffic all at once, linearly or by canary. A CodePipeline triggered by a new ECR image pushes the task definition and appspec to CodeDeploy, and a failed CloudWatch alarm rolls traffic back to the blue task set.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: main
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:main}
+    - {tf: aws_lb, name: app-alb, in: vpc:main}
+    - {tf: aws_lb_target_group, name: blue-tg, in: vpc:main}
+    - {tf: aws_lb_target_group, name: green-tg, in: vpc:main}
+    - {tf: aws_ecs_cluster, name: app-cluster, in: vpc:main}
+    - {tf: aws_ecs_service, name: app-service, in: subnet:private-a}
+    - {tf: aws_codedeploy_app, name: ecs-deploy-app, in: region}
+    - {tf: aws_codedeploy_deployment_group, name: app-deployment-group, in: region}
+    - {tf: aws_codepipeline, name: release-pipeline, in: region}
+    - {tf: aws_ecr_repository, name: app-image, in: region}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: region}
+    - {tf: aws_cloudwatch_metric_alarm, name: green-5xx-alarm, in: region}
+  actors: [users, user]
+  flows:
+    - {from: user, to: app-image, label: docker push new tag, step: 1}
+    - {from: app-image, to: release-pipeline, label: ECR source action, step: 2}
+    - {from: release-pipeline, to: pipeline-artifacts, label: taskdef.json + appspec.yaml}
+    - {from: release-pipeline, to: ecs-deploy-app, label: ECS blue/green deploy action, step: 3}
+    - {from: ecs-deploy-app, to: app-deployment-group, step: 4}
+    - {from: app-deployment-group, to: app-service, label: create replacement (green) task set, step: 5}
+    - {from: app-deployment-group, to: app-alb, label: "test listener :8080 to green, then shift production listener", step: 6}
+    - {from: users, to: igw, label: HTTPS, step: 7}
+    - {from: igw, to: app-alb, step: 8}
+    - {from: app-alb, to: blue-tg, label: production listener (before cutover)}
+    - {from: app-alb, to: green-tg, label: production listener (after cutover)}
+    - {from: blue-tg, to: app-service, label: original task set}
+    - {from: green-tg, to: app-service, label: replacement task set}
+    - {from: green-5xx-alarm, to: app-deployment-group, label: alarm triggers rollback}
+
+- slug: batch-fargate-s3-file-processing
+  title: Serverless batch file processing with AWS Batch on Fargate
+  category: containers
+  tags: [aws batch, fargate, job queue, s3 event, lambda, dynamodb]
+  source: https://aws.amazon.com/blogs/developer/aws-batch-application-orchestration-using-aws-fargate/
+  description: An object uploaded to S3 triggers a Lambda function that submits a job to an AWS Batch job queue mapped to a Fargate compute environment, so no EC2 instances are managed and capacity scales up to the configured maximum vCPUs. The job definition points at a container image in ECR; the task reads the file from S3, writes parsed rows to DynamoDB and streams its output to CloudWatch Logs.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: batch
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.20.0.0/24, az: a, public: true}
+            - {name: private-a, cidr: 10.20.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.20.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_s3_bucket, name: input-bucket, in: region}
+    - {tf: aws_lambda_function, name: submit-job-fn, in: region}
+    - {tf: aws_batch_job_queue, name: fargate-queue, in: region}
+    - {tf: aws_batch_compute_environment, name: fargate-ce, in: subnet:private-a}
+    - {tf: aws_batch_job_definition, name: csv-processor-jobdef, in: region}
+    - {tf: aws_ecr_repository, name: csv-processor-image, in: region}
+    - {tf: aws_dynamodb_table, name: records-table, in: region}
+    - {tf: aws_iam_role, name: batch-job-role, in: region}
+    - {tf: aws_cloudwatch_log_group, name: batch-job-logs, in: region}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_internet_gateway, name: igw, in: vpc:batch}
+  actors: [user]
+  flows:
+    - {from: user, to: input-bucket, label: upload CSV, step: 1}
+    - {from: input-bucket, to: submit-job-fn, link: aws_s3_bucket_notification, label: "s3:ObjectCreated", step: 2}
+    - {from: submit-job-fn, to: fargate-queue, label: SubmitJob, step: 3}
+    - {from: fargate-queue, to: fargate-ce, label: scheduler places job (FARGATE / FARGATE_SPOT), step: 4}
+    - {from: csv-processor-jobdef, to: fargate-ce, label: container spec, vCPU and memory}
+    - {from: csv-processor-image, to: fargate-ce, label: image pull, step: 5}
+    - {from: fargate-ce, to: input-bucket, label: GetObject, step: 6}
+    - {from: fargate-ce, to: records-table, label: BatchWriteItem, step: 7}
+    - {from: fargate-ce, to: batch-job-logs, label: awslogs}
+    - {from: batch-job-role, to: fargate-ce, label: task role}
+    - {from: fargate-ce, to: nat-a, label: outbound to AWS APIs}
+    - {from: nat-a, to: igw}
+
+- slug: eks-baseline-managed-nodes-fargate
+  title: EKS baseline cluster with managed node groups and a Fargate profile
+  category: containers
+  tags: [eks, managed node groups, fargate profile, eks blueprints, add-ons, irsa]
+  source: https://aws.amazon.com/blogs/containers/bootstrapping-clusters-with-eks-blueprints/
+  description: A private-subnet EKS cluster runs a small managed node group for system add-ons and a second group for applications across two Availability Zones, while a Fargate profile schedules pods in a selected namespace on serverless compute. Managed add-ons (VPC CNI, CoreDNS, kube-proxy) and an IAM OIDC provider for IAM roles for service accounts are created with the cluster, and NAT gateways give nodes outbound access to ECR and the EKS API.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: eks
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.16.0/20, az: a, public: false}
+            - {name: private-b, cidr: 10.0.32.0/20, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:eks}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_nat_gateway, name: nat-b, in: subnet:public-b}
+    - {tf: aws_eks_cluster, name: baseline-cluster, in: vpc:eks}
+    - {tf: aws_eks_node_group, name: system-nodes, in: subnet:private-a}
+    - {tf: aws_eks_node_group, name: app-nodes, in: subnet:private-b}
+    - {tf: aws_eks_fargate_profile, name: serverless-namespace-profile, in: vpc:eks}
+    - {tf: aws_eks_addon, name: vpc-cni-addon, in: region}
+    - {tf: aws_eks_addon, name: coredns-addon, in: region}
+    - {tf: aws_iam_openid_connect_provider, name: cluster-oidc, in: region}
+    - {tf: aws_iam_role, name: node-role, in: region}
+    - {tf: aws_ecr_repository, name: app-image, in: region}
+    - {tf: aws_cloudwatch_log_group, name: control-plane-logs, in: region}
+  actors: [user]
+  flows:
+    - {from: user, to: baseline-cluster, label: kubectl to API endpoint, step: 1}
+    - {from: baseline-cluster, to: system-nodes, label: schedule add-on pods, step: 2}
+    - {from: baseline-cluster, to: app-nodes, label: schedule application pods, step: 2}
+    - {from: baseline-cluster, to: serverless-namespace-profile, label: pods matching namespace selector run on Fargate, step: 2}
+    - {from: vpc-cni-addon, to: baseline-cluster, label: managed add-on}
+    - {from: coredns-addon, to: baseline-cluster, label: managed add-on}
+    - {from: cluster-oidc, to: baseline-cluster, label: IRSA identity provider}
+    - {from: node-role, to: app-nodes, label: node IAM role}
+    - {from: app-image, to: app-nodes, label: image pull, step: 3}
+    - {from: app-nodes, to: nat-b, label: outbound}
+    - {from: nat-b, to: igw}
+    - {from: baseline-cluster, to: control-plane-logs, label: audit, authenticator logs}
+
+- slug: eks-karpenter-nodepool-autoscaling
+  title: Just-in-time node provisioning on EKS with Karpenter
+  category: containers
+  tags: [eks, karpenter, autoscaling, nodepool, spot, interruption handling]
+  source: https://docs.aws.amazon.com/eks/latest/best-practices/karpenter.html
+  description: Karpenter runs on a small managed node group (or Fargate) and watches for unschedulable pods, then calls the EC2 Fleet API directly to launch right-sized instances from a diverse set of types defined in a NodePool, without Auto Scaling groups. An EventBridge rule forwards Spot interruption and instance health events to an SQS queue that Karpenter drains so it can cordon and replace nodes ahead of termination, and consolidation removes under-used nodes.
+  containers:
+    - region: us-west-2
+      vpcs:
+        - name: eks
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: private-a, cidr: 10.0.16.0/20, az: a, public: false}
+            - {name: private-b, cidr: 10.0.32.0/20, az: b, public: false}
+            - {name: private-c, cidr: 10.0.48.0/20, az: c, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:eks}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_eks_cluster, name: karpenter-cluster, in: vpc:eks}
+    - {tf: aws_eks_node_group, name: karpenter-controller-nodes, in: subnet:private-a}
+    - {tf: aws_iam_role, name: karpenter-controller-role, in: region}
+    - {tf: aws_iam_role, name: karpenter-node-role, in: region}
+    - {tf: aws_sqs_queue, name: interruption-queue, in: region}
+    - {tf: aws_cloudwatch_event_rule, name: spot-interruption-rule, in: region}
+    - {tf: aws_instance, name: karpenter-node-b, in: subnet:private-b}
+    - {tf: aws_instance, name: karpenter-node-c, in: subnet:private-c}
+    - {tf: aws_iam_openid_connect_provider, name: cluster-oidc, in: region}
+  actors: [user]
+  flows:
+    - {from: user, to: karpenter-cluster, label: apply Deployment (pods pending), step: 1}
+    - {from: karpenter-cluster, to: karpenter-controller-nodes, label: Karpenter controller pods watch pending pods, step: 2}
+    - {from: karpenter-controller-nodes, to: karpenter-node-b, label: EC2 CreateFleet (NodePool requirements), step: 3}
+    - {from: karpenter-controller-nodes, to: karpenter-node-c, label: EC2 CreateFleet (NodePool requirements), step: 3}
+    - {from: karpenter-node-b, to: karpenter-cluster, label: node joins, pods scheduled, step: 4}
+    - {from: karpenter-controller-role, to: karpenter-controller-nodes, label: IRSA / Pod Identity}
+    - {from: cluster-oidc, to: karpenter-controller-role, label: trust}
+    - {from: karpenter-node-role, to: karpenter-node-b, label: instance profile}
+    - {from: spot-interruption-rule, to: interruption-queue, link: aws_cloudwatch_event_target, label: Spot interruption / rebalance / health events}
+    - {from: karpenter-controller-nodes, to: interruption-queue, label: poll, cordon and drain node}
+    - {from: karpenter-node-b, to: nat-a, label: outbound}
+
+- slug: eks-alb-ingress-load-balancer-controller
+  title: EKS ingress with the AWS Load Balancer Controller and an ALB
+  category: containers
+  tags: [eks, aws load balancer controller, ingress, alb, ip targets, acm]
+  source: https://docs.aws.amazon.com/eks/latest/userguide/alb-ingress.html
+  description: The AWS Load Balancer Controller, running in the cluster with an IAM role for its service account, watches Kubernetes Ingress objects and creates an internet-facing ALB with a target group per backend; in IP target mode the ALB sends traffic straight to pod IPs assigned by the VPC CNI. An ACM certificate provides TLS on the listener and a Route 53 alias record points the application hostname at the ALB.
+  containers:
+    - region: eu-central-1
+      vpcs:
+        - name: eks
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.16.0/20, az: a, public: false}
+            - {name: private-b, cidr: 10.0.32.0/20, az: b, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: example-zone, in: region}
+    - {tf: aws_acm_certificate, name: app-certificate, in: region}
+    - {tf: aws_internet_gateway, name: igw, in: vpc:eks}
+    - {tf: aws_lb, name: ingress-alb, in: vpc:eks}
+    - {tf: aws_lb_target_group, name: web-pods-tg, in: vpc:eks}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_eks_cluster, name: web-cluster, in: vpc:eks}
+    - {tf: aws_eks_node_group, name: web-nodes, in: subnet:private-a}
+    - {tf: aws_iam_role, name: lb-controller-role, in: region}
+    - {tf: aws_iam_openid_connect_provider, name: cluster-oidc, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: example-zone, label: DNS app.example.com, step: 1}
+    - {from: example-zone, to: ingress-alb, label: alias record, step: 2}
+    - {from: users, to: igw, label: HTTPS, step: 3}
+    - {from: igw, to: ingress-alb, step: 4}
+    - {from: app-certificate, to: ingress-alb, label: TLS listener certificate}
+    - {from: ingress-alb, to: web-pods-tg, label: "host/path rule from Ingress", step: 5}
+    - {from: web-pods-tg, to: web-nodes, label: IP targets = pod IPs, step: 6}
+    - {from: web-cluster, to: ingress-alb, label: controller reconciles Ingress into ALB}
+    - {from: lb-controller-role, to: web-cluster, label: IRSA for aws-load-balancer-controller}
+    - {from: cluster-oidc, to: lb-controller-role, label: trust}
+    - {from: web-nodes, to: nat-a, label: outbound}
+
+- slug: eks-private-cluster-vpc-endpoints
+  title: Fully private EKS cluster with VPC endpoints and no internet egress
+  category: containers
+  tags: [eks, private cluster, vpc endpoints, privatelink, ecr, air gap]
+  source: https://docs.aws.amazon.com/eks/latest/userguide/private-clusters.html
+  description: The cluster has only private API endpoint access and its nodes live in subnets with no route to the internet, so every dependency is reached through interface endpoints (ECR API and DKR, EC2, STS, CloudWatch Logs, EKS Auth) and an S3 gateway endpoint for image layers. Images are copied into an ECR registry in the same account, and operators reach the API server from a bastion or over Direct Connect rather than from the internet.
+  containers:
+    - datacenter: on-premises
+    - region: eu-west-1
+      vpcs:
+        - name: private-eks
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: nodes-a, cidr: 10.50.0.0/20, az: a, public: false}
+            - {name: nodes-b, cidr: 10.50.16.0/20, az: b, public: false}
+            - {name: endpoints-a, cidr: 10.50.32.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_customer_gateway, name: onprem-router, in: datacenter}
+    - {tf: aws_vpn_gateway, name: vgw, in: vpc:private-eks}
+    - {tf: aws_eks_cluster, name: private-cluster, in: vpc:private-eks}
+    - {tf: aws_eks_node_group, name: private-nodes, in: subnet:nodes-a}
+    - {tf: aws_vpc_endpoint, name: ecr-api-endpoint, in: subnet:endpoints-a}
+    - {tf: aws_vpc_endpoint, name: ecr-dkr-endpoint, in: subnet:endpoints-a}
+    - {tf: aws_vpc_endpoint, name: s3-gateway-endpoint, in: vpc:private-eks}
+    - {tf: aws_vpc_endpoint, name: sts-endpoint, in: subnet:endpoints-a}
+    - {tf: aws_vpc_endpoint, name: ec2-endpoint, in: subnet:endpoints-a}
+    - {tf: aws_vpc_endpoint, name: logs-endpoint, in: subnet:endpoints-a}
+    - {tf: aws_ecr_repository, name: mirrored-images, in: region}
+    - {tf: aws_cloudwatch_log_group, name: cluster-logs, in: region}
+  actors: [datacenter]
+  flows:
+    - {from: onprem-router, to: vgw, link: aws_vpn_connection, label: kubectl over Site-to-Site VPN, step: 1}
+    - {from: vgw, to: private-cluster, label: private API endpoint only, step: 2}
+    - {from: private-nodes, to: private-cluster, label: node registration via private endpoint, step: 3}
+    - {from: private-nodes, to: ecr-api-endpoint, label: GetAuthorizationToken, step: 4}
+    - {from: private-nodes, to: ecr-dkr-endpoint, label: image manifest pull, step: 5}
+    - {from: private-nodes, to: s3-gateway-endpoint, label: image layers from ECR S3 buckets, step: 6}
+    - {from: ecr-dkr-endpoint, to: mirrored-images, label: PrivateLink}
+    - {from: private-nodes, to: sts-endpoint, label: AssumeRoleWithWebIdentity (IRSA)}
+    - {from: private-nodes, to: ec2-endpoint, label: DescribeInstances (node DNS name)}
+    - {from: private-nodes, to: logs-endpoint, label: PutLogEvents}
+    - {from: logs-endpoint, to: cluster-logs}
+
+- slug: eks-multi-region-global-accelerator
+  title: Multi-Region stateless application on EKS with Global Accelerator failover
+  category: containers
+  tags: [eks, multi-region, global accelerator, route 53, alb, failover]
+  source: https://aws.amazon.com/blogs/containers/operating-a-multi-regional-stateless-application-using-amazon-eks/
+  description: Identical stateless deployments run on EKS clusters in two Regions, each exposed through an ALB created by the AWS Load Balancer Controller. Global Accelerator publishes two static anycast IPs, sends 100 percent of traffic to the primary endpoint group and 0 percent to the secondary, and health-checks both ALBs so failover happens at the accelerator without waiting for DNS propagation; Route 53 maps the application domain to the accelerator.
+  containers:
+    - region: us-west-2
+      label: primary
+      vpcs:
+        - name: primary-vpc
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: p-public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: p-public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: p-private-a, cidr: 10.0.16.0/20, az: a, public: false}
+    - region: us-east-1
+      label: secondary
+      vpcs:
+        - name: secondary-vpc
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: s-public-a, cidr: 10.1.0.0/24, az: a, public: true}
+            - {name: s-public-b, cidr: 10.1.1.0/24, az: b, public: true}
+            - {name: s-private-a, cidr: 10.1.16.0/20, az: a, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: example-zone, in: region:us-west-2}
+    - {tf: aws_globalaccelerator_accelerator, name: app-accelerator, in: region:us-west-2}
+    - {tf: aws_internet_gateway, name: primary-igw, in: vpc:primary-vpc}
+    - {tf: aws_lb, name: primary-alb, in: vpc:primary-vpc}
+    - {tf: aws_eks_cluster, name: primary-cluster, in: vpc:primary-vpc}
+    - {tf: aws_eks_node_group, name: primary-nodes, in: subnet:p-private-a}
+    - {tf: aws_ecr_repository, name: app-image, in: region:us-west-2}
+    - {tf: aws_internet_gateway, name: secondary-igw, in: vpc:secondary-vpc}
+    - {tf: aws_lb, name: secondary-alb, in: vpc:secondary-vpc}
+    - {tf: aws_eks_cluster, name: secondary-cluster, in: vpc:secondary-vpc}
+    - {tf: aws_eks_node_group, name: secondary-nodes, in: subnet:s-private-a}
+    - {tf: aws_ecr_repository, name: app-image-replica, in: region:us-east-1}
+  actors: [users]
+  flows:
+    - {from: users, to: example-zone, label: DNS, step: 1}
+    - {from: example-zone, to: app-accelerator, label: alias to accelerator DNS name, step: 2}
+    - {from: users, to: app-accelerator, label: "TCP :443 to anycast IPs", step: 3}
+    - {from: app-accelerator, to: primary-alb, label: endpoint group traffic dial 100, step: 4}
+    - {from: app-accelerator, to: secondary-alb, label: endpoint group traffic dial 0 (failover)}
+    - {from: primary-alb, to: primary-nodes, label: Ingress target group (pod IPs), step: 5}
+    - {from: secondary-alb, to: secondary-nodes, label: Ingress target group (pod IPs)}
+    - {from: primary-cluster, to: primary-alb, label: AWS Load Balancer Controller}
+    - {from: secondary-cluster, to: secondary-alb, label: AWS Load Balancer Controller}
+    - {from: app-image, to: app-image-replica, label: ECR cross-Region replication}
+    - {from: app-image, to: primary-nodes, label: image pull}
+    - {from: app-image-replica, to: secondary-nodes, label: image pull}
+
+- slug: eks-anywhere-hybrid-connector
+  title: EKS Anywhere on-premises clusters connected to the EKS console
+  category: containers
+  tags: [eks anywhere, hybrid, eks connector, on-premises, vsphere, adot]
+  source: https://anywhere.eks.amazonaws.com/docs/overview/
+  description: EKS Anywhere runs the EKS Distro Kubernetes on customer hardware (vSphere, bare metal, Nutanix or Snow) with a management cluster that provisions workload clusters through Cluster API. When connected to a Region, the EKS Connector agent registers each cluster in the EKS console over Systems Manager, IAM identities authenticate to the cluster, and optional integrations pull images from ECR and ship metrics and logs to Amazon Managed Service for Prometheus and CloudWatch over Direct Connect or VPN.
+  containers:
+    - datacenter: on-premises
+    - region: us-east-1
+      vpcs:
+        - name: hybrid
+          cidr: 10.100.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.100.1.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_customer_gateway, name: onprem-router, in: datacenter}
+    - {tf: aws_instance, name: eksa-management-cluster, in: datacenter}
+    - {tf: aws_instance, name: eksa-workload-cluster, in: datacenter}
+    - {tf: aws_dx_connection, name: dx-1g, in: region}
+    - {tf: aws_dx_gateway, name: dxgw, in: region}
+    - {tf: aws_vpn_gateway, name: vgw, in: vpc:hybrid}
+    - {tf: aws_ssm_activation, name: eks-connector-activation, in: region}
+    - {tf: aws_iam_role, name: eks-connector-role, in: region}
+    - {tf: aws_ecr_repository, name: workload-images, in: region}
+    - {tf: aws_prometheus_workspace, name: eksa-metrics, in: region}
+    - {tf: aws_cloudwatch_log_group, name: eksa-logs, in: region}
+  actors: [user, datacenter]
+  flows:
+    - {from: eksa-management-cluster, to: eksa-workload-cluster, label: Cluster API provisions workload cluster, step: 1}
+    - {from: onprem-router, to: dx-1g, label: private connectivity, step: 2}
+    - {from: dx-1g, to: dxgw, label: private VIF}
+    - {from: dxgw, to: vgw, link: aws_dx_gateway_association}
+    - {from: eksa-workload-cluster, to: eks-connector-activation, label: EKS Connector agent registers via SSM, step: 3}
+    - {from: eks-connector-role, to: eks-connector-activation, label: connector IAM role}
+    - {from: user, to: eksa-workload-cluster, label: view cluster and workloads in EKS console, step: 4}
+    - {from: eksa-workload-cluster, to: workload-images, label: image pull with IRSA}
+    - {from: eksa-workload-cluster, to: eksa-metrics, label: ADOT remote write}
+    - {from: eksa-workload-cluster, to: eksa-logs, label: Fluent Bit logs}
+
+- slug: eks-gitops-flux-codepipeline-ecr
+  title: GitOps CI/CD on EKS with CodeCommit, CodePipeline, CodeBuild and Flux
+  category: devops
+  tags: [eks, gitops, flux, codepipeline, codebuild, codecommit, ecr]
+  source: https://aws.amazon.com/blogs/devops/ci-cd-on-amazon-eks-using-aws-codecommit-aws-codepipeline-aws-codebuild-and-fluxcd/
+  description: A commit to the application repository in CodeCommit starts a CodePipeline whose CodeBuild stage builds the container image, tags it with the commit hash and pushes it to ECR. Flux running in the EKS cluster watches a separate Kubernetes manifest repository and the ECR registry; when a new tag appears it updates the manifest and reconciles the cluster so the desired state always lives in Git.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: eks
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: private-a, cidr: 10.0.16.0/20, az: a, public: false}
+            - {name: private-b, cidr: 10.0.32.0/20, az: b, public: false}
+  elements:
+    - {tf: aws_codecommit_repository, name: app-repo, in: region}
+    - {tf: aws_codecommit_repository, name: k8s-manifests-repo, in: region}
+    - {tf: aws_codepipeline, name: build-pipeline, in: region}
+    - {tf: aws_codebuild_project, name: image-build, in: region}
+    - {tf: aws_ecr_repository, name: app-image, in: region}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: region}
+    - {tf: aws_eks_cluster, name: gitops-cluster, in: vpc:eks}
+    - {tf: aws_eks_node_group, name: app-nodes, in: subnet:private-a}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_internet_gateway, name: igw, in: vpc:eks}
+    - {tf: aws_iam_role, name: flux-irsa-role, in: region}
+  actors: [user]
+  flows:
+    - {from: user, to: app-repo, label: git push, step: 1}
+    - {from: app-repo, to: build-pipeline, label: CodeCommit source trigger, step: 2}
+    - {from: build-pipeline, to: image-build, label: build stage, step: 3}
+    - {from: image-build, to: app-image, label: "docker push :<commit-sha>", step: 4}
+    - {from: build-pipeline, to: pipeline-artifacts, label: artifacts}
+    - {from: app-nodes, to: app-image, label: Flux image automation scans tags, step: 5}
+    - {from: app-nodes, to: k8s-manifests-repo, label: Flux commits new tag, then pulls manifests, step: 6}
+    - {from: app-nodes, to: gitops-cluster, label: Flux applies manifests, step: 7}
+    - {from: app-image, to: app-nodes, label: image pull for new pods, step: 8}
+    - {from: flux-irsa-role, to: app-nodes, label: IRSA for ECR and CodeCommit access}
+    - {from: app-nodes, to: nat-a, label: outbound}
+    - {from: nat-a, to: igw}
+
+- slug: ecr-multi-account-image-pipeline
+  title: Central ECR image pipeline with scanning and cross-account replication
+  category: devops
+  tags: [ecr, codebuild, image scanning, inspector, replication, pull-through cache, multi-account]
+  source: https://aws.amazon.com/blogs/containers/amazon-ecr-in-multi-account-and-multi-region-architectures/
+  description: A platform account caches upstream public images through an ECR pull-through cache and a tooling account builds application images with CodeBuild, scanning them with Amazon Inspector on push and promoting clean images while quarantining ones with critical CVEs. ECR replication copies promoted images to the production account and to a second Region for disaster recovery, and workload clusters pull from their local registry through VPC endpoints rather than across accounts.
+  containers:
+    - account: tooling
+      region: eu-west-1
+      groups: [{label: organization, accounts: [platform, production]}]
+      vpcs:
+        - name: workloads
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.0.16.0/20, az: a, public: false}
+            - {name: endpoints-a, cidr: 10.0.32.0/24, az: a, public: false}
+    - account: production
+      region: eu-central-1
+      label: dr
+  elements:
+    - {tf: aws_ecr_pull_through_cache_rule, name: public-cache-rule, in: account:platform}
+    - {tf: aws_ecr_repository, name: cached-base-images, in: account:platform}
+    - {tf: aws_codecommit_repository, name: app-source, in: region:eu-west-1}
+    - {tf: aws_codebuild_project, name: image-build, in: region:eu-west-1}
+    - {tf: aws_ecr_repository, name: app-build-repo, in: region:eu-west-1}
+    - {tf: aws_ecr_repository, name: app-quarantine-repo, in: region:eu-west-1}
+    - {tf: aws_cloudwatch_event_rule, name: scan-complete-rule, in: region:eu-west-1}
+    - {tf: aws_lambda_function, name: promote-or-quarantine-fn, in: region:eu-west-1}
+    - {tf: aws_ecr_replication_configuration, name: replicate-to-prod, in: region:eu-west-1}
+    - {tf: aws_ecr_repository, name: prod-app-repo, in: account:production}
+    - {tf: aws_ecr_repository, name: prod-dr-app-repo, in: region:eu-central-1}
+    - {tf: aws_vpc_endpoint, name: ecr-dkr-endpoint, in: subnet:endpoints-a}
+    - {tf: aws_eks_cluster, name: prod-cluster, in: vpc:workloads}
+  actors: [user]
+  flows:
+    - {from: public-cache-rule, to: cached-base-images, label: pull-through cache from ECR Public / Quay, step: 1}
+    - {from: cached-base-images, to: image-build, label: vetted base image (cross-account pull), step: 2}
+    - {from: user, to: app-source, label: git push, step: 3}
+    - {from: app-source, to: image-build, label: build trigger, step: 4}
+    - {from: image-build, to: app-build-repo, label: docker push, scan on push, step: 5}
+    - {from: scan-complete-rule, to: promote-or-quarantine-fn, link: aws_cloudwatch_event_target, label: ECR image scan completed, step: 6}
+    - {from: promote-or-quarantine-fn, to: app-quarantine-repo, label: critical CVEs found}
+    - {from: promote-or-quarantine-fn, to: prod-app-repo, label: promote clean image, step: 7}
+    - {from: replicate-to-prod, to: prod-app-repo, label: cross-account replication rule}
+    - {from: prod-app-repo, to: prod-dr-app-repo, label: cross-Region replication, step: 8}
+    - {from: prod-cluster, to: ecr-dkr-endpoint, label: image pull, step: 9}
+    - {from: ecr-dkr-endpoint, to: prod-app-repo, label: PrivateLink}
+
+- slug: apprunner-web-service-vpc-connector
+  title: App Runner web service reaching a private RDS database through a VPC connector
+  category: containers
+  tags: [app runner, vpc connector, rds, secrets manager, ecr, serverless containers]
+  source: https://aws.amazon.com/blogs/containers/deploy-and-scale-django-applications-on-aws-app-runner/
+  description: App Runner builds and runs the web application in an AWS-managed VPC, terminating TLS, load balancing and scaling instances on concurrent requests. A VPC connector creates Hyperplane ENIs in the customer's private subnets so outbound calls reach an RDS for PostgreSQL instance that has no public endpoint, and the service's instance role reads the database credentials from Secrets Manager.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: data
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.0.1.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.2.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_apprunner_service, name: web-app, in: region}
+    - {tf: aws_apprunner_auto_scaling_configuration_version, name: web-autoscaling, in: region}
+    - {tf: aws_apprunner_vpc_connector, name: data-vpc-connector, in: vpc:data}
+    - {tf: aws_ecr_repository, name: web-app-image, in: region}
+    - {tf: aws_db_instance, name: app-postgres, in: subnet:private-a}
+    - {tf: aws_secretsmanager_secret, name: db-credentials, in: region}
+    - {tf: aws_iam_role, name: apprunner-instance-role, in: region}
+    - {tf: aws_s3_bucket, name: static-assets, in: region}
+    - {tf: aws_cloudwatch_log_group, name: apprunner-logs, in: region}
+  actors: [users, user]
+  flows:
+    - {from: user, to: web-app-image, label: push image (or connect source repo), step: 1}
+    - {from: web-app-image, to: web-app, label: auto deploy on new image, step: 2}
+    - {from: users, to: web-app, label: HTTPS to App Runner domain, step: 3}
+    - {from: web-autoscaling, to: web-app, label: concurrency, min/max instances}
+    - {from: web-app, to: db-credentials, label: GetSecretValue, step: 4}
+    - {from: apprunner-instance-role, to: web-app, label: instance role}
+    - {from: web-app, to: data-vpc-connector, label: outbound VPC traffic, step: 5}
+    - {from: data-vpc-connector, to: app-postgres, label: "PostgreSQL :5432 via Hyperplane ENI", step: 6}
+    - {from: web-app, to: static-assets, label: static files}
+    - {from: web-app, to: apprunner-logs, label: application and service logs}
+
+- slug: lambda-container-image-http-api
+  title: Lambda functions packaged as container images behind an HTTP API
+  category: containers
+  tags: [lambda, container image, ecr, api gateway, codebuild, serverless]
+  source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/deploy-lambda-functions-with-container-images.html
+  description: CodeBuild builds an image from a Lambda base image and pushes it to ECR; the Lambda function is created from that image URI (up to 10 GB) and Lambda pulls and caches it in its execution environment. An API Gateway HTTP API routes requests to the function, which reads and writes a DynamoDB table, so a team keeps its Docker-based tooling while running serverless.
+  containers:
+    - region: eu-west-1
+  elements:
+    - {tf: aws_codecommit_repository, name: function-source, in: region}
+    - {tf: aws_codebuild_project, name: image-build, in: region}
+    - {tf: aws_ecr_repository, name: function-image, in: region}
+    - {tf: aws_lambda_function, name: orders-fn, in: region}
+    - {tf: aws_apigatewayv2_api, name: orders-http-api, in: region}
+    - {tf: aws_dynamodb_table, name: orders-table, in: region}
+    - {tf: aws_iam_role, name: orders-fn-role, in: region}
+    - {tf: aws_cloudwatch_log_group, name: orders-fn-logs, in: region}
+  actors: [user, client]
+  flows:
+    - {from: user, to: function-source, label: git push Dockerfile + handler, step: 1}
+    - {from: function-source, to: image-build, label: build trigger, step: 2}
+    - {from: image-build, to: function-image, label: docker push, step: 3}
+    - {from: function-image, to: orders-fn, label: ImageUri deployment package, step: 4}
+    - {from: client, to: orders-http-api, label: HTTPS POST /orders, step: 5}
+    - {from: orders-http-api, to: orders-fn, label: Lambda proxy integration, step: 6}
+    - {from: orders-fn, to: orders-table, label: PutItem / GetItem, step: 7}
+    - {from: orders-fn-role, to: orders-fn, label: execution role}
+    - {from: orders-fn, to: orders-fn-logs, label: logs}
+
+- slug: apigw-vpc-link-ecs-private-integration
+  title: HTTP API with a VPC Link private integration to ECS services
+  category: containers
+  tags: [api gateway, http api, vpc link, ecs, fargate, cloud map, alb]
+  source: https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-private-integration.html
+  description: An API Gateway HTTP API terminates client requests and forwards them through a VPC Link into private subnets, either to an internal ALB in front of ECS services or directly to task IPs registered in a Cloud Map service. The ECS tasks never receive internet traffic, and API Gateway supplies authorization, throttling and routing while a single VPC link fans out to many backend routes.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: main
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_apigatewayv2_api, name: shop-http-api, in: region}
+    - {tf: aws_apigatewayv2_vpc_link, name: private-vpc-link, in: subnet:private-a}
+    - {tf: aws_lb, name: internal-alb, in: vpc:main}
+    - {tf: aws_lb_target_group, name: orders-tg, in: vpc:main}
+    - {tf: aws_ecs_cluster, name: api-cluster, in: vpc:main}
+    - {tf: aws_ecs_service, name: orders-service, in: subnet:private-a}
+    - {tf: aws_ecs_service, name: inventory-service, in: subnet:private-b}
+    - {tf: aws_service_discovery_private_dns_namespace, name: api-namespace, in: vpc:main}
+    - {tf: aws_service_discovery_service, name: inventory-discovery, in: region}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_rds_cluster, name: orders-aurora, in: subnet:private-b}
+  actors: [client]
+  flows:
+    - {from: client, to: shop-http-api, label: HTTPS /orders, /inventory, step: 1}
+    - {from: shop-http-api, to: private-vpc-link, label: private integration, step: 2}
+    - {from: private-vpc-link, to: internal-alb, label: "route /orders -> ALB listener", step: 3}
+    - {from: internal-alb, to: orders-tg, step: 4}
+    - {from: orders-tg, to: orders-service, label: HTTP :8080, step: 5}
+    - {from: private-vpc-link, to: inventory-discovery, label: "route /inventory -> Cloud Map DiscoverInstances", step: 3}
+    - {from: inventory-discovery, to: inventory-service, label: healthy task IPs (SRV), step: 5}
+    - {from: inventory-service, to: api-namespace, label: registers tasks}
+    - {from: orders-service, to: orders-aurora, label: SQL, step: 6}
+    - {from: orders-service, to: nat-a, label: outbound}
+
+- slug: event-driven-microservices-eventbridge-sqs-ecs
+  title: Event-driven microservices with EventBridge, SQS and ECS Fargate consumers
+  category: containers
+  tags: [eventbridge, sqs, ecs, fargate, event-driven, queue processing, autoscaling]
+  source: https://aws.amazon.com/blogs/compute/extending-a-serverless-event-driven-architecture-to-existing-container-workloads/
+  description: Producers publish domain events to a custom EventBridge event bus; rules match on detail-type and deliver matching events to per-consumer SQS queues so each containerized service polls its own queue at its own pace. The settlement service on ECS Fargate scales on queue depth, persists results to DynamoDB and emits a follow-up event back to the bus, while a dead-letter queue captures messages that repeatedly fail.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: main
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_cloudwatch_event_bus, name: payments-bus, in: region}
+    - {tf: aws_cloudwatch_event_rule, name: fraud-not-detected-rule, in: region}
+    - {tf: aws_cloudwatch_event_rule, name: settlement-finalized-rule, in: region}
+    - {tf: aws_sqs_queue, name: settlement-queue, in: region}
+    - {tf: aws_sqs_queue, name: settlement-dlq, in: region}
+    - {tf: aws_lambda_function, name: fraud-detection-fn, in: region}
+    - {tf: aws_lambda_function, name: notification-fn, in: region}
+    - {tf: aws_ecs_cluster, name: payments-cluster, in: vpc:main}
+    - {tf: aws_ecs_service, name: settlement-service, in: subnet:private-a}
+    - {tf: aws_dynamodb_table, name: settlements-table, in: region}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_ecr_repository, name: settlement-image, in: region}
+  actors: [client]
+  flows:
+    - {from: client, to: fraud-detection-fn, label: payment request, step: 1}
+    - {from: fraud-detection-fn, to: payments-bus, label: PutEvents Fraud.Not.Detected, step: 2}
+    - {from: payments-bus, to: fraud-not-detected-rule, label: rule match on detail-type, step: 3}
+    - {from: fraud-not-detected-rule, to: settlement-queue, link: aws_cloudwatch_event_target, step: 4}
+    - {from: settlement-service, to: settlement-queue, label: long poll ReceiveMessage, step: 5}
+    - {from: settlement-queue, to: settlement-dlq, label: redrive after maxReceiveCount}
+    - {from: settlement-service, to: settlements-table, label: PutItem, step: 6}
+    - {from: settlement-service, to: payments-bus, label: PutEvents Settlement.Finalized, step: 7}
+    - {from: payments-bus, to: settlement-finalized-rule, step: 8}
+    - {from: settlement-finalized-rule, to: notification-fn, link: aws_cloudwatch_event_target, step: 9}
+    - {from: settlement-image, to: settlement-service, label: image pull}
+    - {from: settlement-service, to: nat-a, label: outbound to SQS, DynamoDB, EventBridge}
+
+- slug: container-insights-ecs-eks-observability
+  title: Container observability with CloudWatch Container Insights on ECS and EKS
+  category: observability
+  tags: [cloudwatch, container insights, enhanced observability, fluent bit, cloudwatch agent, ecs, eks]
+  source: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/ContainerInsights.html
+  description: Container Insights with enhanced observability collects CPU, memory, disk and network metrics down to the container level from an ECS cluster (via the ECS agent) and from an EKS cluster (via the Amazon CloudWatch Observability add-on, which installs the CloudWatch agent and Fluent Bit). Metrics land in the ContainerInsights namespace, container logs and performance log events go to CloudWatch Logs, and curated dashboards plus alarms that notify an SNS topic give operators cluster-to-container drill-down.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: main
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: private-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_ecs_cluster, name: web-ecs-cluster, in: vpc:main}
+    - {tf: aws_ecs_service, name: web-service, in: subnet:private-a}
+    - {tf: aws_eks_cluster, name: api-eks-cluster, in: vpc:main}
+    - {tf: aws_eks_node_group, name: api-nodes, in: subnet:private-b}
+    - {tf: aws_eks_addon, name: cloudwatch-observability-addon, in: region}
+    - {tf: aws_cloudwatch_log_group, name: ecs-performance-logs, in: region}
+    - {tf: aws_cloudwatch_log_group, name: eks-application-logs, in: region}
+    - {tf: aws_cloudwatch_dashboard, name: container-insights-dashboard, in: region}
+    - {tf: aws_cloudwatch_metric_alarm, name: pod-restart-alarm, in: region}
+    - {tf: aws_sns_topic, name: ops-alerts, in: region}
+    - {tf: aws_iam_role, name: cloudwatch-agent-role, in: region}
+  actors: [user]
+  flows:
+    - {from: web-ecs-cluster, to: ecs-performance-logs, label: ECS agent performance log events (containerInsights enhanced), step: 1}
+    - {from: web-service, to: web-ecs-cluster, label: task and container metrics}
+    - {from: cloudwatch-observability-addon, to: api-eks-cluster, label: installs CloudWatch agent + Fluent Bit, step: 1}
+    - {from: api-nodes, to: eks-application-logs, label: Fluent Bit container logs, step: 2}
+    - {from: api-nodes, to: ecs-performance-logs, label: CloudWatch agent node/pod/container metrics, step: 2}
+    - {from: cloudwatch-agent-role, to: api-nodes, label: IRSA / node role for PutLogEvents}
+    - {from: ecs-performance-logs, to: container-insights-dashboard, label: metrics extracted to ContainerInsights namespace, step: 3}
+    - {from: eks-application-logs, to: container-insights-dashboard, label: Logs Insights queries}
+    - {from: pod-restart-alarm, to: ops-alerts, label: ALARM notification, step: 4}
+    - {from: user, to: container-insights-dashboard, label: cluster to container drill-down, step: 5}
+
+- slug: eks-managed-prometheus-grafana
+  title: Monitoring EKS workloads with Amazon Managed Service for Prometheus and Amazon Managed Grafana
+  category: observability
+  tags: [eks, amazon managed prometheus, amazon managed grafana, adot, opentelemetry, alerting]
+  source: https://docs.aws.amazon.com/solutions/monitoring-amazon-eks-workloads-using-amazon-managed-services-for-prometheus-and-grafana/
+  description: An AWS Distro for OpenTelemetry collector deployed in the EKS cluster scrapes pod, node and application metrics and remote-writes them to an Amazon Managed Service for Prometheus workspace, where recording and alerting rules evaluate them and alert manager forwards firing alerts to SNS. An Amazon Managed Grafana workspace queries the Prometheus workspace as a data source, users authenticate through IAM Identity Center, and dashboards are provisioned by the AWS Observability Accelerator.
+  containers:
+    - region: us-west-2
+      vpcs:
+        - name: eks
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: private-a, cidr: 10.0.16.0/20, az: a, public: false}
+            - {name: private-b, cidr: 10.0.32.0/20, az: b, public: false}
+  elements:
+    - {tf: aws_eks_cluster, name: workload-cluster, in: vpc:eks}
+    - {tf: aws_eks_node_group, name: workload-nodes, in: subnet:private-a}
+    - {tf: aws_eks_addon, name: adot-addon, in: region}
+    - {tf: aws_prometheus_workspace, name: metrics-workspace, in: region}
+    - {tf: aws_prometheus_rule_group_namespace, name: alerting-rules, in: region}
+    - {tf: aws_prometheus_alert_manager_definition, name: alert-manager, in: region}
+    - {tf: aws_sns_topic, name: prometheus-alerts, in: region}
+    - {tf: aws_grafana_workspace, name: dashboards-workspace, in: region}
+    - {tf: aws_iam_role, name: adot-collector-role, in: region}
+    - {tf: aws_iam_role, name: grafana-workspace-role, in: region}
+    - {tf: aws_s3_bucket, name: metrics-export, in: region}
+  actors: [user]
+  flows:
+    - {from: adot-addon, to: workload-cluster, label: deploys ADOT collector, step: 1}
+    - {from: workload-nodes, to: metrics-workspace, label: remote_write scraped metrics (SigV4), step: 2}
+    - {from: adot-collector-role, to: workload-nodes, label: IRSA aps:RemoteWrite}
+    - {from: alerting-rules, to: metrics-workspace, label: recording + alerting rules, step: 3}
+    - {from: alert-manager, to: prometheus-alerts, label: firing alerts, step: 4}
+    - {from: dashboards-workspace, to: metrics-workspace, label: PromQL query endpoint (data source), step: 5}
+    - {from: grafana-workspace-role, to: dashboards-workspace, label: aps:QueryMetrics}
+    - {from: user, to: dashboards-workspace, label: IAM Identity Center SSO, dashboards, step: 6}
+    - {from: metrics-workspace, to: metrics-export, label: optional metrics export}
+
+- slug: eks-istio-service-mesh
+  title: Istio service mesh on EKS with an ingress gateway behind an NLB
+  category: containers
+  tags: [eks, istio, service mesh, envoy, nlb, mtls, kiali]
+  source: https://aws.amazon.com/blogs/opensource/getting-started-with-istio-on-amazon-eks/
+  description: Istio's control plane (istiod) runs on an EKS cluster with managed node groups and injects Envoy sidecars into pods of namespaces labelled istio-injection=enabled, giving mutual TLS, retries and traffic splitting between service versions. The Istio ingress gateway is exposed as a LoadBalancer service that the AWS Load Balancer Controller realizes as a Network Load Balancer, and Gateway and VirtualService resources route edge traffic to the application; Kiali, Prometheus, Grafana and Jaeger add-ons visualize the mesh.
+  containers:
+    - region: us-west-2
+      vpcs:
+        - name: eks
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.16.0/20, az: a, public: false}
+            - {name: private-b, cidr: 10.0.32.0/20, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:eks}
+    - {tf: aws_lb, name: istio-ingress-nlb, in: vpc:eks}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_eks_cluster, name: mesh-cluster, in: vpc:eks}
+    - {tf: aws_eks_node_group, name: istio-system-nodes, in: subnet:private-a}
+    - {tf: aws_eks_node_group, name: app-nodes, in: subnet:private-b}
+    - {tf: aws_ecr_repository, name: productpage-image, in: region}
+    - {tf: aws_ecr_repository, name: reviews-image, in: region}
+    - {tf: aws_iam_role, name: lb-controller-role, in: region}
+    - {tf: aws_prometheus_workspace, name: mesh-metrics, in: region}
+    - {tf: aws_grafana_workspace, name: mesh-dashboards, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: igw, label: HTTP/HTTPS, step: 1}
+    - {from: igw, to: istio-ingress-nlb, step: 2}
+    - {from: istio-ingress-nlb, to: istio-system-nodes, label: istio-ingressgateway pods (IP targets), step: 3}
+    - {from: istio-system-nodes, to: app-nodes, label: Gateway + VirtualService route to productpage, step: 4}
+    - {from: app-nodes, to: app-nodes, label: sidecar-to-sidecar mTLS (reviews v1/v2/v3 traffic split), step: 5}
+    - {from: istio-system-nodes, to: app-nodes, label: istiod pushes xDS config to Envoy sidecars}
+    - {from: mesh-cluster, to: istio-ingress-nlb, label: AWS Load Balancer Controller creates NLB}
+    - {from: lb-controller-role, to: mesh-cluster, label: IRSA}
+    - {from: productpage-image, to: app-nodes, label: image pull}
+    - {from: reviews-image, to: app-nodes, label: image pull}
+    - {from: app-nodes, to: mesh-metrics, label: Envoy telemetry (Prometheus remote write)}
+    - {from: mesh-dashboards, to: mesh-metrics, label: Kiali / Grafana queries}
+    - {from: app-nodes, to: nat-a, label: outbound}
+
+- slug: copilot-three-tier-fargate-app
+  title: Three-tier ECS Fargate application scaffolded with AWS Copilot
+  category: containers
+  tags: [copilot, ecs, fargate, load balanced web service, backend service, aurora serverless, cloud map]
+  source: https://aws.github.io/copilot-cli/docs/concepts/services/
+  description: Copilot provisions an environment (VPC with public and private subnets, an ECS cluster, a Cloud Map namespace and an ALB) and then deploys a Load Balanced Web Service that receives internet traffic through the ALB plus a Backend Service that is reachable only by service discovery name inside the environment. A storage addon adds an Aurora Serverless v2 PostgreSQL cluster whose credentials are injected into the backend as a secret, each service gets its own ECR repository, and a Copilot pipeline can build and deploy on every push.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: copilot-env
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.0.2.0/24, az: a, public: false}
+            - {name: private-b, cidr: 10.0.3.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: igw, in: vpc:copilot-env}
+    - {tf: aws_lb, name: env-alb, in: vpc:copilot-env}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_ecs_cluster, name: env-cluster, in: vpc:copilot-env}
+    - {tf: aws_service_discovery_private_dns_namespace, name: env-namespace, in: vpc:copilot-env}
+    - {tf: aws_ecs_service, name: frontend-lb-web-service, in: subnet:private-a}
+    - {tf: aws_ecs_service, name: api-backend-service, in: subnet:private-b}
+    - {tf: aws_rds_cluster, name: api-aurora-serverless, in: subnet:private-b}
+    - {tf: aws_secretsmanager_secret, name: api-aurora-secret, in: region}
+    - {tf: aws_ecr_repository, name: frontend-image, in: region}
+    - {tf: aws_ecr_repository, name: api-image, in: region}
+    - {tf: aws_codepipeline, name: copilot-pipeline, in: region}
+  actors: [users, user]
+  flows:
+    - {from: user, to: copilot-pipeline, label: git push (copilot pipeline deploy), step: 1}
+    - {from: copilot-pipeline, to: frontend-image, label: build and push, step: 2}
+    - {from: copilot-pipeline, to: api-image, label: build and push, step: 2}
+    - {from: users, to: igw, label: HTTPS, step: 3}
+    - {from: igw, to: env-alb, step: 4}
+    - {from: env-alb, to: frontend-lb-web-service, label: "path / to Load Balanced Web Service", step: 5}
+    - {from: frontend-lb-web-service, to: api-backend-service, label: "http://api.<env>.<app>.local:8080", step: 6}
+    - {from: api-backend-service, to: env-namespace, label: service discovery registration}
+    - {from: api-backend-service, to: api-aurora-secret, label: secret injected as env var}
+    - {from: api-backend-service, to: api-aurora-serverless, label: PostgreSQL, step: 7}
+    - {from: frontend-image, to: frontend-lb-web-service, label: image pull}
+    - {from: api-image, to: api-backend-service, label: image pull}
+    - {from: api-backend-service, to: nat-a, label: outbound}

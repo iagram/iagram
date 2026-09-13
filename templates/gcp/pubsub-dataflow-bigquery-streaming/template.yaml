@@ -1,0 +1,38 @@
+# Generated from the official reference (https://docs.cloud.google.com/dataflow/docs/tutorials/dataflow-stream-to-bigquery); edit freely.
+title: Streaming analytics with Pub/Sub, Dataflow and BigQuery
+category: analytics-bi
+tags:
+- streaming
+- pub/sub
+- dataflow
+- bigquery
+- dead letter
+source: https://docs.cloud.google.com/dataflow/docs/tutorials/dataflow-stream-to-bigquery
+description: Producers publish JSON events to a Pub/Sub topic and a Dataflow streaming job reads them, applies a user-defined transform, and writes rows to a BigQuery table with the Storage Write API. Records
+  that fail parsing are routed to a dead-letter BigQuery table, and the raw stream is optionally archived to Cloud Storage.
+nodes:
+- {id: prj-streaming, type: gcp.project, name: streaming, props: {project_id: streaming-123456, project: changeme, region: us-central1}}
+- {id: grp-ingest, type: common.group, name: ingest, parent: prj-streaming}
+- {id: grp-process, type: common.group, name: process, parent: prj-streaming}
+- {id: grp-store, type: common.group, name: store, parent: prj-streaming}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: events-topic, type: gcp.pubsub_topic, name: events-topic, parent: grp-ingest}
+- {id: events-dataflow-sub, type: gcp.res.google_pubsub_subscription, name: events-dataflow-sub, parent: grp-ingest, props: {name: changeme, topic: changeme}}
+- {id: dataflow-temp-bucket, type: gcp.storage_bucket, name: dataflow-temp-bucket, parent: grp-process}
+- {id: events-dataset, type: gcp.bigquery_dataset, name: events-dataset, parent: grp-store}
+- id: events-looker
+  type: gcp.res.google_looker_instance
+  name: events-looker
+  parent: grp-store
+  props: {name: changeme, oauth_config: {}}
+edges:
+- {from: device, to: events-topic, label: publish JSON events, step: '1'}
+- {from: events-topic, to: events-dataflow-sub, label: fan out, step: '2'}
+- {from: events-looker, to: events-dataset, label: query, step: '7'}
+- {from: users, to: events-looker, label: dashboards, step: '8'}
+steps:
+- {n: '1', text: 'device → events-topic: publish JSON events'}
+- {n: '2', text: 'events-topic → events-dataflow-sub: fan out'}
+- {n: '7', text: 'events-looker → events-dataset: query'}
+- {n: '8', text: 'users → events-looker: dashboards'}

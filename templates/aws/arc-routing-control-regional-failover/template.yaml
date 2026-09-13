@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.aws.amazon.com/r53recovery/latest/dg/routing-control.html); edit freely.
+title: Regional failover with Application Recovery Controller routing controls
+category: resilience
+tags:
+- application recovery controller
+- routing control
+- safety rule
+- readiness check
+- route 53
+- data plane failover
+source: https://docs.aws.amazon.com/r53recovery/latest/dg/routing-control.html
+description: An ARC cluster exposes a highly available data-plane API in five Regions; routing controls on its control panel act as on/off switches bound to Route 53 health checks that front the failover
+  records for each Regional replica. A safety rule asserts that at least one control is always on, and a readiness check monitors quotas and capacity of the standby replica so failover can be scripted without
+  depending on Regional control planes.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: primary}
+- {id: vpc-arc-primary, type: aws.vpc, name: arc-primary, parent: reg-us-east-1, props: {cidr: 10.50.0.0/16}}
+- {id: az-arc-primary-a, type: aws.availability_zone, name: a, parent: vpc-arc-primary, props: {zone: a}}
+- {id: sub-arc-p-public-a, type: aws.subnet, name: arc-p-public-a, parent: az-arc-primary-a, props: {cidr: 10.50.0.0/24, az: a, public: true}}
+- {id: az-arc-primary-b, type: aws.availability_zone, name: b, parent: vpc-arc-primary, props: {zone: b}}
+- {id: sub-arc-p-public-b, type: aws.subnet, name: arc-p-public-b, parent: az-arc-primary-b, props: {cidr: 10.50.1.0/24, az: b, public: true}}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: secondary}
+- {id: vpc-arc-secondary, type: aws.vpc, name: arc-secondary, parent: reg-us-west-2, props: {cidr: 10.51.0.0/16}}
+- {id: az-arc-secondary-a, type: aws.availability_zone, name: a, parent: vpc-arc-secondary, props: {zone: a}}
+- {id: sub-arc-s-public-a, type: aws.subnet, name: arc-s-public-a, parent: az-arc-secondary-a, props: {cidr: 10.51.0.0/24, az: a, public: true}}
+- {id: az-arc-secondary-b, type: aws.availability_zone, name: b, parent: vpc-arc-secondary, props: {zone: b}}
+- {id: sub-arc-s-public-b, type: aws.subnet, name: arc-s-public-b, parent: az-arc-secondary-b, props: {cidr: 10.51.1.0/24, az: b, public: true}}
+- {id: users, type: common.users, name: users}
+- {id: arc-cluster, type: aws.res.aws_route53recoverycontrolconfig_cluster, name: arc-cluster, parent: reg-us-east-1, props: {name: changeme}}
+- {id: payments-readiness, type: aws.res.aws_route53recoveryreadiness_recovery_group, name: payments-readiness, parent: reg-us-east-1, props: {recovery_group_name: changeme}}
+- {id: payments-zone, type: aws.route53_zone, name: payments-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: east-routing-check, type: aws.res.aws_route53_health_check, name: east-routing-check, parent: reg-us-east-1, props: {type: changeme}}
+- {id: west-routing-check, type: aws.res.aws_route53_health_check, name: west-routing-check, parent: reg-us-east-1, props: {type: changeme}}
+- {id: payments-east-alb, type: aws.alb, name: payments-east-alb, parent: vpc-arc-primary}
+- {id: payments-east-asg, type: aws.res.aws_autoscaling_group, name: payments-east-asg, parent: vpc-arc-primary, props: {max_size: 1, min_size: 1}}
+- {id: payments-west-alb, type: aws.alb, name: payments-west-alb, parent: vpc-arc-secondary}
+- {id: payments-west-asg, type: aws.res.aws_autoscaling_group, name: payments-west-asg, parent: vpc-arc-secondary, props: {max_size: 1, min_size: 1}}
+edges:
+- {from: east-routing-check, to: payments-zone, label: gates PRIMARY failover record, step: '2'}
+- {from: west-routing-check, to: payments-zone, label: gates SECONDARY failover record}
+- {from: users, to: payments-zone, label: DNS, step: '3'}
+- {from: payments-zone, to: payments-east-alb, label: active replica, step: '4'}
+- {from: payments-zone, to: payments-west-alb, label: standby replica}
+- {from: payments-east-alb, to: payments-east-asg, step: '5'}
+- {from: payments-west-alb, to: payments-west-asg}
+- {from: payments-readiness, to: payments-west-asg, label: readiness check on quotas and capacity}
+- {from: payments-readiness, to: payments-east-asg, label: readiness check}
+steps:
+- {n: '2', text: 'east-routing-check → payments-zone: gates PRIMARY failover record'}
+- {n: '3', text: 'users → payments-zone: DNS'}
+- {n: '4', text: 'payments-zone → payments-east-alb: active replica'}
+- {n: '5', text: payments-east-alb → payments-east-asg}

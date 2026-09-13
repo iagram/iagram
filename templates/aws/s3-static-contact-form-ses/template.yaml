@@ -1,0 +1,47 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/architecture/create-dynamic-contact-forms-for-s3-static-websites-using-aws-lambda-amazon-api-gateway-and-amazon-ses/); edit freely.
+title: Dynamic contact form for an S3 static website with Lambda and SES
+category: web
+tags:
+- static website
+- contact form
+- api gateway
+- lambda
+- ses
+- cors
+source: https://aws.amazon.com/blogs/architecture/create-dynamic-contact-forms-for-s3-static-websites-using-aws-lambda-amazon-api-gateway-and-amazon-ses/
+description: A static marketing site hosted on S3 and served through CloudFront embeds a contact form whose JavaScript posts the fields to an API Gateway endpoint with CORS enabled. A Lambda function validates
+  the payload, stores the enquiry in DynamoDB, and sends an email to the site owner through a verified SES domain identity.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: grp-form-backend, type: common.group, name: form backend, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: site-zone, type: aws.route53_zone, name: site-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: site-cert, type: aws.res.aws_acm_certificate, name: site-cert, parent: reg-us-east-1}
+- {id: site-cdn, type: aws.cloudfront_distribution, name: site-cdn, parent: grp-global-edge}
+- {id: site-bucket, type: aws.s3_bucket, name: site-bucket, parent: reg-us-east-1}
+- {id: contact-api, type: aws.res.aws_api_gateway_rest_api, name: contact-api, parent: grp-form-backend, props: {name: changeme}}
+- {id: contact-handler, type: aws.lambda_function, name: contact-handler, parent: grp-form-backend}
+- {id: enquiries, type: aws.dynamodb_table, name: enquiries, parent: grp-form-backend}
+- {id: mail-domain, type: aws.res.aws_ses_domain_identity, name: mail-domain, parent: grp-form-backend, props: {domain: example.com}}
+edges:
+- {from: users, to: site-zone, label: DNS, step: '1'}
+- {from: users, to: site-cdn, label: HTTPS page load, step: '2'}
+- {from: site-cert, to: site-cdn, label: TLS certificate}
+- {from: site-cdn, to: site-bucket, label: static origin via OAC, step: '3'}
+- {from: users, to: contact-api, label: POST /contact (CORS), step: '4'}
+- {from: contact-api, to: contact-handler, label: Lambda proxy integration, step: '5'}
+- {from: contact-handler, to: enquiries, label: PutItem, step: '6'}
+- {from: contact-handler, to: mail-domain, label: SendEmail, step: '7'}
+- {from: mail-domain, to: user, label: notification email to site owner, step: '8'}
+steps:
+- {n: '1', text: 'users → site-zone: DNS'}
+- {n: '2', text: 'users → site-cdn: HTTPS page load'}
+- {n: '3', text: 'site-cdn → site-bucket: static origin via OAC'}
+- {n: '4', text: 'users → contact-api: POST /contact (CORS)'}
+- {n: '5', text: 'contact-api → contact-handler: Lambda proxy integration'}
+- {n: '6', text: 'contact-handler → enquiries: PutItem'}
+- {n: '7', text: 'contact-handler → mail-domain: SendEmail'}
+- {n: '8', text: 'mail-domain → user: notification email to site owner'}

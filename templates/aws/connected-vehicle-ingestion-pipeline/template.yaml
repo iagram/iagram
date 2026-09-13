@@ -1,0 +1,60 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/connected-mobility-on-aws/); edit freely.
+title: Connected vehicle ingestion pipeline
+category: industry
+tags:
+- connected vehicle
+- iot core
+- msk
+- flink
+- dynamodb
+- appsync
+- automotive
+source: https://docs.aws.amazon.com/solutions/connected-mobility-on-aws/
+description: Vehicles authenticate to IoT Core with X.509 mTLS and publish compressed telemetry; an IoT rule with Basic Ingest writes directly to an Amazon MSK topic using SCRAM credentials from Secrets
+  Manager, while bulk telemetry is uploaded to S3 through pre-signed URLs. Managed Service for Apache Flink decodes and enriches the Kafka stream and sinks the last known vehicle state to DynamoDB, which
+  AppSync exposes to the companion app as a GraphQL API behind CloudFront.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-telemetry, type: aws.vpc, name: telemetry, parent: reg-eu-west-1, props: {cidr: 10.20.0.0/16}}
+- {id: az-telemetry-a, type: aws.availability_zone, name: a, parent: vpc-telemetry, props: {zone: a}}
+- {id: sub-streaming-a, type: aws.subnet, name: streaming-a, parent: az-telemetry-a, props: {cidr: 10.20.1.0/24, az: a, public: false}}
+- {id: az-telemetry-b, type: aws.availability_zone, name: b, parent: vpc-telemetry, props: {zone: b}}
+- {id: sub-streaming-b, type: aws.subnet, name: streaming-b, parent: az-telemetry-b, props: {cidr: 10.20.2.0/24, az: b, public: false}}
+- {id: device, type: common.device, name: device}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: vehicle-thing, type: aws.res.aws_iot_thing, name: vehicle-thing, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: telemetry-to-kafka, type: aws.res.aws_iot_topic_rule, name: telemetry-to-kafka, parent: reg-eu-west-1, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: msk-scram-credentials, type: aws.res.aws_secretsmanager_secret, name: msk-scram-credentials, parent: reg-eu-west-1}
+- id: vehicle-telemetry-msk
+  type: aws.res.aws_msk_cluster
+  name: vehicle-telemetry-msk
+  parent: sub-streaming-a
+  props: {broker_node_group_info: {}, cluster_name: changeme, kafka_version: changeme, number_of_broker_nodes: 1}
+- {id: telemetry-decoder, type: aws.res.aws_kinesisanalyticsv2_application, name: telemetry-decoder, parent: sub-streaming-b, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: batch-telemetry-uploads, type: aws.s3_bucket, name: batch-telemetry-uploads, parent: reg-eu-west-1}
+- {id: vehicle-last-known-state, type: aws.dynamodb_table, name: vehicle-last-known-state, parent: reg-eu-west-1}
+- {id: companion-graphql-api, type: aws.res.aws_appsync_graphql_api, name: companion-graphql-api, parent: reg-eu-west-1, props: {authentication_type: changeme, name: changeme}}
+- {id: companion-edge, type: aws.cloudfront_distribution, name: companion-edge, parent: reg-eu-west-1}
+- {id: connection-state-cache, type: aws.res.aws_elasticache_replication_group, name: connection-state-cache, parent: sub-streaming-a, props: {description: changeme, replication_group_id: changeme}}
+edges:
+- {from: device, to: vehicle-thing, label: MQTT over mTLS, step: '1'}
+- {from: vehicle-thing, to: telemetry-to-kafka, label: Basic Ingest topic, step: '2'}
+- {from: telemetry-to-kafka, to: vehicle-telemetry-msk, label: kafka rule action, step: '2'}
+- {from: telemetry-to-kafka, to: msk-scram-credentials, label: SASL/SCRAM secret lookup, step: '3'}
+- {from: device, to: batch-telemetry-uploads, label: pre-signed URL batch upload, step: '4'}
+- {from: vehicle-telemetry-msk, to: telemetry-decoder, label: consume raw topic, step: '5'}
+- {from: telemetry-decoder, to: vehicle-telemetry-msk, label: republish enriched topic, step: '5'}
+- {from: telemetry-decoder, to: vehicle-last-known-state, label: DynamoDB sink connector, step: '6'}
+- {from: companion-graphql-api, to: vehicle-last-known-state, label: GraphQL resolvers}
+- {from: companion-graphql-api, to: connection-state-cache, label: subscriber connection state}
+- {from: mobile, to: companion-edge, label: HTTPS, step: '7'}
+- {from: companion-edge, to: companion-graphql-api, label: lowest-latency region origin}
+steps:
+- {n: '1', text: 'device → vehicle-thing: MQTT over mTLS'}
+- {n: '2', text: 'vehicle-thing → telemetry-to-kafka: Basic Ingest topic'}
+- {n: '3', text: 'telemetry-to-kafka → msk-scram-credentials: SASL/SCRAM secret lookup'}
+- {n: '4', text: 'device → batch-telemetry-uploads: pre-signed URL batch upload'}
+- {n: '5', text: 'vehicle-telemetry-msk → telemetry-decoder: consume raw topic'}
+- {n: '6', text: 'telemetry-decoder → vehicle-last-known-state: DynamoDB sink connector'}
+- {n: '7', text: 'mobile → companion-edge: HTTPS'}

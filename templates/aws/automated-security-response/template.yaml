@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/automated-security-response-on-aws/solution-overview.html); edit freely.
+title: Automated Security Response on AWS
+category: security
+tags:
+- security hub
+- remediation
+- step functions
+- ssm automation
+- playbooks
+- cis
+source: https://docs.aws.amazon.com/solutions/latest/automated-security-response-on-aws/solution-overview.html
+description: Security Hub custom actions or automatic rules send findings through EventBridge to a Step Functions orchestrator in the security administrator account, which assumes a cross-account role and
+  runs Systems Manager Automation runbooks that remediate the resource in the member account. Every action is logged to CloudWatch Logs and notified via SNS, with playbooks mapped to CIS, FSBP, PCI DSS
+  and NIST 800-53 controls.
+nodes:
+- {id: acct-security-admin, type: aws.account, name: security-admin}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security-admin, props: {region: us-east-1}}
+- {id: acct-member, type: aws.account, name: member}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-member, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: security-hub, type: aws.res.aws_securityhub_account, name: security-hub, parent: acct-security-admin}
+- {id: finding-custom-action-rule, type: aws.res.aws_cloudwatch_event_rule, name: finding-custom-action-rule, parent: acct-security-admin}
+- {id: orchestrator, type: aws.res.aws_sfn_state_machine, name: orchestrator, parent: acct-security-admin, props: {definition: changeme, role_arn: changeme}}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: check-finding-lambda, type: aws.lambda_function, name: check-finding-lambda, parent: sub-reg-us-east-1-a}
+- {id: remediation-notifications, type: aws.res.aws_sns_topic, name: remediation-notifications, parent: acct-security-admin}
+- {id: remediation-audit-log, type: aws.res.aws_cloudwatch_log_group, name: remediation-audit-log, parent: acct-security-admin}
+- {id: solution-cmk, type: aws.res.aws_kms_key, name: solution-cmk, parent: acct-security-admin}
+- {id: remediation-role, type: aws.res.aws_iam_role, name: remediation-role, parent: acct-member, props: {assume_role_policy: changeme}}
+- {id: remediation-runbook, type: aws.res.aws_ssm_document, name: remediation-runbook, parent: acct-member, props: {content: changeme, document_type: changeme, name: changeme}}
+- {id: noncompliant-bucket, type: aws.s3_bucket, name: noncompliant-bucket, parent: reg-us-east-1}
+edges:
+- {from: users, to: security-hub, label: custom action, step: '1'}
+- {from: security-hub, to: finding-custom-action-rule, label: finding event, step: '2'}
+- {from: finding-custom-action-rule, to: orchestrator, link: aws_cloudwatch_event_target}
+- {from: orchestrator, to: check-finding-lambda, label: validate finding, step: '3'}
+- {from: orchestrator, to: remediation-role, label: AssumeRole, step: '4'}
+- {from: remediation-role, to: remediation-runbook, label: StartAutomationExecution, step: '5'}
+- {from: remediation-runbook, to: noncompliant-bucket, label: remediate, step: '6'}
+- {from: orchestrator, to: remediation-notifications, label: notify, step: '7'}
+- {from: orchestrator, to: remediation-audit-log, label: log actions}
+steps:
+- {n: '1', text: 'users → security-hub: custom action'}
+- {n: '2', text: 'security-hub → finding-custom-action-rule: finding event'}
+- {n: '3', text: 'orchestrator → check-finding-lambda: validate finding'}
+- {n: '4', text: 'orchestrator → remediation-role: AssumeRole'}
+- {n: '5', text: 'remediation-role → remediation-runbook: StartAutomationExecution'}
+- {n: '6', text: 'remediation-runbook → noncompliant-bucket: remediate'}
+- {n: '7', text: 'orchestrator → remediation-notifications: notify'}

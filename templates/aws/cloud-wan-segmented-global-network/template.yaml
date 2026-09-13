@@ -1,0 +1,55 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/aws-cloud-wan.html); edit freely.
+title: AWS Cloud WAN core network with segments across Regions
+category: networking
+tags:
+- cloud wan
+- core network
+- segments
+- multi-region
+- policy-based routing
+source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/aws-cloud-wan.html
+description: A single global core network defined by a core network policy places a core network edge in every chosen Region and joins them over the AWS backbone; VPC attachments are mapped to production,
+  development, and shared segments using attachment tags. Segments are isolated routing domains, and the policy's segment actions share the shared-services segment with the workload segments while keeping
+  production and development apart.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-prod-east, type: aws.vpc, name: prod-east, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-prod-east-a, type: aws.availability_zone, name: a, parent: vpc-prod-east, props: {zone: a}}
+- {id: sub-prod-east-private-a, type: aws.subnet, name: prod-east-private-a, parent: az-prod-east-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-shared-east, type: aws.vpc, name: shared-east, parent: reg-us-east-1, props: {cidr: 10.9.0.0/16}}
+- {id: az-shared-east-a, type: aws.availability_zone, name: a, parent: vpc-shared-east, props: {zone: a}}
+- {id: sub-shared-east-private-a, type: aws.subnet, name: shared-east-private-a, parent: az-shared-east-a, props: {cidr: 10.9.1.0/24, az: a, public: false}}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-prod-eu, type: aws.vpc, name: prod-eu, parent: reg-eu-west-1, props: {cidr: 10.11.0.0/16}}
+- {id: az-prod-eu-a, type: aws.availability_zone, name: a, parent: vpc-prod-eu, props: {zone: a}}
+- {id: sub-prod-eu-private-a, type: aws.subnet, name: prod-eu-private-a, parent: az-prod-eu-a, props: {cidr: 10.11.1.0/24, az: a, public: false}}
+- {id: vpc-dev-eu, type: aws.vpc, name: dev-eu, parent: reg-eu-west-1, props: {cidr: 10.12.0.0/16}}
+- {id: az-dev-eu-a, type: aws.availability_zone, name: a, parent: vpc-dev-eu, props: {zone: a}}
+- {id: sub-dev-eu-private-a, type: aws.subnet, name: dev-eu-private-a, parent: az-dev-eu-a, props: {cidr: 10.12.1.0/24, az: a, public: false}}
+- {id: global-network, type: aws.res.aws_networkmanager_global_network, name: global-network, parent: reg-us-east-1}
+- {id: core-network, type: aws.res.aws_networkmanager_core_network, name: core-network, parent: reg-us-east-1, props: {global_network_id: changeme}}
+- {id: prod-east-app, type: aws.ec2_instance, name: prod-east-app, parent: sub-prod-east-private-a}
+- {id: shared-directory, type: aws.ec2_instance, name: shared-directory, parent: sub-shared-east-private-a}
+- {id: prod-eu-app, type: aws.ec2_instance, name: prod-eu-app, parent: sub-prod-eu-private-a}
+- {id: dev-eu-app, type: aws.ec2_instance, name: dev-eu-app, parent: sub-dev-eu-private-a}
+- {id: az-vpc-prod-east-b, type: aws.availability_zone, name: b, parent: vpc-prod-east, props: {zone: b}}
+- {id: sub-vpc-prod-east-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-east-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-shared-east-b, type: aws.availability_zone, name: b, parent: vpc-shared-east, props: {zone: b}}
+- {id: sub-vpc-shared-east-b, type: aws.subnet, name: private-b, parent: az-vpc-shared-east-b, props: {cidr: 10.9.251.0/24, az: b, public: false}}
+- {id: az-vpc-prod-eu-b, type: aws.availability_zone, name: b, parent: vpc-prod-eu, props: {zone: b}}
+- {id: sub-vpc-prod-eu-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-eu-b, props: {cidr: 10.11.251.0/24, az: b, public: false}}
+- {id: az-vpc-dev-eu-b, type: aws.availability_zone, name: b, parent: vpc-dev-eu, props: {zone: b}}
+- {id: sub-vpc-dev-eu-b, type: aws.subnet, name: private-b, parent: az-vpc-dev-eu-b, props: {cidr: 10.12.251.0/24, az: b, public: false}}
+edges:
+- {from: core-network, to: vpc-prod-east, label: 'segment: production', link: aws_networkmanager_vpc_attachment}
+- {from: core-network, to: vpc-prod-eu, label: 'segment: production', link: aws_networkmanager_vpc_attachment}
+- {from: core-network, to: vpc-dev-eu, label: 'segment: development', link: aws_networkmanager_vpc_attachment}
+- {from: core-network, to: vpc-shared-east, label: 'segment: shared (shared to all)', link: aws_networkmanager_vpc_attachment}
+- {from: global-network, to: core-network, label: policy document}
+- {from: prod-eu-app, to: core-network, label: 'same segment, cross-Region', step: '1'}
+- {from: core-network, to: prod-east-app, label: core network edge to edge, step: '2'}
+- {from: dev-eu-app, to: shared-directory, label: via shared segment}
+steps:
+- {n: '1', text: 'prod-eu-app → core-network: same segment, cross-Region'}
+- {n: '2', text: 'core-network → prod-east-app: core network edge to edge'}

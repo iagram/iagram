@@ -1,0 +1,42 @@
+# Generated from the official reference (https://docs.cloud.google.com/vpc/docs/configure-private-service-connect-apis); edit freely.
+title: Private Service Connect endpoint for Google APIs
+category: networking
+tags:
+- private service connect
+- google apis
+- all-apis bundle
+- vpc-sc bundle
+- global forwarding rule
+- cloud dns
+source: https://docs.cloud.google.com/vpc/docs/configure-private-service-connect-apis
+description: A global forwarding rule with an internal IP from the VPC targets the all-apis or vpc-sc API bundle so workloads and on-premises hosts reach Google APIs through a private address. A Cloud DNS
+  private zone maps googleapis.com names to the endpoint IP and the endpoint prefix is advertised to on-premises over Cloud Router.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: europe-west1}}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-workload, props: {cidr: 10.80.0.0/16}}
+- {id: sub-app-ew1, type: gcp.subnetwork, name: app-ew1, parent: vpc-app-vpc, props: {cidr: 10.80.0.0/24, region: europe-west1}}
+- {id: saas, type: common.saas, name: saas}
+- {id: psc-apis-ip, type: gcp.res.google_compute_address, name: psc-apis-ip, parent: vpc-app-vpc, props: {name: changeme}}
+- {id: psc-apis-endpoint, type: gcp.res.google_compute_global_forwarding_rule, name: psc-apis-endpoint, parent: vpc-app-vpc, props: {name: changeme, target: changeme}}
+- {id: googleapis-private-zone, type: gcp.cloud_dns_zone, name: googleapis-private-zone, parent: prj-workload, props: {domain: example.com}}
+- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-app-ew1}
+- {id: ha-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: ha-vpn-gw, parent: vpc-app-vpc, props: {name: changeme, network: changeme}}
+- {id: vpn-router, type: gcp.res.google_compute_router, name: vpn-router, parent: vpc-app-vpc, props: {name: changeme, network: changeme}}
+- {id: vpc-prj-workload, type: gcp.vpc, name: main, parent: prj-workload}
+- {id: sub-prj-workload, type: gcp.subnetwork, name: main, parent: vpc-prj-workload, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: onprem-peer-gw, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-peer-gw, parent: sub-prj-workload, props: {name: changeme}}
+edges:
+- {from: app-vm, to: googleapis-private-zone, label: resolve storage.googleapis.com to endpoint IP, step: '1'}
+- {from: app-vm, to: psc-apis-endpoint, label: HTTPS to internal IP, step: '2'}
+- {from: psc-apis-endpoint, to: saas, label: Google APIs all-apis bundle, step: '3'}
+- {from: onprem-peer-gw, to: ha-vpn-gw, label: IPsec, step: '4'}
+- {from: vpn-router, to: onprem-peer-gw, label: advertise endpoint IP via BGP, step: '5'}
+- {from: onprem-peer-gw, to: psc-apis-endpoint, label: on-premises API calls, step: '6'}
+steps:
+- {n: '1', text: 'app-vm → googleapis-private-zone: resolve storage.googleapis.com to endpoint IP'}
+- {n: '2', text: 'app-vm → psc-apis-endpoint: HTTPS to internal IP'}
+- {n: '3', text: 'psc-apis-endpoint → saas: Google APIs all-apis bundle'}
+- {n: '4', text: 'onprem-peer-gw → ha-vpn-gw: IPsec'}
+- {n: '5', text: 'vpn-router → onprem-peer-gw: advertise endpoint IP via BGP'}
+- {n: '6', text: 'onprem-peer-gw → psc-apis-endpoint: on-premises API calls'}

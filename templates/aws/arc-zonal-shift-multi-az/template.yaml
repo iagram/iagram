@@ -1,0 +1,52 @@
+# Generated from the official reference (https://docs.aws.amazon.com/r53recovery/latest/dg/arc-zonal-shift.html); edit freely.
+title: Zonal shift away from an impaired Availability Zone
+category: resilience
+tags:
+- application recovery controller
+- zonal shift
+- zonal autoshift
+- multi-az
+- load balancer
+- availability zone impairment
+source: https://docs.aws.amazon.com/r53recovery/latest/dg/arc-zonal-shift.html
+description: A load balancer and Auto Scaling group are pre-scaled across three Availability Zones with a Multi-AZ database behind them. When one zone is impaired, an ARC zonal shift (manual or autoshift)
+  temporarily stops the load balancer from sending traffic to that zone for up to three days, without changing the application deployment.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-zs-app, type: aws.vpc, name: zs-app, parent: reg-eu-west-1, props: {cidr: 10.60.0.0/16}}
+- {id: az-zs-app-a, type: aws.availability_zone, name: a, parent: vpc-zs-app, props: {zone: a}}
+- {id: sub-zs-public-a, type: aws.subnet, name: zs-public-a, parent: az-zs-app-a, props: {cidr: 10.60.0.0/24, az: a, public: true}}
+- {id: az-zs-app-b, type: aws.availability_zone, name: b, parent: vpc-zs-app, props: {zone: b}}
+- {id: sub-zs-public-b, type: aws.subnet, name: zs-public-b, parent: az-zs-app-b, props: {cidr: 10.60.1.0/24, az: b, public: true}}
+- {id: az-zs-app-c, type: aws.availability_zone, name: c, parent: vpc-zs-app, props: {zone: c}}
+- {id: sub-zs-public-c, type: aws.subnet, name: zs-public-c, parent: az-zs-app-c, props: {cidr: 10.60.2.0/24, az: c, public: true}}
+- {id: sub-zs-app-a, type: aws.subnet, name: zs-app-a, parent: az-zs-app-a, props: {cidr: 10.60.10.0/24, az: a, public: false}}
+- {id: sub-zs-app-b, type: aws.subnet, name: zs-app-b, parent: az-zs-app-b, props: {cidr: 10.60.11.0/24, az: b, public: false}}
+- {id: sub-zs-app-c, type: aws.subnet, name: zs-app-c, parent: az-zs-app-c, props: {cidr: 10.60.12.0/24, az: c, public: false}}
+- {id: sub-zs-db-a, type: aws.subnet, name: zs-db-a, parent: az-zs-app-a, props: {cidr: 10.60.20.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: api-zone, type: aws.route53_zone, name: api-zone, parent: reg-eu-west-1, props: {domain: example.com}}
+- {id: api-alb, type: aws.alb, name: api-alb, parent: vpc-zs-app}
+- {id: api-asg, type: aws.res.aws_autoscaling_group, name: api-asg, parent: vpc-zs-app, props: {max_size: 1, min_size: 1}}
+- {id: api-az-a, type: aws.ec2_instance, name: api-az-a, parent: sub-zs-app-a}
+- {id: api-az-b, type: aws.ec2_instance, name: api-az-b, parent: sub-zs-app-b}
+- {id: api-az-c, type: aws.ec2_instance, name: api-az-c, parent: sub-zs-app-c}
+- {id: api-db-multi-az, type: aws.rds_instance, name: api-db-multi-az, parent: sub-zs-db-a}
+- {id: az-a-error-rate, type: aws.res.aws_cloudwatch_metric_alarm, name: az-a-error-rate, parent: reg-eu-west-1, props: {alarm_name: changeme}}
+edges:
+- {from: users, to: api-zone, label: DNS, step: '1'}
+- {from: api-zone, to: api-alb, step: '2'}
+- {from: api-alb, to: api-az-a, label: shifted away during zonal shift}
+- {from: api-alb, to: api-az-b, label: healthy AZ, step: '3'}
+- {from: api-alb, to: api-az-c, label: healthy AZ}
+- {from: api-asg, to: api-az-a, label: pre-scaled capacity per AZ}
+- {from: api-asg, to: api-az-b}
+- {from: api-asg, to: api-az-c}
+- {from: api-az-b, to: api-db-multi-az, label: synchronous standby in another AZ, step: '4'}
+- {from: az-a-error-rate, to: api-alb, label: per-AZ alarm triggers operator or autoshift}
+steps:
+- {n: '1', text: 'users → api-zone: DNS'}
+- {n: '2', text: api-zone → api-alb}
+- {n: '3', text: 'api-alb → api-az-b: healthy AZ'}
+- {n: '4', text: 'api-az-b → api-db-multi-az: synchronous standby in another AZ'}

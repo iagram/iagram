@@ -1,0 +1,63 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/security/centrally-manage-aws-waf-api-v2-and-aws-managed-rules-at-scale-with-firewall-manager/); edit freely.
+title: Firewall Manager WAF policies across an organization
+category: security
+tags:
+- firewall manager
+- waf
+- managed rules
+- organizations
+- policy enforcement
+- logging
+source: https://aws.amazon.com/blogs/security/centrally-manage-aws-waf-api-v2-and-aws-managed-rules-at-scale-with-firewall-manager/
+description: A Firewall Manager administrator account in the organization defines a WAF policy that includes AWS Managed Rules rule groups and applies it to in-scope accounts and OUs by resource type and
+  tag. Firewall Manager automatically creates and associates web ACLs on new ALBs and API Gateway stages in member accounts, remediates non-compliant resources and streams WAF logs through Kinesis Data
+  Firehose to a central bucket.
+nodes:
+- {id: acct-management, type: aws.account, name: management}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}}
+- {id: grp-workloads-ou, type: common.group, name: Workloads OU, parent: reg-us-east-1}
+- {id: acct-firewall-admin, type: aws.account, name: firewall-admin}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-firewall-admin, props: {region: us-east-1}}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: workloads-ou, type: aws.res.aws_organizations_organizational_unit, name: workloads-ou, parent: grp-workloads-ou, props: {name: changeme, parent_id: changeme}}
+- {id: fms-admin, type: aws.res.aws_fms_admin_account, name: fms-admin, parent: acct-firewall-admin}
+- id: org-waf-policy
+  type: aws.res.aws_fms_policy
+  name: org-waf-policy
+  parent: acct-firewall-admin
+  props: {exclude_resource_tags: true, name: changeme, security_service_policy_data: {}}
+- id: custom-block-rules
+  type: aws.res.aws_wafv2_rule_group
+  name: custom-block-rules
+  parent: acct-firewall-admin
+  props: {capacity: 1, scope: changeme, visibility_config: {}}
+- {id: waf-log-stream, type: aws.res.aws_kinesis_firehose_delivery_stream, name: waf-log-stream, parent: acct-firewall-admin, props: {destination: changeme, name: changeme}}
+- {id: waf-logs, type: aws.s3_bucket, name: waf-logs, parent: reg-us-east-1}
+- id: fms-managed-web-acl
+  type: aws.res.aws_wafv2_web_acl
+  name: fms-managed-web-acl
+  parent: acct-workload
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: public-alb, type: aws.alb, name: public-alb, parent: vpc-reg-us-east-1}
+- {id: prod-stage, type: aws.res.aws_api_gateway_stage, name: prod-stage, parent: acct-workload, props: {deployment_id: changeme, rest_api_id: changeme, stage_name: changeme}}
+- {id: sub-vpc-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: vpc-reg-us-east-1, props: {cidr: 10.200.250.0/24, az: a, public: false}}
+- {id: sub-vpc-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: vpc-reg-us-east-1, props: {cidr: 10.200.251.0/24, az: b, public: false}}
+edges:
+- {from: fms-admin, to: workloads-ou, label: policy scope}
+- {from: org-waf-policy, to: fms-managed-web-acl, label: creates web ACL, step: '1'}
+- {from: custom-block-rules, to: org-waf-policy, label: included rule group}
+- {from: fms-managed-web-acl, to: public-alb, link: aws_wafv2_web_acl_association}
+- {from: fms-managed-web-acl, to: prod-stage, link: aws_wafv2_web_acl_association}
+- {from: internet, to: public-alb, label: HTTPS filtered, step: '2'}
+- {from: fms-managed-web-acl, to: waf-log-stream, label: WAF logs, step: '3'}
+- {from: waf-log-stream, to: waf-logs, label: deliver, step: '4'}
+- {from: users, to: org-waf-policy, label: manage policy}
+steps:
+- {n: '1', text: 'org-waf-policy → fms-managed-web-acl: creates web ACL'}
+- {n: '2', text: 'internet → public-alb: HTTPS filtered'}
+- {n: '3', text: 'fms-managed-web-acl → waf-log-stream: WAF logs'}
+- {n: '4', text: 'waf-log-stream → waf-logs: deliver'}

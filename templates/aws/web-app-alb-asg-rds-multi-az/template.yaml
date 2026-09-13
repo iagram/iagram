@@ -1,0 +1,68 @@
+# Generated from the official reference (https://docs.aws.amazon.com/reference-architecture-diagrams/latest/web-application-architecture/web-application-architecture.html); edit freely.
+title: Classic three-tier web application across two Availability Zones
+category: web
+tags:
+- three tier
+- alb
+- auto scaling
+- rds multi-az
+- elasticache
+- cloudfront
+- waf
+source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/web-application-architecture/web-application-architecture.html
+description: Route 53 and CloudFront front an internet-facing Application Load Balancer that spreads web servers in an Auto Scaling group across two Availability Zones, with AWS WAF filtering requests at
+  the edge. Web instances read a Multi-AZ RDS database through an ElastiCache layer, and NAT gateways in the public subnets give the private tier outbound access.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: vpc-web, type: aws.vpc, name: web, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-web-a, type: aws.availability_zone, name: a, parent: vpc-web, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-web-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-web-b, type: aws.availability_zone, name: b, parent: vpc-web, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-web-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-web-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-web-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-web-a, props: {cidr: 10.0.20.0/24, az: a, public: false}}
+- {id: sub-data-b, type: aws.subnet, name: data-b, parent: az-web-b, props: {cidr: 10.0.21.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: app-zone, type: aws.route53_zone, name: app-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: app-cdn, type: aws.cloudfront_distribution, name: app-cdn, parent: grp-global-edge}
+- id: app-waf
+  type: aws.res.aws_wafv2_web_acl
+  name: app-waf
+  parent: grp-global-edge
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+- {id: static-assets, type: aws.s3_bucket, name: static-assets, parent: reg-us-east-1}
+- {id: web-igw, type: aws.res.aws_internet_gateway, name: web-igw, parent: vpc-web}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: nat-b, type: aws.res.aws_nat_gateway, name: nat-b, parent: sub-public-b}
+- {id: web-alb, type: aws.alb, name: web-alb, parent: vpc-web}
+- {id: web-asg, type: aws.res.aws_autoscaling_group, name: web-asg, parent: vpc-web, props: {max_size: 1, min_size: 1}}
+- {id: web-a, type: aws.ec2_instance, name: web-a, parent: sub-app-a}
+- {id: web-b, type: aws.ec2_instance, name: web-b, parent: sub-app-b}
+- {id: session-cache, type: aws.res.aws_elasticache_cluster, name: session-cache, parent: sub-data-a, props: {cluster_id: changeme}}
+- {id: app-db, type: aws.rds_instance, name: app-db, parent: sub-data-a}
+- {id: app-db-standby, type: aws.rds_instance, name: app-db-standby, parent: sub-data-b}
+edges:
+- {from: users, to: app-zone, label: DNS lookup, step: '1'}
+- {from: users, to: app-cdn, label: HTTPS, step: '2'}
+- {from: app-waf, to: app-cdn, label: web ACL}
+- {from: app-cdn, to: static-assets, label: static origin}
+- {from: app-cdn, to: web-alb, label: dynamic origin, step: '3'}
+- {from: web-alb, to: web-a, label: HTTP target, step: '4'}
+- {from: web-alb, to: web-b, label: HTTP target}
+- {from: web-asg, to: web-a, label: scales}
+- {from: web-asg, to: web-b, label: scales}
+- {from: web-a, to: session-cache, label: cache read/write, step: '5'}
+- {from: web-a, to: app-db, label: SQL, step: '6'}
+- {from: app-db, to: app-db-standby, label: synchronous replication}
+- {from: web-a, to: nat-a, label: outbound updates}
+- {from: nat-a, to: web-igw}
+steps:
+- {n: '1', text: 'users → app-zone: DNS lookup'}
+- {n: '2', text: 'users → app-cdn: HTTPS'}
+- {n: '3', text: 'app-cdn → web-alb: dynamic origin'}
+- {n: '4', text: 'web-alb → web-a: HTTP target'}
+- {n: '5', text: 'web-a → session-cache: cache read/write'}
+- {n: '6', text: 'web-a → app-db: SQL'}

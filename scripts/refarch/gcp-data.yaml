@@ -1,0 +1,710 @@
+# Google Cloud reference architectures: data & analytics
+# Format: scripts/refarch/FORMAT.md. Provider: gcp.
+
+- slug: analytics-lakehouse-biglake-iceberg
+  title: Analytics lakehouse with BigLake and Apache Iceberg
+  category: data
+  tags: [lakehouse, biglake, iceberg, dataproc, bigquery, dataplex]
+  source: https://docs.cloud.google.com/architecture/big-data-analytics/analytics-lakehouse
+  description: Raw files land in Cloud Storage and are transformed by Dataproc Spark jobs into Apache Iceberg tables on Cloud Storage that BigQuery reads through BigLake tables via a Cloud Resource connection. Dataplex manages the lake zones and metadata, Cloud Workflows orchestrates the load, and analysts query the same open-format data from BigQuery or Spark without copies.
+  containers:
+    - project: lakehouse
+      region: us-central1
+      groups: [{label: landing}, {label: processing}, {label: serving}]
+  elements:
+    - {tf: google_storage_bucket, name: raw-landing-bucket, in: group:landing}
+    - {tf: google_storage_bucket, name: iceberg-warehouse-bucket, in: group:landing}
+    - {tf: google_dataproc_cluster, name: spark-transform-cluster, in: group:processing}
+    - {tf: google_workflows_workflow, name: lakehouse-load-workflow, in: group:processing}
+    - {tf: google_dataplex_lake, name: analytics-lake, in: group:processing}
+    - {tf: google_bigquery_connection, name: biglake-gcs-connection, in: group:serving}
+    - {tf: google_bigquery_dataset, name: lakehouse-dataset, in: group:serving}
+    - {tf: google_bigquery_table, name: iceberg-biglake-table, in: group:serving}
+    - {tf: google_looker_instance, name: lakehouse-looker, in: group:serving}
+  actors: [server, users]
+  flows:
+    - {from: server, to: raw-landing-bucket, label: upload raw files, step: 1}
+    - {from: lakehouse-load-workflow, to: spark-transform-cluster, label: submit Spark job, step: 2}
+    - {from: spark-transform-cluster, to: raw-landing-bucket, label: read raw, step: 3}
+    - {from: spark-transform-cluster, to: iceberg-warehouse-bucket, label: write Iceberg tables, step: 4}
+    - {from: analytics-lake, to: iceberg-warehouse-bucket, label: discover and catalog, step: 5}
+    - {from: iceberg-biglake-table, to: biglake-gcs-connection, label: read via connection, step: 6}
+    - {from: biglake-gcs-connection, to: iceberg-warehouse-bucket, label: Parquet and Iceberg metadata, step: 7}
+    - {from: lakehouse-looker, to: lakehouse-dataset, label: SQL queries, step: 8}
+    - {from: users, to: lakehouse-looker, label: dashboards, step: 9}
+
+- slug: bigquery-data-warehouse-jump-start
+  title: Data warehouse with BigQuery jump start solution
+  category: data
+  tags: [data warehouse, bigquery, workflows, looker studio, bigquery ml]
+  source: https://docs.cloud.google.com/architecture/big-data-analytics/data-warehouse
+  description: Cloud Workflows loads sample data from a Cloud Storage bucket into BigQuery datasets, then runs stored procedures that build views and a BigQuery ML model. Looker Studio dashboards query the curated tables, and Cloud Scheduler triggers periodic refreshes of the warehouse.
+  containers:
+    - project: warehouse
+      region: us-central1
+      groups: [{label: ingest}, {label: warehouse}, {label: consume}]
+  elements:
+    - {tf: google_storage_bucket, name: staging-bucket, in: group:ingest}
+    - {tf: google_workflows_workflow, name: dw-load-workflow, in: group:ingest}
+    - {tf: google_cloud_scheduler_job, name: dw-refresh-schedule, in: group:ingest}
+    - {tf: google_bigquery_dataset, name: dw-raw-dataset, in: group:warehouse}
+    - {tf: google_bigquery_dataset, name: dw-curated-dataset, in: group:warehouse}
+    - {tf: google_bigquery_table, name: orders-fact-table, in: group:warehouse}
+    - {tf: google_bigquery_routine, name: build-views-procedure, in: group:warehouse}
+    - {tf: google_looker_instance, name: warehouse-looker, in: group:consume}
+  actors: [users]
+  flows:
+    - {from: dw-refresh-schedule, to: dw-load-workflow, label: cron trigger, step: 1}
+    - {from: dw-load-workflow, to: staging-bucket, label: list source files, step: 2}
+    - {from: dw-load-workflow, to: dw-raw-dataset, label: BigQuery load jobs, step: 3}
+    - {from: dw-load-workflow, to: build-views-procedure, label: CALL procedure, step: 4}
+    - {from: build-views-procedure, to: dw-curated-dataset, label: create tables and ML model, step: 5}
+    - {from: warehouse-looker, to: orders-fact-table, label: query, step: 6}
+    - {from: users, to: warehouse-looker, label: dashboards, step: 7}
+
+- slug: dataform-elt-bigquery
+  title: ELT in BigQuery with Dataform and scheduled workflows
+  category: data
+  tags: [elt, dataform, bigquery, sqlx, scheduled queries, looker]
+  source: https://docs.cloud.google.com/dataform/docs/overview
+  description: Raw data is loaded into BigQuery staging datasets from Cloud Storage and BigQuery Data Transfer Service, and a Dataform repository of SQLX definitions compiles into a dependency tree of tables, views and assertions executed inside BigQuery. A Dataform workflow configuration runs the release on a schedule and Looker models the resulting marts for business users.
+  containers:
+    - project: analytics
+      region: europe-west1
+      groups: [{label: load}, {label: transform}, {label: serve}]
+  elements:
+    - {tf: google_storage_bucket, name: raw-export-bucket, in: group:load}
+    - {tf: google_bigquery_data_transfer_config, name: saas-transfer, in: group:load}
+    - {tf: google_bigquery_dataset, name: staging-dataset, in: group:load}
+    - {tf: google_dataform_repository, name: analytics-dataform-repo, in: group:transform}
+    - {tf: google_dataform_repository_release_config, name: prod-release, in: group:transform}
+    - {tf: google_dataform_repository_workflow_config, name: nightly-run, in: group:transform}
+    - {tf: google_bigquery_dataset, name: marts-dataset, in: group:serve}
+    - {tf: google_bigquery_table, name: revenue-mart-table, in: group:serve}
+    - {tf: google_looker_instance, name: analytics-looker, in: group:serve}
+  actors: [saas, users]
+  flows:
+    - {from: saas, to: saas-transfer, label: API extract, step: 1}
+    - {from: saas-transfer, to: staging-dataset, label: load, step: 2}
+    - {from: raw-export-bucket, to: staging-dataset, label: load CSV/Parquet, step: 3}
+    - {from: nightly-run, to: prod-release, label: run compiled release, step: 4}
+    - {from: prod-release, to: analytics-dataform-repo, label: compile SQLX, step: 5}
+    - {from: nightly-run, to: staging-dataset, label: read sources, step: 6}
+    - {from: nightly-run, to: marts-dataset, label: create tables, views, assertions, step: 7}
+    - {from: analytics-looker, to: revenue-mart-table, label: LookML queries, step: 8}
+    - {from: users, to: analytics-looker, label: explore, step: 9}
+
+- slug: pubsub-dataflow-bigquery-streaming
+  title: Streaming analytics with Pub/Sub, Dataflow and BigQuery
+  category: analytics-bi
+  tags: [streaming, pub/sub, dataflow, bigquery, dead letter]
+  source: https://docs.cloud.google.com/dataflow/docs/tutorials/dataflow-stream-to-bigquery
+  description: Producers publish JSON events to a Pub/Sub topic and a Dataflow streaming job reads them, applies a user-defined transform, and writes rows to a BigQuery table with the Storage Write API. Records that fail parsing are routed to a dead-letter BigQuery table, and the raw stream is optionally archived to Cloud Storage.
+  containers:
+    - project: streaming
+      region: us-central1
+      groups: [{label: ingest}, {label: process}, {label: store}]
+  elements:
+    - {tf: google_pubsub_topic, name: events-topic, in: group:ingest}
+    - {tf: google_pubsub_subscription, name: events-dataflow-sub, in: group:ingest}
+    - {tf: google_dataflow_flex_template_job, name: pubsub-to-bq-job, in: group:process}
+    - {tf: google_storage_bucket, name: dataflow-temp-bucket, in: group:process}
+    - {tf: google_bigquery_dataset, name: events-dataset, in: group:store}
+    - {tf: google_bigquery_table, name: events-table, in: group:store}
+    - {tf: google_bigquery_table, name: events-deadletter-table, in: group:store}
+    - {tf: google_looker_instance, name: events-looker, in: group:store}
+  actors: [device, users]
+  flows:
+    - {from: device, to: events-topic, label: publish JSON events, step: 1}
+    - {from: events-topic, to: events-dataflow-sub, label: fan out, step: 2}
+    - {from: events-dataflow-sub, to: pubsub-to-bq-job, label: pull, step: 3}
+    - {from: pubsub-to-bq-job, to: dataflow-temp-bucket, label: staging and temp files, step: 4}
+    - {from: pubsub-to-bq-job, to: events-table, label: Storage Write API, step: 5}
+    - {from: pubsub-to-bq-job, to: events-deadletter-table, label: failed records, step: 6}
+    - {from: events-looker, to: events-dataset, label: query, step: 7}
+    - {from: users, to: events-looker, label: dashboards, step: 8}
+
+- slug: managed-kafka-dataflow-bigquery
+  title: Kafka to BigQuery with Managed Service for Apache Kafka and Dataflow
+  category: data
+  tags: [kafka, managed kafka, dataflow, bigquery, avro]
+  source: https://docs.cloud.google.com/dataflow/docs/guides/templates/provided/kafka-to-bigquery
+  description: Application producers write Avro or JSON records to topics on a Managed Service for Apache Kafka cluster deployed inside a VPC. The Kafka to BigQuery Dataflow template consumes the topics, decodes records against a schema, and writes them to BigQuery tables, sending malformed messages to a dead-letter table.
+  containers:
+    - project: kafka-analytics
+      region: europe-west4
+      vpcs:
+        - name: kafka-vpc
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: kafka-subnet, cidr: 10.20.1.0/24, region: europe-west4}
+            - {name: dataflow-subnet, cidr: 10.20.2.0/24, region: europe-west4}
+  elements:
+    - {tf: google_managed_kafka_cluster, name: events-kafka-cluster, in: subnet:kafka-subnet}
+    - {tf: google_managed_kafka_topic, name: orders-topic, in: subnet:kafka-subnet}
+    - {tf: google_cloud_run_v2_service, name: order-producer-service, in: region}
+    - {tf: google_dataflow_flex_template_job, name: kafka-to-bq-job, in: subnet:dataflow-subnet}
+    - {tf: google_storage_bucket, name: kafka-dataflow-temp-bucket, in: region}
+    - {tf: google_bigquery_dataset, name: orders-dataset, in: region}
+    - {tf: google_bigquery_table, name: orders-table, in: region}
+    - {tf: google_bigquery_table, name: orders-deadletter-table, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: order-producer-service, label: HTTPS orders, step: 1}
+    - {from: order-producer-service, to: orders-topic, label: produce Avro, step: 2}
+    - {from: orders-topic, to: kafka-to-bq-job, label: consume, step: 3}
+    - {from: kafka-to-bq-job, to: kafka-dataflow-temp-bucket, label: temp files, step: 4}
+    - {from: kafka-to-bq-job, to: orders-table, label: write rows, step: 5}
+    - {from: kafka-to-bq-job, to: orders-deadletter-table, label: failed records, step: 6}
+
+- slug: composer-dataflow-batch-etl
+  title: Batch ETL with Cloud Composer and Dataflow templates
+  category: data
+  tags: [batch etl, cloud composer, airflow, dataflow, bigquery]
+  source: https://docs.cloud.google.com/composer/docs/how-to/using/using-dataflow-template-operator
+  description: An Airflow DAG in Cloud Composer waits for input files in a Cloud Storage bucket and launches the GCS Text to BigQuery Dataflow template with a JavaScript UDF and JSON schema stored alongside the data. Dataflow transforms the files and loads them into a BigQuery table, and downstream DAG tasks run BigQuery SQL to build aggregates.
+  containers:
+    - project: batch-etl
+      region: us-central1
+      vpcs:
+        - name: composer-vpc
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: composer-subnet, cidr: 10.30.1.0/24, region: us-central1}
+  elements:
+    - {tf: google_storage_bucket, name: input-files-bucket, in: region}
+    - {tf: google_storage_bucket, name: udf-schema-bucket, in: region}
+    - {tf: google_composer_environment, name: etl-composer-env, in: subnet:composer-subnet}
+    - {tf: google_dataflow_job, name: gcs-text-to-bq-job, in: subnet:composer-subnet}
+    - {tf: google_storage_bucket, name: dataflow-staging-bucket, in: region}
+    - {tf: google_bigquery_dataset, name: etl-dataset, in: region}
+    - {tf: google_bigquery_table, name: transformed-table, in: region}
+    - {tf: google_bigquery_table, name: daily-aggregate-table, in: region}
+  actors: [server]
+  flows:
+    - {from: server, to: input-files-bucket, label: nightly file drop, step: 1}
+    - {from: etl-composer-env, to: input-files-bucket, label: GCS sensor, step: 2}
+    - {from: etl-composer-env, to: gcs-text-to-bq-job, label: DataflowTemplatedJobStartOperator, step: 3}
+    - {from: gcs-text-to-bq-job, to: udf-schema-bucket, label: read UDF and schema, step: 4}
+    - {from: gcs-text-to-bq-job, to: dataflow-staging-bucket, label: staging, step: 5}
+    - {from: gcs-text-to-bq-job, to: transformed-table, label: load rows, step: 6}
+    - {from: etl-composer-env, to: daily-aggregate-table, label: BigQueryInsertJobOperator, step: 7}
+
+- slug: datastream-cdc-to-bigquery
+  title: Change data capture from Cloud SQL to BigQuery with Datastream
+  category: data
+  tags: [cdc, datastream, cloud sql, postgresql, bigquery]
+  source: https://docs.cloud.google.com/datastream/docs/quickstart-replication-to-bigquery
+  description: Datastream reads the PostgreSQL logical replication slot of a Cloud SQL instance through a private connectivity configuration and streams inserts, updates and deletes directly into BigQuery. Destination tables are created automatically per source schema and merged with a configurable staleness, giving near real-time replicas for analytics without a Dataflow pipeline.
+  containers:
+    - project: cdc
+      region: us-central1
+      vpcs:
+        - name: db-vpc
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: db-subnet, cidr: 10.40.1.0/24, region: us-central1}
+            - {name: datastream-subnet, cidr: 10.40.2.0/29, region: us-central1}
+  elements:
+    - {tf: google_sql_database_instance, name: orders-postgres, in: subnet:db-subnet}
+    - {tf: google_datastream_private_connection, name: datastream-private-conn, in: subnet:datastream-subnet}
+    - {tf: google_datastream_connection_profile, name: postgres-source-profile, in: region}
+    - {tf: google_datastream_connection_profile, name: bigquery-dest-profile, in: region}
+    - {tf: google_datastream_stream, name: orders-cdc-stream, in: region}
+    - {tf: google_bigquery_dataset, name: orders-replica-dataset, in: region}
+    - {tf: google_bigquery_table, name: orders-replica-table, in: region}
+  actors: [users, client]
+  flows:
+    - {from: client, to: orders-postgres, label: OLTP writes, step: 1}
+    - {from: orders-cdc-stream, to: postgres-source-profile, label: source, step: 2}
+    - {from: postgres-source-profile, to: datastream-private-conn, label: VPC peering, step: 3}
+    - {from: datastream-private-conn, to: orders-postgres, label: read replication slot, step: 4}
+    - {from: orders-cdc-stream, to: bigquery-dest-profile, label: destination, step: 5}
+    - {from: bigquery-dest-profile, to: orders-replica-table, label: merge CDC events, step: 6}
+    - {from: users, to: orders-replica-dataset, label: analytics queries, step: 7}
+
+- slug: datastream-dataflow-cdc-analytics
+  title: CDC analytics with Datastream, Cloud Storage and Dataflow templates
+  category: data
+  tags: [cdc, datastream, dataflow template, pub/sub, cloud storage, bigquery]
+  source: https://docs.cloud.google.com/datastream/docs/implementing-datastream-dataflow-analytics
+  description: Datastream captures MySQL change events and writes them as Avro files to a Cloud Storage bucket whose object notifications publish to Pub/Sub. The Datastream to BigQuery Dataflow template consumes those notifications, loads change events into staging tables and merges them into replica tables, allowing custom transformations in the pipeline.
+  containers:
+    - project: cdc-dataflow
+      region: us-central1
+      vpcs:
+        - name: mysql-vpc
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: mysql-subnet, cidr: 10.50.1.0/24, region: us-central1}
+  elements:
+    - {tf: google_sql_database_instance, name: source-mysql, in: subnet:mysql-subnet}
+    - {tf: google_datastream_connection_profile, name: mysql-source-profile, in: region}
+    - {tf: google_datastream_stream, name: mysql-to-gcs-stream, in: region}
+    - {tf: google_storage_bucket, name: cdc-avro-bucket, in: region}
+    - {tf: google_storage_notification, name: cdc-object-notification, in: region}
+    - {tf: google_pubsub_topic, name: cdc-files-topic, in: region}
+    - {tf: google_pubsub_subscription, name: cdc-files-sub, in: region}
+    - {tf: google_dataflow_flex_template_job, name: datastream-to-bq-job, in: region}
+    - {tf: google_bigquery_dataset, name: cdc-staging-dataset, in: region}
+    - {tf: google_bigquery_dataset, name: cdc-replica-dataset, in: region}
+  actors: [client]
+  flows:
+    - {from: client, to: source-mysql, label: transactions, step: 1}
+    - {from: mysql-to-gcs-stream, to: mysql-source-profile, label: binlog read, step: 2}
+    - {from: mysql-source-profile, to: source-mysql, label: CDC, step: 3}
+    - {from: mysql-to-gcs-stream, to: cdc-avro-bucket, label: write Avro files, step: 4}
+    - {from: cdc-avro-bucket, to: cdc-files-topic, label: object finalize, step: 5, link: google_storage_notification}
+    - {from: cdc-files-topic, to: cdc-files-sub, label: notifications, step: 6}
+    - {from: cdc-files-sub, to: datastream-to-bq-job, label: pull file events, step: 7}
+    - {from: datastream-to-bq-job, to: cdc-staging-dataset, label: load change events, step: 8}
+    - {from: datastream-to-bq-job, to: cdc-replica-dataset, label: MERGE replicas, step: 9}
+
+- slug: data-fusion-visual-etl-pipeline
+  title: Visual ETL pipeline with Cloud Data Fusion
+  category: data
+  tags: [data fusion, cdap, etl, wrangler, dataproc, bigquery]
+  source: https://docs.cloud.google.com/data-fusion/docs/tutorials/targeting-campaign-pipeline
+  description: A Cloud Data Fusion instance hosts a visual CDAP pipeline that reads customer CSV files from Cloud Storage, cleans them with Wrangler transformations, joins them against a lookup table in BigQuery and writes the result to a BigQuery output table. Each pipeline run executes on an ephemeral Dataproc cluster provisioned by Data Fusion.
+  containers:
+    - project: data-fusion
+      region: us-central1
+      vpcs:
+        - name: fusion-vpc
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: dataproc-subnet, cidr: 10.60.1.0/24, region: us-central1}
+  elements:
+    - {tf: google_storage_bucket, name: customers-csv-bucket, in: region}
+    - {tf: google_data_fusion_instance, name: etl-fusion-instance, in: region}
+    - {tf: google_dataproc_cluster, name: fusion-ephemeral-dataproc, in: subnet:dataproc-subnet}
+    - {tf: google_bigquery_dataset, name: campaign-dataset, in: region}
+    - {tf: google_bigquery_table, name: state-abbreviations-table, in: region}
+    - {tf: google_bigquery_table, name: campaign-targets-table, in: region}
+    - {tf: google_storage_bucket, name: fusion-temp-bucket, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: etl-fusion-instance, label: design pipeline in Studio, step: 1}
+    - {from: etl-fusion-instance, to: fusion-ephemeral-dataproc, label: provision and run, step: 2}
+    - {from: fusion-ephemeral-dataproc, to: customers-csv-bucket, label: read CSV, step: 3}
+    - {from: fusion-ephemeral-dataproc, to: state-abbreviations-table, label: join lookup, step: 4}
+    - {from: fusion-ephemeral-dataproc, to: fusion-temp-bucket, label: staging, step: 5}
+    - {from: fusion-ephemeral-dataproc, to: campaign-targets-table, label: write output, step: 6}
+
+- slug: dataplex-data-governance
+  title: Data governance with Dataplex lakes, zones and data quality scans
+  category: data
+  tags: [dataplex, governance, data catalog, data quality, biglake]
+  source: https://docs.cloud.google.com/dataplex/docs/introduction
+  description: A Dataplex lake groups Cloud Storage buckets and BigQuery datasets into raw and curated zones as assets, automatically discovering schemas and registering metadata in the catalog. Data profiling and data quality scans run on a schedule against curated tables, and Dataplex-managed IAM applies consistent access policies across the underlying storage.
+  containers:
+    - project: governance
+      region: us-central1
+      groups: [{label: raw zone}, {label: curated zone}, {label: governance}]
+  elements:
+    - {tf: google_storage_bucket, name: raw-zone-bucket, in: group:raw zone}
+    - {tf: google_bigquery_dataset, name: curated-zone-dataset, in: group:curated zone}
+    - {tf: google_bigquery_table, name: customers-curated-table, in: group:curated zone}
+    - {tf: google_dataplex_lake, name: enterprise-lake, in: group:governance}
+    - {tf: google_dataplex_zone, name: raw-dataplex-zone, in: group:governance}
+    - {tf: google_dataplex_zone, name: curated-dataplex-zone, in: group:governance}
+    - {tf: google_dataplex_asset, name: raw-bucket-asset, in: group:governance}
+    - {tf: google_dataplex_asset, name: curated-dataset-asset, in: group:governance}
+    - {tf: google_dataplex_datascan, name: customers-quality-scan, in: group:governance}
+    - {tf: google_data_catalog_tag_template, name: data-owner-tag-template, in: group:governance}
+  actors: [users]
+  flows:
+    - {from: raw-bucket-asset, to: raw-zone-bucket, label: attach asset, step: 1, link: google_dataplex_asset}
+    - {from: curated-dataset-asset, to: curated-zone-dataset, label: attach asset, step: 2, link: google_dataplex_asset}
+    - {from: enterprise-lake, to: raw-dataplex-zone, label: discovery, step: 3}
+    - {from: enterprise-lake, to: curated-dataplex-zone, label: discovery, step: 4}
+    - {from: customers-quality-scan, to: customers-curated-table, label: scheduled data quality rules, step: 5}
+    - {from: data-owner-tag-template, to: customers-curated-table, label: business metadata tags, step: 6}
+    - {from: users, to: enterprise-lake, label: search catalog, step: 7}
+
+- slug: bigquery-data-mesh-domains
+  title: Data mesh with BigQuery domain projects and central governance
+  category: data
+  tags: [data mesh, bigquery, dataplex, domains, data products]
+  source: https://docs.cloud.google.com/architecture/data-mesh
+  description: Domain teams own producer projects where they ingest and curate data products in BigQuery, while a central governance project runs Dataplex to catalog, classify and apply policies across domains. Consumer projects query authorized views and shared datasets without copying data, and a platform team provides the common infrastructure and Pub/Sub ingestion.
+  containers:
+    - project: sales-domain
+      region: europe-west1
+    - project: marketing-domain
+      region: europe-west1
+    - project: central-governance
+      region: europe-west1
+    - project: consumer-analytics
+      region: europe-west1
+  elements:
+    - {tf: google_pubsub_topic, name: sales-events-topic, in: project:sales-domain}
+    - {tf: google_dataflow_job, name: sales-ingest-job, in: project:sales-domain}
+    - {tf: google_bigquery_dataset, name: sales-product-dataset, in: project:sales-domain}
+    - {tf: google_storage_bucket, name: marketing-raw-bucket, in: project:marketing-domain}
+    - {tf: google_bigquery_dataset, name: marketing-product-dataset, in: project:marketing-domain}
+    - {tf: google_dataplex_lake, name: mesh-catalog-lake, in: project:central-governance}
+    - {tf: google_dataplex_asset, name: sales-product-asset, in: project:central-governance}
+    - {tf: google_dataplex_asset, name: marketing-product-asset, in: project:central-governance}
+    - {tf: google_bigquery_dataset, name: consumer-views-dataset, in: project:consumer-analytics}
+    - {tf: google_looker_instance, name: consumer-looker, in: project:consumer-analytics}
+  actors: [users, device]
+  flows:
+    - {from: device, to: sales-events-topic, label: events, step: 1}
+    - {from: sales-events-topic, to: sales-ingest-job, label: stream, step: 2}
+    - {from: sales-ingest-job, to: sales-product-dataset, label: write product tables, step: 3}
+    - {from: marketing-raw-bucket, to: marketing-product-dataset, label: load, step: 4}
+    - {from: sales-product-asset, to: sales-product-dataset, label: catalog, step: 5, link: google_dataplex_asset}
+    - {from: marketing-product-asset, to: marketing-product-dataset, label: catalog, step: 6, link: google_dataplex_asset}
+    - {from: consumer-views-dataset, to: sales-product-dataset, label: authorized views, step: 7}
+    - {from: consumer-views-dataset, to: marketing-product-dataset, label: authorized views, step: 8}
+    - {from: consumer-looker, to: consumer-views-dataset, label: query, step: 9}
+    - {from: users, to: consumer-looker, label: explore, step: 10}
+
+- slug: analytics-hub-data-sharing
+  title: Cross-organization data sharing with BigQuery Analytics Hub
+  category: data
+  tags: [analytics hub, bigquery sharing, data exchange, linked dataset]
+  source: https://docs.cloud.google.com/bigquery/docs/analytics-hub-introduction
+  description: A publisher project curates a BigQuery dataset and a Pub/Sub topic and lists them in an Analytics Hub data exchange. Subscriber projects create linked datasets and linked subscriptions that read the shared data in place, so publishers keep a single copy while subscribers pay only for their own queries.
+  containers:
+    - project: data-publisher
+      region: us
+    - project: data-subscriber
+      region: us
+  elements:
+    - {tf: google_bigquery_dataset, name: curated-market-dataset, in: project:data-publisher}
+    - {tf: google_bigquery_table, name: market-prices-table, in: project:data-publisher}
+    - {tf: google_pubsub_topic, name: market-ticks-topic, in: project:data-publisher}
+    - {tf: google_bigquery_analytics_hub_data_exchange, name: market-data-exchange, in: project:data-publisher}
+    - {tf: google_bigquery_analytics_hub_listing, name: market-prices-listing, in: project:data-publisher}
+    - {tf: google_bigquery_analytics_hub_listing, name: market-ticks-listing, in: project:data-publisher}
+    - {tf: google_bigquery_dataset, name: linked-market-dataset, in: project:data-subscriber}
+    - {tf: google_pubsub_subscription, name: linked-ticks-subscription, in: project:data-subscriber}
+    - {tf: google_bigquery_dataset, name: subscriber-analytics-dataset, in: project:data-subscriber}
+  actors: [users]
+  flows:
+    - {from: market-prices-listing, to: curated-market-dataset, label: list dataset, step: 1}
+    - {from: market-ticks-listing, to: market-ticks-topic, label: list topic, step: 2}
+    - {from: market-data-exchange, to: market-prices-listing, label: contains, step: 3}
+    - {from: linked-market-dataset, to: market-prices-listing, label: subscribe, step: 4, link: google_bigquery_analytics_hub_listing_subscription}
+    - {from: linked-ticks-subscription, to: market-ticks-listing, label: subscribe, step: 5, link: google_bigquery_analytics_hub_listing_subscription}
+    - {from: subscriber-analytics-dataset, to: linked-market-dataset, label: join shared data, step: 6}
+    - {from: users, to: subscriber-analytics-dataset, label: query, step: 7}
+
+- slug: security-log-analytics-bigquery
+  title: Log analytics with aggregated Cloud Logging sinks to BigQuery
+  category: observability
+  tags: [cloud logging, log sink, bigquery, security analytics, looker studio]
+  source: https://docs.cloud.google.com/architecture/exporting-stackdriver-logging-for-security-and-access-analytics
+  description: An aggregated log sink routes audit, network and platform logs from all projects into a partitioned BigQuery dataset in a dedicated analytics project, while a Cloud Storage sink keeps a long-term archive. Scheduled queries and Community Security Analytics SQL detect anomalies over the log tables, and Looker Studio dashboards visualize the results.
+  containers:
+    - project: workload-a
+      region: us-central1
+    - project: workload-b
+      region: us-central1
+    - project: log-analytics
+      region: us-central1
+  elements:
+    - {tf: google_cloud_run_v2_service, name: api-service, in: project:workload-a}
+    - {tf: google_sql_database_instance, name: app-database, in: project:workload-b}
+    - {tf: google_logging_project_sink, name: audit-logs-bq-sink, in: project:log-analytics}
+    - {tf: google_logging_project_sink, name: archive-gcs-sink, in: project:log-analytics}
+    - {tf: google_bigquery_dataset, name: security-logs-dataset, in: project:log-analytics}
+    - {tf: google_bigquery_table, name: cloudaudit-activity-table, in: project:log-analytics}
+    - {tf: google_storage_bucket, name: logs-archive-bucket, in: project:log-analytics}
+    - {tf: google_bigquery_data_transfer_config, name: threat-detection-scheduled-query, in: project:log-analytics}
+    - {tf: google_bigquery_table, name: findings-table, in: project:log-analytics}
+  actors: [users]
+  flows:
+    - {from: api-service, to: audit-logs-bq-sink, label: Cloud Audit Logs, step: 1}
+    - {from: app-database, to: audit-logs-bq-sink, label: data access logs, step: 2}
+    - {from: audit-logs-bq-sink, to: cloudaudit-activity-table, label: stream partitioned rows, step: 3}
+    - {from: archive-gcs-sink, to: logs-archive-bucket, label: hourly batches, step: 4}
+    - {from: threat-detection-scheduled-query, to: security-logs-dataset, label: CSA SQL detections, step: 5}
+    - {from: threat-detection-scheduled-query, to: findings-table, label: write findings, step: 6}
+    - {from: users, to: findings-table, label: Looker Studio dashboards, step: 7}
+
+- slug: ecommerce-clickstream-streaming
+  title: Ecommerce clickstream analytics with Dataflow, BigQuery and Bigtable
+  category: analytics-bi
+  tags: [clickstream, ecommerce, pub/sub, dataflow, bigquery, bigtable]
+  source: https://docs.cloud.google.com/dataflow/docs/tutorials/ecommerce-java
+  description: A web store publishes clickstream and transaction events to Pub/Sub, and a Dataflow streaming pipeline validates the JSON, enriches it with side-input lookup tables, and writes analytical rows to BigQuery while serving per-session aggregates to Bigtable for low-latency personalization. Invalid events land in a dead-letter table and Looker Studio reports on the warehouse.
+  containers:
+    - project: ecommerce
+      region: us-central1
+      groups: [{label: front end}, {label: streaming}, {label: sinks}]
+  elements:
+    - {tf: google_cloud_run_v2_service, name: web-store-service, in: group:front end}
+    - {tf: google_pubsub_topic, name: clickstream-topic, in: group:streaming}
+    - {tf: google_pubsub_topic, name: transactions-topic, in: group:streaming}
+    - {tf: google_pubsub_subscription, name: clickstream-sub, in: group:streaming}
+    - {tf: google_dataflow_job, name: ecommerce-streaming-job, in: group:streaming}
+    - {tf: google_bigquery_dataset, name: ecommerce-dataset, in: group:sinks}
+    - {tf: google_bigquery_table, name: clickstream-table, in: group:sinks}
+    - {tf: google_bigquery_table, name: clickstream-deadletter-table, in: group:sinks}
+    - {tf: google_bigtable_instance, name: session-store-bigtable, in: group:sinks}
+    - {tf: google_bigtable_table, name: session-aggregates-table, in: group:sinks}
+  actors: [users]
+  flows:
+    - {from: users, to: web-store-service, label: browse and buy, step: 1}
+    - {from: web-store-service, to: clickstream-topic, label: page view events, step: 2}
+    - {from: web-store-service, to: transactions-topic, label: order events, step: 3}
+    - {from: clickstream-topic, to: clickstream-sub, label: fan out, step: 4}
+    - {from: clickstream-sub, to: ecommerce-streaming-job, label: pull, step: 5}
+    - {from: transactions-topic, to: ecommerce-streaming-job, label: pull, step: 6}
+    - {from: ecommerce-streaming-job, to: clickstream-table, label: enriched rows, step: 7}
+    - {from: ecommerce-streaming-job, to: clickstream-deadletter-table, label: invalid JSON, step: 8}
+    - {from: ecommerce-streaming-job, to: session-aggregates-table, label: session aggregates, step: 9}
+    - {from: web-store-service, to: session-store-bigtable, label: personalization lookups, step: 10}
+
+- slug: realtime-dashboards-bigquery-subscription
+  title: Real-time dashboards with Pub/Sub BigQuery subscriptions and BI Engine
+  category: analytics-bi
+  tags: [real-time dashboard, pub/sub, bigquery subscription, bi engine, looker studio]
+  source: https://docs.cloud.google.com/pubsub/docs/bigquery
+  description: A Pub/Sub BigQuery subscription writes messages directly into a BigQuery table using the Storage Write API with no intermediate pipeline, and a dead-letter topic captures messages that cannot be written. A BI Engine reservation accelerates the dashboard queries and Looker Studio refreshes charts against a materialized view over the live table.
+  containers:
+    - project: realtime-bi
+      region: us-central1
+  elements:
+    - {tf: google_pubsub_schema, name: metrics-avro-schema, in: region}
+    - {tf: google_pubsub_topic, name: metrics-topic, in: region}
+    - {tf: google_pubsub_subscription, name: metrics-bigquery-sub, in: region}
+    - {tf: google_pubsub_topic, name: metrics-deadletter-topic, in: region}
+    - {tf: google_bigquery_dataset, name: realtime-dataset, in: region}
+    - {tf: google_bigquery_table, name: metrics-live-table, in: region}
+    - {tf: google_bigquery_table, name: metrics-materialized-view, in: region}
+    - {tf: google_bigquery_bi_reservation, name: dashboard-bi-engine, in: region}
+    - {tf: google_looker_instance, name: realtime-looker, in: region}
+  actors: [device, users]
+  flows:
+    - {from: device, to: metrics-topic, label: publish metrics, step: 1}
+    - {from: metrics-avro-schema, to: metrics-topic, label: schema validation, step: 2}
+    - {from: metrics-topic, to: metrics-bigquery-sub, label: deliver, step: 3}
+    - {from: metrics-bigquery-sub, to: metrics-live-table, label: Storage Write API, step: 4}
+    - {from: metrics-bigquery-sub, to: metrics-deadletter-topic, label: failed writes, step: 5}
+    - {from: metrics-live-table, to: metrics-materialized-view, label: incremental refresh, step: 6}
+    - {from: dashboard-bi-engine, to: realtime-dataset, label: in-memory acceleration, step: 7}
+    - {from: realtime-looker, to: metrics-materialized-view, label: dashboard queries, step: 8}
+    - {from: users, to: realtime-looker, label: live dashboards, step: 9}
+
+- slug: bigquery-ml-feature-pipeline
+  title: ML feature pipelines with BigQuery ML and Vertex AI
+  category: ml
+  tags: [bigquery ml, feature engineering, scheduled queries, vertex ai, model registry]
+  source: https://docs.cloud.google.com/bigquery/docs/bqml-introduction
+  description: Scheduled queries transform raw event tables into a feature dataset in BigQuery, and CREATE MODEL statements train BigQuery ML models in SQL directly on those features. Trained models are registered in Vertex AI Model Registry and deployed to an endpoint for online prediction, while batch predictions run with ML.PREDICT back into BigQuery tables.
+  containers:
+    - project: ml-analytics
+      region: us-central1
+      groups: [{label: features}, {label: training}, {label: serving}]
+  elements:
+    - {tf: google_storage_bucket, name: raw-events-bucket, in: group:features}
+    - {tf: google_bigquery_dataset, name: raw-events-dataset, in: group:features}
+    - {tf: google_bigquery_data_transfer_config, name: feature-scheduled-query, in: group:features}
+    - {tf: google_bigquery_dataset, name: features-dataset, in: group:features}
+    - {tf: google_bigquery_table, name: customer-features-table, in: group:features}
+    - {tf: google_bigquery_routine, name: train-churn-model-procedure, in: group:training}
+    - {tf: google_bigquery_table, name: churn-predictions-table, in: group:training}
+    - {tf: google_vertex_ai_endpoint, name: churn-online-endpoint, in: group:serving}
+    - {tf: google_cloud_run_v2_service, name: churn-api-service, in: group:serving}
+  actors: [users, client]
+  flows:
+    - {from: raw-events-bucket, to: raw-events-dataset, label: load, step: 1}
+    - {from: feature-scheduled-query, to: raw-events-dataset, label: read events, step: 2}
+    - {from: feature-scheduled-query, to: customer-features-table, label: write features, step: 3}
+    - {from: train-churn-model-procedure, to: customer-features-table, label: CREATE MODEL, step: 4}
+    - {from: train-churn-model-procedure, to: churn-predictions-table, label: ML.PREDICT batch, step: 5}
+    - {from: train-churn-model-procedure, to: churn-online-endpoint, label: register and deploy to Vertex AI, step: 6}
+    - {from: churn-api-service, to: churn-online-endpoint, label: online prediction, step: 7}
+    - {from: client, to: churn-api-service, label: HTTPS, step: 8}
+    - {from: users, to: churn-predictions-table, label: analyze predictions, step: 9}
+
+- slug: bigtable-time-series-ingestion
+  title: Time series ingestion into Bigtable with Dataflow
+  category: database
+  tags: [bigtable, time series, iot, dataflow, pub/sub, bigquery]
+  source: https://docs.cloud.google.com/bigtable/docs/schema-design-time-series
+  description: Sensor readings are published to Pub/Sub and a Dataflow streaming job writes them into a Bigtable table using a time-bucketed row key design that spreads writes and keeps recent measurements adjacent. Serving applications read the latest rows from Bigtable with single-digit millisecond latency, and a nightly Dataflow batch exports history to BigQuery for analytics.
+  containers:
+    - project: timeseries
+      region: us-east1
+      groups: [{label: ingest}, {label: store}, {label: analyze}]
+  elements:
+    - {tf: google_pubsub_topic, name: sensor-readings-topic, in: group:ingest}
+    - {tf: google_pubsub_subscription, name: sensor-readings-sub, in: group:ingest}
+    - {tf: google_dataflow_job, name: readings-to-bigtable-job, in: group:ingest}
+    - {tf: google_bigtable_instance, name: timeseries-bigtable, in: group:store}
+    - {tf: google_bigtable_table, name: readings-table, in: group:store}
+    - {tf: google_cloud_run_v2_service, name: readings-api-service, in: group:store}
+    - {tf: google_dataflow_job, name: bigtable-to-bq-export-job, in: group:analyze}
+    - {tf: google_bigquery_dataset, name: readings-history-dataset, in: group:analyze}
+    - {tf: google_cloud_scheduler_job, name: nightly-export-schedule, in: group:analyze}
+  actors: [device, users]
+  flows:
+    - {from: device, to: sensor-readings-topic, label: publish readings, step: 1}
+    - {from: sensor-readings-topic, to: sensor-readings-sub, label: fan out, step: 2}
+    - {from: sensor-readings-sub, to: readings-to-bigtable-job, label: pull, step: 3}
+    - {from: readings-to-bigtable-job, to: readings-table, label: write time-bucketed rows, step: 4}
+    - {from: readings-api-service, to: readings-table, label: read latest rows, step: 5}
+    - {from: users, to: readings-api-service, label: HTTPS, step: 6}
+    - {from: nightly-export-schedule, to: bigtable-to-bq-export-job, label: launch batch, step: 7}
+    - {from: bigtable-to-bq-export-job, to: readings-table, label: scan, step: 8}
+    - {from: bigtable-to-bq-export-job, to: readings-history-dataset, label: load history, step: 9}
+
+- slug: spanner-change-streams-bigquery
+  title: Spanner change streams to BigQuery for operational analytics
+  category: database
+  tags: [spanner, change streams, dataflow template, bigquery, cdc]
+  source: https://docs.cloud.google.com/dataflow/docs/guides/templates/provided/cloud-spanner-change-streams-to-bigquery
+  description: A change stream on a Spanner database records every insert, update and delete, and the Spanner change streams to BigQuery Dataflow template reads it, converts change records into rows with commit timestamp and modification type, and appends them to BigQuery tables. A separate Spanner metadata database tracks partition progress and failed records are written to a Cloud Storage dead-letter path.
+  containers:
+    - project: spanner-analytics
+      region: us-central1
+      groups: [{label: oltp}, {label: pipeline}, {label: analytics}]
+  elements:
+    - {tf: google_spanner_instance, name: orders-spanner-instance, in: group:oltp}
+    - {tf: google_spanner_database, name: orders-spanner-db, in: group:oltp}
+    - {tf: google_spanner_database, name: changestream-metadata-db, in: group:oltp}
+    - {tf: google_cloud_run_v2_service, name: orders-api-service, in: group:oltp}
+    - {tf: google_dataflow_flex_template_job, name: spanner-cdc-to-bq-job, in: group:pipeline}
+    - {tf: google_storage_bucket, name: cdc-deadletter-bucket, in: group:pipeline}
+    - {tf: google_bigquery_dataset, name: orders-changelog-dataset, in: group:analytics}
+    - {tf: google_bigquery_table, name: orders-changelog-table, in: group:analytics}
+    - {tf: google_looker_instance, name: ops-looker, in: group:analytics}
+  actors: [client, users]
+  flows:
+    - {from: client, to: orders-api-service, label: HTTPS, step: 1}
+    - {from: orders-api-service, to: orders-spanner-db, label: transactions, step: 2}
+    - {from: orders-spanner-db, to: spanner-cdc-to-bq-job, label: read change stream, step: 3}
+    - {from: spanner-cdc-to-bq-job, to: changestream-metadata-db, label: partition metadata, step: 4}
+    - {from: spanner-cdc-to-bq-job, to: orders-changelog-table, label: append change records, step: 5}
+    - {from: spanner-cdc-to-bq-job, to: cdc-deadletter-bucket, label: failed records, step: 6}
+    - {from: ops-looker, to: orders-changelog-dataset, label: query, step: 7}
+    - {from: users, to: ops-looker, label: operational dashboards, step: 8}
+
+- slug: storage-transfer-service-migration
+  title: Large dataset migration with Storage Transfer Service
+  category: migration
+  tags: [storage transfer service, migration, s3, on-premises, cloud storage, bigquery]
+  source: https://docs.cloud.google.com/architecture/migration-to-google-cloud-transferring-your-large-datasets
+  description: Storage Transfer Service jobs copy objects from an on-premises file system through transfer agents and from Amazon S3 buckets over the internet or Interconnect into a Cloud Storage landing bucket, with checksums validating each object. Pub/Sub notifications report job completion, a Cloud Function moves validated data to a curated bucket, and BigQuery loads it for analytics.
+  containers:
+    - datacenter: on-premises
+    - project: migration
+      region: us-central1
+  elements:
+    - {tf: google_storage_transfer_job, name: onprem-posix-transfer, in: region}
+    - {tf: google_storage_transfer_job, name: s3-to-gcs-transfer, in: region}
+    - {tf: google_storage_bucket, name: landing-bucket, in: region}
+    - {tf: google_storage_bucket, name: curated-bucket, in: region}
+    - {tf: google_pubsub_topic, name: transfer-events-topic, in: region}
+    - {tf: google_cloudfunctions2_function, name: validate-and-move-function, in: region}
+    - {tf: google_bigquery_dataset, name: migrated-dataset, in: region}
+    - {tf: google_secret_manager_secret, name: aws-credentials-secret, in: region}
+  actors: [server, saas, users]
+  flows:
+    - {from: server, to: onprem-posix-transfer, label: transfer agents read NFS, step: 1}
+    - {from: onprem-posix-transfer, to: landing-bucket, label: parallel upload, step: 2}
+    - {from: s3-to-gcs-transfer, to: aws-credentials-secret, label: AWS access key, step: 3}
+    - {from: saas, to: s3-to-gcs-transfer, label: S3 bucket listing, step: 4}
+    - {from: s3-to-gcs-transfer, to: landing-bucket, label: copy objects, step: 5}
+    - {from: landing-bucket, to: transfer-events-topic, label: transfer complete notification, step: 6}
+    - {from: transfer-events-topic, to: validate-and-move-function, label: trigger, step: 7}
+    - {from: validate-and-move-function, to: curated-bucket, label: checksum and move, step: 8}
+    - {from: curated-bucket, to: migrated-dataset, label: BigQuery load, step: 9}
+    - {from: users, to: migrated-dataset, label: query, step: 10}
+
+- slug: transfer-appliance-offline-migration
+  title: Offline petabyte migration with Transfer Appliance
+  category: migration
+  tags: [transfer appliance, offline migration, cloud storage, dataproc, kms]
+  source: https://docs.cloud.google.com/transfer-appliance/docs/4.0/overview
+  description: An on-premises team copies data to a Transfer Appliance over NFS or SCP; the appliance encrypts it with AES-256 under a customer-managed Cloud KMS key and is shipped to Google, where the data is uploaded to the customer's Cloud Storage bucket. Once landed, a Dataproc cluster and BigQuery load jobs process the archive into analytics-ready tables.
+  containers:
+    - datacenter: on-premises
+    - project: appliance-migration
+      region: us-central1
+  elements:
+    - {tf: google_kms_key_ring, name: appliance-key-ring, in: region}
+    - {tf: google_kms_crypto_key, name: appliance-cmek, in: region}
+    - {tf: google_storage_bucket, name: appliance-landing-bucket, in: region}
+    - {tf: google_storage_bucket, name: processed-bucket, in: region}
+    - {tf: google_dataproc_cluster, name: archive-processing-cluster, in: region}
+    - {tf: google_bigquery_dataset, name: archive-dataset, in: region}
+    - {tf: google_bigquery_table, name: archive-records-table, in: region}
+  actors: [server, users]
+  flows:
+    - {from: server, to: datacenter, label: copy to appliance via NFS/SCP, step: 1}
+    - {from: datacenter, to: appliance-landing-bucket, label: ship appliance, Google uploads, step: 2}
+    - {from: appliance-cmek, to: appliance-landing-bucket, label: decrypt with CMEK, step: 3}
+    - {from: archive-processing-cluster, to: appliance-landing-bucket, label: read archive, step: 4}
+    - {from: archive-processing-cluster, to: processed-bucket, label: write Parquet, step: 5}
+    - {from: processed-bucket, to: archive-records-table, label: BigQuery load, step: 6}
+    - {from: users, to: archive-dataset, label: query, step: 7}
+
+- slug: vertex-ai-pipelines-data-prep
+  title: Data preparation pipelines with Vertex AI Pipelines and Dataflow
+  category: ml
+  tags: [vertex ai pipelines, kubeflow, dataflow, bigquery, feature engineering, metadata]
+  source: https://docs.cloud.google.com/vertex-ai/docs/pipelines/introduction
+  description: A Kubeflow pipeline compiled to Vertex AI Pipelines pulls raw data from BigQuery and Cloud Storage, launches a Dataflow job to validate and transform it at scale, and materializes a training dataset in Vertex AI. Every artifact and execution is tracked in Vertex ML Metadata, pipeline components run from images in Artifact Registry, and Cloud Scheduler triggers recurring runs.
+  containers:
+    - project: ml-platform
+      region: us-central1
+      groups: [{label: sources}, {label: pipeline}, {label: outputs}]
+  elements:
+    - {tf: google_bigquery_dataset, name: raw-training-dataset, in: group:sources}
+    - {tf: google_storage_bucket, name: raw-images-bucket, in: group:sources}
+    - {tf: google_cloud_scheduler_job, name: weekly-pipeline-trigger, in: group:pipeline}
+    - {tf: google_cloudfunctions2_function, name: submit-pipeline-function, in: group:pipeline}
+    - {tf: google_artifact_registry_repository, name: pipeline-components-repo, in: group:pipeline}
+    - {tf: google_dataflow_flex_template_job, name: transform-validate-job, in: group:pipeline}
+    - {tf: google_storage_bucket, name: pipeline-root-bucket, in: group:pipeline}
+    - {tf: google_vertex_ai_metadata_store, name: ml-metadata-store, in: group:outputs}
+    - {tf: google_vertex_ai_dataset, name: prepared-training-dataset, in: group:outputs}
+    - {tf: google_bigquery_dataset, name: features-dataset, in: group:outputs}
+  actors: [users]
+  flows:
+    - {from: weekly-pipeline-trigger, to: submit-pipeline-function, label: cron, step: 1}
+    - {from: submit-pipeline-function, to: pipeline-root-bucket, label: submit compiled pipeline, step: 2}
+    - {from: pipeline-components-repo, to: transform-validate-job, label: component images, step: 3}
+    - {from: transform-validate-job, to: raw-training-dataset, label: read raw rows, step: 4}
+    - {from: transform-validate-job, to: raw-images-bucket, label: read raw files, step: 5}
+    - {from: transform-validate-job, to: features-dataset, label: write features, step: 6}
+    - {from: transform-validate-job, to: prepared-training-dataset, label: import dataset, step: 7}
+    - {from: transform-validate-job, to: ml-metadata-store, label: log artifacts and lineage, step: 8}
+    - {from: users, to: ml-metadata-store, label: inspect lineage, step: 9}
+
+- slug: bigquery-geospatial-analytics
+  title: Geospatial analytics with BigQuery GEOGRAPHY and streaming locations
+  category: analytics-bi
+  tags: [geospatial, bigquery gis, geography, pub/sub, dataflow, looker]
+  source: https://docs.cloud.google.com/bigquery/docs/geospatial-intro
+  description: Vehicle and customer location events stream through Pub/Sub and Dataflow into BigQuery tables with GEOGRAPHY columns, while static boundaries and store locations are loaded from GeoJSON and shapefiles in Cloud Storage. Geography functions such as ST_DWITHIN and ST_CONTAINS join the streams against polygons, and Looker and BigQuery Geo Viz render the results on maps.
+  containers:
+    - project: geo-analytics
+      region: us-central1
+      groups: [{label: ingest}, {label: geospatial warehouse}, {label: visualize}]
+  elements:
+    - {tf: google_pubsub_topic, name: vehicle-locations-topic, in: group:ingest}
+    - {tf: google_dataflow_job, name: locations-to-bq-job, in: group:ingest}
+    - {tf: google_storage_bucket, name: geojson-boundaries-bucket, in: group:ingest}
+    - {tf: google_bigquery_dataset, name: geo-dataset, in: group:geospatial warehouse}
+    - {tf: google_bigquery_table, name: vehicle-positions-table, in: group:geospatial warehouse}
+    - {tf: google_bigquery_table, name: delivery-zones-table, in: group:geospatial warehouse}
+    - {tf: google_bigquery_table, name: store-locations-table, in: group:geospatial warehouse}
+    - {tf: google_bigquery_data_transfer_config, name: zone-metrics-scheduled-query, in: group:geospatial warehouse}
+    - {tf: google_looker_instance, name: geo-looker, in: group:visualize}
+  actors: [device, users]
+  flows:
+    - {from: device, to: vehicle-locations-topic, label: GPS events, step: 1}
+    - {from: vehicle-locations-topic, to: locations-to-bq-job, label: stream, step: 2}
+    - {from: locations-to-bq-job, to: vehicle-positions-table, label: ST_GEOGPOINT rows, step: 3}
+    - {from: geojson-boundaries-bucket, to: delivery-zones-table, label: load GeoJSON, step: 4}
+    - {from: geojson-boundaries-bucket, to: store-locations-table, label: load CSV with WKT, step: 5}
+    - {from: zone-metrics-scheduled-query, to: geo-dataset, label: ST_CONTAINS and ST_DWITHIN joins, step: 6}
+    - {from: geo-looker, to: geo-dataset, label: map visualizations, step: 7}
+    - {from: users, to: geo-looker, label: explore maps, step: 8}

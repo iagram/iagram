@@ -1,0 +1,48 @@
+# Generated from the official reference (https://docs.aws.amazon.com/securityhub/latest/userguide/central-configuration-intro.html); edit freely.
+title: Security Hub central configuration across OUs and Regions
+category: security
+tags:
+- security hub
+- central configuration
+- home region
+- configuration policy
+- organizational unit
+source: https://docs.aws.amazon.com/securityhub/latest/userguide/central-configuration-intro.html
+description: The delegated Security Hub administrator defines configuration policies in a home Region that enable Security Hub, standards and controls on accounts and OUs across linked Regions, preventing
+  configuration drift. Linked Regions send findings to the home Region, which acts as the cross-Region aggregation point for the organization.
+nodes:
+- {id: acct-security-tooling, type: aws.account, name: security-tooling}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}}
+- {id: grp-home-region, type: common.group, name: home region, parent: reg-us-east-1}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-security-tooling, props: {region: eu-west-1}}
+- {id: grp-linked-region, type: common.group, name: linked region, parent: reg-eu-west-1}
+- {id: acct-management, type: aws.account, name: management}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}}
+- {id: grp-workloads-ou, type: common.group, name: Workloads OU, parent: reg-us-east-1-2}
+- {id: acct-prod-workload, type: aws.account, name: prod-workload}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-prod-workload, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: delegated-admin, type: aws.res.aws_securityhub_organization_admin_account, name: delegated-admin, parent: grp-home-region, props: {admin_account_id: changeme}}
+- id: fsbp-policy
+  type: aws.res.aws_securityhub_configuration_policy
+  name: fsbp-policy
+  parent: grp-home-region
+  props: {configuration_policy: {}, name: changeme}
+- {id: cross-region-aggregator, type: aws.res.aws_securityhub_finding_aggregator, name: cross-region-aggregator, parent: grp-home-region, props: {linking_mode: changeme}}
+- {id: linked-region-hub, type: aws.res.aws_securityhub_account, name: linked-region-hub, parent: grp-linked-region}
+- {id: workloads-ou, type: aws.res.aws_organizations_organizational_unit, name: workloads-ou, parent: grp-workloads-ou, props: {name: changeme, parent_id: changeme}}
+- {id: prod-hub, type: aws.res.aws_securityhub_account, name: prod-hub, parent: acct-prod-workload}
+- {id: fsbp-standard, type: aws.res.aws_securityhub_standards_subscription, name: fsbp-standard, parent: acct-prod-workload, props: {standards_arn: changeme}}
+edges:
+- {from: users, to: fsbp-policy, label: define policy, step: '1'}
+- {from: fsbp-policy, to: workloads-ou, label: securityhub configuration policy association}
+- {from: workloads-ou, to: prod-hub, label: inherits configuration, step: '2'}
+- {from: prod-hub, to: fsbp-standard, label: enables standard, step: '3'}
+- {from: linked-region-hub, to: cross-region-aggregator, label: findings replication, step: '4'}
+- {from: prod-hub, to: delegated-admin, label: member findings, step: '5'}
+steps:
+- {n: '1', text: 'users → fsbp-policy: define policy'}
+- {n: '2', text: 'workloads-ou → prod-hub: inherits configuration'}
+- {n: '3', text: 'prod-hub → fsbp-standard: enables standard'}
+- {n: '4', text: 'linked-region-hub → cross-region-aggregator: findings replication'}
+- {n: '5', text: 'prod-hub → delegated-admin: member findings'}

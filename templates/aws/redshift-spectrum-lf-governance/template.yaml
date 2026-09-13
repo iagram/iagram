@@ -1,0 +1,49 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/centralize-governance-for-your-data-lake-using-aws-lake-formation-while-enabling-a-modern-data-architecture-with-amazon-redshift-spectrum); edit freely.
+title: Redshift Spectrum on a Lake Formation governed data lake
+category: data
+tags:
+- redshift spectrum
+- lake formation
+- glue catalog
+- column-level security
+- data lake
+source: https://aws.amazon.com/blogs/big-data/centralize-governance-for-your-data-lake-using-aws-lake-formation-while-enabling-a-modern-data-architecture-with-amazon-redshift-spectrum
+description: An S3 data lake registered with Lake Formation is catalogued by a Glue crawler, and Lake Formation grants table and column permissions to an IAM role used by a Redshift cluster. Redshift Spectrum
+  creates an external schema over the Glue database so warehouse users join hot data in Redshift with lake data in S3 while Lake Formation enforces the same policies that Athena and Glue honour.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-governed-data-lake, type: common.group, name: governed data lake, parent: reg-us-east-1}
+- {id: vpc-warehouse, type: aws.vpc, name: warehouse, parent: reg-us-east-1, props: {cidr: 10.40.0.0/16}}
+- {id: az-warehouse-a, type: aws.availability_zone, name: a, parent: vpc-warehouse, props: {zone: a}}
+- {id: sub-dw-private-a, type: aws.subnet, name: dw-private-a, parent: az-warehouse-a, props: {cidr: 10.40.1.0/24, az: a, public: false}}
+- {id: az-warehouse-b, type: aws.availability_zone, name: b, parent: vpc-warehouse, props: {zone: b}}
+- {id: sub-dw-private-b, type: aws.subnet, name: dw-private-b, parent: az-warehouse-b, props: {cidr: 10.40.2.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: lake-bucket, type: aws.s3_bucket, name: lake-bucket, parent: grp-governed-data-lake}
+- {id: lake-registration, type: aws.res.aws_lakeformation_resource, name: lake-registration, parent: grp-governed-data-lake, props: {arn: changeme}}
+- {id: lake-crawler, type: aws.res.aws_glue_crawler, name: lake-crawler, parent: grp-governed-data-lake, props: {database_name: changeme, name: changeme, role: changeme}}
+- {id: lake-db, type: aws.res.aws_glue_catalog_database, name: lake-db, parent: grp-governed-data-lake, props: {name: changeme}}
+- {id: analytics-dw, type: aws.res.aws_redshift_cluster, name: analytics-dw, parent: sub-dw-private-a, props: {cluster_identifier: changeme, node_type: changeme}}
+- {id: adhoc-athena, type: aws.res.aws_athena_workgroup, name: adhoc-athena, parent: reg-us-east-1, props: {name: changeme}}
+- id: bi-dashboards
+  type: aws.res.aws_quicksight_data_source
+  name: bi-dashboards
+  parent: reg-us-east-1
+  props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+edges:
+- {from: lake-registration, to: lake-bucket, label: register S3 location, step: '1'}
+- {from: lake-crawler, to: lake-bucket, label: crawl Parquet, step: '2'}
+- {from: lake-crawler, to: lake-db, label: create tables, step: '2'}
+- {from: analytics-dw, to: lake-db, label: external schema (Spectrum), step: '3'}
+- {from: analytics-dw, to: lake-bucket, label: Spectrum scans governed columns, step: '4'}
+- {from: adhoc-athena, to: lake-db, label: same Lake Formation grants, step: '4'}
+- {from: bi-dashboards, to: analytics-dw, label: JDBC, step: '5'}
+- {from: users, to: bi-dashboards, step: '6'}
+steps:
+- {n: '1', text: 'lake-registration → lake-bucket: register S3 location'}
+- {n: '2', text: 'lake-crawler → lake-bucket: crawl Parquet'}
+- {n: '3', text: 'analytics-dw → lake-db: external schema (Spectrum)'}
+- {n: '4', text: 'analytics-dw → lake-bucket: Spectrum scans governed columns'}
+- {n: '5', text: 'bi-dashboards → analytics-dw: JDBC'}
+- {n: '6', text: users → bi-dashboards}

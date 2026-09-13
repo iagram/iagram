@@ -1,0 +1,56 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/aws/new-amazon-ecs-service-connect-enabling-easy-communication-between-microservices/); edit freely.
+title: Microservices on ECS Fargate connected with ECS Service Connect
+category: containers
+tags:
+- ecs
+- service connect
+- cloud map
+- envoy
+- fargate
+- microservices
+source: https://aws.amazon.com/blogs/aws/new-amazon-ecs-service-connect-enabling-easy-communication-between-microservices/
+description: ECS Service Connect adds an ECS-managed Envoy proxy container to every task and registers each service under a logical name in a Cloud Map HTTP namespace, so the checkout service reaches orders
+  and catalog by short name with client-side load balancing, retries and outlier detection. Only the UI service is exposed through an ALB; all other traffic stays service to service, and Service Connect
+  publishes per-service request, error and latency metrics to CloudWatch.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-main-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-main}
+- {id: ui-alb, type: aws.alb, name: ui-alb, parent: vpc-main}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: shop-cluster, type: aws.res.aws_ecs_cluster, name: shop-cluster, parent: vpc-main, props: {name: changeme}}
+- {id: shop-namespace, type: aws.res.aws_service_discovery_http_namespace, name: shop-namespace, parent: reg-us-east-1, props: {name: changeme}}
+- {id: ui-service, type: aws.res.aws_ecs_service, name: ui-service, parent: shop-cluster, props: {name: changeme}}
+- {id: checkout-service, type: aws.res.aws_ecs_service, name: checkout-service, parent: shop-cluster, props: {name: changeme}}
+- {id: orders-service, type: aws.res.aws_ecs_service, name: orders-service, parent: shop-cluster, props: {name: changeme}}
+- {id: catalog-service, type: aws.res.aws_ecs_service, name: catalog-service, parent: shop-cluster, props: {name: changeme}}
+- {id: orders-table, type: aws.dynamodb_table, name: orders-table, parent: reg-us-east-1}
+- {id: service-connect-logs, type: aws.res.aws_cloudwatch_log_group, name: service-connect-logs, parent: reg-us-east-1}
+edges:
+- {from: users, to: igw, label: HTTPS, step: '1'}
+- {from: igw, to: ui-alb, step: '2'}
+- {from: ui-alb, to: ui-service, label: 'HTTP :80', step: '3'}
+- {from: ui-service, to: checkout-service, label: 'http://checkout via Envoy proxy', step: '4'}
+- {from: checkout-service, to: orders-service, label: 'http://orders', step: '5'}
+- {from: checkout-service, to: catalog-service, label: 'http://catalog', step: '5'}
+- {from: orders-service, to: orders-table, label: PutItem, step: '6'}
+- {from: shop-cluster, to: shop-namespace, label: default Service Connect namespace}
+- {from: orders-service, to: shop-namespace, label: registers logical name orders}
+- {from: catalog-service, to: shop-namespace, label: registers logical name catalog}
+- {from: checkout-service, to: service-connect-logs, label: proxy access logs + metrics}
+- {from: catalog-service, to: nat-a, label: outbound}
+steps:
+- {n: '1', text: 'users → igw: HTTPS'}
+- {n: '2', text: igw → ui-alb}
+- {n: '3', text: 'ui-alb → ui-service: HTTP :80'}
+- {n: '4', text: 'ui-service → checkout-service: http://checkout via Envoy proxy'}
+- {n: '5', text: 'checkout-service → orders-service: http://orders'}
+- {n: '6', text: 'orders-service → orders-table: PutItem'}

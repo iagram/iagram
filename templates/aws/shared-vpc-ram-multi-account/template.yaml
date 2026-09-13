@@ -1,0 +1,52 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/vpc-sharing-a-new-approach-to-multiple-accounts-and-vpc-management/); edit freely.
+title: Shared VPC with subnets shared to participant accounts via AWS RAM
+category: networking
+tags:
+- vpc sharing
+- ram
+- shared subnets
+- multi-account
+- organizations
+- cost optimization
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/vpc-sharing-a-new-approach-to-multiple-accounts-and-vpc-management/
+description: A central network account owns one large VPC and shares individual subnets with participant accounts in the same organization through AWS RAM; participants launch instances, load balancers,
+  and databases into the shared subnets while the owner keeps control of route tables, NAT gateways, and VPC-level networking. The pattern reduces the number of VPCs, endpoints, and NAT gateways to manage,
+  and participant resources communicate over the VPC network without peering or Transit Gateway.
+nodes:
+- {id: acct-network, type: aws.account, name: network}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-network, props: {region: us-east-1}}
+- {id: vpc-shared-vpc, type: aws.vpc, name: shared-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-shared-vpc-a, type: aws.availability_zone, name: a, parent: vpc-shared-vpc, props: {zone: a}}
+- {id: sub-shared-public-a, type: aws.subnet, name: shared-public-a, parent: az-shared-vpc-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: sub-team-a-private, type: aws.subnet, name: team-a-private, parent: az-shared-vpc-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-team-b-private, type: aws.subnet, name: team-b-private, parent: az-shared-vpc-a, props: {cidr: 10.0.20.0/24, az: a, public: false}}
+- {id: acct-team-a, type: aws.account, name: team-a}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-team-a, props: {region: us-east-1}}
+- {id: acct-team-b, type: aws.account, name: team-b}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-team-b, props: {region: us-east-1}}
+- {id: internet, type: common.internet, name: internet}
+- {id: subnet-share-team-a, type: aws.res.aws_ram_resource_share, name: subnet-share-team-a, parent: acct-network, props: {name: changeme}}
+- {id: subnet-share-team-b, type: aws.res.aws_ram_resource_share, name: subnet-share-team-b, parent: acct-network, props: {name: changeme}}
+- {id: shared-igw, type: aws.res.aws_internet_gateway, name: shared-igw, parent: vpc-shared-vpc}
+- {id: shared-nat, type: aws.res.aws_nat_gateway, name: shared-nat, parent: sub-shared-public-a}
+- {id: shared-s3-endpoint, type: aws.res.aws_vpc_endpoint, name: shared-s3-endpoint, parent: vpc-shared-vpc, props: {vpc_id: changeme}}
+- {id: team-a-app, type: aws.ec2_instance, name: team-a-app, parent: sub-team-a-private}
+- {id: team-a-alb-application, type: aws.alb, name: team-a-alb-application, parent: az-shared-vpc-a}
+- {id: team-b-db, type: aws.rds_instance, name: team-b-db, parent: sub-team-b-private}
+- {id: az-vpc-shared-vpc-b, type: aws.availability_zone, name: b, parent: vpc-shared-vpc, props: {zone: b}}
+- {id: sub-vpc-shared-vpc-b, type: aws.subnet, name: private-b, parent: az-vpc-shared-vpc-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
+edges:
+- {from: subnet-share-team-a, to: acct-team-a, label: share team-a-private, step: '1'}
+- {from: subnet-share-team-b, to: acct-team-b, label: share team-b-private}
+- {from: acct-team-a, to: team-a-app, label: participant launches into shared subnet, step: '2'}
+- {from: acct-team-b, to: team-b-db, label: participant launches into shared subnet}
+- {from: team-a-app, to: team-b-db, label: 'intra-VPC, no peering', step: '3'}
+- {from: team-a-app, to: shared-nat, label: owner-managed egress}
+- {from: shared-nat, to: shared-igw}
+- {from: shared-igw, to: internet}
+- {from: team-a-app, to: shared-s3-endpoint, label: owner-managed gateway endpoint}
+- {from: internet, to: team-a-alb-application, label: HTTPS}
+steps:
+- {n: '1', text: 'subnet-share-team-a → account:team-a: share team-a-private'}
+- {n: '2', text: 'account:team-a → team-a-app: participant launches into shared subnet'}
+- {n: '3', text: 'team-a-app → team-b-db: intra-VPC, no peering'}

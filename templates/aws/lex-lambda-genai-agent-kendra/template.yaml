@@ -1,0 +1,41 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/build-generative-ai-agents-with-amazon-bedrock-amazon-dynamodb-amazon-kendra-amazon-lex-and-langchain/); edit freely.
+title: Lex chatbot with a Lambda LangChain agent over Bedrock, DynamoDB and Kendra
+category: ml
+tags:
+- amazon lex
+- lambda fulfillment
+- langchain
+- bedrock
+- kendra
+- dynamodb
+source: https://aws.amazon.com/blogs/machine-learning/build-generative-ai-agents-with-amazon-bedrock-amazon-dynamodb-amazon-kendra-amazon-lex-and-langchain/
+description: A Lex V2 bot handles intents and slot filling and hands fulfillment to a Lambda function that runs a LangChain conversational agent on a Bedrock model. The agent reads customer records from
+  DynamoDB, retrieves curated answers from documents indexed by Kendra and falls back to model knowledge; the web chat UI is served by CloudFront with Cognito identity-pool credentials.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: lex-web-ui, type: aws.cloudfront_distribution, name: lex-web-ui, parent: reg-us-east-1}
+- {id: web-ui-bucket, type: aws.s3_bucket, name: web-ui-bucket, parent: reg-us-east-1}
+- {id: web-ui-identity, type: aws.res.aws_cognito_identity_pool, name: web-ui-identity, parent: reg-us-east-1, props: {identity_pool_name: changeme}}
+- {id: financial-services-bot, type: aws.res.aws_lexv2models_bot, name: financial-services-bot, parent: reg-us-east-1, props: {idle_session_ttl_in_seconds: 1, name: changeme, role_arn: changeme}}
+- {id: agent-executor-fn, type: aws.lambda_function, name: agent-executor-fn, parent: reg-us-east-1}
+- {id: user-accounts, type: aws.dynamodb_table, name: user-accounts, parent: reg-us-east-1}
+- {id: fs-documents-index, type: aws.res.aws_kendra_index, name: fs-documents-index, parent: reg-us-east-1, props: {name: changeme, role_arn: changeme}}
+- {id: fs-documents, type: aws.s3_bucket, name: fs-documents, parent: reg-us-east-1}
+edges:
+- {from: users, to: lex-web-ui, label: HTTPS chat UI, step: '1'}
+- {from: lex-web-ui, to: web-ui-bucket, label: static assets}
+- {from: lex-web-ui, to: web-ui-identity, label: temporary credentials, step: '2'}
+- {from: lex-web-ui, to: financial-services-bot, label: RecognizeText, step: '3'}
+- {from: financial-services-bot, to: agent-executor-fn, label: fulfillment code hook, step: '4'}
+- {from: agent-executor-fn, to: user-accounts, label: GetItem customer data, step: '5'}
+- {from: agent-executor-fn, to: fs-documents-index, label: Kendra Retrieve, step: '6'}
+- {from: fs-documents, to: fs-documents-index, label: kendra data source}
+steps:
+- {n: '1', text: 'users → lex-web-ui: HTTPS chat UI'}
+- {n: '2', text: 'lex-web-ui → web-ui-identity: temporary credentials'}
+- {n: '3', text: 'lex-web-ui → financial-services-bot: RecognizeText'}
+- {n: '4', text: 'financial-services-bot → agent-executor-fn: fulfillment code hook'}
+- {n: '5', text: 'agent-executor-fn → user-accounts: GetItem customer data'}
+- {n: '6', text: 'agent-executor-fn → fs-documents-index: Kendra Retrieve'}

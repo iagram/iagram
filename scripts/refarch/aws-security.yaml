@@ -1,0 +1,860 @@
+# AWS reference architectures: security, identity and governance
+# Format: see FORMAT.md. 22 distinct official architectures.
+
+- slug: control-tower-landing-zone
+  title: Control Tower multi-account landing zone
+  category: security
+  tags: [control tower, organizations, landing zone, scp, log archive, audit account]
+  source: https://docs.aws.amazon.com/controltower/latest/userguide/how-control-tower-works.html
+  description: Control Tower creates a Security OU holding a Log Archive account and an Audit account, plus a Sandbox OU for workload accounts, under the organization root managed from the management account. Preventive controls are enforced as service control policies on OUs, detective controls run as Config rules aggregated in the Audit account, and the organization trail lands in the Log Archive bucket.
+  containers:
+    - region: us-east-1
+      account: management
+      groups: [{label: Security OU}, {label: Sandbox OU}]
+    - region: us-east-1
+      account: log-archive
+    - region: us-east-1
+      account: audit
+  elements:
+    - {tf: aws_organizations_organizational_unit, name: security-ou, in: group:Security OU}
+    - {tf: aws_organizations_organizational_unit, name: sandbox-ou, in: group:Sandbox OU}
+    - {tf: aws_organizations_policy, name: mandatory-guardrails-scp, in: account:management}
+    - {tf: aws_cloudtrail, name: org-trail, in: account:management}
+    - {tf: aws_ssoadmin_permission_set, name: admin-permission-set, in: account:management}
+    - {tf: aws_s3_bucket, name: cloudtrail-logs, in: account:log-archive}
+    - {tf: aws_s3_bucket, name: config-snapshots, in: account:log-archive}
+    - {tf: aws_config_configuration_aggregator, name: org-config-aggregator, in: account:audit}
+    - {tf: aws_sns_topic, name: security-notifications, in: account:audit}
+  actors: [users]
+  flows:
+    - {from: mandatory-guardrails-scp, to: security-ou, link: aws_organizations_policy_attachment}
+    - {from: mandatory-guardrails-scp, to: sandbox-ou, link: aws_organizations_policy_attachment}
+    - {from: users, to: admin-permission-set, label: SSO sign-in, step: 1}
+    - {from: org-trail, to: cloudtrail-logs, label: log delivery, step: 2}
+    - {from: sandbox-ou, to: org-config-aggregator, label: Config data, step: 3}
+    - {from: sandbox-ou, to: config-snapshots, label: Config snapshots, step: 4}
+    - {from: org-config-aggregator, to: security-notifications, label: drift alerts, step: 5}
+
+- slug: sra-log-archive-centralized-logging
+  title: SRA Log Archive account centralized logging
+  category: security
+  tags: [security reference architecture, log archive, cloudtrail, config, object lock, kms]
+  source: https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/log-archive.html
+  description: The Log Archive account receives the CloudTrail organization trail, Config snapshots, VPC flow logs and GuardDuty findings in dedicated S3 buckets encrypted with a controlled KMS key and protected by Object Lock and lifecycle rules. Access is limited to automated, monitored roles; the CloudTrail delegated administrator lives in the Security Tooling account while the buckets stay in Log Archive to separate duties.
+  containers:
+    - region: us-east-1
+      account: management
+    - region: us-east-1
+      account: security-tooling
+    - region: us-east-1
+      account: log-archive
+    - region: us-east-1
+      account: workload
+      vpcs:
+        - name: app
+          cidr: 10.20.0.0/16
+  elements:
+    - {tf: aws_cloudtrail, name: org-trail, in: account:security-tooling}
+    - {tf: aws_config_configuration_aggregator, name: config-aggregator, in: account:security-tooling}
+    - {tf: aws_guardduty_detector, name: guardduty-admin, in: account:security-tooling}
+    - {tf: aws_s3_bucket, name: cloudtrail-archive, in: account:log-archive}
+    - {tf: aws_s3_bucket, name: config-archive, in: account:log-archive}
+    - {tf: aws_s3_bucket, name: guardduty-findings-archive, in: account:log-archive}
+    - {tf: aws_s3_bucket, name: flow-logs-archive, in: account:log-archive}
+    - {tf: aws_kms_key, name: log-archive-cmk, in: account:log-archive}
+    - {tf: aws_cloudwatch_log_group, name: cloudtrail-events, in: account:log-archive}
+    - {tf: aws_flow_log, name: app-vpc-flow-log, in: vpc:app}
+  actors: [users]
+  flows:
+    - {from: org-trail, to: cloudtrail-archive, label: org trail SSE-KMS, step: 1}
+    - {from: org-trail, to: cloudtrail-events, label: CloudWatch Logs, step: 2}
+    - {from: config-aggregator, to: config-archive, label: delivery channel, step: 3}
+    - {from: guardduty-admin, to: guardduty-findings-archive, label: findings export, step: 4}
+    - {from: app-vpc-flow-log, to: flow-logs-archive, label: flow logs, step: 5}
+    - {from: log-archive-cmk, to: cloudtrail-archive, label: encrypts}
+    - {from: users, to: cloudtrail-archive, label: read via least-privilege role}
+
+- slug: sra-security-tooling-delegated-admin
+  title: SRA Security Tooling account with delegated administrators
+  category: security
+  tags: [security hub, guardduty, delegated administrator, detective, inspector, macie, security reference architecture]
+  source: https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/security-tooling.html
+  description: A dedicated Security Tooling account in the Security OU is the delegated administrator for Security Hub, GuardDuty, Detective, Inspector, Macie, Config, Firewall Manager, Audit Manager and IAM Access Analyzer across the organization. Findings from every member account aggregate there while long-term exports go to S3 buckets in the Log Archive account.
+  containers:
+    - region: us-east-1
+      account: management
+    - region: us-east-1
+      account: security-tooling
+    - region: us-east-1
+      account: log-archive
+    - region: us-east-1
+      account: workload
+  elements:
+    - {tf: aws_organizations_organizational_unit, name: security-ou, in: account:management}
+    - {tf: aws_securityhub_account, name: security-hub-admin, in: account:security-tooling}
+    - {tf: aws_guardduty_detector, name: guardduty-admin, in: account:security-tooling}
+    - {tf: aws_detective_graph, name: detective-graph, in: account:security-tooling}
+    - {tf: aws_inspector2_enabler, name: inspector-admin, in: account:security-tooling}
+    - {tf: aws_macie2_account, name: macie-admin, in: account:security-tooling}
+    - {tf: aws_config_configuration_aggregator, name: config-aggregator, in: account:security-tooling}
+    - {tf: aws_accessanalyzer_analyzer, name: org-access-analyzer, in: account:security-tooling}
+    - {tf: aws_s3_bucket, name: findings-archive, in: account:log-archive}
+    - {tf: aws_guardduty_detector, name: guardduty-member, in: account:workload}
+    - {tf: aws_securityhub_account, name: security-hub-member, in: account:workload}
+  actors: [users]
+  flows:
+    - {from: guardduty-member, to: guardduty-admin, label: member findings, step: 1}
+    - {from: security-hub-member, to: security-hub-admin, label: aggregated findings, step: 2}
+    - {from: guardduty-admin, to: security-hub-admin, label: GuardDuty findings, step: 3}
+    - {from: inspector-admin, to: security-hub-admin, label: vulnerabilities, step: 4}
+    - {from: macie-admin, to: security-hub-admin, label: sensitive data findings, step: 5}
+    - {from: guardduty-admin, to: detective-graph, label: behavior graph, step: 6}
+    - {from: guardduty-admin, to: findings-archive, label: export beyond 90 days, step: 7}
+    - {from: users, to: security-hub-admin, label: security operators}
+
+- slug: security-hub-central-configuration
+  title: Security Hub central configuration across OUs and Regions
+  category: security
+  tags: [security hub, central configuration, home region, configuration policy, organizational unit]
+  source: https://docs.aws.amazon.com/securityhub/latest/userguide/central-configuration-intro.html
+  description: The delegated Security Hub administrator defines configuration policies in a home Region that enable Security Hub, standards and controls on accounts and OUs across linked Regions, preventing configuration drift. Linked Regions send findings to the home Region, which acts as the cross-Region aggregation point for the organization.
+  containers:
+    - region: us-east-1
+      account: security-tooling
+      groups: [{label: home region}]
+    - region: eu-west-1
+      account: security-tooling
+      groups: [{label: linked region}]
+    - region: us-east-1
+      account: management
+      groups: [{label: Workloads OU}]
+    - region: us-east-1
+      account: prod-workload
+  elements:
+    - {tf: aws_securityhub_organization_admin_account, name: delegated-admin, in: group:home region}
+    - {tf: aws_securityhub_configuration_policy, name: fsbp-policy, in: group:home region}
+    - {tf: aws_securityhub_finding_aggregator, name: cross-region-aggregator, in: group:home region}
+    - {tf: aws_securityhub_account, name: linked-region-hub, in: group:linked region}
+    - {tf: aws_organizations_organizational_unit, name: workloads-ou, in: group:Workloads OU}
+    - {tf: aws_securityhub_account, name: prod-hub, in: account:prod-workload}
+    - {tf: aws_securityhub_standards_subscription, name: fsbp-standard, in: account:prod-workload}
+  actors: [users]
+  flows:
+    - {from: users, to: fsbp-policy, label: define policy, step: 1}
+    - {from: fsbp-policy, to: workloads-ou, link: aws_securityhub_configuration_policy_association}
+    - {from: workloads-ou, to: prod-hub, label: inherits configuration, step: 2}
+    - {from: prod-hub, to: fsbp-standard, label: enables standard, step: 3}
+    - {from: linked-region-hub, to: cross-region-aggregator, label: findings replication, step: 4}
+    - {from: prod-hub, to: delegated-admin, label: member findings, step: 5}
+
+- slug: automated-security-response
+  title: Automated Security Response on AWS
+  category: security
+  tags: [security hub, remediation, step functions, ssm automation, playbooks, cis]
+  source: https://docs.aws.amazon.com/solutions/latest/automated-security-response-on-aws/solution-overview.html
+  description: Security Hub custom actions or automatic rules send findings through EventBridge to a Step Functions orchestrator in the security administrator account, which assumes a cross-account role and runs Systems Manager Automation runbooks that remediate the resource in the member account. Every action is logged to CloudWatch Logs and notified via SNS, with playbooks mapped to CIS, FSBP, PCI DSS and NIST 800-53 controls.
+  containers:
+    - region: us-east-1
+      account: security-admin
+    - region: us-east-1
+      account: member
+  elements:
+    - {tf: aws_securityhub_account, name: security-hub, in: account:security-admin}
+    - {tf: aws_cloudwatch_event_rule, name: finding-custom-action-rule, in: account:security-admin}
+    - {tf: aws_sfn_state_machine, name: orchestrator, in: account:security-admin}
+    - {tf: aws_lambda_function, name: check-finding-lambda, in: account:security-admin}
+    - {tf: aws_sns_topic, name: remediation-notifications, in: account:security-admin}
+    - {tf: aws_cloudwatch_log_group, name: remediation-audit-log, in: account:security-admin}
+    - {tf: aws_kms_key, name: solution-cmk, in: account:security-admin}
+    - {tf: aws_iam_role, name: remediation-role, in: account:member}
+    - {tf: aws_ssm_document, name: remediation-runbook, in: account:member}
+    - {tf: aws_s3_bucket, name: noncompliant-bucket, in: account:member}
+  actors: [users]
+  flows:
+    - {from: users, to: security-hub, label: custom action, step: 1}
+    - {from: security-hub, to: finding-custom-action-rule, label: finding event, step: 2}
+    - {from: finding-custom-action-rule, to: orchestrator, link: aws_cloudwatch_event_target}
+    - {from: orchestrator, to: check-finding-lambda, label: validate finding, step: 3}
+    - {from: orchestrator, to: remediation-role, label: AssumeRole, step: 4}
+    - {from: remediation-role, to: remediation-runbook, label: StartAutomationExecution, step: 5}
+    - {from: remediation-runbook, to: noncompliant-bucket, label: remediate, step: 6}
+    - {from: orchestrator, to: remediation-notifications, label: notify, step: 7}
+    - {from: orchestrator, to: remediation-audit-log, label: log actions}
+
+- slug: macie-multi-account-remediation
+  title: Macie sensitive data remediation across accounts
+  category: security
+  tags: [macie, sensitive data, quarantine, step functions, eventbridge, delegated administrator]
+  source: https://aws.amazon.com/blogs/security/building-sensitive-data-remediation-workflows-in-multi-account-aws-environments/
+  description: Macie in the delegated administrator account scans S3 buckets in member accounts and emits findings to EventBridge, which forwards them to a Step Functions state machine. The workflow either notifies analysts through Lambda or automatically moves the object to a quarantine prefix, tracks status in DynamoDB, and lets security staff release objects through an API Gateway endpoint.
+  containers:
+    - region: us-east-1
+      account: security
+    - region: us-east-1
+      account: member
+  elements:
+    - {tf: aws_macie2_account, name: macie-admin, in: account:security}
+    - {tf: aws_cloudwatch_event_bus, name: findings-bus, in: account:security}
+    - {tf: aws_cloudwatch_event_rule, name: macie-finding-rule, in: account:security}
+    - {tf: aws_sfn_state_machine, name: remediation-workflow, in: account:security}
+    - {tf: aws_lambda_function, name: notify-lambda, in: account:security}
+    - {tf: aws_lambda_function, name: quarantine-lambda, in: account:security}
+    - {tf: aws_dynamodb_table, name: quarantine-tracker, in: account:security}
+    - {tf: aws_api_gateway_rest_api, name: release-api, in: account:security}
+    - {tf: aws_macie2_account, name: macie-member, in: account:member}
+    - {tf: aws_s3_bucket, name: data-bucket, in: account:member}
+    - {tf: aws_iam_role, name: quarantine-role, in: account:member}
+  actors: [users]
+  flows:
+    - {from: macie-member, to: data-bucket, label: classification job, step: 1}
+    - {from: macie-member, to: macie-admin, label: findings, step: 2}
+    - {from: macie-admin, to: findings-bus, label: finding event, step: 3}
+    - {from: macie-finding-rule, to: remediation-workflow, link: aws_cloudwatch_event_target}
+    - {from: remediation-workflow, to: notify-lambda, label: notify path, step: 4}
+    - {from: remediation-workflow, to: quarantine-lambda, label: quarantine path, step: 5}
+    - {from: quarantine-lambda, to: quarantine-role, label: AssumeRole, step: 6}
+    - {from: quarantine-role, to: data-bucket, label: move to quarantine prefix, step: 7}
+    - {from: quarantine-lambda, to: quarantine-tracker, label: record status}
+    - {from: users, to: release-api, label: release object, step: 8}
+
+- slug: kms-multi-region-keys-global-tables
+  title: KMS multi-Region keys for client-side encryption of global data
+  category: security
+  tags: [kms, multi-region keys, encryption at rest, dynamodb global tables, client-side encryption]
+  source: https://aws.amazon.com/blogs/security/encrypt-global-data-client-side-with-aws-kms-multi-region-keys/
+  description: A primary KMS multi-Region key is replicated to a second Region so the replica shares the same key ID and key material; the application encrypts DynamoDB items client-side with the AWS Encryption SDK in one Region. DynamoDB global tables replicate the ciphertext and the application in the other Region decrypts locally with the replica key, avoiding cross-Region KMS calls.
+  containers:
+    - region: us-east-1
+      account: app
+    - region: eu-west-1
+      account: app
+  elements:
+    - {tf: aws_kms_key, name: primary-mrk, in: region:us-east-1}
+    - {tf: aws_kms_replica_key, name: replica-mrk, in: region:eu-west-1}
+    - {tf: aws_dynamodb_table, name: orders-global-table, in: region:us-east-1}
+    - {tf: aws_dynamodb_table, name: orders-replica-table, in: region:eu-west-1}
+    - {tf: aws_lambda_function, name: order-writer, in: region:us-east-1}
+    - {tf: aws_lambda_function, name: order-reader, in: region:eu-west-1}
+    - {tf: aws_iam_role, name: encrypt-role, in: region:us-east-1}
+    - {tf: aws_iam_role, name: decrypt-role, in: region:eu-west-1}
+  actors: [users]
+  flows:
+    - {from: users, to: order-writer, label: write order, step: 1}
+    - {from: order-writer, to: primary-mrk, label: GenerateDataKey, step: 2}
+    - {from: order-writer, to: orders-global-table, label: put encrypted item, step: 3}
+    - {from: orders-global-table, to: orders-replica-table, label: global table replication, step: 4}
+    - {from: primary-mrk, to: replica-mrk, label: key material replication}
+    - {from: order-reader, to: orders-replica-table, label: get item, step: 5}
+    - {from: order-reader, to: replica-mrk, label: Decrypt locally, step: 6}
+    - {from: users, to: order-reader, label: read order}
+
+- slug: secrets-manager-lambda-rotation
+  title: Secrets Manager automatic rotation with a Lambda function
+  category: security
+  tags: [secrets manager, rotation, lambda, rds, kms, vpc endpoint]
+  source: https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html
+  description: Secrets Manager stores database credentials encrypted with a KMS key and invokes a rotation Lambda function on a schedule; the function runs inside the database VPC, sets a new password in the database and updates the secret version. The application retrieves the current credentials at runtime through a Secrets Manager VPC endpoint instead of embedding them.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: app
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: app-a, cidr: 10.0.1.0/24, az: a}
+            - {name: db-a, cidr: 10.0.2.0/24, az: a}
+  elements:
+    - {tf: aws_secretsmanager_secret, name: db-credentials, in: region}
+    - {tf: aws_secretsmanager_secret_rotation, name: thirty-day-rotation, in: region}
+    - {tf: aws_kms_key, name: secrets-cmk, in: region}
+    - {tf: aws_lambda_function, name: rotation-function, in: subnet:app-a}
+    - {tf: aws_lambda_function, name: app-function, in: subnet:app-a}
+    - {tf: aws_db_instance, name: orders-db, in: subnet:db-a}
+    - {tf: aws_vpc_endpoint, name: secretsmanager-endpoint, in: subnet:app-a}
+    - {tf: aws_iam_role, name: rotation-role, in: region}
+  actors: [users]
+  flows:
+    - {from: thirty-day-rotation, to: rotation-function, label: scheduled rotation, step: 1}
+    - {from: rotation-function, to: orders-db, label: set new password, step: 2}
+    - {from: rotation-function, to: secretsmanager-endpoint, label: PutSecretValue, step: 3}
+    - {from: secretsmanager-endpoint, to: db-credentials, label: new version, step: 4}
+    - {from: secrets-cmk, to: db-credentials, label: encrypts}
+    - {from: users, to: app-function, label: request, step: 5}
+    - {from: app-function, to: secretsmanager-endpoint, label: GetSecretValue, step: 6}
+    - {from: app-function, to: orders-db, label: SQL over TLS, step: 7}
+
+- slug: identity-center-external-idp-federation
+  title: IAM Identity Center federation with an external identity provider
+  category: identity
+  tags: [iam identity center, saml, scim, permission sets, workforce identity, organizations]
+  source: https://docs.aws.amazon.com/singlesignon/latest/userguide/manage-your-identity-source-idp.html
+  description: IAM Identity Center in the management account trusts an external SAML 2.0 identity provider and receives users and groups through SCIM provisioning. Permission sets are assigned to groups per account, so users sign in once at the AWS access portal and assume short-lived roles in the production and development accounts.
+  containers:
+    - region: us-east-1
+      account: management
+    - region: us-east-1
+      account: production
+    - region: us-east-1
+      account: development
+  elements:
+    - {tf: aws_ssoadmin_instance_access_control_attributes, name: identity-center-instance, in: account:management}
+    - {tf: aws_identitystore_group, name: platform-admins, in: account:management}
+    - {tf: aws_identitystore_group, name: developers, in: account:management}
+    - {tf: aws_ssoadmin_permission_set, name: admin-access, in: account:management}
+    - {tf: aws_ssoadmin_permission_set, name: developer-access, in: account:management}
+    - {tf: aws_iam_role, name: prod-admin-role, in: account:production}
+    - {tf: aws_iam_role, name: dev-developer-role, in: account:development}
+    - {tf: aws_cloudtrail, name: sign-in-audit-trail, in: account:management}
+  actors: [users, idp]
+  flows:
+    - {from: idp, to: identity-center-instance, label: SCIM provisioning, step: 1}
+    - {from: users, to: idp, label: corporate login, step: 2}
+    - {from: idp, to: identity-center-instance, label: SAML assertion, step: 3}
+    - {from: admin-access, to: prod-admin-role, link: aws_ssoadmin_account_assignment}
+    - {from: developer-access, to: dev-developer-role, link: aws_ssoadmin_account_assignment}
+    - {from: platform-admins, to: admin-access, label: group assignment}
+    - {from: developers, to: developer-access, label: group assignment}
+    - {from: identity-center-instance, to: prod-admin-role, label: short-term credentials, step: 4}
+    - {from: identity-center-instance, to: sign-in-audit-trail, label: sign-in events}
+
+- slug: cognito-api-gateway-fine-grained-authz
+  title: Fine-grained API authorization with Cognito, API Gateway and IAM
+  category: identity
+  tags: [cognito, api gateway, lambda authorizer, jwt, fine-grained authorization, dynamodb]
+  source: https://aws.amazon.com/blogs/security/building-fine-grained-authorization-using-amazon-cognito-api-gateway-and-iam/
+  description: Users authenticate against a Cognito user pool and present the access token to API Gateway, which invokes a Lambda authorizer that validates the JWT against the cached Cognito public keys. The authorizer maps the user's Cognito group to an IAM policy stored in DynamoDB and returns it, so API Gateway allows or denies each method before invoking the backend Lambda function.
+  containers:
+    - region: us-east-1
+  elements:
+    - {tf: aws_cognito_user_pool, name: customer-user-pool, in: region}
+    - {tf: aws_cognito_user_pool_client, name: web-app-client, in: region}
+    - {tf: aws_api_gateway_rest_api, name: orders-api, in: region}
+    - {tf: aws_api_gateway_authorizer, name: token-authorizer, in: region}
+    - {tf: aws_lambda_function, name: authorizer-function, in: region}
+    - {tf: aws_dynamodb_table, name: group-policy-table, in: region}
+    - {tf: aws_lambda_function, name: orders-backend, in: region}
+    - {tf: aws_iam_role, name: authorizer-role, in: region}
+    - {tf: aws_cloudwatch_log_group, name: api-access-logs, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: customer-user-pool, label: sign in, step: 1}
+    - {from: customer-user-pool, to: users, label: JWT tokens, step: 2}
+    - {from: users, to: orders-api, label: request with bearer token, step: 3}
+    - {from: orders-api, to: token-authorizer, label: authorize, step: 4}
+    - {from: token-authorizer, to: authorizer-function, label: invoke, step: 5}
+    - {from: authorizer-function, to: customer-user-pool, label: fetch JWKS, step: 6}
+    - {from: authorizer-function, to: group-policy-table, label: lookup group policy, step: 7}
+    - {from: orders-api, to: orders-backend, label: allowed invoke, step: 8}
+    - {from: orders-api, to: api-access-logs, label: access logs}
+
+- slug: private-ca-cross-account-sharing
+  title: Private CA hierarchy shared across accounts with RAM
+  category: security
+  tags: [acm pca, private ca, certificate hierarchy, ram, tls, encryption in transit]
+  source: https://aws.amazon.com/blogs/security/how-to-use-aws-ram-to-share-your-acm-private-ca-cross-account/
+  description: A root CA and a subordinate issuing CA run in a dedicated CA account; the subordinate CA is shared to workload accounts through AWS Resource Access Manager. Teams in the workload accounts request private certificates through ACM from the shared CA and attach them to load balancers, so certificate private keys never leave the workload account while CA control stays central.
+  containers:
+    - region: us-east-1
+      account: security-ca
+    - region: us-east-1
+      account: workload
+      vpcs:
+        - name: app
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.30.1.0/24, az: a}
+  elements:
+    - {tf: aws_acmpca_certificate_authority, name: root-ca, in: account:security-ca}
+    - {tf: aws_acmpca_certificate_authority, name: issuing-ca, in: account:security-ca}
+    - {tf: aws_ram_resource_share, name: issuing-ca-share, in: account:security-ca}
+    - {tf: aws_s3_bucket, name: crl-bucket, in: account:security-ca}
+    - {tf: aws_cloudtrail, name: ca-audit-trail, in: account:security-ca}
+    - {tf: aws_acm_certificate, name: internal-app-cert, in: account:workload}
+    - {tf: aws_lb, name: internal-alb, in: subnet:private-a}
+    - {tf: aws_instance, name: app-server, in: subnet:private-a}
+  actors: [users]
+  flows:
+    - {from: root-ca, to: issuing-ca, label: signs subordinate CA, step: 1}
+    - {from: issuing-ca-share, to: issuing-ca, label: shares CA}
+    - {from: issuing-ca-share, to: internal-app-cert, link: aws_ram_principal_association}
+    - {from: internal-app-cert, to: issuing-ca, label: RequestCertificate, step: 2}
+    - {from: issuing-ca, to: crl-bucket, label: publish CRL, step: 3}
+    - {from: internal-app-cert, to: internal-alb, label: attached to listener, step: 4}
+    - {from: users, to: internal-alb, label: HTTPS, step: 5}
+    - {from: internal-alb, to: app-server, label: HTTPS, step: 6}
+    - {from: issuing-ca, to: ca-audit-trail, label: issuance audit}
+
+- slug: ddos-resilient-edge-waf-shield
+  title: DDoS-resilient web application with WAF and Shield Advanced
+  category: security
+  tags: [ddos, shield advanced, waf, cloudfront, route 53, edge protection]
+  source: https://docs.aws.amazon.com/whitepapers/latest/aws-best-practices-ddos-resiliency/aws-best-practices-ddos-resiliency.html
+  description: The DDoS-resilient reference architecture fronts the application with Route 53 and CloudFront, attaches a WAF web ACL with rate-based and managed rules, and enrols the edge and load balancer resources in Shield Advanced. Traffic reaches an Application Load Balancer in public subnets while EC2 targets sit in private subnets, and Shield Advanced health-based detection plus the Shield Response Team cover layer 3 to layer 7 events.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: web
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.40.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.40.1.0/24, az: b, public: true}
+            - {name: private-a, cidr: 10.40.10.0/24, az: a}
+            - {name: private-b, cidr: 10.40.11.0/24, az: b}
+  elements:
+    - {tf: aws_route53_zone, name: public-zone, in: region}
+    - {tf: aws_cloudfront_distribution, name: edge-distribution, in: region}
+    - {tf: aws_wafv2_web_acl, name: edge-web-acl, in: region}
+    - {tf: aws_shield_protection, name: cloudfront-shield, in: region}
+    - {tf: aws_shield_protection, name: alb-shield, in: region}
+    - {tf: aws_lb, name: web-alb, in: subnet:public-a}
+    - {tf: aws_autoscaling_group, name: web-asg, in: subnet:private-a}
+    - {tf: aws_s3_bucket, name: static-assets, in: region}
+    - {tf: aws_cloudwatch_metric_alarm, name: ddos-detected-alarm, in: region}
+  actors: [internet, users]
+  flows:
+    - {from: users, to: public-zone, label: DNS, step: 1}
+    - {from: users, to: edge-distribution, label: HTTPS, step: 2}
+    - {from: internet, to: edge-distribution, label: attack traffic}
+    - {from: edge-web-acl, to: edge-distribution, link: aws_wafv2_web_acl_association}
+    - {from: cloudfront-shield, to: edge-distribution, label: protects}
+    - {from: alb-shield, to: web-alb, label: protects}
+    - {from: edge-distribution, to: web-alb, label: origin request, step: 3}
+    - {from: edge-distribution, to: static-assets, label: static origin}
+    - {from: web-alb, to: web-asg, label: HTTP, step: 4}
+    - {from: cloudfront-shield, to: ddos-detected-alarm, label: DDoSDetected metric}
+
+- slug: network-firewall-centralized-inspection
+  title: Centralized Network Firewall inspection VPC with Transit Gateway
+  category: security
+  tags: [network firewall, inspection vpc, transit gateway, east-west, egress filtering]
+  source: https://aws.amazon.com/blogs/networking-and-content-delivery/deployment-models-for-aws-network-firewall/
+  description: Spoke VPCs attach to a Transit Gateway whose route tables send all inter-VPC and egress traffic through a dedicated inspection VPC, where Network Firewall endpoints sit in their own subnets separate from the Transit Gateway attachment subnets. A central egress path through a NAT gateway and internet gateway lets the firewall enforce stateful domain and Suricata rules on all outbound flows.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: inspection
+          cidr: 10.100.0.0/16
+          subnets:
+            - {name: tgw-attach-a, cidr: 10.100.0.0/28, az: a}
+            - {name: firewall-a, cidr: 10.100.1.0/28, az: a}
+            - {name: public-a, cidr: 10.100.2.0/24, az: a, public: true}
+        - name: spoke-a
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: spoke-a-private, cidr: 10.1.1.0/24, az: a}
+        - name: spoke-b
+          cidr: 10.2.0.0/16
+          subnets:
+            - {name: spoke-b-private, cidr: 10.2.1.0/24, az: a}
+  elements:
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
+    - {tf: aws_networkfirewall_firewall, name: central-firewall, in: subnet:firewall-a}
+    - {tf: aws_networkfirewall_firewall_policy, name: inspection-policy, in: vpc:inspection}
+    - {tf: aws_networkfirewall_rule_group, name: egress-domain-rules, in: vpc:inspection}
+    - {tf: aws_nat_gateway, name: central-nat, in: subnet:public-a}
+    - {tf: aws_internet_gateway, name: inspection-igw, in: vpc:inspection}
+    - {tf: aws_networkfirewall_logging_configuration, name: firewall-logs, in: vpc:inspection}
+    - {tf: aws_s3_bucket, name: firewall-log-bucket, in: region}
+    - {tf: aws_instance, name: spoke-a-app, in: subnet:spoke-a-private}
+    - {tf: aws_instance, name: spoke-b-app, in: subnet:spoke-b-private}
+  actors: [internet]
+  flows:
+    - {from: hub-tgw, to: vpc:spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:inspection, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: spoke-a-app, to: hub-tgw, label: east-west traffic, step: 1}
+    - {from: hub-tgw, to: central-firewall, label: route to inspection, step: 2}
+    - {from: central-firewall, to: spoke-b-app, label: inspected traffic, step: 3}
+    - {from: central-firewall, to: central-nat, label: egress after inspection, step: 4}
+    - {from: central-nat, to: inspection-igw, label: NAT, step: 5}
+    - {from: inspection-igw, to: internet, label: outbound, step: 6}
+    - {from: firewall-logs, to: firewall-log-bucket, label: flow and alert logs}
+
+- slug: verified-access-multi-account-zero-trust
+  title: Zero trust application access with Verified Access across accounts
+  category: security
+  tags: [verified access, zero trust, iam identity center, cedar, ram, shared services]
+  source: https://aws.amazon.com/blogs/networking-and-content-delivery/building-zero-trust-access-across-multi-account-aws-environments/
+  description: A Verified Access instance is deployed in a shared networking account with IAM Identity Center as the trust provider, and Verified Access groups are shared to organizational units via AWS Resource Access Manager. Application teams create endpoints for their internal load balancers in workload accounts, and every request is evaluated per user identity and device posture with Cedar policies instead of network location.
+  containers:
+    - region: us-east-1
+      account: networking
+      vpcs:
+        - name: shared-services
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: endpoint-a, cidr: 10.50.1.0/24, az: a}
+    - region: us-east-1
+      account: workload
+      vpcs:
+        - name: app
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: app-private-a, cidr: 10.60.1.0/24, az: a}
+    - region: us-east-1
+      account: management
+  elements:
+    - {tf: aws_verifiedaccess_instance, name: zero-trust-instance, in: vpc:shared-services}
+    - {tf: aws_verifiedaccess_trust_provider, name: identity-center-trust, in: account:networking}
+    - {tf: aws_verifiedaccess_group, name: internal-apps-group, in: account:networking}
+    - {tf: aws_ram_resource_share, name: verified-access-share, in: account:networking}
+    - {tf: aws_ssoadmin_permission_set, name: workforce-identity, in: account:management}
+    - {tf: aws_verifiedaccess_endpoint, name: hr-app-endpoint, in: account:workload}
+    - {tf: aws_lb, name: hr-app-alb, in: subnet:app-private-a}
+    - {tf: aws_instance, name: hr-app-server, in: subnet:app-private-a}
+    - {tf: aws_cloudwatch_log_group, name: access-logs, in: account:networking}
+  actors: [users, idp]
+  flows:
+    - {from: idp, to: workforce-identity, label: SAML federation, step: 1}
+    - {from: workforce-identity, to: identity-center-trust, label: identity source}
+    - {from: identity-center-trust, to: zero-trust-instance, link: aws_verifiedaccess_instance_trust_provider_attachment}
+    - {from: verified-access-share, to: internal-apps-group, label: shared to OUs}
+    - {from: users, to: zero-trust-instance, label: HTTPS with identity, step: 2}
+    - {from: zero-trust-instance, to: internal-apps-group, label: evaluate Cedar policy, step: 3}
+    - {from: internal-apps-group, to: hr-app-endpoint, label: policy applies, step: 4}
+    - {from: hr-app-endpoint, to: hr-app-alb, label: forward request, step: 5}
+    - {from: hr-app-alb, to: hr-app-server, label: HTTP, step: 6}
+    - {from: zero-trust-instance, to: access-logs, label: access logs}
+
+- slug: inspector-organization-vulnerability-management
+  title: Inspector vulnerability management across an organization
+  category: security
+  tags: [inspector, vulnerability scanning, ecr, ec2, lambda, delegated administrator, security hub]
+  source: https://docs.aws.amazon.com/inspector/latest/user/managing-multiple-accounts.html
+  description: A delegated Inspector administrator enables continuous scanning of EC2 instances, ECR container images and Lambda functions across all member accounts, with Organizations policies enforcing which scan types stay enabled. Findings flow to Security Hub and EventBridge in the administrator account so that critical CVEs can trigger SNS notifications and Systems Manager patching in the member account.
+  containers:
+    - region: us-east-1
+      account: security-tooling
+    - region: us-east-1
+      account: workload
+      vpcs:
+        - name: app
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.70.1.0/24, az: a}
+  elements:
+    - {tf: aws_inspector2_delegated_admin_account, name: inspector-delegated-admin, in: account:security-tooling}
+    - {tf: aws_inspector2_organization_configuration, name: auto-enable-scans, in: account:security-tooling}
+    - {tf: aws_securityhub_account, name: security-hub, in: account:security-tooling}
+    - {tf: aws_cloudwatch_event_rule, name: critical-finding-rule, in: account:security-tooling}
+    - {tf: aws_sns_topic, name: vulnerability-alerts, in: account:security-tooling}
+    - {tf: aws_inspector2_enabler, name: inspector-member, in: account:workload}
+    - {tf: aws_instance, name: app-server, in: subnet:private-a}
+    - {tf: aws_ecr_repository, name: app-images, in: account:workload}
+    - {tf: aws_lambda_function, name: api-function, in: account:workload}
+    - {tf: aws_ssm_patch_baseline, name: critical-patch-baseline, in: account:workload}
+  actors: [users]
+  flows:
+    - {from: auto-enable-scans, to: inspector-member, label: auto-enable member, step: 1}
+    - {from: inspector-member, to: app-server, label: agentless EC2 scan, step: 2}
+    - {from: inspector-member, to: app-images, label: image scan on push, step: 3}
+    - {from: inspector-member, to: api-function, label: Lambda code scan, step: 4}
+    - {from: inspector-member, to: inspector-delegated-admin, label: findings, step: 5}
+    - {from: inspector-delegated-admin, to: security-hub, label: findings, step: 6}
+    - {from: critical-finding-rule, to: vulnerability-alerts, link: aws_cloudwatch_event_target}
+    - {from: vulnerability-alerts, to: users, label: alert}
+    - {from: inspector-delegated-admin, to: critical-patch-baseline, label: patch trigger, step: 7}
+
+- slug: detective-guardduty-investigation
+  title: Investigating GuardDuty findings with Detective finding groups
+  category: security
+  tags: [detective, guardduty, investigation, behavior graph, finding groups, cloudtrail, vpc flow logs]
+  source: https://aws.amazon.com/blogs/security/how-to-improve-security-incident-investigations-using-amazon-detective-finding-groups/
+  description: Detective in the security account ingests CloudTrail management events, VPC flow logs, EKS audit logs and GuardDuty findings from member accounts into a behavior graph. Finding groups correlate related GuardDuty findings and the IAM roles, instances and IP addresses they touch so analysts can pivot from a Security Hub finding into a scoped investigation.
+  containers:
+    - region: us-east-1
+      account: security-tooling
+    - region: us-east-1
+      account: workload
+      vpcs:
+        - name: app
+          cidr: 10.80.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.80.1.0/24, az: a}
+  elements:
+    - {tf: aws_detective_graph, name: behavior-graph, in: account:security-tooling}
+    - {tf: aws_detective_organization_admin_account, name: detective-admin, in: account:security-tooling}
+    - {tf: aws_guardduty_detector, name: guardduty-admin, in: account:security-tooling}
+    - {tf: aws_securityhub_account, name: security-hub, in: account:security-tooling}
+    - {tf: aws_detective_member, name: workload-member, in: account:security-tooling}
+    - {tf: aws_guardduty_detector, name: guardduty-member, in: account:workload}
+    - {tf: aws_cloudtrail, name: workload-trail, in: account:workload}
+    - {tf: aws_flow_log, name: app-flow-log, in: vpc:app}
+    - {tf: aws_instance, name: compromised-instance, in: subnet:private-a}
+    - {tf: aws_iam_role, name: suspicious-role, in: account:workload}
+  actors: [users]
+  flows:
+    - {from: guardduty-member, to: compromised-instance, label: monitors, step: 1}
+    - {from: guardduty-member, to: guardduty-admin, label: findings, step: 2}
+    - {from: guardduty-admin, to: security-hub, label: findings, step: 3}
+    - {from: guardduty-admin, to: behavior-graph, label: findings ingest, step: 4}
+    - {from: workload-trail, to: behavior-graph, label: CloudTrail events}
+    - {from: app-flow-log, to: behavior-graph, label: VPC flow logs}
+    - {from: suspicious-role, to: behavior-graph, label: entity in graph}
+    - {from: workload-member, to: guardduty-member, label: member enrolment}
+    - {from: users, to: security-hub, label: triage finding, step: 5}
+    - {from: users, to: behavior-graph, label: investigate finding group, step: 6}
+
+- slug: firewall-manager-organization-waf-policies
+  title: Firewall Manager WAF policies across an organization
+  category: security
+  tags: [firewall manager, waf, managed rules, organizations, policy enforcement, logging]
+  source: https://aws.amazon.com/blogs/security/centrally-manage-aws-waf-api-v2-and-aws-managed-rules-at-scale-with-firewall-manager/
+  description: A Firewall Manager administrator account in the organization defines a WAF policy that includes AWS Managed Rules rule groups and applies it to in-scope accounts and OUs by resource type and tag. Firewall Manager automatically creates and associates web ACLs on new ALBs and API Gateway stages in member accounts, remediates non-compliant resources and streams WAF logs through Kinesis Data Firehose to a central bucket.
+  containers:
+    - region: us-east-1
+      account: management
+      groups: [{label: Workloads OU}]
+    - region: us-east-1
+      account: firewall-admin
+    - region: us-east-1
+      account: workload
+  elements:
+    - {tf: aws_organizations_organizational_unit, name: workloads-ou, in: group:Workloads OU}
+    - {tf: aws_fms_admin_account, name: fms-admin, in: account:firewall-admin}
+    - {tf: aws_fms_policy, name: org-waf-policy, in: account:firewall-admin}
+    - {tf: aws_wafv2_rule_group, name: custom-block-rules, in: account:firewall-admin}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: waf-log-stream, in: account:firewall-admin}
+    - {tf: aws_s3_bucket, name: waf-logs, in: account:firewall-admin}
+    - {tf: aws_wafv2_web_acl, name: fms-managed-web-acl, in: account:workload}
+    - {tf: aws_lb, name: public-alb, in: account:workload}
+    - {tf: aws_api_gateway_stage, name: prod-stage, in: account:workload}
+  actors: [users, internet]
+  flows:
+    - {from: fms-admin, to: workloads-ou, label: policy scope}
+    - {from: org-waf-policy, to: fms-managed-web-acl, label: creates web ACL, step: 1}
+    - {from: custom-block-rules, to: org-waf-policy, label: included rule group}
+    - {from: fms-managed-web-acl, to: public-alb, link: aws_wafv2_web_acl_association}
+    - {from: fms-managed-web-acl, to: prod-stage, link: aws_wafv2_web_acl_association}
+    - {from: internet, to: public-alb, label: HTTPS filtered, step: 2}
+    - {from: fms-managed-web-acl, to: waf-log-stream, label: WAF logs, step: 3}
+    - {from: waf-log-stream, to: waf-logs, label: deliver, step: 4}
+    - {from: users, to: org-waf-policy, label: manage policy}
+
+- slug: siem-on-opensearch-service
+  title: SIEM on Amazon OpenSearch Service
+  category: security
+  tags: [siem, opensearch, security hub, log ingestion, lambda, elastic common schema]
+  source: https://aws.amazon.com/blogs/security/how-to-use-aws-security-hub-and-amazon-opensearch-service-for-siem/
+  description: Security Hub findings, CloudTrail, VPC flow logs, GuardDuty and WAF logs from many accounts land in a central S3 bucket, where a Lambda ETL function normalizes each log type to Elastic Common Schema and indexes it into an OpenSearch domain. Analysts correlate events across sources in OpenSearch Dashboards and configure alerts, keeping findings searchable beyond the Security Hub retention window.
+  containers:
+    - region: us-east-1
+      account: security-tooling
+      vpcs:
+        - name: siem
+          cidr: 10.90.0.0/16
+          subnets:
+            - {name: siem-private-a, cidr: 10.90.1.0/24, az: a}
+    - region: us-east-1
+      account: log-archive
+    - region: us-east-1
+      account: workload
+  elements:
+    - {tf: aws_securityhub_account, name: security-hub, in: account:security-tooling}
+    - {tf: aws_cloudwatch_event_rule, name: findings-export-rule, in: account:security-tooling}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: findings-firehose, in: account:security-tooling}
+    - {tf: aws_s3_bucket, name: siem-log-bucket, in: account:log-archive}
+    - {tf: aws_sqs_queue, name: log-object-queue, in: account:security-tooling}
+    - {tf: aws_lambda_function, name: es-loader, in: account:security-tooling}
+    - {tf: aws_opensearch_domain, name: siem-domain, in: subnet:siem-private-a}
+    - {tf: aws_kms_key, name: siem-cmk, in: account:security-tooling}
+    - {tf: aws_cloudtrail, name: workload-trail, in: account:workload}
+    - {tf: aws_guardduty_detector, name: guardduty-member, in: account:workload}
+  actors: [users]
+  flows:
+    - {from: workload-trail, to: siem-log-bucket, label: CloudTrail logs, step: 1}
+    - {from: guardduty-member, to: security-hub, label: findings, step: 2}
+    - {from: findings-export-rule, to: findings-firehose, link: aws_cloudwatch_event_target}
+    - {from: findings-firehose, to: siem-log-bucket, label: findings as JSON, step: 3}
+    - {from: siem-log-bucket, to: log-object-queue, label: object created event, step: 4}
+    - {from: log-object-queue, to: es-loader, link: aws_lambda_event_source_mapping}
+    - {from: es-loader, to: siem-domain, label: index ECS documents, step: 5}
+    - {from: siem-cmk, to: siem-domain, label: encryption at rest}
+    - {from: users, to: siem-domain, label: OpenSearch Dashboards, step: 6}
+
+- slug: backup-vault-lock-cross-account
+  title: Immutable cross-account backups with Backup Vault Lock
+  category: security
+  tags: [aws backup, vault lock, immutable, cross-account copy, organizations backup policy, ransomware]
+  source: https://docs.aws.amazon.com/aws-backup/latest/devguide/manage-cross-account.html
+  description: An Organizations backup policy applied to workload OUs creates backup plans in every member account, and each plan copies recovery points to a locked vault in a dedicated backup account encrypted with its own KMS key. Vault Lock in compliance mode and cross-account monitoring from the delegated backup administrator guarantee retention that cannot be shortened even by account administrators.
+  containers:
+    - region: us-east-1
+      account: management
+      groups: [{label: Workloads OU}]
+    - region: us-east-1
+      account: workload
+    - region: us-east-1
+      account: central-backup
+  elements:
+    - {tf: aws_organizations_organizational_unit, name: workloads-ou, in: group:Workloads OU}
+    - {tf: aws_organizations_policy, name: daily-backup-policy, in: account:management}
+    - {tf: aws_backup_vault, name: local-vault, in: account:workload}
+    - {tf: aws_backup_plan, name: daily-plan, in: account:workload}
+    - {tf: aws_db_instance, name: orders-db, in: account:workload}
+    - {tf: aws_ebs_volume, name: app-data-volume, in: account:workload}
+    - {tf: aws_backup_vault, name: locked-vault, in: account:central-backup}
+    - {tf: aws_backup_vault_lock_configuration, name: compliance-lock, in: account:central-backup}
+    - {tf: aws_kms_key, name: backup-cmk, in: account:central-backup}
+    - {tf: aws_sns_topic, name: backup-job-events, in: account:central-backup}
+  actors: [users]
+  flows:
+    - {from: daily-backup-policy, to: workloads-ou, link: aws_organizations_policy_attachment}
+    - {from: workloads-ou, to: daily-plan, label: effective backup plan, step: 1}
+    - {from: daily-plan, to: orders-db, label: snapshot, step: 2}
+    - {from: daily-plan, to: app-data-volume, label: snapshot, step: 2}
+    - {from: daily-plan, to: local-vault, label: recovery point, step: 3}
+    - {from: local-vault, to: locked-vault, label: cross-account copy, step: 4}
+    - {from: compliance-lock, to: locked-vault, label: WORM retention}
+    - {from: backup-cmk, to: locked-vault, label: encrypts}
+    - {from: locked-vault, to: backup-job-events, label: copy job status, step: 5}
+    - {from: users, to: backup-job-events, label: monitor}
+
+- slug: config-rules-auto-remediation
+  title: Config rules with automatic SSM remediation
+  category: security
+  tags: [aws config, conformance pack, remediation, ssm automation, compliance, sns]
+  source: https://docs.aws.amazon.com/config/latest/developerguide/remediation.html
+  description: Config records resource configuration and evaluates managed and custom rules; when a resource becomes non-compliant, a remediation configuration invokes a Systems Manager Automation runbook under an IAM role that fixes the resource, for example re-enabling S3 public access block or EBS encryption. Compliance changes are published to SNS and configuration history is delivered to an S3 bucket.
+  containers:
+    - region: us-east-1
+  elements:
+    - {tf: aws_config_configuration_recorder, name: recorder, in: region}
+    - {tf: aws_config_delivery_channel, name: delivery-channel, in: region}
+    - {tf: aws_config_conformance_pack, name: security-best-practices-pack, in: region}
+    - {tf: aws_config_config_rule, name: s3-public-read-prohibited, in: region}
+    - {tf: aws_config_remediation_configuration, name: block-public-access-remediation, in: region}
+    - {tf: aws_ssm_document, name: disable-public-access-runbook, in: region}
+    - {tf: aws_iam_role, name: remediation-role, in: region}
+    - {tf: aws_s3_bucket, name: config-history, in: region}
+    - {tf: aws_sns_topic, name: compliance-changes, in: region}
+    - {tf: aws_s3_bucket, name: noncompliant-bucket, in: region}
+  actors: [users]
+  flows:
+    - {from: recorder, to: noncompliant-bucket, label: record configuration, step: 1}
+    - {from: recorder, to: s3-public-read-prohibited, label: evaluate, step: 2}
+    - {from: security-best-practices-pack, to: s3-public-read-prohibited, label: contains rule}
+    - {from: s3-public-read-prohibited, to: block-public-access-remediation, label: NON_COMPLIANT, step: 3}
+    - {from: block-public-access-remediation, to: disable-public-access-runbook, label: StartAutomationExecution, step: 4}
+    - {from: disable-public-access-runbook, to: remediation-role, label: assumes}
+    - {from: disable-public-access-runbook, to: noncompliant-bucket, label: PutPublicAccessBlock, step: 5}
+    - {from: delivery-channel, to: config-history, label: configuration snapshots}
+    - {from: delivery-channel, to: compliance-changes, label: compliance notifications, step: 6}
+    - {from: compliance-changes, to: users, label: alert}
+
+- slug: network-firewall-tls-inspection
+  title: TLS inspection of encrypted traffic with Network Firewall
+  category: security
+  tags: [network firewall, tls inspection, acm, private ca, encryption in transit, deep packet inspection]
+  source: https://aws.amazon.com/blogs/security/tls-inspection-configuration-for-encrypted-traffic-and-aws-network-firewall/
+  description: A Network Firewall TLS inspection configuration references a certificate in ACM, issued by Private CA, so the firewall decrypts in-scope TLS sessions, applies stateful Suricata rules to the plaintext and re-encrypts before forwarding to the target. Ingress traffic from an internet gateway passes through the firewall endpoint subnet before reaching the load balancer, and decrypted-session alerts are logged to S3.
+  containers:
+    - region: us-east-1
+      vpcs:
+        - name: ingress
+          cidr: 10.110.0.0/16
+          subnets:
+            - {name: firewall-a, cidr: 10.110.0.0/28, az: a}
+            - {name: public-a, cidr: 10.110.1.0/24, az: a, public: true}
+            - {name: app-a, cidr: 10.110.2.0/24, az: a}
+  elements:
+    - {tf: aws_internet_gateway, name: ingress-igw, in: vpc:ingress}
+    - {tf: aws_networkfirewall_firewall, name: tls-firewall, in: subnet:firewall-a}
+    - {tf: aws_networkfirewall_tls_inspection_configuration, name: inbound-tls-config, in: vpc:ingress}
+    - {tf: aws_networkfirewall_firewall_policy, name: tls-policy, in: vpc:ingress}
+    - {tf: aws_networkfirewall_rule_group, name: suricata-http-rules, in: vpc:ingress}
+    - {tf: aws_acmpca_certificate_authority, name: internal-ca, in: region}
+    - {tf: aws_acm_certificate, name: inspection-cert, in: region}
+    - {tf: aws_lb, name: app-alb, in: subnet:public-a}
+    - {tf: aws_instance, name: app-server, in: subnet:app-a}
+    - {tf: aws_s3_bucket, name: firewall-alert-logs, in: region}
+  actors: [internet]
+  flows:
+    - {from: internal-ca, to: inspection-cert, label: issues certificate, step: 1}
+    - {from: inspection-cert, to: inbound-tls-config, label: server certificate}
+    - {from: inbound-tls-config, to: tls-policy, label: attached}
+    - {from: suricata-http-rules, to: tls-policy, label: stateful rules}
+    - {from: internet, to: ingress-igw, label: HTTPS, step: 2}
+    - {from: ingress-igw, to: tls-firewall, label: ingress route, step: 3}
+    - {from: tls-firewall, to: app-alb, label: decrypt inspect re-encrypt, step: 4}
+    - {from: app-alb, to: app-server, label: HTTPS, step: 5}
+    - {from: tls-firewall, to: firewall-alert-logs, label: alert logs}
+
+- slug: audit-manager-continuous-compliance
+  title: Continuous compliance evidence collection with Audit Manager
+  category: security
+  tags: [audit manager, compliance, evidence, config, security hub, cloudtrail, assessment report]
+  source: https://docs.aws.amazon.com/audit-manager/latest/userguide/what-is.html
+  description: Audit Manager in the delegated administrator account runs assessments built from prebuilt frameworks such as PCI DSS or SOC 2 against in-scope accounts, continuously collecting evidence from Config rule evaluations, Security Hub checks and CloudTrail activity. Evidence is attached to controls, assessment reports are written to an encrypted S3 destination, and EventBridge events notify control owners when review is needed.
+  containers:
+    - region: us-east-1
+      account: security-tooling
+    - region: us-east-1
+      account: workload
+  elements:
+    - {tf: aws_auditmanager_account_registration, name: audit-manager, in: account:security-tooling}
+    - {tf: aws_auditmanager_framework, name: pci-dss-framework, in: account:security-tooling}
+    - {tf: aws_auditmanager_assessment, name: annual-pci-assessment, in: account:security-tooling}
+    - {tf: aws_securityhub_account, name: security-hub, in: account:security-tooling}
+    - {tf: aws_config_configuration_aggregator, name: config-aggregator, in: account:security-tooling}
+    - {tf: aws_s3_bucket, name: assessment-reports, in: account:security-tooling}
+    - {tf: aws_kms_key, name: evidence-cmk, in: account:security-tooling}
+    - {tf: aws_cloudwatch_event_rule, name: assessment-events-rule, in: account:security-tooling}
+    - {tf: aws_sns_topic, name: control-owner-notifications, in: account:security-tooling}
+    - {tf: aws_cloudtrail, name: workload-trail, in: account:workload}
+    - {tf: aws_config_config_rule, name: encrypted-volumes-rule, in: account:workload}
+  actors: [users]
+  flows:
+    - {from: pci-dss-framework, to: annual-pci-assessment, label: framework controls, step: 1}
+    - {from: encrypted-volumes-rule, to: config-aggregator, label: evaluations, step: 2}
+    - {from: config-aggregator, to: annual-pci-assessment, label: compliance evidence, step: 3}
+    - {from: security-hub, to: annual-pci-assessment, label: security check evidence, step: 3}
+    - {from: workload-trail, to: annual-pci-assessment, label: user activity evidence, step: 3}
+    - {from: annual-pci-assessment, to: assessment-reports, label: assessment report, step: 4}
+    - {from: evidence-cmk, to: assessment-reports, label: encrypts}
+    - {from: assessment-events-rule, to: control-owner-notifications, link: aws_cloudwatch_event_target}
+    - {from: users, to: annual-pci-assessment, label: review controls, step: 5}
+
+- slug: automated-forensic-disk-collection
+  title: Automated forensic disk collection into a forensics account
+  category: security
+  tags: [incident response, forensics, step functions, ebs snapshots, guardduty, evidence bucket]
+  source: https://aws.amazon.com/blogs/security/how-to-automate-forensic-disk-collection-in-aws/
+  description: A GuardDuty or Security Hub finding matched by an EventBridge rule invokes a Lambda function that starts a Step Functions workflow, which snapshots the suspect instance's EBS volumes, shares and copies them with KMS encryption into a separate forensics account. Collector instances in an isolated forensics VPC stream bit-for-bit disk images into an evidence S3 bucket while every step is logged for chain of custody.
+  containers:
+    - region: us-east-1
+      account: workload
+      vpcs:
+        - name: app
+          cidr: 10.120.0.0/16
+          subnets:
+            - {name: private-a, cidr: 10.120.1.0/24, az: a}
+    - region: us-east-1
+      account: forensics
+      vpcs:
+        - name: forensics
+          cidr: 10.130.0.0/16
+          subnets:
+            - {name: collector-a, cidr: 10.130.1.0/24, az: a}
+  elements:
+    - {tf: aws_guardduty_detector, name: guardduty, in: account:workload}
+    - {tf: aws_instance, name: suspect-instance, in: subnet:private-a}
+    - {tf: aws_ebs_snapshot, name: suspect-snapshot, in: account:workload}
+    - {tf: aws_cloudwatch_event_rule, name: finding-trigger-rule, in: account:forensics}
+    - {tf: aws_lambda_function, name: start-collection, in: account:forensics}
+    - {tf: aws_sfn_state_machine, name: disk-collection-workflow, in: account:forensics}
+    - {tf: aws_kms_key, name: forensics-cmk, in: account:forensics}
+    - {tf: aws_instance, name: collector-instance, in: subnet:collector-a}
+    - {tf: aws_s3_bucket, name: evidence-bucket, in: account:forensics}
+    - {tf: aws_cloudwatch_log_group, name: chain-of-custody-log, in: account:forensics}
+  actors: [users]
+  flows:
+    - {from: guardduty, to: suspect-instance, label: finding on instance, step: 1}
+    - {from: guardduty, to: finding-trigger-rule, label: finding event, step: 2}
+    - {from: finding-trigger-rule, to: start-collection, link: aws_cloudwatch_event_target}
+    - {from: start-collection, to: disk-collection-workflow, label: StartExecution, step: 3}
+    - {from: disk-collection-workflow, to: suspect-snapshot, label: CreateSnapshot, step: 4}
+    - {from: suspect-snapshot, to: forensics-cmk, label: copy with encryption, step: 5}
+    - {from: disk-collection-workflow, to: collector-instance, label: launch collector, step: 6}
+    - {from: collector-instance, to: evidence-bucket, label: stream disk image, step: 7}
+    - {from: disk-collection-workflow, to: chain-of-custody-log, label: log each step}
+    - {from: users, to: evidence-bucket, label: analyst access}

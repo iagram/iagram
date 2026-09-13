@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.aws.amazon.com/iot/latest/developerguide/provision-wo-cert.html); edit freely.
+title: IoT fleet provisioning by claim with pre-provisioning hook
+category: iot
+tags:
+- iot core
+- fleet provisioning
+- claim certificate
+- provisioning template
+- pre-provisioning hook
+source: https://docs.aws.amazon.com/iot/latest/developerguide/provision-wo-cert.html
+description: Devices leave the factory with a shared claim certificate; on first connection they call CreateKeysAndCertificate and RegisterThing against a provisioning template, and IoT Core issues a unique
+  X.509 certificate signed by the Amazon Root CA. A pre-provisioning hook Lambda validates the device serial against an allow-list in DynamoDB before the template creates the thing, attaches the policy
+  and activates the certificate.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-provisioning, type: common.group, name: provisioning, parent: reg-us-east-1}
+- {id: grp-registry, type: common.group, name: registry, parent: reg-us-east-1}
+- {id: device, type: common.device, name: device}
+- {id: claim-certificate, type: aws.res.aws_iot_certificate, name: claim-certificate, parent: grp-provisioning, props: {active: true}}
+- {id: claim-policy, type: aws.res.aws_iot_policy, name: claim-policy, parent: grp-provisioning, props: {name: changeme, policy: changeme}}
+- {id: fleet-template, type: aws.res.aws_iot_provisioning_template, name: fleet-template, parent: grp-provisioning, props: {name: changeme, provisioning_role_arn: changeme, template_body: changeme}}
+- {id: pre-provisioning-hook, type: aws.lambda_function, name: pre-provisioning-hook, parent: grp-provisioning}
+- {id: device-allowlist, type: aws.dynamodb_table, name: device-allowlist, parent: grp-provisioning}
+- {id: provisioned-thing, type: aws.res.aws_iot_thing, name: provisioned-thing, parent: grp-registry, props: {name: changeme}}
+- {id: device-policy, type: aws.res.aws_iot_policy, name: device-policy, parent: grp-registry, props: {name: changeme, policy: changeme}}
+- {id: provisioning-alerts, type: aws.res.aws_sns_topic, name: provisioning-alerts, parent: grp-registry}
+edges:
+- {from: device, to: claim-certificate, label: mTLS connect with claim cert, step: '1'}
+- {from: claim-certificate, to: claim-policy, label: restricted to provisioning topics}
+- {from: device, to: fleet-template, label: CreateKeysAndCertificate + RegisterThing, step: '2'}
+- {from: fleet-template, to: pre-provisioning-hook, label: invoke hook with device parameters, step: '3'}
+- {from: pre-provisioning-hook, to: device-allowlist, label: check serial number, step: '4'}
+- {from: fleet-template, to: provisioned-thing, label: create thing from template, step: '5'}
+- {from: fleet-template, to: device-policy, label: attach policy to new cert, step: '5'}
+- {from: pre-provisioning-hook, to: provisioning-alerts, label: rejected device notification}
+- {from: device, to: provisioned-thing, label: reconnect with unique cert, step: '6'}
+steps:
+- {n: '1', text: 'device → claim-certificate: mTLS connect with claim cert'}
+- {n: '2', text: 'device → fleet-template: CreateKeysAndCertificate + RegisterThing'}
+- {n: '3', text: 'fleet-template → pre-provisioning-hook: invoke hook with device parameters'}
+- {n: '4', text: 'pre-provisioning-hook → device-allowlist: check serial number'}
+- {n: '5', text: 'fleet-template → provisioned-thing: create thing from template'}
+- {n: '6', text: 'device → provisioned-thing: reconnect with unique cert'}

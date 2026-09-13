@@ -1,0 +1,55 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/security/building-sensitive-data-remediation-workflows-in-multi-account-aws-environments/); edit freely.
+title: Macie sensitive data remediation across accounts
+category: security
+tags:
+- macie
+- sensitive data
+- quarantine
+- step functions
+- eventbridge
+- delegated administrator
+source: https://aws.amazon.com/blogs/security/building-sensitive-data-remediation-workflows-in-multi-account-aws-environments/
+description: Macie in the delegated administrator account scans S3 buckets in member accounts and emits findings to EventBridge, which forwards them to a Step Functions state machine. The workflow either
+  notifies analysts through Lambda or automatically moves the object to a quarantine prefix, tracks status in DynamoDB, and lets security staff release objects through an API Gateway endpoint.
+nodes:
+- {id: acct-security, type: aws.account, name: security}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security, props: {region: us-east-1}}
+- {id: acct-member, type: aws.account, name: member}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-member, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: macie-admin, type: aws.res.aws_macie2_account, name: macie-admin, parent: acct-security}
+- {id: findings-bus, type: aws.res.aws_cloudwatch_event_bus, name: findings-bus, parent: acct-security, props: {name: changeme}}
+- {id: macie-finding-rule, type: aws.res.aws_cloudwatch_event_rule, name: macie-finding-rule, parent: acct-security}
+- {id: remediation-workflow, type: aws.res.aws_sfn_state_machine, name: remediation-workflow, parent: acct-security, props: {definition: changeme, role_arn: changeme}}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: notify-lambda, type: aws.lambda_function, name: notify-lambda, parent: sub-reg-us-east-1-a}
+- {id: quarantine-lambda, type: aws.lambda_function, name: quarantine-lambda, parent: sub-reg-us-east-1-a}
+- {id: quarantine-tracker, type: aws.dynamodb_table, name: quarantine-tracker, parent: reg-us-east-1}
+- {id: release-api, type: aws.res.aws_api_gateway_rest_api, name: release-api, parent: acct-security, props: {name: changeme}}
+- {id: macie-member, type: aws.res.aws_macie2_account, name: macie-member, parent: acct-member}
+- {id: data-bucket, type: aws.s3_bucket, name: data-bucket, parent: reg-us-east-1}
+- {id: quarantine-role, type: aws.res.aws_iam_role, name: quarantine-role, parent: acct-member, props: {assume_role_policy: changeme}}
+edges:
+- {from: macie-member, to: data-bucket, label: classification job, step: '1'}
+- {from: macie-member, to: macie-admin, label: findings, step: '2'}
+- {from: macie-admin, to: findings-bus, label: finding event, step: '3'}
+- {from: macie-finding-rule, to: remediation-workflow, link: aws_cloudwatch_event_target}
+- {from: remediation-workflow, to: notify-lambda, label: notify path, step: '4'}
+- {from: remediation-workflow, to: quarantine-lambda, label: quarantine path, step: '5'}
+- {from: quarantine-lambda, to: quarantine-role, label: AssumeRole, step: '6'}
+- {from: quarantine-role, to: data-bucket, label: move to quarantine prefix, step: '7'}
+- {from: quarantine-lambda, to: quarantine-tracker, label: record status}
+- {from: users, to: release-api, label: release object, step: '8'}
+steps:
+- {n: '1', text: 'macie-member → data-bucket: classification job'}
+- {n: '2', text: 'macie-member → macie-admin: findings'}
+- {n: '3', text: 'macie-admin → findings-bus: finding event'}
+- {n: '4', text: 'remediation-workflow → notify-lambda: notify path'}
+- {n: '5', text: 'remediation-workflow → quarantine-lambda: quarantine path'}
+- {n: '6', text: 'quarantine-lambda → quarantine-role: AssumeRole'}
+- {n: '7', text: 'quarantine-role → data-bucket: move to quarantine prefix'}
+- {n: '8', text: 'users → release-api: release object'}

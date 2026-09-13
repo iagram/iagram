@@ -1,0 +1,40 @@
+# Generated from the official reference (https://docs.aws.amazon.com/apigateway/latest/developerguide/websocket-api-chat-app.html); edit freely.
+title: WebSocket chat API with API Gateway, Lambda and DynamoDB
+category: serverless
+tags:
+- websocket
+- api gateway
+- lambda
+- dynamodb
+- real-time
+source: https://docs.aws.amazon.com/apigateway/latest/developerguide/websocket-api-chat-app.html
+description: An API Gateway WebSocket API routes $connect, $disconnect and sendmessage frames to three Lambda functions. Connection IDs are stored in a DynamoDB table so the sendmessage handler can broadcast
+  to every connected client through the API Gateway management endpoint.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: chat-websocket-api, type: aws.res.aws_apigatewayv2_api, name: chat-websocket-api, parent: reg-us-east-1, props: {name: changeme, protocol_type: changeme}}
+- {id: on-connect, type: aws.lambda_function, name: on-connect, parent: reg-us-east-1}
+- {id: on-disconnect, type: aws.lambda_function, name: on-disconnect, parent: reg-us-east-1}
+- {id: send-message, type: aws.lambda_function, name: send-message, parent: reg-us-east-1}
+- {id: connections, type: aws.dynamodb_table, name: connections, parent: reg-us-east-1}
+- {id: websocket-logs, type: aws.res.aws_cloudwatch_log_group, name: websocket-logs, parent: reg-us-east-1}
+edges:
+- {from: users, to: chat-websocket-api, label: 'wss:// $connect', step: '1'}
+- {from: chat-websocket-api, to: on-connect, label: $connect route, step: '2'}
+- {from: on-connect, to: connections, label: PutItem connectionId, step: '3'}
+- {from: users, to: chat-websocket-api, label: sendmessage frame, step: '4'}
+- {from: chat-websocket-api, to: send-message, label: sendmessage route, step: '5'}
+- {from: send-message, to: connections, label: Scan connections, step: '6'}
+- {from: send-message, to: chat-websocket-api, label: PostToConnection, step: '7'}
+- {from: chat-websocket-api, to: on-disconnect, label: $disconnect route}
+- {from: on-disconnect, to: connections, label: DeleteItem}
+steps:
+- {n: '1', text: 'users → chat-websocket-api: wss:// $connect'}
+- {n: '2', text: 'chat-websocket-api → on-connect: $connect route'}
+- {n: '3', text: 'on-connect → connections: PutItem connectionId'}
+- {n: '4', text: 'users → chat-websocket-api: sendmessage frame'}
+- {n: '5', text: 'chat-websocket-api → send-message: sendmessage route'}
+- {n: '6', text: 'send-message → connections: Scan connections'}
+- {n: '7', text: 'send-message → chat-websocket-api: PostToConnection'}

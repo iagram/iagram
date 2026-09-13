@@ -1,0 +1,56 @@
+# Generated from the official reference (https://docs.aws.amazon.com/wellarchitected/latest/iot-lens/device-telemetry.html); edit freely.
+title: IoT Core telemetry pipeline with rules, Kinesis, Firehose and Timestream
+category: iot
+tags:
+- iot core
+- rules engine
+- kinesis
+- firehose
+- timestream
+- telemetry
+source: https://docs.aws.amazon.com/wellarchitected/latest/iot-lens/device-telemetry.html
+description: Devices publish read-only telemetry on a data/ topic namespace to the IoT Core message broker; topic rules fan the same messages out to a Kinesis data stream for real-time processing, a Firehose
+  delivery stream that lands raw records in S3, and a Timestream table for time-series queries. A Lambda consumer on the Kinesis stream writes latest-state records to DynamoDB while Glue and Athena query
+  the S3 archive.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-eu-west-1}
+- {id: grp-hot-path, type: common.group, name: hot path, parent: reg-eu-west-1}
+- {id: grp-cold-path, type: common.group, name: cold path, parent: reg-eu-west-1}
+- {id: device, type: common.device, name: device}
+- {id: sensor-thing, type: aws.res.aws_iot_thing, name: sensor-thing, parent: grp-ingestion, props: {name: changeme}}
+- {id: telemetry-rule, type: aws.res.aws_iot_topic_rule, name: telemetry-rule, parent: grp-ingestion, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: telemetry-stream, type: aws.res.aws_kinesis_stream, name: telemetry-stream, parent: grp-hot-path, props: {name: changeme}}
+- {id: state-processor, type: aws.lambda_function, name: state-processor, parent: grp-hot-path}
+- {id: device-state, type: aws.dynamodb_table, name: device-state, parent: grp-hot-path}
+- {id: telemetry-tsdb, type: aws.res.aws_timestreamwrite_database, name: telemetry-tsdb, parent: grp-hot-path, props: {database_name: changeme}}
+- id: ops-dashboards
+  type: aws.res.aws_grafana_workspace
+  name: ops-dashboards
+  parent: grp-hot-path
+  props:
+    account_access_type: changeme
+    authentication_providers: []
+    permission_type: changeme
+- {id: telemetry-firehose, type: aws.res.aws_kinesis_firehose_delivery_stream, name: telemetry-firehose, parent: grp-cold-path, props: {destination: changeme, name: changeme}}
+- {id: telemetry-lake, type: aws.s3_bucket, name: telemetry-lake, parent: grp-cold-path}
+- {id: telemetry-catalog, type: aws.res.aws_glue_catalog_database, name: telemetry-catalog, parent: grp-cold-path, props: {name: changeme}}
+- {id: telemetry-athena, type: aws.res.aws_athena_workgroup, name: telemetry-athena, parent: grp-cold-path, props: {name: changeme}}
+edges:
+- {from: device, to: sensor-thing, label: MQTT publish data/<device>/<sensor>, step: '1'}
+- {from: sensor-thing, to: telemetry-rule, label: rules engine SQL select, step: '2'}
+- {from: telemetry-rule, to: telemetry-stream, label: kinesis action, step: '3'}
+- {from: telemetry-rule, to: telemetry-firehose, label: firehose action, step: '3'}
+- {from: telemetry-rule, to: telemetry-tsdb, label: timestream action, step: '3'}
+- {from: telemetry-stream, to: state-processor, link: aws_lambda_event_source_mapping}
+- {from: state-processor, to: device-state, label: put latest state, step: '4'}
+- {from: telemetry-firehose, to: telemetry-lake, label: buffered parquet objects, step: '4'}
+- {from: telemetry-catalog, to: telemetry-lake, label: crawled schema}
+- {from: telemetry-athena, to: telemetry-catalog, label: SQL over archive}
+- {from: ops-dashboards, to: telemetry-tsdb, label: time-series queries}
+steps:
+- {n: '1', text: 'device → sensor-thing: MQTT publish data/<device>/<sensor>'}
+- {n: '2', text: 'sensor-thing → telemetry-rule: rules engine SQL select'}
+- {n: '3', text: 'telemetry-rule → telemetry-stream: kinesis action'}
+- {n: '4', text: 'state-processor → device-state: put latest state'}

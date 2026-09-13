@@ -1,0 +1,63 @@
+# Generated from the official reference (https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html); edit freely.
+title: Cell-based architecture with a thin cell router
+category: resilience
+tags:
+- cell-based architecture
+- bulkhead
+- fault isolation
+- shuffle sharding
+- cell router
+- scope of impact
+source: https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html
+description: The workload is deployed as independent, identically sized cells, each with its own load balancer, compute and database so a failure is contained to the customers mapped to that cell. A thin,
+  highly available cell router looks up the partition key (for example tenant ID) in a mapping table and forwards the request to the owning cell; cells never call each other.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-cell-router, type: common.group, name: cell-router, parent: reg-us-east-1}
+- {id: grp-cell-1, type: common.group, name: cell-1, parent: reg-us-east-1}
+- {id: grp-cell-2, type: common.group, name: cell-2, parent: reg-us-east-1}
+- {id: vpc-cells, type: aws.vpc, name: cells, parent: reg-us-east-1, props: {cidr: 10.120.0.0/16}}
+- {id: az-cells-a, type: aws.availability_zone, name: a, parent: vpc-cells, props: {zone: a}}
+- {id: sub-c1-app-a, type: aws.subnet, name: c1-app-a, parent: az-cells-a, props: {cidr: 10.120.1.0/24, az: a, public: false}}
+- {id: sub-c1-db-a, type: aws.subnet, name: c1-db-a, parent: az-cells-a, props: {cidr: 10.120.2.0/24, az: a, public: false}}
+- {id: sub-c2-app-a, type: aws.subnet, name: c2-app-a, parent: az-cells-a, props: {cidr: 10.120.11.0/24, az: a, public: false}}
+- {id: sub-c2-db-a, type: aws.subnet, name: c2-db-a, parent: az-cells-a, props: {cidr: 10.120.12.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: tenant-zone, type: aws.route53_zone, name: tenant-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: router-api, type: aws.res.aws_api_gateway_rest_api, name: router-api, parent: grp-cell-router, props: {name: changeme}}
+- {id: router-fn, type: aws.lambda_function, name: router-fn, parent: grp-cell-router}
+- {id: tenant-to-cell-map, type: aws.dynamodb_table, name: tenant-to-cell-map, parent: grp-cell-router}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: cell-1-alb, type: aws.alb, name: cell-1-alb, parent: vpc-reg-us-east-1}
+- {id: cell-1-ecs, type: aws.res.aws_ecs_cluster, name: cell-1-ecs, parent: sub-c1-app-a, props: {name: changeme}}
+- {id: cell-1-db, type: aws.res.aws_rds_cluster, name: cell-1-db, parent: sub-c1-db-a, props: {engine: changeme}}
+- {id: cell-1-queue, type: aws.sqs_queue, name: cell-1-queue, parent: grp-cell-1}
+- {id: cell-2-alb, type: aws.alb, name: cell-2-alb, parent: vpc-reg-us-east-1}
+- {id: cell-2-ecs, type: aws.res.aws_ecs_cluster, name: cell-2-ecs, parent: sub-c2-app-a, props: {name: changeme}}
+- {id: cell-2-db, type: aws.res.aws_rds_cluster, name: cell-2-db, parent: sub-c2-db-a, props: {engine: changeme}}
+- {id: cell-2-queue, type: aws.sqs_queue, name: cell-2-queue, parent: grp-cell-2}
+- {id: az-vpc-cells-b, type: aws.availability_zone, name: b, parent: vpc-cells, props: {zone: b}}
+- {id: sub-vpc-cells-b, type: aws.subnet, name: private-b, parent: az-vpc-cells-b, props: {cidr: 10.120.251.0/24, az: b, public: false}}
+- {id: sub-vpc-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: vpc-reg-us-east-1, props: {cidr: 10.200.250.0/24, az: a, public: false}}
+- {id: sub-vpc-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: vpc-reg-us-east-1, props: {cidr: 10.200.251.0/24, az: b, public: false}}
+edges:
+- {from: users, to: tenant-zone, label: DNS, step: '1'}
+- {from: tenant-zone, to: router-api, step: '2'}
+- {from: router-api, to: router-fn, step: '3'}
+- {from: router-fn, to: tenant-to-cell-map, label: lookup partition key, step: '4'}
+- {from: router-fn, to: cell-1-alb, label: forward to owning cell, step: '5'}
+- {from: router-fn, to: cell-2-alb, label: forward to owning cell}
+- {from: cell-1-alb, to: cell-1-ecs, step: '6'}
+- {from: cell-1-ecs, to: cell-1-db, label: cell-local data}
+- {from: cell-1-ecs, to: cell-1-queue, label: cell-local async work}
+- {from: cell-2-alb, to: cell-2-ecs}
+- {from: cell-2-ecs, to: cell-2-db, label: cell-local data}
+- {from: cell-2-ecs, to: cell-2-queue, label: cell-local async work}
+steps:
+- {n: '1', text: 'users → tenant-zone: DNS'}
+- {n: '2', text: tenant-zone → router-api}
+- {n: '3', text: router-api → router-fn}
+- {n: '4', text: 'router-fn → tenant-to-cell-map: lookup partition key'}
+- {n: '5', text: 'router-fn → cell-1-alb: forward to owning cell'}
+- {n: '6', text: cell-1-alb → cell-1-ecs}

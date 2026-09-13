@@ -1,0 +1,51 @@
+# Generated from the official reference (https://docs.aws.amazon.com/reference-architecture-diagrams/latest/ipv6-vpc-architectures/ipv6-centralized-egress-nat64.html); edit freely.
+title: IPv6-only workloads reaching IPv4 destinations with centralized NAT64 and DNS64
+category: networking
+tags:
+- ipv6-only
+- nat64
+- dns64
+- nat gateway
+- transit gateway
+- centralized egress
+source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/ipv6-vpc-architectures/ipv6-centralized-egress-nat64.html
+description: Workloads in IPv6-only subnets enable DNS64 so that IPv4-only destinations resolve to synthesized addresses in the 64:ff9b::/96 well-known prefix, and a route for that prefix points at the
+  Transit Gateway. The Transit Gateway forwards to a central egress VPC where NAT gateways perform NAT64 to translate to IPv4 and send the traffic through the internet gateway, while native IPv6 traffic
+  exits through the egress VPC's egress-only internet gateway.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-egress, type: aws.vpc, name: egress, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-egress-a, type: aws.availability_zone, name: a, parent: vpc-egress, props: {zone: a}}
+- {id: sub-egress-public-a, type: aws.subnet, name: egress-public-a, parent: az-egress-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-egress-b, type: aws.availability_zone, name: b, parent: vpc-egress, props: {zone: b}}
+- {id: sub-egress-public-b, type: aws.subnet, name: egress-public-b, parent: az-egress-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-egress-tgw-a, type: aws.subnet, name: egress-tgw-a, parent: az-egress-a, props: {cidr: 10.0.10.0/28, az: a, public: false}}
+- {id: vpc-spoke-ipv6, type: aws.vpc, name: spoke-ipv6, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-spoke-ipv6-a, type: aws.availability_zone, name: a, parent: vpc-spoke-ipv6, props: {zone: a}}
+- {id: sub-ipv6-only-a, type: aws.subnet, name: ipv6-only-a, parent: az-spoke-ipv6-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: az-spoke-ipv6-b, type: aws.availability_zone, name: b, parent: vpc-spoke-ipv6, props: {zone: b}}
+- {id: sub-ipv6-only-b, type: aws.subnet, name: ipv6-only-b, parent: az-spoke-ipv6-b, props: {cidr: 10.1.2.0/24, az: b, public: false}}
+- {id: internet, type: common.internet, name: internet}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1}
+- {id: nat64-a, type: aws.res.aws_nat_gateway, name: nat64-a, parent: sub-egress-public-a}
+- {id: nat64-b, type: aws.res.aws_nat_gateway, name: nat64-b, parent: sub-egress-public-b}
+- {id: egress-igw, type: aws.res.aws_internet_gateway, name: egress-igw, parent: vpc-egress}
+- {id: egress-eigw, type: aws.res.aws_egress_only_internet_gateway, name: egress-eigw, parent: vpc-egress, props: {vpc_id: changeme}}
+- {id: ipv6-app-a, type: aws.ec2_instance, name: ipv6-app-a, parent: sub-ipv6-only-a}
+- {id: ipv6-app-b, type: aws.ec2_instance, name: ipv6-app-b, parent: sub-ipv6-only-b}
+edges:
+- {from: hub-tgw, to: vpc-spoke-ipv6, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-egress, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: ipv6-app-a, to: hub-tgw, label: 'DNS64 answer 64:ff9b::/96 routed to TGW', step: '1'}
+- {from: hub-tgw, to: nat64-a, label: egress route table, step: '2'}
+- {from: nat64-a, to: egress-igw, label: NAT64 to IPv4 source, step: '3'}
+- {from: egress-igw, to: internet, label: IPv4-only destination, step: '4'}
+- {from: ipv6-app-b, to: hub-tgw, label: 'native IPv6 ::/0'}
+- {from: hub-tgw, to: egress-eigw, label: IPv6 destinations}
+- {from: egress-eigw, to: internet, label: IPv6}
+steps:
+- {n: '1', text: 'ipv6-app-a → hub-tgw: DNS64 answer 64:ff9b::/96 routed to TGW'}
+- {n: '2', text: 'hub-tgw → nat64-a: egress route table'}
+- {n: '3', text: 'nat64-a → egress-igw: NAT64 to IPv4 source'}
+- {n: '4', text: 'egress-igw → internet: IPv4-only destination'}

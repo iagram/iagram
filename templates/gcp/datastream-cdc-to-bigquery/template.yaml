@@ -1,0 +1,43 @@
+# Generated from the official reference (https://docs.cloud.google.com/datastream/docs/quickstart-replication-to-bigquery); edit freely.
+title: Change data capture from Cloud SQL to BigQuery with Datastream
+category: data
+tags:
+- cdc
+- datastream
+- cloud sql
+- postgresql
+- bigquery
+source: https://docs.cloud.google.com/datastream/docs/quickstart-replication-to-bigquery
+description: Datastream reads the PostgreSQL logical replication slot of a Cloud SQL instance through a private connectivity configuration and streams inserts, updates and deletes directly into BigQuery.
+  Destination tables are created automatically per source schema and merged with a configurable staleness, giving near real-time replicas for analytics without a Dataflow pipeline.
+nodes:
+- {id: prj-cdc, type: gcp.project, name: cdc, props: {project_id: cdc-123456, project: changeme, region: us-central1}}
+- {id: vpc-db-vpc, type: gcp.vpc, name: db-vpc, parent: prj-cdc, props: {cidr: 10.40.0.0/16}}
+- {id: sub-db-subnet, type: gcp.subnetwork, name: db-subnet, parent: vpc-db-vpc, props: {cidr: 10.40.1.0/24, region: us-central1}}
+- {id: sub-datastream-subnet, type: gcp.subnetwork, name: datastream-subnet, parent: vpc-db-vpc, props: {cidr: 10.40.2.0/29, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: orders-postgres, type: gcp.cloud_sql_instance, name: orders-postgres, parent: vpc-db-vpc}
+- {id: datastream-private-conn, type: gcp.res.google_datastream_private_connection, name: datastream-private-conn, parent: sub-datastream-subnet, props: {display_name: changeme, location: westeurope, private_connection_id: changeme}}
+- {id: postgres-source-profile, type: gcp.res.google_datastream_connection_profile, name: postgres-source-profile, parent: prj-cdc, props: {connection_profile_id: changeme, display_name: changeme, location: westeurope}}
+- {id: bigquery-dest-profile, type: gcp.res.google_datastream_connection_profile, name: bigquery-dest-profile, parent: prj-cdc, props: {connection_profile_id: changeme, display_name: changeme, location: westeurope}}
+- id: orders-cdc-stream
+  type: gcp.res.google_datastream_stream
+  name: orders-cdc-stream
+  parent: prj-cdc
+  props: {destination_config: {}, display_name: changeme, location: westeurope, source_config: {}, stream_id: changeme}
+- {id: orders-replica-dataset, type: gcp.bigquery_dataset, name: orders-replica-dataset, parent: prj-cdc}
+edges:
+- {from: client, to: orders-postgres, label: OLTP writes, step: '1'}
+- {from: orders-cdc-stream, to: postgres-source-profile, label: source, step: '2'}
+- {from: postgres-source-profile, to: datastream-private-conn, label: VPC peering, step: '3'}
+- {from: datastream-private-conn, to: orders-postgres, label: read replication slot, step: '4'}
+- {from: orders-cdc-stream, to: bigquery-dest-profile, label: destination, step: '5'}
+- {from: users, to: orders-replica-dataset, label: analytics queries, step: '7'}
+steps:
+- {n: '1', text: 'client → orders-postgres: OLTP writes'}
+- {n: '2', text: 'orders-cdc-stream → postgres-source-profile: source'}
+- {n: '3', text: 'postgres-source-profile → datastream-private-conn: VPC peering'}
+- {n: '4', text: 'datastream-private-conn → orders-postgres: read replication slot'}
+- {n: '5', text: 'orders-cdc-stream → bigquery-dest-profile: destination'}
+- {n: '7', text: 'users → orders-replica-dataset: analytics queries'}

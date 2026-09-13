@@ -1,0 +1,64 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/design-patterns-for-an-enterprise-data-lake-using-aws-lake-formation-cross-account-access/); edit freely.
+title: Enterprise data lake with Lake Formation cross-account access
+category: data
+tags:
+- lake formation
+- cross-account
+- resource links
+- ram
+- glue
+- athena
+- redshift spectrum
+source: https://aws.amazon.com/blogs/big-data/design-patterns-for-an-enterprise-data-lake-using-aws-lake-formation-cross-account-access/
+description: A central enterprise data lake account holds the shared S3 buckets, Glue Data Catalog and Lake Formation permissions; producer accounts write into it with Glue jobs, and consumer accounts read
+  through resource links with Athena, EMR or Redshift Spectrum. Lake Formation creates AWS RAM resource shares for every grant, so catalog changes are visible immediately in all accounts with no copy or
+  sync.
+nodes:
+- {id: acct-data-lake, type: aws.account, name: data-lake}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-data-lake, props: {region: eu-west-1}}
+- {id: acct-producer, type: aws.account, name: producer}
+- {id: reg-eu-west-1-2, type: aws.region, name: eu-west-1, parent: acct-producer, props: {region: eu-west-1}}
+- {id: acct-consumer, type: aws.account, name: consumer}
+- {id: reg-eu-west-1-3, type: aws.region, name: eu-west-1, parent: acct-consumer, props: {region: eu-west-1}}
+- {id: users, type: common.users, name: users}
+- {id: edla-raw, type: aws.s3_bucket, name: edla-raw, parent: reg-eu-west-1}
+- {id: edla-curated, type: aws.s3_bucket, name: edla-curated, parent: reg-eu-west-1}
+- {id: edla-location, type: aws.res.aws_lakeformation_resource, name: edla-location, parent: acct-data-lake, props: {arn: changeme}}
+- {id: edla-catalog, type: aws.res.aws_glue_catalog_database, name: edla-catalog, parent: acct-data-lake, props: {name: changeme}}
+- {id: edla-share, type: aws.res.aws_ram_resource_share, name: edla-share, parent: acct-data-lake, props: {name: changeme}}
+- id: producer-etl
+  type: aws.res.aws_glue_job
+  name: producer-etl
+  parent: acct-producer
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: producer-link, type: aws.res.aws_glue_catalog_database, name: producer-link, parent: acct-producer, props: {name: changeme}}
+- {id: consumer-link, type: aws.res.aws_glue_catalog_database, name: consumer-link, parent: acct-consumer, props: {name: changeme}}
+- {id: consumer-athena, type: aws.res.aws_athena_workgroup, name: consumer-athena, parent: acct-consumer, props: {name: changeme}}
+- {id: consumer-redshift, type: aws.res.aws_redshift_cluster, name: consumer-redshift, parent: acct-consumer, props: {cluster_identifier: changeme, node_type: changeme}}
+- id: consumer-quicksight
+  type: aws.res.aws_quicksight_data_source
+  name: consumer-quicksight
+  parent: acct-consumer
+  props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+edges:
+- {from: edla-location, to: edla-raw, label: registered, step: '1'}
+- {from: edla-location, to: edla-curated, label: registered, step: '1'}
+- {from: edla-share, to: producer-link, label: write grant via RAM, step: '2'}
+- {from: producer-link, to: edla-catalog, label: resource link, step: '2'}
+- {from: producer-etl, to: edla-raw, label: read, step: '3'}
+- {from: producer-etl, to: edla-curated, label: write curated tables, step: '3'}
+- {from: producer-etl, to: producer-link, label: update catalog, step: '3'}
+- {from: edla-share, to: consumer-link, label: read grant via RAM, step: '4'}
+- {from: consumer-link, to: edla-catalog, label: resource link, step: '4'}
+- {from: consumer-athena, to: consumer-link, label: SELECT, step: '5'}
+- {from: consumer-redshift, to: consumer-link, label: Spectrum external schema, step: '5'}
+- {from: consumer-quicksight, to: consumer-athena, step: '6'}
+- {from: users, to: consumer-quicksight, step: '7'}
+steps:
+- {n: '1', text: 'edla-location → edla-raw: registered'}
+- {n: '2', text: 'edla-share → producer-link: write grant via RAM'}
+- {n: '3', text: 'producer-etl → edla-raw: read'}
+- {n: '4', text: 'edla-share → consumer-link: read grant via RAM'}
+- {n: '5', text: 'consumer-athena → consumer-link: SELECT'}
+- {n: '6', text: consumer-quicksight → consumer-athena}
+- {n: '7', text: users → consumer-quicksight}

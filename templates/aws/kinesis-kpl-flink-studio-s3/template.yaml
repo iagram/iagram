@@ -1,0 +1,38 @@
+# Generated from the official reference (https://docs.aws.amazon.com/streams/latest/dev/examples-streaming-solution.html); edit freely.
+title: Kinesis Producer Library to Flink Studio notebook and S3
+category: data
+tags:
+- kinesis data streams
+- kpl
+- managed service for apache flink
+- studio notebook
+- s3
+source: https://docs.aws.amazon.com/streams/latest/dev/examples-streaming-solution.html
+description: Option 2 of the Streaming Data Solution for Amazon Kinesis. An EC2 instance running the Kinesis Producer Library generates records into a Kinesis data stream; a Managed Service for Apache Flink
+  Studio notebook queries and transforms the stream with Flink SQL and writes results to an S3 bucket.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-producer-vpc, type: aws.vpc, name: producer-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-producer-vpc-a, type: aws.availability_zone, name: a, parent: vpc-producer-vpc, props: {zone: a}}
+- {id: sub-producer-subnet, type: aws.subnet, name: producer-subnet, parent: az-producer-vpc-a, props: {cidr: 10.0.1.0/24, az: a, public: true}}
+- {id: kpl-producer, type: aws.ec2_instance, name: kpl-producer, parent: sub-producer-subnet}
+- {id: data-stream, type: aws.res.aws_kinesis_stream, name: data-stream, parent: reg-us-east-1, props: {name: changeme}}
+- {id: flink-studio-notebook, type: aws.res.aws_kinesisanalyticsv2_application, name: flink-studio-notebook, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: notebook-catalog, type: aws.res.aws_glue_catalog_database, name: notebook-catalog, parent: reg-us-east-1, props: {name: changeme}}
+- {id: output-bucket, type: aws.s3_bucket, name: output-bucket, parent: reg-us-east-1}
+- {id: stream-dashboard, type: aws.res.aws_cloudwatch_dashboard, name: stream-dashboard, parent: reg-us-east-1, props: {dashboard_body: changeme, dashboard_name: changeme}}
+- {id: az-vpc-producer-vpc-b, type: aws.availability_zone, name: b, parent: vpc-producer-vpc, props: {zone: b}}
+- {id: sub-vpc-producer-vpc-b, type: aws.subnet, name: private-b, parent: az-vpc-producer-vpc-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
+edges:
+- {from: kpl-producer, to: data-stream, label: KPL PutRecords, step: '1'}
+- {from: data-stream, to: flink-studio-notebook, label: Flink Kinesis source, step: '2'}
+- {from: flink-studio-notebook, to: notebook-catalog, label: table metadata, step: '3'}
+- {from: flink-studio-notebook, to: output-bucket, label: Flink S3 sink, step: '4'}
+- {from: data-stream, to: stream-dashboard, label: metrics, step: '5'}
+steps:
+- {n: '1', text: 'kpl-producer → data-stream: KPL PutRecords'}
+- {n: '2', text: 'data-stream → flink-studio-notebook: Flink Kinesis source'}
+- {n: '3', text: 'flink-studio-notebook → notebook-catalog: table metadata'}
+- {n: '4', text: 'flink-studio-notebook → output-bucket: Flink S3 sink'}
+- {n: '5', text: 'data-stream → stream-dashboard: metrics'}

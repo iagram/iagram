@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/migration-to-google-cloud-transferring-your-large-datasets); edit freely.
+title: Large dataset migration with Storage Transfer Service
+category: migration
+tags:
+- storage transfer service
+- migration
+- s3
+- on-premises
+- cloud storage
+- bigquery
+source: https://docs.cloud.google.com/architecture/migration-to-google-cloud-transferring-your-large-datasets
+description: Storage Transfer Service jobs copy objects from an on-premises file system through transfer agents and from Amazon S3 buckets over the internet or Interconnect into a Cloud Storage landing
+  bucket, with checksums validating each object. Pub/Sub notifications report job completion, a Cloud Function moves validated data to a curated bucket, and BigQuery loads it for analytics.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-migration, type: gcp.project, name: migration, props: {project_id: migration-123456, project: changeme, region: us-central1}}
+- {id: server, type: common.server, name: server}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: onprem-posix-transfer, type: gcp.res.google_storage_transfer_job, name: onprem-posix-transfer, parent: prj-migration, props: {description: changeme}}
+- {id: s3-to-gcs-transfer, type: gcp.res.google_storage_transfer_job, name: s3-to-gcs-transfer, parent: prj-migration, props: {description: changeme}}
+- {id: landing-bucket, type: gcp.storage_bucket, name: landing-bucket, parent: prj-migration}
+- {id: curated-bucket, type: gcp.storage_bucket, name: curated-bucket, parent: prj-migration}
+- {id: transfer-events-topic, type: gcp.pubsub_topic, name: transfer-events-topic, parent: prj-migration}
+- {id: validate-and-move-function, type: gcp.res.google_cloudfunctions2_function, name: validate-and-move-function, parent: prj-migration, props: {location: westeurope, name: changeme}}
+- {id: migrated-dataset, type: gcp.bigquery_dataset, name: migrated-dataset, parent: prj-migration}
+- id: aws-credentials-secret
+  type: gcp.res.google_secret_manager_secret
+  name: aws-credentials-secret
+  parent: prj-migration
+  props: {replication: {}, secret_id: changeme}
+edges:
+- {from: server, to: onprem-posix-transfer, label: transfer agents read NFS, step: '1'}
+- {from: onprem-posix-transfer, to: landing-bucket, label: parallel upload, step: '2'}
+- {from: s3-to-gcs-transfer, to: aws-credentials-secret, label: AWS access key, step: '3'}
+- {from: saas, to: s3-to-gcs-transfer, label: S3 bucket listing, step: '4'}
+- {from: s3-to-gcs-transfer, to: landing-bucket, label: copy objects, step: '5'}
+- {from: landing-bucket, to: transfer-events-topic, label: transfer complete notification, step: '6'}
+- {from: transfer-events-topic, to: validate-and-move-function, label: trigger, step: '7'}
+- {from: validate-and-move-function, to: curated-bucket, label: checksum and move, step: '8'}
+- {from: curated-bucket, to: migrated-dataset, label: BigQuery load, step: '9'}
+- {from: users, to: migrated-dataset, label: query, step: '10'}
+steps:
+- {n: '1', text: 'server → onprem-posix-transfer: transfer agents read NFS'}
+- {n: '2', text: 'onprem-posix-transfer → landing-bucket: parallel upload'}
+- {n: '3', text: 's3-to-gcs-transfer → aws-credentials-secret: AWS access key'}
+- {n: '4', text: 'saas → s3-to-gcs-transfer: S3 bucket listing'}
+- {n: '5', text: 's3-to-gcs-transfer → landing-bucket: copy objects'}
+- {n: '6', text: 'landing-bucket → transfer-events-topic: transfer complete notification'}
+- {n: '7', text: 'transfer-events-topic → validate-and-move-function: trigger'}
+- {n: '8', text: 'validate-and-move-function → curated-bucket: checksum and move'}
+- {n: '9', text: 'curated-bucket → migrated-dataset: BigQuery load'}
+- {n: '10', text: 'users → migrated-dataset: query'}

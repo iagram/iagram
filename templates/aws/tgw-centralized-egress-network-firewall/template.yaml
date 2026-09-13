@@ -1,0 +1,55 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/using-nat-gateway-with-firewall.html); edit freely.
+title: Centralized IPv4 egress with NAT gateway and AWS Network Firewall
+category: networking
+tags:
+- transit gateway
+- centralized egress
+- network firewall
+- nat gateway
+- multi-vpc
+source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/using-nat-gateway-with-firewall.html
+description: Spoke VPCs send their default route to a Transit Gateway whose egress route table forwards all internet-bound traffic to a dedicated egress VPC. Inside the egress VPC the traffic passes through
+  AWS Network Firewall endpoints for stateful inspection before a NAT gateway in a public subnet forwards it to the internet gateway; return traffic follows the same path in reverse.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-egress, type: aws.vpc, name: egress, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-egress-a, type: aws.availability_zone, name: a, parent: vpc-egress, props: {zone: a}}
+- {id: sub-egress-tgw-a, type: aws.subnet, name: egress-tgw-a, parent: az-egress-a, props: {cidr: 10.0.0.0/28, az: a, public: false}}
+- {id: sub-egress-firewall-a, type: aws.subnet, name: egress-firewall-a, parent: az-egress-a, props: {cidr: 10.0.1.0/28, az: a, public: false}}
+- {id: sub-egress-public-a, type: aws.subnet, name: egress-public-a, parent: az-egress-a, props: {cidr: 10.0.2.0/24, az: a, public: true}}
+- {id: az-egress-b, type: aws.availability_zone, name: b, parent: vpc-egress, props: {zone: b}}
+- {id: sub-egress-public-b, type: aws.subnet, name: egress-public-b, parent: az-egress-b, props: {cidr: 10.0.3.0/24, az: b, public: true}}
+- {id: vpc-spoke-app, type: aws.vpc, name: spoke-app, parent: reg-eu-west-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-spoke-app-a, type: aws.availability_zone, name: a, parent: vpc-spoke-app, props: {zone: a}}
+- {id: sub-app-private-a, type: aws.subnet, name: app-private-a, parent: az-spoke-app-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-spoke-data, type: aws.vpc, name: spoke-data, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}}
+- {id: az-spoke-data-a, type: aws.availability_zone, name: a, parent: vpc-spoke-data, props: {zone: a}}
+- {id: sub-data-private-a, type: aws.subnet, name: data-private-a, parent: az-spoke-data-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
+- {id: internet, type: common.internet, name: internet}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-eu-west-1}
+- {id: egress-firewall, type: aws.res.aws_networkfirewall_firewall, name: egress-firewall, parent: sub-egress-firewall-a, props: {firewall_policy_arn: changeme, name: changeme}}
+- {id: egress-nat-a, type: aws.res.aws_nat_gateway, name: egress-nat-a, parent: sub-egress-public-a}
+- {id: egress-nat-b, type: aws.res.aws_nat_gateway, name: egress-nat-b, parent: sub-egress-public-b}
+- {id: egress-igw, type: aws.res.aws_internet_gateway, name: egress-igw, parent: vpc-egress}
+- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-app-private-a}
+- {id: data-server, type: aws.ec2_instance, name: data-server, parent: sub-data-private-a}
+- {id: az-vpc-spoke-app-b, type: aws.availability_zone, name: b, parent: vpc-spoke-app, props: {zone: b}}
+- {id: sub-vpc-spoke-app-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-app-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-spoke-data-b, type: aws.availability_zone, name: b, parent: vpc-spoke-data, props: {zone: b}}
+- {id: sub-vpc-spoke-data-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-data-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+edges:
+- {from: hub-tgw, to: vpc-spoke-app, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-spoke-data, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-egress, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: app-server, to: hub-tgw, label: 0.0.0.0/0 via TGW, step: '1'}
+- {from: hub-tgw, to: egress-firewall, label: egress route table to firewall endpoint, step: '2'}
+- {from: egress-firewall, to: egress-nat-a, label: inspected traffic, step: '3'}
+- {from: egress-nat-a, to: egress-igw, label: SNAT, step: '4'}
+- {from: egress-igw, to: internet, step: '5'}
+steps:
+- {n: '1', text: 'app-server → hub-tgw: 0.0.0.0/0 via TGW'}
+- {n: '2', text: 'hub-tgw → egress-firewall: egress route table to firewall endpoint'}
+- {n: '3', text: 'egress-firewall → egress-nat-a: inspected traffic'}
+- {n: '4', text: 'egress-nat-a → egress-igw: SNAT'}
+- {n: '5', text: egress-igw → internet}

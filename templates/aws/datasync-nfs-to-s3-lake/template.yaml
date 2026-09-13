@@ -1,0 +1,55 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/storage/synchronizing-your-data-to-amazon-s3-using-aws-datasync/); edit freely.
+title: Synchronize on-premises NFS shares into S3 with DataSync
+category: storage
+tags:
+- datasync
+- nfs
+- on-premises
+- s3
+- incremental transfer
+- cloudwatch
+source: https://aws.amazon.com/blogs/storage/synchronizing-your-data-to-amazon-s3-using-aws-datasync/
+description: A DataSync agent deployed as a VM next to an on-premises Linux NFS server reads the shares and transfers them to an S3 bucket through a scheduled DataSync task with incremental transfer and
+  checksum verification enabled. Each run compares source metadata against S3 objects and uploads only new or changed files, logging every transferred object to CloudWatch Logs.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: server, type: common.server, name: server}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: nfs-agent, type: aws.res.aws_datasync_agent, name: nfs-agent, parent: sub-reg-eu-west-1-a}
+- id: nfs-source
+  type: aws.res.aws_datasync_location_nfs
+  name: nfs-source
+  parent: sub-reg-eu-west-1-a
+  props: {on_prem_config: {}, server_hostname: changeme, subdirectory: changeme}
+- id: lake-destination
+  type: aws.res.aws_datasync_location_s3
+  name: lake-destination
+  parent: reg-eu-west-1
+  props: {s3_bucket_arn: changeme, s3_config: {}, subdirectory: changeme}
+- {id: nightly-sync, type: aws.res.aws_datasync_task, name: nightly-sync, parent: reg-eu-west-1, props: {destination_location_arn: changeme, source_location_arn: changeme}}
+- {id: landing-bucket, type: aws.s3_bucket, name: landing-bucket, parent: reg-eu-west-1}
+- {id: datasync-logs, type: aws.res.aws_cloudwatch_log_group, name: datasync-logs, parent: reg-eu-west-1}
+- {id: landing-crawler, type: aws.res.aws_glue_crawler, name: landing-crawler, parent: reg-eu-west-1, props: {database_name: changeme, name: changeme, role: changeme}}
+- {id: landing-db, type: aws.res.aws_glue_catalog_database, name: landing-db, parent: reg-eu-west-1, props: {name: changeme}}
+edges:
+- {from: server, to: nfs-source, label: NFS export, step: '1'}
+- {from: nfs-agent, to: nfs-source, label: agent reads share, step: '2'}
+- {from: nightly-sync, to: nfs-agent, label: scheduled task execution, step: '3'}
+- {from: nfs-agent, to: lake-destination, label: 'TLS transfer, only changed data', step: '4'}
+- {from: lake-destination, to: landing-bucket, label: PUT objects, step: '4'}
+- {from: nightly-sync, to: datasync-logs, label: log all transferred objects, step: '5'}
+- {from: landing-crawler, to: landing-bucket, step: '6'}
+- {from: landing-crawler, to: landing-db, step: '6'}
+steps:
+- {n: '1', text: 'server → nfs-source: NFS export'}
+- {n: '2', text: 'nfs-agent → nfs-source: agent reads share'}
+- {n: '3', text: 'nightly-sync → nfs-agent: scheduled task execution'}
+- {n: '4', text: 'nfs-agent → lake-destination: TLS transfer, only changed data'}
+- {n: '5', text: 'nightly-sync → datasync-logs: log all transferred objects'}
+- {n: '6', text: landing-crawler → landing-bucket}

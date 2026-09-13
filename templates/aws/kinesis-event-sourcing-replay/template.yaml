@@ -1,0 +1,42 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/architectural-patterns-for-real-time-analytics-using-amazon-kinesis-data-streams-part-1/); edit freely.
+title: Event-sourcing microservices with Kinesis replay and Flink state snapshots
+category: serverless
+tags:
+- event sourcing
+- event replay
+- kinesis data streams
+- retention
+- managed service for apache flink
+- lambda
+source: https://aws.amazon.com/blogs/big-data/architectural-patterns-for-real-time-analytics-using-amazon-kinesis-data-streams-part-1/
+description: Kinesis Data Streams acts as the centralized event store for event-sourcing microservices, retaining events for up to 365 days so consumers can replay them by resetting their position. A Managed
+  Service for Apache Flink application maintains stateful aggregates with snapshots persisted to S3, and emits derived events to output streams consumed by Lambda-based microservices behind API Gateway.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-event-store, type: common.group, name: event store, parent: reg-us-east-1}
+- {id: grp-microservices, type: common.group, name: microservices, parent: reg-us-east-1}
+- {id: client, type: common.client, name: client}
+- {id: event-store, type: aws.res.aws_kinesis_stream, name: event-store, parent: grp-event-store, props: {name: changeme}}
+- {id: stateful-processor, type: aws.res.aws_kinesisanalyticsv2_application, name: stateful-processor, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: state-snapshots, type: aws.s3_bucket, name: state-snapshots, parent: reg-us-east-1}
+- {id: derived-events, type: aws.res.aws_kinesis_stream, name: derived-events, parent: grp-event-store, props: {name: changeme}}
+- {id: order-service, type: aws.lambda_function, name: order-service, parent: grp-microservices}
+- {id: replay-consumer, type: aws.lambda_function, name: replay-consumer, parent: grp-microservices}
+- {id: commands-api, type: aws.res.aws_api_gateway_rest_api, name: commands-api, parent: grp-microservices, props: {name: changeme}}
+edges:
+- {from: client, to: commands-api, label: commands, step: '1'}
+- {from: commands-api, to: event-store, label: append events, step: '2'}
+- {from: event-store, to: stateful-processor, label: Flink Kinesis source, step: '3'}
+- {from: stateful-processor, to: state-snapshots, label: state snapshots, step: '4'}
+- {from: stateful-processor, to: derived-events, label: aggregated events, step: '5'}
+- {from: derived-events, to: order-service, step: '6', link: aws_lambda_event_source_mapping}
+- {from: event-store, to: replay-consumer, label: 'replay: TRIM_HORIZON or AT_TIMESTAMP', step: '7'}
+steps:
+- {n: '1', text: 'client → commands-api: commands'}
+- {n: '2', text: 'commands-api → event-store: append events'}
+- {n: '3', text: 'event-store → stateful-processor: Flink Kinesis source'}
+- {n: '4', text: 'stateful-processor → state-snapshots: state snapshots'}
+- {n: '5', text: 'stateful-processor → derived-events: aggregated events'}
+- {n: '6', text: derived-events → order-service}
+- {n: '7', text: 'event-store → replay-consumer: replay: TRIM_HORIZON or AT_TIMESTAMP'}

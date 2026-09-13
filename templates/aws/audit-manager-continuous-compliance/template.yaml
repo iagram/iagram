@@ -1,0 +1,41 @@
+# Generated from the official reference (https://docs.aws.amazon.com/audit-manager/latest/userguide/what-is.html); edit freely.
+title: Continuous compliance evidence collection with Audit Manager
+category: security
+tags:
+- audit manager
+- compliance
+- evidence
+- config
+- security hub
+- cloudtrail
+- assessment report
+source: https://docs.aws.amazon.com/audit-manager/latest/userguide/what-is.html
+description: Audit Manager in the delegated administrator account runs assessments built from prebuilt frameworks such as PCI DSS or SOC 2 against in-scope accounts, continuously collecting evidence from
+  Config rule evaluations, Security Hub checks and CloudTrail activity. Evidence is attached to controls, assessment reports are written to an encrypted S3 destination, and EventBridge events notify control
+  owners when review is needed.
+nodes:
+- {id: acct-security-tooling, type: aws.account, name: security-tooling}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}}
+- {id: acct-workload, type: aws.account, name: workload}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: audit-manager, type: aws.res.aws_auditmanager_account_registration, name: audit-manager, parent: acct-security-tooling}
+- {id: pci-dss-framework, type: aws.res.aws_auditmanager_framework, name: pci-dss-framework, parent: acct-security-tooling, props: {name: changeme}}
+- {id: security-hub, type: aws.res.aws_securityhub_account, name: security-hub, parent: acct-security-tooling}
+- {id: config-aggregator, type: aws.res.aws_config_configuration_aggregator, name: config-aggregator, parent: acct-security-tooling, props: {name: changeme}}
+- {id: assessment-reports, type: aws.s3_bucket, name: assessment-reports, parent: reg-us-east-1}
+- {id: evidence-cmk, type: aws.res.aws_kms_key, name: evidence-cmk, parent: acct-security-tooling}
+- {id: assessment-events-rule, type: aws.res.aws_cloudwatch_event_rule, name: assessment-events-rule, parent: acct-security-tooling}
+- {id: control-owner-notifications, type: aws.res.aws_sns_topic, name: control-owner-notifications, parent: acct-security-tooling}
+- {id: workload-trail, type: aws.res.aws_cloudtrail, name: workload-trail, parent: acct-workload, props: {name: changeme, s3_bucket_name: changeme}}
+- id: encrypted-volumes-rule
+  type: aws.res.aws_config_config_rule
+  name: encrypted-volumes-rule
+  parent: acct-workload
+  props: {name: changeme, source: {}}
+edges:
+- {from: encrypted-volumes-rule, to: config-aggregator, label: evaluations, step: '2'}
+- {from: evidence-cmk, to: assessment-reports, label: encrypts}
+- {from: assessment-events-rule, to: control-owner-notifications, link: aws_cloudwatch_event_target}
+steps:
+- {n: '2', text: 'encrypted-volumes-rule → config-aggregator: evaluations'}

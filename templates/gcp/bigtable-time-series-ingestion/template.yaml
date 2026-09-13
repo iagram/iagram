@@ -1,0 +1,42 @@
+# Generated from the official reference (https://docs.cloud.google.com/bigtable/docs/schema-design-time-series); edit freely.
+title: Time series ingestion into Bigtable with Dataflow
+category: database
+tags:
+- bigtable
+- time series
+- iot
+- dataflow
+- pub/sub
+- bigquery
+source: https://docs.cloud.google.com/bigtable/docs/schema-design-time-series
+description: Sensor readings are published to Pub/Sub and a Dataflow streaming job writes them into a Bigtable table using a time-bucketed row key design that spreads writes and keeps recent measurements
+  adjacent. Serving applications read the latest rows from Bigtable with single-digit millisecond latency, and a nightly Dataflow batch exports history to BigQuery for analytics.
+nodes:
+- {id: prj-timeseries, type: gcp.project, name: timeseries, props: {project_id: timeseries-123456, project: changeme, region: us-east1}}
+- {id: grp-ingest, type: common.group, name: ingest, parent: prj-timeseries}
+- {id: grp-store, type: common.group, name: store, parent: prj-timeseries}
+- {id: grp-analyze, type: common.group, name: analyze, parent: prj-timeseries}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: sensor-readings-topic, type: gcp.pubsub_topic, name: sensor-readings-topic, parent: grp-ingest}
+- {id: sensor-readings-sub, type: gcp.res.google_pubsub_subscription, name: sensor-readings-sub, parent: grp-ingest, props: {name: changeme, topic: changeme}}
+- {id: readings-to-bigtable-job, type: gcp.res.google_dataflow_job, name: readings-to-bigtable-job, parent: grp-ingest, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: timeseries-bigtable, type: gcp.res.google_bigtable_instance, name: timeseries-bigtable, parent: grp-store, props: {name: changeme}}
+- {id: readings-api-service, type: gcp.cloud_run_service, name: readings-api-service, parent: grp-store}
+- {id: bigtable-to-bq-export-job, type: gcp.res.google_dataflow_job, name: bigtable-to-bq-export-job, parent: grp-analyze, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: readings-history-dataset, type: gcp.bigquery_dataset, name: readings-history-dataset, parent: grp-analyze}
+- {id: nightly-export-schedule, type: gcp.res.google_cloud_scheduler_job, name: nightly-export-schedule, parent: grp-analyze, props: {name: changeme}}
+edges:
+- {from: device, to: sensor-readings-topic, label: publish readings, step: '1'}
+- {from: sensor-readings-topic, to: sensor-readings-sub, label: fan out, step: '2'}
+- {from: sensor-readings-sub, to: readings-to-bigtable-job, label: pull, step: '3'}
+- {from: users, to: readings-api-service, label: HTTPS, step: '6'}
+- {from: nightly-export-schedule, to: bigtable-to-bq-export-job, label: launch batch, step: '7'}
+- {from: bigtable-to-bq-export-job, to: readings-history-dataset, label: load history, step: '9'}
+steps:
+- {n: '1', text: 'device → sensor-readings-topic: publish readings'}
+- {n: '2', text: 'sensor-readings-topic → sensor-readings-sub: fan out'}
+- {n: '3', text: 'sensor-readings-sub → readings-to-bigtable-job: pull'}
+- {n: '6', text: 'users → readings-api-service: HTTPS'}
+- {n: '7', text: 'nightly-export-schedule → bigtable-to-bq-export-job: launch batch'}
+- {n: '9', text: 'bigtable-to-bq-export-job → readings-history-dataset: load history'}

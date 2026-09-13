@@ -1,0 +1,40 @@
+# Generated from the official reference (https://docs.cloud.google.com/network-connectivity/docs/vpn/how-to/creating-ha-vpn2); edit freely.
+title: Hub-and-spoke with HA VPN between VPC networks
+category: networking
+tags:
+- ha vpn
+- hub and spoke
+- transitive routing
+- bgp
+- vpc to vpc
+source: https://docs.cloud.google.com/network-connectivity/docs/vpn/how-to/creating-ha-vpn2
+description: Two VPC networks are connected with a pair of HA VPN gateways, one per network, and four IPsec tunnels (two per gateway interface) with BGP sessions on Cloud Routers in each network. Used as
+  a hub-and-spoke option when transitive routing between spokes through the hub is required and the bandwidth ceiling of VPN tunnels is acceptable.
+nodes:
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west4}}
+- {id: vpc-hub-vpc, type: gcp.vpc, name: hub-vpc, parent: prj-net-hub, props: {cidr: 10.20.0.0/16}}
+- {id: sub-hub-ew4, type: gcp.subnetwork, name: hub-ew4, parent: vpc-hub-vpc, props: {cidr: 10.20.0.0/24, region: europe-west4}}
+- {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: europe-west4}}
+- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-workload-a, props: {cidr: 10.21.0.0/16}}
+- {id: sub-spoke-a-ew4, type: gcp.subnetwork, name: spoke-a-ew4, parent: vpc-spoke-a, props: {cidr: 10.21.0.0/24, region: europe-west4}}
+- {id: prj-workload-b, type: gcp.project, name: workload-b, props: {project_id: workload-b-123456, project: changeme, region: europe-west4}}
+- {id: vpc-spoke-b, type: gcp.vpc, name: spoke-b, parent: prj-workload-b, props: {cidr: 10.22.0.0/16}}
+- {id: sub-spoke-b-ew4, type: gcp.subnetwork, name: spoke-b-ew4, parent: vpc-spoke-b, props: {cidr: 10.22.0.0/24, region: europe-west4}}
+- {id: hub-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: hub-vpn-gw, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}}
+- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}}
+- {id: spoke-a-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: spoke-a-vpn-gw, parent: vpc-spoke-a, props: {name: changeme, network: changeme}}
+- {id: spoke-a-router, type: gcp.res.google_compute_router, name: spoke-a-router, parent: vpc-spoke-a, props: {name: changeme, network: changeme}}
+- {id: spoke-b-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: spoke-b-vpn-gw, parent: vpc-spoke-b, props: {name: changeme, network: changeme}}
+- {id: spoke-b-router, type: gcp.res.google_compute_router, name: spoke-b-router, parent: vpc-spoke-b, props: {name: changeme, network: changeme}}
+- {id: app-a, type: gcp.compute_instance, name: app-a, parent: sub-spoke-a-ew4}
+- {id: app-b, type: gcp.compute_instance, name: app-b, parent: sub-spoke-b-ew4}
+edges:
+- {from: hub-vpn-gw, to: spoke-a-vpn-gw, label: HA VPN 4 tunnels, step: '1'}
+- {from: hub-vpn-gw, to: spoke-b-vpn-gw, label: HA VPN 4 tunnels, step: '2'}
+- {from: hub-router, to: spoke-a-router, label: BGP}
+- {from: hub-router, to: spoke-b-router, label: BGP}
+- {from: app-a, to: app-b, label: transitive spoke-to-spoke via hub, step: '3'}
+steps:
+- {n: '1', text: 'hub-vpn-gw → spoke-a-vpn-gw: HA VPN 4 tunnels'}
+- {n: '2', text: 'hub-vpn-gw → spoke-b-vpn-gw: HA VPN 4 tunnels'}
+- {n: '3', text: 'app-a → app-b: transitive spoke-to-spoke via hub'}

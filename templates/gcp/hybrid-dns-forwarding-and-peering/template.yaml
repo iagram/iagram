@@ -1,0 +1,48 @@
+# Generated from the official reference (https://docs.cloud.google.com/dns/docs/best-practices); edit freely.
+title: Hybrid DNS with forwarding zones, peering zones and a DNS hub
+category: networking
+tags:
+- cloud dns
+- forwarding zone
+- peering zone
+- inbound server policy
+- hub and spoke
+- hybrid dns
+source: https://docs.cloud.google.com/dns/docs/best-practices
+description: A hub VPC hosts the hybrid connectivity, a forwarding zone that sends corp.example.com queries to on-premises DNS servers, and an inbound server policy that lets on-premises resolvers query
+  Cloud DNS private zones through a proxy IP in the hub. Spoke VPCs use peering zones that point at the hub VPC so their workloads resolve on-premises and shared private names without their own forwarding
+  configuration.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-dns-hub, type: gcp.project, name: dns-hub, props: {project_id: dns-hub-123456, project: changeme, region: europe-west1}}
+- {id: vpc-hub-vpc, type: gcp.vpc, name: hub-vpc, parent: prj-dns-hub, props: {cidr: 10.160.0.0/16}}
+- {id: sub-hub-ew1, type: gcp.subnetwork, name: hub-ew1, parent: vpc-hub-vpc, props: {cidr: 10.160.0.0/24, region: europe-west1}}
+- {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: europe-west1}}
+- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-workload-a, props: {cidr: 10.161.0.0/16}}
+- {id: sub-spoke-a-ew1, type: gcp.subnetwork, name: spoke-a-ew1, parent: vpc-spoke-a, props: {cidr: 10.161.0.0/24, region: europe-west1}}
+- {id: hub-private-zone, type: gcp.cloud_dns_zone, name: hub-private-zone, parent: prj-dns-hub, props: {domain: example.com}}
+- {id: onprem-forwarding-zone, type: gcp.cloud_dns_zone, name: onprem-forwarding-zone, parent: prj-dns-hub, props: {domain: example.com}}
+- {id: hub-inbound-policy, type: gcp.res.google_dns_policy, name: hub-inbound-policy, parent: vpc-hub-vpc, props: {name: changeme}}
+- {id: spoke-a-peering-zone, type: gcp.cloud_dns_zone, name: spoke-a-peering-zone, parent: prj-workload-a, props: {domain: example.com}}
+- {id: hub-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: hub-vpn-gw, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}}
+- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}}
+- {id: vpc-prj-dns-hub, type: gcp.vpc, name: main, parent: prj-dns-hub}
+- {id: sub-prj-dns-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-dns-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: onprem-peer-gw, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-peer-gw, parent: sub-prj-dns-hub, props: {name: changeme}}
+- {id: onprem-dns-server, type: gcp.compute_instance, name: onprem-dns-server, parent: sub-prj-dns-hub}
+- {id: app-a, type: gcp.compute_instance, name: app-a, parent: sub-spoke-a-ew1}
+edges:
+- {from: vpc-hub-vpc, to: vpc-spoke-a, link: google_compute_network_peering}
+- {from: onprem-peer-gw, to: hub-vpn-gw, label: IPsec, step: '1'}
+- {from: app-a, to: spoke-a-peering-zone, label: query corp.example.com, step: '2'}
+- {from: spoke-a-peering-zone, to: onprem-forwarding-zone, label: DNS peering to hub VPC, step: '3'}
+- {from: onprem-forwarding-zone, to: onprem-dns-server, label: forward via 35.199.192.0/19, step: '4'}
+- {from: onprem-dns-server, to: hub-inbound-policy, label: query gcp.example.com via inbound proxy IP, step: '5'}
+- {from: hub-inbound-policy, to: hub-private-zone, label: resolve private zone, step: '6'}
+steps:
+- {n: '1', text: 'onprem-peer-gw → hub-vpn-gw: IPsec'}
+- {n: '2', text: 'app-a → spoke-a-peering-zone: query corp.example.com'}
+- {n: '3', text: 'spoke-a-peering-zone → onprem-forwarding-zone: DNS peering to hub VPC'}
+- {n: '4', text: 'onprem-forwarding-zone → onprem-dns-server: forward via 35.199.192.0/19'}
+- {n: '5', text: 'onprem-dns-server → hub-inbound-policy: query gcp.example.com via inbound proxy IP'}
+- {n: '6', text: 'hub-inbound-policy → hub-private-zone: resolve private zone'}

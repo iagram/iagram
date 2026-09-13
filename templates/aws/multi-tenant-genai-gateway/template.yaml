@@ -1,0 +1,52 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/build-a-multi-tenant-generative-ai-environment-for-your-enterprise-on-aws/); edit freely.
+title: Multi-tenant generative AI gateway on Amazon Bedrock
+category: ml
+tags:
+- multi-tenant
+- saas
+- generative ai gateway
+- bedrock
+- cost allocation
+- cognito
+source: https://aws.amazon.com/blogs/machine-learning/build-a-multi-tenant-generative-ai-environment-for-your-enterprise-on-aws/
+description: A central API Gateway and Lambda gateway authenticates tenants with Cognito, looks up tenant configuration in DynamoDB and routes requests to Bedrock models with a guardrail and tenant-scoped
+  knowledge base. Invocation logs and usage records land in S3 and are queried with Athena to allocate cost and enforce quotas per tenant.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-gateway, type: common.group, name: gateway, parent: reg-us-east-1}
+- {id: grp-tenant-data, type: common.group, name: tenant-data, parent: reg-us-east-1}
+- {id: grp-observability, type: common.group, name: observability, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: tenant-users, type: aws.res.aws_cognito_user_pool, name: tenant-users, parent: grp-gateway, props: {name: changeme}}
+- {id: genai-gateway-api, type: aws.res.aws_api_gateway_rest_api, name: genai-gateway-api, parent: grp-gateway, props: {name: changeme}}
+- {id: tenant-router-fn, type: aws.lambda_function, name: tenant-router-fn, parent: grp-gateway}
+- {id: tenant-config, type: aws.dynamodb_table, name: tenant-config, parent: grp-gateway}
+- {id: tenant-guardrail, type: aws.res.aws_bedrock_guardrail, name: tenant-guardrail, parent: grp-gateway, props: {blocked_input_messaging: changeme, blocked_outputs_messaging: changeme, name: changeme}}
+- {id: tenant-a-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: tenant-a-kb, parent: grp-tenant-data, props: {name: changeme, role_arn: changeme}}
+- {id: tenant-vectors, type: aws.res.aws_opensearchserverless_collection, name: tenant-vectors, parent: grp-tenant-data, props: {name: changeme}}
+- {id: tenant-documents, type: aws.s3_bucket, name: tenant-documents, parent: grp-tenant-data}
+- {id: usage-metering, type: aws.dynamodb_table, name: usage-metering, parent: grp-observability}
+- {id: model-invocation-logs, type: aws.res.aws_cloudwatch_log_group, name: model-invocation-logs, parent: grp-observability}
+- {id: invocation-log-archive, type: aws.s3_bucket, name: invocation-log-archive, parent: grp-observability}
+- {id: cost-allocation, type: aws.res.aws_athena_workgroup, name: cost-allocation, parent: grp-observability, props: {name: changeme}}
+edges:
+- {from: users, to: genai-gateway-api, label: HTTPS with tenant JWT, step: '1'}
+- {from: genai-gateway-api, to: tenant-users, label: authorizer}
+- {from: genai-gateway-api, to: tenant-router-fn, step: '2'}
+- {from: tenant-router-fn, to: tenant-config, label: model, step: '3'}
+- {from: tenant-router-fn, to: tenant-guardrail, label: InvokeModel with guardrail, step: '4'}
+- {from: tenant-router-fn, to: tenant-a-kb, label: Retrieve with tenant metadata filter, step: '5'}
+- {from: tenant-a-kb, to: tenant-vectors, label: vector index}
+- {from: tenant-documents, to: tenant-a-kb, label: bedrockagent data source}
+- {from: tenant-router-fn, to: usage-metering, label: tokens per tenant, step: '6'}
+- {from: tenant-guardrail, to: model-invocation-logs, label: invocation logging}
+- {from: model-invocation-logs, to: invocation-log-archive, label: S3 delivery}
+- {from: cost-allocation, to: invocation-log-archive, label: SQL over logs}
+steps:
+- {n: '1', text: 'users → genai-gateway-api: HTTPS with tenant JWT'}
+- {n: '2', text: genai-gateway-api → tenant-router-fn}
+- {n: '3', text: 'tenant-router-fn → tenant-config: model'}
+- {n: '4', text: 'tenant-router-fn → tenant-guardrail: InvokeModel with guardrail'}
+- {n: '5', text: 'tenant-router-fn → tenant-a-kb: Retrieve with tenant metadata filter'}
+- {n: '6', text: 'tenant-router-fn → usage-metering: tokens per tenant'}

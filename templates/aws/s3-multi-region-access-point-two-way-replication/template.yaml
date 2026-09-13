@@ -1,0 +1,51 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonS3/latest/userguide/MultiRegionAccessPoints.html); edit freely.
+title: S3 Multi-Region Access Point with two-way replication
+category: resilience
+tags:
+- s3
+- multi-region access point
+- cross-region replication
+- two-way replication
+- failover controls
+- global accelerator
+source: https://docs.aws.amazon.com/AmazonS3/latest/userguide/MultiRegionAccessPoints.html
+description: Applications in two Regions read and write through a single Multi-Region Access Point global endpoint, which routes over the AWS global network to the nearest bucket with an active routing
+  status. Bidirectional Cross-Region Replication with replica modification sync keeps the two buckets in sync, and failover controls shift all S3 traffic to one Region within minutes.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: primary}
+- {id: vpc-mrap-west, type: aws.vpc, name: mrap-west, parent: reg-us-west-2, props: {cidr: 10.70.0.0/16}}
+- {id: az-mrap-west-a, type: aws.availability_zone, name: a, parent: vpc-mrap-west, props: {zone: a}}
+- {id: sub-mrap-w-app-a, type: aws.subnet, name: mrap-w-app-a, parent: az-mrap-west-a, props: {cidr: 10.70.1.0/24, az: a, public: false}}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}, caption: secondary}
+- {id: vpc-mrap-eu, type: aws.vpc, name: mrap-eu, parent: reg-eu-central-1, props: {cidr: 10.71.0.0/16}}
+- {id: az-mrap-eu-a, type: aws.availability_zone, name: a, parent: vpc-mrap-eu, props: {zone: a}}
+- {id: sub-mrap-e-app-a, type: aws.subnet, name: mrap-e-app-a, parent: az-mrap-eu-a, props: {cidr: 10.71.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- id: media-mrap
+  type: aws.res.aws_s3control_multi_region_access_point
+  name: media-mrap
+  parent: reg-us-west-2
+  props: {details: {}}
+- {id: media-us-west-2, type: aws.s3_bucket, name: media-us-west-2, parent: reg-us-west-2}
+- {id: media-eu-central-1, type: aws.s3_bucket, name: media-eu-central-1, parent: reg-eu-central-1}
+- {id: uploader-west, type: aws.res.aws_ecs_cluster, name: uploader-west, parent: sub-mrap-w-app-a, props: {name: changeme}}
+- {id: uploader-eu, type: aws.res.aws_ecs_cluster, name: uploader-eu, parent: sub-mrap-e-app-a, props: {name: changeme}}
+- {id: media-cdn, type: aws.cloudfront_distribution, name: media-cdn, parent: reg-us-west-2}
+- {id: az-vpc-mrap-west-b, type: aws.availability_zone, name: b, parent: vpc-mrap-west, props: {zone: b}}
+- {id: sub-vpc-mrap-west-b, type: aws.subnet, name: private-b, parent: az-vpc-mrap-west-b, props: {cidr: 10.70.251.0/24, az: b, public: false}}
+- {id: az-vpc-mrap-eu-b, type: aws.availability_zone, name: b, parent: vpc-mrap-eu, props: {zone: b}}
+- {id: sub-vpc-mrap-eu-b, type: aws.subnet, name: private-b, parent: az-vpc-mrap-eu-b, props: {cidr: 10.71.251.0/24, az: b, public: false}}
+edges:
+- {from: uploader-west, to: media-mrap, label: PUT/GET via global endpoint, step: '1'}
+- {from: uploader-eu, to: media-mrap, label: PUT/GET via global endpoint}
+- {from: media-mrap, to: media-us-west-2, label: routed to closest active bucket, step: '2'}
+- {from: media-mrap, to: media-eu-central-1, label: routed to closest active bucket}
+- {from: media-us-west-2, to: media-eu-central-1, label: two-way CRR with replica modification sync, step: '3'}
+- {from: users, to: media-cdn, label: HTTPS, step: '4'}
+- {from: media-cdn, to: media-mrap, label: origin}
+steps:
+- {n: '1', text: 'uploader-west → media-mrap: PUT/GET via global endpoint'}
+- {n: '2', text: 'media-mrap → media-us-west-2: routed to closest active bucket'}
+- {n: '3', text: 'media-us-west-2 → media-eu-central-1: two-way CRR with replica modification sync'}
+- {n: '4', text: 'users → media-cdn: HTTPS'}

@@ -1,0 +1,38 @@
+# Generated from the official reference (https://docs.cloud.google.com/firewall/docs/about-firewalls); edit freely.
+title: Cloud NGFW with hierarchical and network firewall policies
+category: security
+tags:
+- cloud ngfw
+- network firewall policy
+- hierarchical firewall policy
+- intrusion prevention
+- firewall endpoint
+source: https://docs.cloud.google.com/firewall/docs/about-firewalls
+description: Cloud Next Generation Firewall enforces distributed stateful rules through hierarchical policies at the organization or folder level and global or regional network firewall policies attached
+  to a VPC. The enterprise tier adds firewall endpoints for Layer 7 inspection and intrusion prevention of north-south and east-west traffic without routing through a proxy appliance.
+nodes:
+- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: europe-west1}}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-workload, props: {cidr: 10.120.0.0/16}}
+- {id: sub-web-ew1, type: gcp.subnetwork, name: web-ew1, parent: vpc-app-vpc, props: {cidr: 10.120.0.0/24, region: europe-west1}}
+- {id: sub-db-ew1, type: gcp.subnetwork, name: db-ew1, parent: vpc-app-vpc, props: {cidr: 10.120.1.0/24, region: europe-west1}}
+- {id: internet, type: common.internet, name: internet}
+- {id: users, type: common.users, name: users}
+- {id: global-net-fw-policy, type: gcp.res.google_compute_network_firewall_policy, name: global-net-fw-policy, parent: vpc-app-vpc, props: {name: changeme}}
+- {id: regional-net-fw-policy, type: gcp.res.google_compute_network_firewall_policy, name: regional-net-fw-policy, parent: prj-workload, props: {name: changeme}}
+- {id: legacy-vpc-rule, type: gcp.firewall_rule, name: legacy-vpc-rule, parent: vpc-app-vpc}
+- {id: web-vm, type: gcp.compute_instance, name: web-vm, parent: sub-web-ew1}
+- {id: db-vm, type: gcp.compute_instance, name: db-vm, parent: sub-db-ew1}
+- {id: web-lb, type: gcp.res.google_compute_global_forwarding_rule, name: web-lb, parent: prj-workload, props: {name: changeme, target: changeme}}
+- {id: web-backend, type: gcp.res.google_compute_backend_service, name: web-backend, parent: vpc-app-vpc, props: {name: changeme}}
+edges:
+- {from: users, to: web-lb, label: HTTPS, step: '1'}
+- {from: web-lb, to: web-backend, label: to backend service, step: '2'}
+- {from: web-backend, to: web-vm, label: north-south ingress inspected by NGFW, step: '3'}
+- {from: web-vm, to: db-vm, label: east-west allowed by tag-based rule, step: '4'}
+- {from: db-vm, to: internet, label: egress denied by policy, step: '5'}
+steps:
+- {n: '1', text: 'users → web-lb: HTTPS'}
+- {n: '2', text: 'web-lb → web-backend: to backend service'}
+- {n: '3', text: 'web-backend → web-vm: north-south ingress inspected by NGFW'}
+- {n: '4', text: 'web-vm → db-vm: east-west allowed by tag-based rule'}
+- {n: '5', text: 'db-vm → internet: egress denied by policy'}

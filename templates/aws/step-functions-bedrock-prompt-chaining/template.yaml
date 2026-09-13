@@ -1,0 +1,48 @@
+# Generated from the official reference (https://docs.aws.amazon.com/step-functions/latest/dg/connect-bedrock.html); edit freely.
+title: Agentic prompt chaining with Step Functions and Amazon Bedrock
+category: serverless
+tags:
+- step functions
+- bedrock
+- prompt chaining
+- agentic workflow
+- model customization
+source: https://docs.aws.amazon.com/step-functions/latest/dg/connect-bedrock.html
+description: A Step Functions state machine uses the optimized Bedrock integration to call InvokeModel in successive Task states, passing each model output as input to the next prompt and reading large
+  payloads from or writing them to S3. The same integration runs CreateModelCustomizationJob.sync to fine-tune a custom model, and a Lambda post-processes results into DynamoDB with an SNS notification
+  on completion.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: client, type: common.client, name: client}
+- {id: workflow-api, type: aws.res.aws_api_gateway_rest_api, name: workflow-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: prompt-chain, type: aws.res.aws_sfn_state_machine, name: prompt-chain, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: prompt-inputs, type: aws.s3_bucket, name: prompt-inputs, parent: reg-us-east-1}
+- {id: model-outputs, type: aws.s3_bucket, name: model-outputs, parent: reg-us-east-1}
+- id: domain-tuned-model
+  type: aws.res.aws_bedrock_custom_model
+  name: domain-tuned-model
+  parent: reg-us-east-1
+  props: {base_model_identifier: changeme, custom_model_name: changeme, hyperparameters: {}, job_name: changeme, role_arn: changeme}
+- {id: post-process-fn, type: aws.lambda_function, name: post-process-fn, parent: reg-us-east-1}
+- {id: chain-results, type: aws.dynamodb_table, name: chain-results, parent: reg-us-east-1}
+- {id: chain-complete, type: aws.res.aws_sns_topic, name: chain-complete, parent: reg-us-east-1}
+edges:
+- {from: client, to: workflow-api, label: POST /run, step: '1'}
+- {from: workflow-api, to: prompt-chain, label: StartExecution, step: '2'}
+- {from: prompt-inputs, to: prompt-chain, label: 'bedrock:invokeModel Input S3Uri', step: '3'}
+- {from: prompt-chain, to: prompt-chain, label: chained Task states outline then draft then review, step: '4'}
+- {from: prompt-chain, to: model-outputs, label: Output S3Uri, step: '5'}
+- {from: prompt-chain, to: domain-tuned-model, label: 'bedrock:createModelCustomizationJob.sync'}
+- {from: prompt-chain, to: post-process-fn, step: '6'}
+- {from: post-process-fn, to: chain-results, label: PutItem, step: '7'}
+- {from: prompt-chain, to: chain-complete, label: Publish, step: '8'}
+steps:
+- {n: '1', text: 'client → workflow-api: POST /run'}
+- {n: '2', text: 'workflow-api → prompt-chain: StartExecution'}
+- {n: '3', text: 'prompt-inputs → prompt-chain: bedrock:invokeModel Input S3Uri'}
+- {n: '4', text: 'prompt-chain → prompt-chain: chained Task states outline then draft then review'}
+- {n: '5', text: 'prompt-chain → model-outputs: Output S3Uri'}
+- {n: '6', text: prompt-chain → post-process-fn}
+- {n: '7', text: 'post-process-fn → chain-results: PutItem'}
+- {n: '8', text: 'prompt-chain → chain-complete: Publish'}

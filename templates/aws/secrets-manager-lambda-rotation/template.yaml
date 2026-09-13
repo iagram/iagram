@@ -1,0 +1,45 @@
+# Generated from the official reference (https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html); edit freely.
+title: Secrets Manager automatic rotation with a Lambda function
+category: security
+tags:
+- secrets manager
+- rotation
+- lambda
+- rds
+- kms
+- vpc endpoint
+source: https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html
+description: Secrets Manager stores database credentials encrypted with a KMS key and invokes a rotation Lambda function on a schedule; the function runs inside the database VPC, sets a new password in
+  the database and updates the secret version. The application retrieves the current credentials at runtime through a Secrets Manager VPC endpoint instead of embedding them.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-app-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: sub-db-a, type: aws.subnet, name: db-a, parent: az-app-a, props: {cidr: 10.0.2.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: db-credentials, type: aws.res.aws_secretsmanager_secret, name: db-credentials, parent: reg-us-east-1}
+- {id: secrets-cmk, type: aws.res.aws_kms_key, name: secrets-cmk, parent: reg-us-east-1}
+- {id: rotation-function, type: aws.lambda_function, name: rotation-function, parent: sub-app-a}
+- {id: app-function, type: aws.lambda_function, name: app-function, parent: sub-app-a}
+- {id: orders-db, type: aws.rds_instance, name: orders-db, parent: sub-db-a}
+- {id: secretsmanager-endpoint, type: aws.res.aws_vpc_endpoint, name: secretsmanager-endpoint, parent: sub-app-a, props: {vpc_id: changeme}}
+- {id: rotation-role, type: aws.res.aws_iam_role, name: rotation-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
+edges:
+- {from: rotation-function, to: orders-db, label: set new password, step: '2'}
+- {from: rotation-function, to: secretsmanager-endpoint, label: PutSecretValue, step: '3'}
+- {from: secretsmanager-endpoint, to: db-credentials, label: new version, step: '4'}
+- {from: secrets-cmk, to: db-credentials, label: encrypts}
+- {from: users, to: app-function, label: request, step: '5'}
+- {from: app-function, to: secretsmanager-endpoint, label: GetSecretValue, step: '6'}
+- {from: app-function, to: orders-db, label: SQL over TLS, step: '7'}
+steps:
+- {n: '2', text: 'rotation-function → orders-db: set new password'}
+- {n: '3', text: 'rotation-function → secretsmanager-endpoint: PutSecretValue'}
+- {n: '4', text: 'secretsmanager-endpoint → db-credentials: new version'}
+- {n: '5', text: 'users → app-function: request'}
+- {n: '6', text: 'app-function → secretsmanager-endpoint: GetSecretValue'}
+- {n: '7', text: 'app-function → orders-db: SQL over TLS'}

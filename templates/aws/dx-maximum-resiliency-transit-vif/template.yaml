@@ -1,0 +1,55 @@
+# Generated from the official reference (https://docs.aws.amazon.com/directconnect/latest/UserGuide/maximum_resiliency.html); edit freely.
+title: Direct Connect maximum resiliency with transit VIFs to a Transit Gateway
+category: networking
+tags:
+- direct connect
+- maximum resiliency
+- transit virtual interface
+- direct connect gateway
+- transit gateway
+- bgp
+source: https://docs.aws.amazon.com/directconnect/latest/UserGuide/maximum_resiliency.html
+description: Two Direct Connect locations each terminate two dedicated connections on separate devices, giving four physical paths that survive device, connection, and complete location failure. A transit
+  virtual interface on each connection peers over BGP with a Direct Connect gateway that is associated with the Regional Transit Gateway, so every attached VPC is reachable from the data center over private
+  connectivity with a 99.99 percent SLA target.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-dx-location-1, type: common.group, name: dx-location-1, parent: reg-us-east-1}
+- {id: grp-dx-location-2, type: common.group, name: dx-location-2, parent: reg-us-east-1}
+- {id: vpc-prod, type: aws.vpc, name: prod, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-prod-a, type: aws.availability_zone, name: a, parent: vpc-prod, props: {zone: a}}
+- {id: sub-prod-private-a, type: aws.subnet, name: prod-private-a, parent: az-prod-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-shared, type: aws.vpc, name: shared, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}}
+- {id: az-shared-a, type: aws.availability_zone, name: a, parent: vpc-shared, props: {zone: a}}
+- {id: sub-shared-private-a, type: aws.subnet, name: shared-private-a, parent: az-shared-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
+- {id: dx-loc1-conn-a, type: aws.res.aws_dx_connection, name: dx-loc1-conn-a, parent: grp-dx-location-1, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: dx-loc1-conn-b, type: aws.res.aws_dx_connection, name: dx-loc1-conn-b, parent: grp-dx-location-1, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: dx-loc2-conn-a, type: aws.res.aws_dx_connection, name: dx-loc2-conn-a, parent: grp-dx-location-2, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: dx-loc2-conn-b, type: aws.res.aws_dx_connection, name: dx-loc2-conn-b, parent: grp-dx-location-2, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: transit-vif-1a, type: aws.res.aws_dx_transit_virtual_interface, name: transit-vif-1a, parent: grp-dx-location-1, props: {address_family: changeme, connection_id: changeme, dx_gateway_id: changeme,
+    name: changeme, vlan: 1}}
+- {id: transit-vif-2a, type: aws.res.aws_dx_transit_virtual_interface, name: transit-vif-2a, parent: grp-dx-location-2, props: {address_family: changeme, connection_id: changeme, dx_gateway_id: changeme,
+    name: changeme, vlan: 1}}
+- {id: dx-gateway, type: aws.res.aws_dx_gateway, name: dx-gateway, parent: reg-us-east-1, props: {amazon_side_asn: changeme, name: changeme}}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1}
+- {id: prod-app, type: aws.ec2_instance, name: prod-app, parent: sub-prod-private-a}
+- {id: shared-server, type: aws.ec2_instance, name: shared-server, parent: sub-shared-private-a}
+- {id: az-vpc-prod-b, type: aws.availability_zone, name: b, parent: vpc-prod, props: {zone: b}}
+- {id: sub-vpc-prod-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-shared-b, type: aws.availability_zone, name: b, parent: vpc-shared, props: {zone: b}}
+- {id: sub-vpc-shared-b, type: aws.subnet, name: private-b, parent: az-vpc-shared-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+edges:
+- {from: dc-on-premises, to: dx-loc1-conn-a, label: 'router 1, cross-connect'}
+- {from: dc-on-premises, to: dx-loc1-conn-b, label: 'router 2, cross-connect'}
+- {from: dc-on-premises, to: dx-loc2-conn-a, label: 'router 3, cross-connect'}
+- {from: dc-on-premises, to: dx-loc2-conn-b, label: 'router 4, cross-connect'}
+- {from: dx-loc1-conn-a, to: transit-vif-1a, label: 'VLAN, BGP'}
+- {from: dx-loc2-conn-a, to: transit-vif-2a, label: 'VLAN, BGP'}
+- {from: transit-vif-1a, to: dx-gateway}
+- {from: transit-vif-2a, to: dx-gateway}
+- {from: dx-gateway, to: hub-tgw, label: allowed prefixes, link: aws_dx_gateway_association}
+- {from: hub-tgw, to: vpc-prod, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-shared, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: prod-app, label: on-prem to VPC}

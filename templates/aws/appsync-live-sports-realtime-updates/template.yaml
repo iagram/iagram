@@ -1,0 +1,46 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/mobile/appsync-real-time-live-sports/); edit freely.
+title: Real-time live sports updates with Kinesis, Lambda, DynamoDB and AppSync
+category: serverless
+tags:
+- appsync
+- graphql subscriptions
+- kinesis data streams
+- lambda
+- dynamodb
+- pinpoint
+- real-time dashboard
+source: https://aws.amazon.com/blogs/mobile/appsync-real-time-live-sports/
+description: Score feeds enter through an API Gateway ingestion endpoint into a Kinesis data stream; a Lambda consumer transforms the events and calls AppSync GraphQL mutations that persist them in DynamoDB
+  and fan out to connected clients over WebSocket subscriptions. A DynamoDB Stream triggers a second Lambda that sends push notifications through Amazon Pinpoint to offline users.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-api, type: common.group, name: api, parent: reg-us-east-1}
+- {id: saas, type: common.saas, name: saas}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: feed-ingest-api, type: aws.res.aws_api_gateway_rest_api, name: feed-ingest-api, parent: grp-ingestion, props: {name: changeme}}
+- {id: scores-stream, type: aws.res.aws_kinesis_stream, name: scores-stream, parent: grp-ingestion, props: {name: changeme}}
+- {id: transform-and-mutate, type: aws.lambda_function, name: transform-and-mutate, parent: grp-ingestion}
+- {id: live-scores-api, type: aws.res.aws_appsync_graphql_api, name: live-scores-api, parent: grp-api, props: {authentication_type: changeme, name: changeme}}
+- {id: game-updates, type: aws.dynamodb_table, name: game-updates, parent: grp-api}
+- {id: push-notifier, type: aws.lambda_function, name: push-notifier, parent: grp-api}
+- {id: fan-notifications, type: aws.res.aws_pinpoint_app, name: fan-notifications, parent: reg-us-east-1}
+edges:
+- {from: saas, to: feed-ingest-api, label: sports data feed, step: '1'}
+- {from: feed-ingest-api, to: scores-stream, label: PutRecord, step: '2'}
+- {from: scores-stream, to: transform-and-mutate, step: '3', link: aws_lambda_event_source_mapping}
+- {from: transform-and-mutate, to: live-scores-api, label: GraphQL mutation, step: '4'}
+- {from: live-scores-api, to: game-updates, label: DynamoDB resolver, step: '5'}
+- {from: live-scores-api, to: mobile, label: WebSocket subscription, step: '6'}
+- {from: game-updates, to: push-notifier, step: '7', link: aws_lambda_event_source_mapping}
+- {from: push-notifier, to: fan-notifications, label: push notification, step: '8'}
+steps:
+- {n: '1', text: 'saas → feed-ingest-api: sports data feed'}
+- {n: '2', text: 'feed-ingest-api → scores-stream: PutRecord'}
+- {n: '3', text: scores-stream → transform-and-mutate}
+- {n: '4', text: 'transform-and-mutate → live-scores-api: GraphQL mutation'}
+- {n: '5', text: 'live-scores-api → game-updates: DynamoDB resolver'}
+- {n: '6', text: 'live-scores-api → mobile: WebSocket subscription'}
+- {n: '7', text: game-updates → push-notifier}
+- {n: '8', text: 'push-notifier → fan-notifications: push notification'}

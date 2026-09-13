@@ -1,0 +1,59 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/automate-replication-of-relational-sources-into-a-transactional-data-lake-with-apache-iceberg-and-aws-glue/); edit freely.
+title: Replicate relational sources into an Iceberg transactional data lake
+category: data
+tags:
+- apache iceberg
+- dms
+- glue
+- cdc
+- merge
+- lake formation
+- athena
+source: https://aws.amazon.com/blogs/big-data/automate-replication-of-relational-sources-into-a-transactional-data-lake-with-apache-iceberg-and-aws-glue/
+description: DMS runs a full load and then CDC from a PostgreSQL source into a raw S3 layer organised by schema and table; a Glue job driven by Parameter Store configuration and job bookmarks deduplicates
+  the change files and merges them into Iceberg tables in a stage layer. The Iceberg tables are registered in the Glue Data Catalog, optionally governed by Lake Formation, scheduled through EventBridge
+  and queried with Athena.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-raw-layer, type: common.group, name: raw layer, parent: reg-us-east-1}
+- {id: grp-stage-layer, type: common.group, name: stage layer, parent: reg-us-east-1}
+- {id: vpc-source, type: aws.vpc, name: source, parent: reg-us-east-1, props: {cidr: 10.130.0.0/16}}
+- {id: az-source-a, type: aws.availability_zone, name: a, parent: vpc-source, props: {zone: a}}
+- {id: sub-src-private-a, type: aws.subnet, name: src-private-a, parent: az-source-a, props: {cidr: 10.130.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: source-postgres, type: aws.res.aws_rds_cluster, name: source-postgres, parent: sub-src-private-a, props: {engine: changeme}}
+- {id: replication, type: aws.res.aws_dms_replication_instance, name: replication, parent: sub-src-private-a, props: {replication_instance_class: changeme, replication_instance_id: changeme}}
+- {id: raw-bucket, type: aws.s3_bucket, name: raw-bucket, parent: grp-raw-layer}
+- id: iceberg-merge-job
+  type: aws.res.aws_glue_job
+  name: iceberg-merge-job
+  parent: reg-us-east-1
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: table-config, type: aws.res.aws_ssm_parameter, name: table-config, parent: reg-us-east-1, props: {name: changeme, type: changeme}}
+- {id: hourly-schedule, type: aws.res.aws_cloudwatch_event_rule, name: hourly-schedule, parent: reg-us-east-1}
+- {id: stage-bucket, type: aws.s3_bucket, name: stage-bucket, parent: grp-stage-layer}
+- {id: iceberg-db, type: aws.res.aws_glue_catalog_database, name: iceberg-db, parent: grp-stage-layer, props: {name: changeme}}
+- {id: stage-location, type: aws.res.aws_lakeformation_resource, name: stage-location, parent: grp-stage-layer, props: {arn: changeme}}
+- {id: iceberg-athena, type: aws.res.aws_athena_workgroup, name: iceberg-athena, parent: reg-us-east-1, props: {name: changeme}}
+- {id: az-vpc-source-b, type: aws.availability_zone, name: b, parent: vpc-source, props: {zone: b}}
+- {id: sub-vpc-source-b, type: aws.subnet, name: private-b, parent: az-vpc-source-b, props: {cidr: 10.130.251.0/24, az: b, public: false}}
+edges:
+- {from: source-postgres, to: replication, label: full load then CDC, step: '1'}
+- {from: replication, to: raw-bucket, label: Parquet per schema/table, step: '2'}
+- {from: hourly-schedule, to: iceberg-merge-job, label: cloudwatch event target}
+- {from: table-config, to: iceberg-merge-job, label: primary keys and partitions, step: '3'}
+- {from: iceberg-merge-job, to: raw-bucket, label: read new files via job bookmark, step: '3'}
+- {from: iceberg-merge-job, to: stage-bucket, label: Iceberg MERGE upserts, step: '4'}
+- {from: iceberg-merge-job, to: iceberg-db, label: register Iceberg tables, step: '4'}
+- {from: stage-location, to: stage-bucket, label: Lake Formation permissions, step: '5'}
+- {from: iceberg-athena, to: iceberg-db, label: SQL with time travel, step: '6'}
+- {from: users, to: iceberg-athena, step: '7'}
+steps:
+- {n: '1', text: 'source-postgres → replication: full load then CDC'}
+- {n: '2', text: 'replication → raw-bucket: Parquet per schema/table'}
+- {n: '3', text: 'table-config → iceberg-merge-job: primary keys and partitions'}
+- {n: '4', text: 'iceberg-merge-job → stage-bucket: Iceberg MERGE upserts'}
+- {n: '5', text: 'stage-location → stage-bucket: Lake Formation permissions'}
+- {n: '6', text: 'iceberg-athena → iceberg-db: SQL with time travel'}
+- {n: '7', text: users → iceberg-athena}

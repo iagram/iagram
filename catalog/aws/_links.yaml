@@ -69,10 +69,30 @@ links:
   aws_cloudwatch_event_target:
     label: target
     from: {attr: rule, output: name, types: [aws_cloudwatch_event_rule]}
-    to: {attr: arn, output: arn, types: [aws_lambda_function, aws_sqs_queue, aws_sns_topic, aws_sfn_state_machine, aws_kinesis_stream, aws_kinesis_firehose_delivery_stream, aws_ecs_cluster, aws_cloudwatch_event_bus, aws_cloudwatch_log_group]}
+    to: {attr: arn, output: arn, types: [aws_lambda_function, aws_sqs_queue, aws_sns_topic, aws_sfn_state_machine, aws_kinesis_stream, aws_kinesis_firehose_delivery_stream, aws_ecs_cluster, aws_cloudwatch_event_bus, aws_cloudwatch_log_group, aws_codepipeline, aws_codebuild_project, aws_batch_job_queue, aws_ssm_document, aws_sagemaker_pipeline, aws_redshift_cluster, aws_api_gateway_rest_api]}
     style: {dash: dashed}
   aws_organizations_policy_attachment:
     label: policy attachment
     from: {attr: policy_id, types: [aws_organizations_policy]}
     to: {attr: target_id, types: [aws_organizations_organizational_unit, aws_organizations_account, aws_organizations_organization]}
+    style: {direction: none, dash: dotted}
+  aws_wafv2_web_acl_association:
+    label: WAF association
+    from: {attr: web_acl_arn, output: arn, types: [aws_wafv2_web_acl]}
+    to: {attr: resource_arn, output: arn, types: [aws_lb, aws_api_gateway_stage, aws_api_gateway_rest_api, aws_appsync_graphql_api, aws_cognito_user_pool, aws_apprunner_service, aws_verifiedaccess_instance]}
+    style: {direction: none, dash: dashed, color: "#DD344C"}
+  aws_route53_resolver_rule_association:
+    label: resolver rule association
+    from: {attr: resolver_rule_id, types: [aws_route53_resolver_rule]}
+    to: {attr: vpc_id, types: [aws_vpc]}
+    style: {direction: none, dash: dashed}
+  aws_rds_integration:
+    label: zero-ETL integration
+    from: {attr: source_arn, output: arn, types: [aws_rds_cluster, aws_dynamodb_table, aws_db_instance]}
+    to: {attr: target_arn, output: arn, types: [aws_redshiftserverless_namespace, aws_redshift_cluster]}
+    style: {dash: dashed}
+  aws_ram_principal_association:
+    label: shared with
+    from: {attr: resource_share_arn, output: arn, types: [aws_ram_resource_share]}
+    to: {attr: principal, output: arn, types: [aws_organizations_organizational_unit, aws_organizations_account, aws_organizations_organization]}
     style: {direction: none, dash: dotted}

@@ -1,0 +1,50 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/export-a-microsoft-sql-server-database-to-amazon-s3-by-using-aws-dms.html); edit freely.
+title: Export a SQL Server database to S3 with DMS in Parquet format
+category: migration
+tags:
+- dms
+- sql server
+- s3
+- parquet
+- full load
+- cdc
+- athena
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/export-a-microsoft-sql-server-database-to-amazon-s3-by-using-aws-dms.html
+description: A DMS replication instance connects to an on-premises or EC2 SQL Server source endpoint and an S3 target endpoint, running a full load followed by ongoing change data capture. Output is written
+  as Parquet rather than the default CSV for compact storage, and the exported tables can be catalogued and queried with Athena.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-migration, type: aws.vpc, name: migration, parent: reg-us-east-1, props: {cidr: 10.110.0.0/16}}
+- {id: az-migration-a, type: aws.availability_zone, name: a, parent: vpc-migration, props: {zone: a}}
+- {id: sub-dms-private-a, type: aws.subnet, name: dms-private-a, parent: az-migration-a, props: {cidr: 10.110.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: sqlserver-dms, type: aws.res.aws_dms_replication_instance, name: sqlserver-dms, parent: sub-dms-private-a, props: {replication_instance_class: changeme, replication_instance_id: changeme}}
+- {id: sqlserver-source, type: aws.res.aws_dms_endpoint, name: sqlserver-source, parent: reg-us-east-1, props: {endpoint_id: changeme, endpoint_type: changeme, engine_name: changeme}}
+- {id: s3-target, type: aws.res.aws_dms_s3_endpoint, name: s3-target, parent: reg-us-east-1, props: {bucket_name: changeme, endpoint_id: changeme, endpoint_type: changeme, service_access_role_arn: changeme}}
+- {id: full-load-cdc, type: aws.res.aws_dms_replication_task, name: full-load-cdc, parent: reg-us-east-1, props: {migration_type: changeme, replication_instance_arn: changeme, replication_task_id: changeme,
+    source_endpoint_arn: changeme, table_mappings: changeme, target_endpoint_arn: changeme}}
+- {id: exported-tables, type: aws.s3_bucket, name: exported-tables, parent: reg-us-east-1}
+- {id: export-crawler, type: aws.res.aws_glue_crawler, name: export-crawler, parent: reg-us-east-1, props: {database_name: changeme, name: changeme, role: changeme}}
+- {id: export-db, type: aws.res.aws_glue_catalog_database, name: export-db, parent: reg-us-east-1, props: {name: changeme}}
+- {id: export-athena, type: aws.res.aws_athena_workgroup, name: export-athena, parent: reg-us-east-1, props: {name: changeme}}
+- {id: az-vpc-migration-b, type: aws.availability_zone, name: b, parent: vpc-migration, props: {zone: b}}
+- {id: sub-vpc-migration-b, type: aws.subnet, name: private-b, parent: az-vpc-migration-b, props: {cidr: 10.110.251.0/24, az: b, public: false}}
+edges:
+- {from: dc-on-premises, to: sqlserver-source, label: SQL Server over VPN or DX, step: '1'}
+- {from: sqlserver-source, to: sqlserver-dms, label: source endpoint, step: '1'}
+- {from: full-load-cdc, to: sqlserver-dms, label: full load then CDC, step: '2'}
+- {from: sqlserver-dms, to: s3-target, label: target endpoint, step: '3'}
+- {from: s3-target, to: exported-tables, label: 'Parquet: schema/table/files', step: '3'}
+- {from: export-crawler, to: exported-tables, step: '4'}
+- {from: export-crawler, to: export-db, step: '4'}
+- {from: export-athena, to: export-db, label: SQL, step: '5'}
+- {from: users, to: export-athena, step: '6'}
+steps:
+- {n: '1', text: 'datacenter → sqlserver-source: SQL Server over VPN or DX'}
+- {n: '2', text: 'full-load-cdc → sqlserver-dms: full load then CDC'}
+- {n: '3', text: 'sqlserver-dms → s3-target: target endpoint'}
+- {n: '4', text: export-crawler → exported-tables}
+- {n: '5', text: 'export-athena → export-db: SQL'}
+- {n: '6', text: users → export-athena}

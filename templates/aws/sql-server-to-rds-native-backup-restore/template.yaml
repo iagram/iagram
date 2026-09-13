@@ -1,0 +1,68 @@
+# Generated from the official reference (https://docs.aws.amazon.com/prescriptive-guidance/latest/migration-sql-server/introduction.html); edit freely.
+title: SQL Server migration to RDS for SQL Server with native backup and restore
+category: migration
+tags:
+- sql server
+- rds for sql server
+- native backup restore
+- s3
+- dms
+- active directory
+- windows migration
+source: https://docs.aws.amazon.com/prescriptive-guidance/latest/migration-sql-server/introduction.html
+description: Full and differential backups of the on-premises SQL Server databases are copied to an S3 bucket and restored into a Multi-AZ RDS for SQL Server instance using the native backup and restore
+  option. DMS change data capture closes the gap between the last backup and cutover, while an AWS Managed Microsoft AD directory provides Windows authentication for the migrated application servers.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: vpc-sql-target, type: aws.vpc, name: sql-target, parent: reg-us-west-2, props: {cidr: 10.150.0.0/16}}
+- {id: az-sql-target-a, type: aws.availability_zone, name: a, parent: vpc-sql-target, props: {zone: a}}
+- {id: sub-sql-app-a, type: aws.subnet, name: sql-app-a, parent: az-sql-target-a, props: {cidr: 10.150.1.0/24, az: a, public: false}}
+- {id: az-sql-target-b, type: aws.availability_zone, name: b, parent: vpc-sql-target, props: {zone: b}}
+- {id: sub-sql-app-b, type: aws.subnet, name: sql-app-b, parent: az-sql-target-b, props: {cidr: 10.150.2.0/24, az: b, public: false}}
+- {id: sub-sql-db-a, type: aws.subnet, name: sql-db-a, parent: az-sql-target-a, props: {cidr: 10.150.10.0/24, az: a, public: false}}
+- {id: sub-sql-db-b, type: aws.subnet, name: sql-db-b, parent: az-sql-target-b, props: {cidr: 10.150.11.0/24, az: b, public: false}}
+- {id: database, type: common.database, name: database}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-us-west-2, type: aws.vpc, name: main, parent: reg-us-west-2, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-west-2-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-west-2, props: {zone: a}}
+- {id: sub-reg-us-west-2-a, type: aws.subnet, name: private-a, parent: az-reg-us-west-2-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-west-2-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-west-2, props: {zone: b}}
+- {id: sub-reg-us-west-2-b, type: aws.subnet, name: private-b, parent: az-reg-us-west-2-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: sql-dc-router, type: aws.res.aws_customer_gateway, name: sql-dc-router, parent: sub-reg-us-west-2-a, props: {type: changeme}}
+- {id: sql-backup-bucket, type: aws.s3_bucket, name: sql-backup-bucket, parent: reg-us-west-2}
+- {id: sql-backup-key, type: aws.res.aws_kms_key, name: sql-backup-key, parent: reg-us-west-2}
+- {id: rds-sqlserver-multi-az, type: aws.rds_instance, name: rds-sqlserver-multi-az, parent: sub-sql-db-a}
+- {id: managed-ad, type: aws.res.aws_directory_service_directory, name: managed-ad, parent: vpc-sql-target, props: {name: changeme, password: changeme}}
+- {id: sql-cdc-repl, type: aws.res.aws_dms_replication_instance, name: sql-cdc-repl, parent: sub-sql-app-a, props: {replication_instance_class: changeme, replication_instance_id: changeme}}
+- {id: sql-onprem-source, type: aws.res.aws_dms_endpoint, name: sql-onprem-source, parent: reg-us-west-2, props: {endpoint_id: changeme, endpoint_type: changeme, engine_name: changeme}}
+- {id: rds-sql-target, type: aws.res.aws_dms_endpoint, name: rds-sql-target, parent: reg-us-west-2, props: {endpoint_id: changeme, endpoint_type: changeme, engine_name: changeme}}
+- {id: sql-cdc-only, type: aws.res.aws_dms_replication_task, name: sql-cdc-only, parent: reg-us-west-2, props: {migration_type: changeme, replication_instance_arn: changeme, replication_task_id: changeme,
+    source_endpoint_arn: changeme, table_mappings: changeme, target_endpoint_arn: changeme}}
+- {id: windows-app-1, type: aws.ec2_instance, name: windows-app-1, parent: sub-sql-app-a}
+- {id: windows-app-2, type: aws.ec2_instance, name: windows-app-2, parent: sub-sql-app-b}
+- {id: windows-app-alb, type: aws.alb, name: windows-app-alb, parent: vpc-sql-target}
+edges:
+- {from: sql-dc-router, to: vpc-sql-target, label: Site-to-Site VPN}
+- {from: database, to: sql-backup-bucket, label: .bak full + differential upload, step: '1'}
+- {from: sql-backup-key, to: sql-backup-bucket, label: SSE-KMS}
+- {from: sql-backup-bucket, to: rds-sqlserver-multi-az, label: rds_restore_database (native restore), step: '2'}
+- {from: sql-onprem-source, to: database, label: source endpoint}
+- {from: rds-sql-target, to: rds-sqlserver-multi-az, label: target endpoint}
+- {from: sql-cdc-only, to: sql-cdc-repl, label: CDC-only task from backup LSN, step: '3'}
+- {from: sql-cdc-repl, to: sql-onprem-source, label: read transaction log}
+- {from: sql-cdc-repl, to: rds-sql-target, label: apply changes until cutover}
+- {from: managed-ad, to: rds-sqlserver-multi-az, label: Windows authentication}
+- {from: managed-ad, to: windows-app-1, label: domain join}
+- {from: users, to: windows-app-alb, label: HTTPS, step: '4'}
+- {from: windows-app-alb, to: windows-app-1, step: '5'}
+- {from: windows-app-alb, to: windows-app-2}
+- {from: windows-app-1, to: rds-sqlserver-multi-az, label: connection string repointed at cutover, step: '6'}
+steps:
+- {n: '1', text: 'database → sql-backup-bucket: .bak full + differential upload'}
+- {n: '2', text: 'sql-backup-bucket → rds-sqlserver-multi-az: rds_restore_database (native restore)'}
+- {n: '3', text: 'sql-cdc-only → sql-cdc-repl: CDC-only task from backup LSN'}
+- {n: '4', text: 'users → windows-app-alb: HTTPS'}
+- {n: '5', text: windows-app-alb → windows-app-1}
+- {n: '6', text: 'windows-app-1 → rds-sqlserver-multi-az: connection string repointed at cutover'}

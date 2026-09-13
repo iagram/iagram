@@ -1,0 +1,57 @@
+# Generated from the official reference (https://docs.aws.amazon.com/chime-sdk/latest/dg/capture-pipe-config.html); edit freely.
+title: Chime SDK meetings with media capture pipelines
+category: media
+tags:
+- chime sdk
+- webrtc
+- meetings
+- media capture pipeline
+- transcription
+- recording
+source: https://docs.aws.amazon.com/chime-sdk/latest/dg/capture-pipe-config.html
+description: A serverless backend creates Chime SDK meetings and attendees and returns join tokens to browser and mobile clients that exchange WebRTC media with the Chime media service. A media capture
+  pipeline records audio, video, content share and data messages into an S3 bucket, a concatenation step assembles the artifacts, and a media insights pipeline configuration streams call analytics into
+  Kinesis.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-meeting-backend, type: common.group, name: meeting backend, parent: reg-us-east-1}
+- {id: grp-media-pipelines, type: common.group, name: media pipelines, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: meeting-users, type: aws.res.aws_cognito_user_pool, name: meeting-users, parent: grp-meeting-backend, props: {name: changeme}}
+- {id: meetings-api, type: aws.res.aws_api_gateway_rest_api, name: meetings-api, parent: grp-meeting-backend, props: {name: changeme}}
+- {id: create-meeting, type: aws.lambda_function, name: create-meeting, parent: grp-meeting-backend}
+- {id: meetings-table, type: aws.dynamodb_table, name: meetings-table, parent: grp-meeting-backend}
+- {id: meeting-lifecycle-rule, type: aws.res.aws_cloudwatch_event_rule, name: meeting-lifecycle-rule, parent: grp-meeting-backend}
+- {id: pipeline-controller, type: aws.lambda_function, name: pipeline-controller, parent: grp-media-pipelines}
+- {id: capture-bucket, type: aws.s3_bucket, name: capture-bucket, parent: grp-media-pipelines}
+- {id: capture-key, type: aws.res.aws_kms_key, name: capture-key, parent: grp-media-pipelines}
+- id: call-insights-config
+  type: aws.res.aws_chimesdkmediapipelines_media_insights_pipeline_configuration
+  name: call-insights-config
+  parent: grp-media-pipelines
+  props:
+    elements: []
+    name: changeme
+    resource_access_role_arn: changeme
+- {id: insights-stream, type: aws.res.aws_kinesis_stream, name: insights-stream, parent: grp-media-pipelines, props: {name: changeme}}
+- {id: recording-postprocess, type: aws.res.aws_media_convert_queue, name: recording-postprocess, parent: grp-media-pipelines, props: {name: changeme}}
+edges:
+- {from: users, to: meetings-api, label: join request, step: '1'}
+- {from: meetings-api, to: meeting-users, label: Cognito authorizer}
+- {from: meetings-api, to: create-meeting, label: proxy integration, step: '2'}
+- {from: create-meeting, to: meetings-table, label: CreateMeeting + CreateAttendee tokens, step: '3'}
+- {from: create-meeting, to: pipeline-controller, label: CreateMediaCapturePipeline, step: '4'}
+- {from: pipeline-controller, to: capture-bucket, label: audio, step: '5'}
+- {from: capture-bucket, to: capture-key, label: SSE-KMS}
+- {from: meeting-lifecycle-rule, to: pipeline-controller, link: aws_cloudwatch_event_target}
+- {from: pipeline-controller, to: recording-postprocess, label: concatenate and transcode recording, step: '6'}
+- {from: call-insights-config, to: insights-stream, label: transcription and analytics events, step: '7'}
+steps:
+- {n: '1', text: 'users → meetings-api: join request'}
+- {n: '2', text: 'meetings-api → create-meeting: proxy integration'}
+- {n: '3', text: 'create-meeting → meetings-table: CreateMeeting + CreateAttendee tokens'}
+- {n: '4', text: 'create-meeting → pipeline-controller: CreateMediaCapturePipeline'}
+- {n: '5', text: 'pipeline-controller → capture-bucket: audio'}
+- {n: '6', text: 'pipeline-controller → recording-postprocess: concatenate and transcode recording'}
+- {n: '7', text: 'call-insights-config → insights-stream: transcription and analytics events'}

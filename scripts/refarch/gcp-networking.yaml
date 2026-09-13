@@ -1,0 +1,739 @@
+# Google Cloud reference architectures: networking and hybrid connectivity.
+# Sources: Cloud Architecture Center and Google Cloud networking documentation.
+
+- slug: ncc-hub-and-spoke
+  title: Hub-and-spoke with Network Connectivity Center
+  category: networking
+  tags: [network connectivity center, hub and spoke, vpc spokes, hybrid spoke, ha vpn]
+  source: https://docs.cloud.google.com/architecture/deploy-hub-spoke-vpc-network-topology
+  description: A central hub VPC and per-workload spoke VPCs are attached as VPC spokes to a Network Connectivity Center hub, which exchanges subnet routes so all spokes reach each other with full bandwidth and transitivity. On-premises connectivity terminates on HA VPN in the hub VPC and is attached as a hybrid spoke, so spokes reach the data center through the hub.
+  containers:
+    - datacenter: on-premises
+    - project: net-hub
+      region: europe-west1
+      vpcs:
+        - name: hub-vpc
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: hub-ew1, cidr: 10.0.0.0/24, region: europe-west1}
+    - project: workload-a
+      region: europe-west1
+      vpcs:
+        - name: spoke-a
+          cidr: 10.1.0.0/16
+          subnets:
+            - {name: spoke-a-ew1, cidr: 10.1.0.0/24, region: europe-west1}
+    - project: workload-b
+      region: europe-west1
+      vpcs:
+        - name: spoke-b
+          cidr: 10.2.0.0/16
+          subnets:
+            - {name: spoke-b-ew1, cidr: 10.2.0.0/24, region: europe-west1}
+  elements:
+    - {tf: google_network_connectivity_hub, name: ncc-hub, in: project:net-hub}
+    - {tf: google_compute_ha_vpn_gateway, name: hub-vpn-gw, in: vpc:hub-vpc}
+    - {tf: google_compute_router, name: hub-router, in: vpc:hub-vpc}
+    - {tf: google_compute_vpn_tunnel, name: hub-tunnel-0, in: vpc:hub-vpc}
+    - {tf: google_compute_vpn_tunnel, name: hub-tunnel-1, in: vpc:hub-vpc}
+    - {tf: google_compute_external_vpn_gateway, name: onprem-vpn-peer, in: datacenter}
+    - {tf: google_compute_network_firewall_policy, name: hub-fw-policy, in: vpc:hub-vpc}
+    - {tf: google_compute_instance, name: app-a, in: subnet:spoke-a-ew1}
+    - {tf: google_compute_instance, name: app-b, in: subnet:spoke-b-ew1}
+  actors: [datacenter]
+  flows:
+    - {from: ncc-hub, to: vpc:spoke-a, link: google_network_connectivity_spoke}
+    - {from: ncc-hub, to: vpc:spoke-b, link: google_network_connectivity_spoke}
+    - {from: ncc-hub, to: hub-tunnel-0, link: google_network_connectivity_spoke}
+    - {from: onprem-vpn-peer, to: hub-vpn-gw, label: IPsec tunnels, step: 1}
+    - {from: hub-router, to: onprem-vpn-peer, label: BGP route exchange, step: 2}
+    - {from: app-a, to: app-b, label: inter-spoke traffic via NCC, step: 3}
+    - {from: app-a, to: onprem-vpn-peer, label: spoke to on-premises via hybrid spoke, step: 4}
+
+- slug: peering-hub-and-spoke
+  title: Hub-and-spoke with VPC Network Peering
+  category: networking
+  tags: [vpc peering, hub and spoke, custom route export, non-transitive]
+  source: https://docs.cloud.google.com/vpc/docs/vpc-peering
+  description: Each spoke VPC is peered with a central hub VPC that hosts shared services and the hybrid connectivity to on-premises; the hub exports custom dynamic routes so spokes learn on-premises prefixes. Peering is non-transitive, so spokes cannot talk to each other through the hub unless a network virtual appliance or NCC is added.
+  containers:
+    - datacenter: on-premises
+    - project: net-hub
+      region: us-central1
+      vpcs:
+        - name: hub-vpc
+          cidr: 10.10.0.0/16
+          subnets:
+            - {name: hub-shared-svc, cidr: 10.10.0.0/24, region: us-central1}
+    - project: workload-a
+      region: us-central1
+      vpcs:
+        - name: spoke-a
+          cidr: 10.11.0.0/16
+          subnets:
+            - {name: spoke-a-usc1, cidr: 10.11.0.0/24, region: us-central1}
+    - project: workload-b
+      region: us-central1
+      vpcs:
+        - name: spoke-b
+          cidr: 10.12.0.0/16
+          subnets:
+            - {name: spoke-b-usc1, cidr: 10.12.0.0/24, region: us-central1}
+  elements:
+    - {tf: google_compute_router, name: hub-router, in: vpc:hub-vpc}
+    - {tf: google_compute_interconnect_attachment, name: hub-vlan-attachment, in: vpc:hub-vpc}
+    - {tf: google_compute_instance, name: shared-services-vm, in: subnet:hub-shared-svc}
+    - {tf: google_dns_managed_zone, name: hub-private-zone, in: vpc:hub-vpc}
+    - {tf: google_compute_firewall, name: allow-spoke-ingress, in: vpc:hub-vpc}
+    - {tf: google_compute_instance, name: app-a, in: subnet:spoke-a-usc1}
+    - {tf: google_compute_instance, name: app-b, in: subnet:spoke-b-usc1}
+    - {tf: google_compute_router, name: onprem-router, in: datacenter}
+  actors: [datacenter]
+  flows:
+    - {from: vpc:hub-vpc, to: vpc:spoke-a, link: google_compute_network_peering}
+    - {from: vpc:hub-vpc, to: vpc:spoke-b, link: google_compute_network_peering}
+    - {from: onprem-router, to: hub-vlan-attachment, label: Cloud Interconnect, step: 1}
+    - {from: hub-router, to: onprem-router, label: BGP, step: 2}
+    - {from: app-a, to: shared-services-vm, label: shared services over peering, step: 3}
+    - {from: app-b, to: onprem-router, label: on-premises via exported custom routes, step: 4}
+
+- slug: vpn-hub-and-spoke
+  title: Hub-and-spoke with HA VPN between VPC networks
+  category: networking
+  tags: [ha vpn, hub and spoke, transitive routing, bgp, vpc to vpc]
+  source: https://docs.cloud.google.com/network-connectivity/docs/vpn/how-to/creating-ha-vpn2
+  description: Two VPC networks are connected with a pair of HA VPN gateways, one per network, and four IPsec tunnels (two per gateway interface) with BGP sessions on Cloud Routers in each network. Used as a hub-and-spoke option when transitive routing between spokes through the hub is required and the bandwidth ceiling of VPN tunnels is acceptable.
+  containers:
+    - project: net-hub
+      region: europe-west4
+      vpcs:
+        - name: hub-vpc
+          cidr: 10.20.0.0/16
+          subnets:
+            - {name: hub-ew4, cidr: 10.20.0.0/24, region: europe-west4}
+    - project: workload-a
+      region: europe-west4
+      vpcs:
+        - name: spoke-a
+          cidr: 10.21.0.0/16
+          subnets:
+            - {name: spoke-a-ew4, cidr: 10.21.0.0/24, region: europe-west4}
+    - project: workload-b
+      region: europe-west4
+      vpcs:
+        - name: spoke-b
+          cidr: 10.22.0.0/16
+          subnets:
+            - {name: spoke-b-ew4, cidr: 10.22.0.0/24, region: europe-west4}
+  elements:
+    - {tf: google_compute_ha_vpn_gateway, name: hub-vpn-gw, in: vpc:hub-vpc}
+    - {tf: google_compute_router, name: hub-router, in: vpc:hub-vpc}
+    - {tf: google_compute_ha_vpn_gateway, name: spoke-a-vpn-gw, in: vpc:spoke-a}
+    - {tf: google_compute_router, name: spoke-a-router, in: vpc:spoke-a}
+    - {tf: google_compute_ha_vpn_gateway, name: spoke-b-vpn-gw, in: vpc:spoke-b}
+    - {tf: google_compute_router, name: spoke-b-router, in: vpc:spoke-b}
+    - {tf: google_compute_vpn_tunnel, name: hub-to-a-tunnel-0, in: vpc:hub-vpc}
+    - {tf: google_compute_vpn_tunnel, name: hub-to-a-tunnel-1, in: vpc:hub-vpc}
+    - {tf: google_compute_vpn_tunnel, name: hub-to-b-tunnel-0, in: vpc:hub-vpc}
+    - {tf: google_compute_vpn_tunnel, name: hub-to-b-tunnel-1, in: vpc:hub-vpc}
+    - {tf: google_compute_instance, name: app-a, in: subnet:spoke-a-ew4}
+    - {tf: google_compute_instance, name: app-b, in: subnet:spoke-b-ew4}
+  actors: []
+  flows:
+    - {from: hub-vpn-gw, to: spoke-a-vpn-gw, label: HA VPN 4 tunnels, step: 1}
+    - {from: hub-vpn-gw, to: spoke-b-vpn-gw, label: HA VPN 4 tunnels, step: 2}
+    - {from: hub-router, to: spoke-a-router, label: BGP}
+    - {from: hub-router, to: spoke-b-router, label: BGP}
+    - {from: app-a, to: app-b, label: transitive spoke-to-spoke via hub, step: 3}
+
+- slug: shared-vpc-host-service-projects
+  title: Shared VPC host and service projects
+  category: networking
+  tags: [shared vpc, host project, service project, subnet iam, centralized network admin]
+  source: https://docs.cloud.google.com/vpc/docs/shared-vpc
+  description: A host project owns the VPC network and its subnets; service projects are attached to the host and deploy Compute Engine, GKE and load balancer resources into shared subnets using internal IPs. Network administration stays centralized in the host project while subnet-level IAM delegates usage to service project teams.
+  containers:
+    - project: shared-vpc-host
+      region: europe-west1
+      vpcs:
+        - name: shared-vpc
+          cidr: 10.30.0.0/16
+          subnets:
+            - {name: team-web-ew1, cidr: 10.30.0.0/24, region: europe-west1}
+            - {name: team-data-ew1, cidr: 10.30.1.0/24, region: europe-west1}
+            - {name: proxy-only-ew1, cidr: 10.30.255.0/24, region: europe-west1}
+    - project: service-web
+      region: europe-west1
+    - project: service-data
+      region: europe-west1
+  elements:
+    - {tf: google_compute_router, name: shared-router, in: vpc:shared-vpc}
+    - {tf: google_compute_router_nat, name: shared-nat, in: vpc:shared-vpc}
+    - {tf: google_compute_network_firewall_policy, name: shared-fw-policy, in: vpc:shared-vpc}
+    - {tf: google_dns_managed_zone, name: shared-private-zone, in: vpc:shared-vpc}
+    - {tf: google_compute_instance, name: web-vm, in: subnet:team-web-ew1}
+    - {tf: google_compute_forwarding_rule, name: web-internal-alb, in: subnet:team-web-ew1}
+    - {tf: google_compute_backend_service, name: web-backend, in: project:service-web}
+    - {tf: google_compute_instance, name: data-vm, in: subnet:team-data-ew1}
+    - {tf: google_compute_address, name: data-internal-ip, in: subnet:team-data-ew1}
+  actors: [users]
+  flows:
+    - {from: users, to: web-internal-alb, label: HTTPS from corporate network, step: 1}
+    - {from: web-internal-alb, to: web-backend, label: proxy from proxy-only subnet, step: 2}
+    - {from: web-backend, to: web-vm, label: HTTP, step: 3}
+    - {from: web-vm, to: data-vm, label: internal IP across service projects, step: 4}
+    - {from: data-vm, to: shared-nat, label: egress via Cloud NAT, step: 5}
+
+- slug: dedicated-interconnect-9999-availability
+  title: Dedicated Interconnect with 99.99% availability
+  category: networking
+  tags: [dedicated interconnect, vlan attachment, redundancy, two metros, cloud router]
+  source: https://docs.cloud.google.com/network-connectivity/docs/interconnect/tutorials/dedicated-creating-9999-availability
+  description: Four Dedicated Interconnect connections are provisioned in two metropolitan areas, two per metro in separate edge availability domains, with one VLAN attachment each terminating on two Cloud Routers in two Google Cloud regions. The VPC uses global dynamic routing so any region reaches on-premises over any surviving path.
+  containers:
+    - datacenter: on-premises
+    - project: net-hub
+      region: us-east4
+      vpcs:
+        - name: hybrid-vpc
+          cidr: 10.40.0.0/16
+          subnets:
+            - {name: hybrid-use4, cidr: 10.40.0.0/24, region: us-east4}
+            - {name: hybrid-usw2, cidr: 10.40.1.0/24, region: us-west2}
+  elements:
+    - {tf: google_compute_router, name: router-use4, in: subnet:hybrid-use4}
+    - {tf: google_compute_router, name: router-usw2, in: subnet:hybrid-usw2}
+    - {tf: google_compute_interconnect_attachment, name: vlan-metro1-ead1, in: subnet:hybrid-use4}
+    - {tf: google_compute_interconnect_attachment, name: vlan-metro1-ead2, in: subnet:hybrid-use4}
+    - {tf: google_compute_interconnect_attachment, name: vlan-metro2-ead1, in: subnet:hybrid-usw2}
+    - {tf: google_compute_interconnect_attachment, name: vlan-metro2-ead2, in: subnet:hybrid-usw2}
+    - {tf: google_compute_instance, name: app-use4, in: subnet:hybrid-use4}
+    - {tf: google_compute_instance, name: app-usw2, in: subnet:hybrid-usw2}
+    - {tf: google_compute_router, name: onprem-router-metro1, in: datacenter}
+    - {tf: google_compute_router, name: onprem-router-metro2, in: datacenter}
+  actors: [datacenter]
+  flows:
+    - {from: onprem-router-metro1, to: vlan-metro1-ead1, label: 10G Dedicated Interconnect, step: 1}
+    - {from: onprem-router-metro1, to: vlan-metro1-ead2, label: 10G Dedicated Interconnect, step: 1}
+    - {from: onprem-router-metro2, to: vlan-metro2-ead1, label: 10G Dedicated Interconnect, step: 2}
+    - {from: onprem-router-metro2, to: vlan-metro2-ead2, label: 10G Dedicated Interconnect, step: 2}
+    - {from: router-use4, to: onprem-router-metro1, label: BGP, step: 3}
+    - {from: router-usw2, to: onprem-router-metro2, label: BGP, step: 3}
+    - {from: app-use4, to: onprem-router-metro1, label: private traffic, step: 4}
+
+- slug: partner-interconnect-redundant
+  title: Partner Interconnect with redundant VLAN attachments
+  category: networking
+  tags: [partner interconnect, service provider, vlan attachment, layer 3, redundancy]
+  source: https://docs.cloud.google.com/network-connectivity/docs/interconnect/concepts/partner-overview
+  description: On-premises connects to Google Cloud through a supported service provider; two Partner Interconnect VLAN attachments in separate edge availability domains terminate on a Cloud Router in the VPC. For Layer 3 partners the provider's routers peer with the Cloud Router; for Layer 2 partners the customer's on-premises router runs BGP directly to Google.
+  containers:
+    - datacenter: on-premises
+    - project: net-hub
+      region: europe-west3
+      vpcs:
+        - name: hybrid-vpc
+          cidr: 10.50.0.0/16
+          subnets:
+            - {name: hybrid-ew3, cidr: 10.50.0.0/24, region: europe-west3}
+  elements:
+    - {tf: google_compute_router, name: partner-router, in: vpc:hybrid-vpc}
+    - {tf: google_compute_interconnect_attachment, name: partner-vlan-ead1, in: vpc:hybrid-vpc}
+    - {tf: google_compute_interconnect_attachment, name: partner-vlan-ead2, in: vpc:hybrid-vpc}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:hybrid-ew3}
+    - {tf: google_compute_firewall, name: allow-onprem-ingress, in: vpc:hybrid-vpc}
+    - {tf: google_compute_router, name: onprem-router, in: datacenter}
+  actors: [datacenter, saas]
+  flows:
+    - {from: onprem-router, to: saas, label: circuit to service provider, step: 1}
+    - {from: saas, to: partner-vlan-ead1, label: partner VLAN attachment primary, step: 2}
+    - {from: saas, to: partner-vlan-ead2, label: partner VLAN attachment redundant, step: 2}
+    - {from: partner-router, to: onprem-router, label: BGP, step: 3}
+    - {from: app-vm, to: onprem-router, label: private traffic, step: 4}
+
+- slug: ha-vpn-to-on-premises
+  title: HA VPN to a peer VPN gateway
+  category: networking
+  tags: [ha vpn, ipsec, bgp, cloud router, external vpn gateway, 99.99% sla]
+  source: https://docs.cloud.google.com/network-connectivity/docs/vpn/concepts/topologies
+  description: An HA VPN gateway with two interfaces connects to an on-premises peer gateway with one or two external IPs, carrying two IPsec tunnels that each run a BGP session to a Cloud Router. Active-active or active-passive tunnel routing delivers a 99.99% availability SLA for the Google side.
+  containers:
+    - datacenter: on-premises
+    - project: net-hub
+      region: europe-west2
+      vpcs:
+        - name: hybrid-vpc
+          cidr: 10.60.0.0/16
+          subnets:
+            - {name: hybrid-ew2, cidr: 10.60.0.0/24, region: europe-west2}
+  elements:
+    - {tf: google_compute_ha_vpn_gateway, name: ha-vpn-gw, in: vpc:hybrid-vpc}
+    - {tf: google_compute_router, name: vpn-router, in: vpc:hybrid-vpc}
+    - {tf: google_compute_vpn_tunnel, name: tunnel-if0, in: vpc:hybrid-vpc}
+    - {tf: google_compute_vpn_tunnel, name: tunnel-if1, in: vpc:hybrid-vpc}
+    - {tf: google_compute_external_vpn_gateway, name: onprem-peer-gw, in: datacenter}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:hybrid-ew2}
+    - {tf: google_compute_firewall, name: allow-onprem, in: vpc:hybrid-vpc}
+  actors: [datacenter]
+  flows:
+    - {from: onprem-peer-gw, to: tunnel-if0, label: IPsec tunnel 0, step: 1}
+    - {from: onprem-peer-gw, to: tunnel-if1, label: IPsec tunnel 1, step: 1}
+    - {from: vpn-router, to: onprem-peer-gw, label: BGP over both tunnels, step: 2}
+    - {from: app-vm, to: onprem-peer-gw, label: private traffic ECMP, step: 3}
+
+- slug: psc-published-service
+  title: Private Service Connect published service (producer and consumer)
+  category: networking
+  tags: [private service connect, service attachment, producer, consumer, internal load balancer, nat subnet]
+  source: https://docs.cloud.google.com/vpc/docs/configure-private-service-connect-producer
+  description: A service producer fronts its workload with an internal load balancer, allocates a PSC NAT subnet and publishes the load balancer through a service attachment with an accept list of consumer projects. Consumers create an endpoint (a forwarding rule with an internal IP in their own VPC) that targets the service attachment, so traffic never leaves Google's network and address spaces need not be unique.
+  containers:
+    - project: producer
+      region: us-central1
+      vpcs:
+        - name: producer-vpc
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: producer-backend, cidr: 10.70.0.0/24, region: us-central1}
+            - {name: psc-nat-subnet, cidr: 10.70.100.0/24, region: us-central1}
+    - project: consumer
+      region: us-central1
+      vpcs:
+        - name: consumer-vpc
+          cidr: 10.70.0.0/16
+          subnets:
+            - {name: consumer-app, cidr: 10.70.0.0/24, region: us-central1}
+  elements:
+    - {tf: google_compute_instance, name: service-vm, in: subnet:producer-backend}
+    - {tf: google_compute_backend_service, name: service-backend, in: vpc:producer-vpc}
+    - {tf: google_compute_forwarding_rule, name: producer-ilb, in: subnet:producer-backend}
+    - {tf: google_compute_service_attachment, name: service-attachment, in: subnet:psc-nat-subnet}
+    - {tf: google_compute_address, name: endpoint-ip, in: subnet:consumer-app}
+    - {tf: google_compute_forwarding_rule, name: psc-endpoint, in: subnet:consumer-app}
+    - {tf: google_compute_instance, name: consumer-vm, in: subnet:consumer-app}
+    - {tf: google_dns_managed_zone, name: consumer-private-zone, in: vpc:consumer-vpc}
+  actors: []
+  flows:
+    - {from: consumer-vm, to: consumer-private-zone, label: resolve service name to endpoint IP, step: 1}
+    - {from: consumer-vm, to: psc-endpoint, label: connect to internal endpoint IP, step: 2}
+    - {from: psc-endpoint, to: service-attachment, label: PSC connection with NAT, step: 3}
+    - {from: service-attachment, to: producer-ilb, label: forward to producer load balancer, step: 4}
+    - {from: producer-ilb, to: service-backend, label: backend service, step: 5}
+    - {from: service-backend, to: service-vm, label: serve request, step: 6}
+
+- slug: psc-google-apis-endpoint
+  title: Private Service Connect endpoint for Google APIs
+  category: networking
+  tags: [private service connect, google apis, all-apis bundle, vpc-sc bundle, global forwarding rule, cloud dns]
+  source: https://docs.cloud.google.com/vpc/docs/configure-private-service-connect-apis
+  description: A global forwarding rule with an internal IP from the VPC targets the all-apis or vpc-sc API bundle so workloads and on-premises hosts reach Google APIs through a private address. A Cloud DNS private zone maps googleapis.com names to the endpoint IP and the endpoint prefix is advertised to on-premises over Cloud Router.
+  containers:
+    - datacenter: on-premises
+    - project: workload
+      region: europe-west1
+      vpcs:
+        - name: app-vpc
+          cidr: 10.80.0.0/16
+          subnets:
+            - {name: app-ew1, cidr: 10.80.0.0/24, region: europe-west1}
+  elements:
+    - {tf: google_compute_address, name: psc-apis-ip, in: vpc:app-vpc}
+    - {tf: google_compute_global_forwarding_rule, name: psc-apis-endpoint, in: vpc:app-vpc}
+    - {tf: google_dns_managed_zone, name: googleapis-private-zone, in: vpc:app-vpc}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:app-ew1}
+    - {tf: google_compute_ha_vpn_gateway, name: ha-vpn-gw, in: vpc:app-vpc}
+    - {tf: google_compute_router, name: vpn-router, in: vpc:app-vpc}
+    - {tf: google_compute_external_vpn_gateway, name: onprem-peer-gw, in: datacenter}
+  actors: [datacenter, saas]
+  flows:
+    - {from: app-vm, to: googleapis-private-zone, label: resolve storage.googleapis.com to endpoint IP, step: 1}
+    - {from: app-vm, to: psc-apis-endpoint, label: HTTPS to internal IP, step: 2}
+    - {from: psc-apis-endpoint, to: saas, label: Google APIs all-apis bundle, step: 3}
+    - {from: onprem-peer-gw, to: ha-vpn-gw, label: IPsec, step: 4}
+    - {from: vpn-router, to: onprem-peer-gw, label: advertise endpoint IP via BGP, step: 5}
+    - {from: onprem-peer-gw, to: psc-apis-endpoint, label: on-premises API calls, step: 6}
+
+- slug: private-google-access-on-premises
+  title: Private Google Access for on-premises hosts
+  category: networking
+  tags: [private google access, private.googleapis.com, restricted.googleapis.com, custom route advertisement, cloud dns]
+  source: https://docs.cloud.google.com/vpc/docs/configure-private-google-access-hybrid
+  description: On-premises hosts reach Google APIs over Cloud VPN or Cloud Interconnect by resolving googleapis.com to the private.googleapis.com range 199.36.153.8/30 (or restricted.googleapis.com 199.36.153.4/30) through a Cloud DNS private zone with an inbound server policy. The Cloud Router advertises that range to on-premises with a custom route advertisement, and the VPC has a static route for it to the default internet gateway.
+  containers:
+    - datacenter: on-premises
+    - project: workload
+      region: us-east1
+      vpcs:
+        - name: hybrid-vpc
+          cidr: 10.90.0.0/16
+          subnets:
+            - {name: hybrid-use1, cidr: 10.90.0.0/24, region: us-east1}
+  elements:
+    - {tf: google_compute_ha_vpn_gateway, name: ha-vpn-gw, in: vpc:hybrid-vpc}
+    - {tf: google_compute_router, name: vpn-router, in: vpc:hybrid-vpc}
+    - {tf: google_compute_vpn_tunnel, name: tunnel-0, in: vpc:hybrid-vpc}
+    - {tf: google_compute_external_vpn_gateway, name: onprem-peer-gw, in: datacenter}
+    - {tf: google_dns_managed_zone, name: googleapis-zone, in: vpc:hybrid-vpc}
+    - {tf: google_dns_policy, name: inbound-dns-policy, in: vpc:hybrid-vpc}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:hybrid-use1}
+    - {tf: google_compute_instance, name: onprem-server, in: datacenter}
+  actors: [datacenter, saas]
+  flows:
+    - {from: onprem-server, to: inbound-dns-policy, label: DNS query for googleapis.com, step: 1}
+    - {from: inbound-dns-policy, to: googleapis-zone, label: CNAME to private.googleapis.com, step: 2}
+    - {from: onprem-peer-gw, to: ha-vpn-gw, label: IPsec, step: 3}
+    - {from: vpn-router, to: onprem-peer-gw, label: "advertise 199.36.153.8/30 via BGP", step: 4}
+    - {from: onprem-server, to: saas, label: Google APIs via private.googleapis.com, step: 5}
+    - {from: app-vm, to: saas, label: Private Google Access from subnet, step: 6}
+
+- slug: cloud-nat-private-egress
+  title: Cloud NAT for private instances
+  category: networking
+  tags: [cloud nat, public nat, cloud router, no external ip, egress]
+  source: https://docs.cloud.google.com/nat/docs/overview
+  description: Compute Engine and GKE nodes without external IPs send outbound internet traffic through a regional Public NAT gateway configured on a Cloud Router for selected subnets. The gateway is a distributed software-defined service with no proxy VM, and it does not allow unsolicited inbound connections.
+  containers:
+    - project: workload
+      region: europe-west1
+      vpcs:
+        - name: app-vpc
+          cidr: 10.100.0.0/16
+          subnets:
+            - {name: private-ew1, cidr: 10.100.0.0/24, region: europe-west1}
+            - {name: private-ew1-b, cidr: 10.100.1.0/24, region: europe-west1}
+  elements:
+    - {tf: google_compute_router, name: nat-router, in: vpc:app-vpc}
+    - {tf: google_compute_router_nat, name: public-nat-gw, in: vpc:app-vpc}
+    - {tf: google_compute_address, name: nat-ip-1, in: region}
+    - {tf: google_compute_address, name: nat-ip-2, in: region}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:private-ew1}
+    - {tf: google_compute_instance, name: batch-vm, in: subnet:private-ew1-b}
+    - {tf: google_compute_firewall, name: deny-all-ingress, in: vpc:app-vpc}
+  actors: [internet]
+  flows:
+    - {from: app-vm, to: public-nat-gw, label: outbound TCP/UDP from private IP, step: 1}
+    - {from: batch-vm, to: public-nat-gw, label: outbound package downloads, step: 1}
+    - {from: public-nat-gw, to: nat-ip-1, label: source NAT to static IP, step: 2}
+    - {from: nat-ip-1, to: internet, label: egress, step: 3}
+
+- slug: enterprise-hub-spoke-nva-inspection
+  title: Enterprise foundations hub-and-spoke with network virtual appliances
+  category: networking
+  tags: [enterprise foundations blueprint, hub and spoke, nva, shared vpc, dedicated interconnect, dns hub]
+  source: https://docs.cloud.google.com/architecture/security-foundations/networking
+  description: The enterprise foundations blueprint hub-and-spoke topology adds a hub Shared VPC that connects each environment's Shared VPC, with traffic between environments gated by network virtual appliances behind an internal passthrough load balancer used as next hop. Dedicated Interconnect terminates in the hub, Cloud NAT and Private Google Access provide controlled egress, and a DNS hub project centralizes hybrid resolution.
+  containers:
+    - datacenter: on-premises
+    - project: prj-net-hub
+      region: us-central1
+      vpcs:
+        - name: hub-shared-vpc
+          cidr: 10.110.0.0/16
+          subnets:
+            - {name: hub-nva-usc1, cidr: 10.110.0.0/24, region: us-central1}
+    - project: prj-net-prod
+      region: us-central1
+      vpcs:
+        - name: prod-shared-vpc
+          cidr: 10.111.0.0/16
+          subnets:
+            - {name: prod-usc1, cidr: 10.111.0.0/24, region: us-central1}
+    - project: prj-net-nonprod
+      region: us-central1
+      vpcs:
+        - name: nonprod-shared-vpc
+          cidr: 10.112.0.0/16
+          subnets:
+            - {name: nonprod-usc1, cidr: 10.112.0.0/24, region: us-central1}
+  elements:
+    - {tf: google_compute_instance, name: nva-1, in: subnet:hub-nva-usc1}
+    - {tf: google_compute_instance, name: nva-2, in: subnet:hub-nva-usc1}
+    - {tf: google_compute_backend_service, name: nva-backend, in: vpc:hub-shared-vpc}
+    - {tf: google_compute_forwarding_rule, name: nva-ilb-next-hop, in: subnet:hub-nva-usc1}
+    - {tf: google_compute_router, name: hub-router, in: vpc:hub-shared-vpc}
+    - {tf: google_compute_interconnect_attachment, name: hub-vlan-ead1, in: vpc:hub-shared-vpc}
+    - {tf: google_compute_interconnect_attachment, name: hub-vlan-ead2, in: vpc:hub-shared-vpc}
+    - {tf: google_compute_router_nat, name: hub-nat, in: vpc:hub-shared-vpc}
+    - {tf: google_dns_managed_zone, name: dns-hub-zone, in: vpc:hub-shared-vpc}
+    - {tf: google_compute_network_firewall_policy, name: hierarchical-fw-policy, in: project:prj-net-hub}
+    - {tf: google_compute_instance, name: prod-app, in: subnet:prod-usc1}
+    - {tf: google_compute_instance, name: nonprod-app, in: subnet:nonprod-usc1}
+    - {tf: google_compute_router, name: onprem-router, in: datacenter}
+  actors: [datacenter]
+  flows:
+    - {from: vpc:hub-shared-vpc, to: vpc:prod-shared-vpc, link: google_compute_network_peering}
+    - {from: vpc:hub-shared-vpc, to: vpc:nonprod-shared-vpc, link: google_compute_network_peering}
+    - {from: onprem-router, to: hub-vlan-ead1, label: Dedicated Interconnect, step: 1}
+    - {from: hub-router, to: onprem-router, label: BGP, step: 2}
+    - {from: prod-app, to: nva-ilb-next-hop, label: route to on-premises via NVA next hop, step: 3}
+    - {from: nva-ilb-next-hop, to: nva-backend, label: distribute to appliances}
+    - {from: nva-backend, to: nva-1, label: inspect and forward, step: 4}
+    - {from: nva-1, to: onprem-router, label: inspected traffic, step: 5}
+    - {from: nonprod-app, to: hub-nat, label: controlled internet egress, step: 6}
+
+- slug: cloud-ngfw-network-firewall-policies
+  title: Cloud NGFW with hierarchical and network firewall policies
+  category: security
+  tags: [cloud ngfw, network firewall policy, hierarchical firewall policy, intrusion prevention, firewall endpoint]
+  source: https://docs.cloud.google.com/firewall/docs/about-firewalls
+  description: Cloud Next Generation Firewall enforces distributed stateful rules through hierarchical policies at the organization or folder level and global or regional network firewall policies attached to a VPC. The enterprise tier adds firewall endpoints for Layer 7 inspection and intrusion prevention of north-south and east-west traffic without routing through a proxy appliance.
+  containers:
+    - project: workload
+      region: europe-west1
+      vpcs:
+        - name: app-vpc
+          cidr: 10.120.0.0/16
+          subnets:
+            - {name: web-ew1, cidr: 10.120.0.0/24, region: europe-west1}
+            - {name: db-ew1, cidr: 10.120.1.0/24, region: europe-west1}
+  elements:
+    - {tf: google_compute_network_firewall_policy, name: global-net-fw-policy, in: vpc:app-vpc}
+    - {tf: google_compute_network_firewall_policy, name: regional-net-fw-policy, in: region}
+    - {tf: google_compute_firewall, name: legacy-vpc-rule, in: vpc:app-vpc}
+    - {tf: google_compute_instance, name: web-vm, in: subnet:web-ew1}
+    - {tf: google_compute_instance, name: db-vm, in: subnet:db-ew1}
+    - {tf: google_compute_global_forwarding_rule, name: web-lb, in: region}
+    - {tf: google_compute_backend_service, name: web-backend, in: vpc:app-vpc}
+  actors: [internet, users]
+  flows:
+    - {from: users, to: web-lb, label: HTTPS, step: 1}
+    - {from: web-lb, to: web-backend, label: to backend service, step: 2}
+    - {from: web-backend, to: web-vm, label: north-south ingress inspected by NGFW, step: 3}
+    - {from: web-vm, to: db-vm, label: east-west allowed by tag-based rule, step: 4}
+    - {from: db-vm, to: internet, label: egress denied by policy, step: 5}
+
+- slug: cloud-armor-global-alb
+  title: Cloud Armor with global external Application Load Balancer
+  category: security
+  tags: [cloud armor, waf, ddos, global external application load balancer, anycast, cloud cdn]
+  source: https://docs.cloud.google.com/armor/docs/cloud-armor-overview
+  description: A global external Application Load Balancer with a single anycast IP fronts backend services in multiple regions; a Cloud Armor security policy attached to each backend service filters traffic at Google's edge with preconfigured WAF rules, rate limiting and adaptive protection. Layer 3 and 4 volumetric attacks are absorbed by the load balancing infrastructure before reaching backends.
+  containers:
+    - project: web-frontend
+      region: us-central1
+      vpcs:
+        - name: web-vpc
+          cidr: 10.130.0.0/16
+          subnets:
+            - {name: web-usc1, cidr: 10.130.0.0/24, region: us-central1}
+            - {name: web-ew1, cidr: 10.130.1.0/24, region: europe-west1}
+  elements:
+    - {tf: google_compute_global_forwarding_rule, name: global-https-rule, in: project:web-frontend}
+    - {tf: google_compute_address, name: anycast-ip, in: project:web-frontend}
+    - {tf: google_compute_security_policy, name: edge-waf-policy, in: project:web-frontend}
+    - {tf: google_compute_backend_service, name: web-backend, in: project:web-frontend}
+    - {tf: google_compute_instance, name: web-usc1-vm, in: subnet:web-usc1}
+    - {tf: google_compute_instance, name: web-ew1-vm, in: subnet:web-ew1}
+    - {tf: google_compute_firewall, name: allow-glb-health-checks, in: vpc:web-vpc}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: global-https-rule, label: HTTPS to anycast IP, step: 1}
+    - {from: internet, to: global-https-rule, label: attack traffic, step: 1}
+    - {from: global-https-rule, to: edge-waf-policy, label: evaluate WAF and rate-limit rules at edge, step: 2}
+    - {from: edge-waf-policy, to: web-backend, label: allowed requests, step: 3}
+    - {from: web-backend, to: web-usc1-vm, label: nearest healthy region, step: 4}
+    - {from: web-backend, to: web-ew1-vm, label: failover region, step: 4}
+
+- slug: cross-region-internal-alb
+  title: Cross-region internal Application Load Balancer across two regions
+  category: networking
+  tags: [internal application load balancer, cross-region, proxy-only subnet, envoy, multi-region vpc, failover]
+  source: https://docs.cloud.google.com/load-balancing/docs/l7-internal/setting-up-l7-cross-reg-internal
+  description: A single global VPC spans two regions, each with a workload subnet, a proxy-only subnet for the managed Envoy proxies and a managed instance group backend attached to one global internal backend service. Two forwarding rules with regional internal IPs point at the same global target proxy, so clients in either region hit local proxies and fail over to the other region's backends when needed.
+  containers:
+    - project: workload
+      region: us-west1
+      vpcs:
+        - name: lb-network
+          cidr: 10.140.0.0/16
+          subnets:
+            - {name: backend-usw1, cidr: 10.140.0.0/24, region: us-west1}
+            - {name: proxy-only-usw1, cidr: 10.140.129.0/24, region: us-west1}
+            - {name: backend-use1, cidr: 10.140.1.0/24, region: us-east1}
+            - {name: proxy-only-use1, cidr: 10.140.130.0/24, region: us-east1}
+  elements:
+    - {tf: google_compute_global_forwarding_rule, name: fr-usw1, in: subnet:backend-usw1}
+    - {tf: google_compute_global_forwarding_rule, name: fr-use1, in: subnet:backend-use1}
+    - {tf: google_compute_backend_service, name: global-backend, in: vpc:lb-network}
+    - {tf: google_compute_instance, name: mig-usw1, in: subnet:backend-usw1}
+    - {tf: google_compute_instance, name: mig-use1, in: subnet:backend-use1}
+    - {tf: google_compute_instance, name: client-usw1, in: subnet:backend-usw1}
+    - {tf: google_compute_firewall, name: allow-proxy-only, in: vpc:lb-network}
+    - {tf: google_compute_firewall, name: allow-health-check, in: vpc:lb-network}
+  actors: []
+  flows:
+    - {from: client-usw1, to: fr-usw1, label: HTTP to regional internal IP, step: 1}
+    - {from: fr-usw1, to: global-backend, label: Envoy proxies in proxy-only subnet, step: 2}
+    - {from: global-backend, to: mig-usw1, label: local region backend, step: 3}
+    - {from: global-backend, to: mig-use1, label: failover to other region, step: 4}
+    - {from: fr-use1, to: global-backend, label: clients in us-east1}
+
+- slug: hybrid-dns-forwarding-and-peering
+  title: Hybrid DNS with forwarding zones, peering zones and a DNS hub
+  category: networking
+  tags: [cloud dns, forwarding zone, peering zone, inbound server policy, hub and spoke, hybrid dns]
+  source: https://docs.cloud.google.com/dns/docs/best-practices
+  description: A hub VPC hosts the hybrid connectivity, a forwarding zone that sends corp.example.com queries to on-premises DNS servers, and an inbound server policy that lets on-premises resolvers query Cloud DNS private zones through a proxy IP in the hub. Spoke VPCs use peering zones that point at the hub VPC so their workloads resolve on-premises and shared private names without their own forwarding configuration.
+  containers:
+    - datacenter: on-premises
+    - project: dns-hub
+      region: europe-west1
+      vpcs:
+        - name: hub-vpc
+          cidr: 10.160.0.0/16
+          subnets:
+            - {name: hub-ew1, cidr: 10.160.0.0/24, region: europe-west1}
+    - project: workload-a
+      region: europe-west1
+      vpcs:
+        - name: spoke-a
+          cidr: 10.161.0.0/16
+          subnets:
+            - {name: spoke-a-ew1, cidr: 10.161.0.0/24, region: europe-west1}
+  elements:
+    - {tf: google_dns_managed_zone, name: hub-private-zone, in: vpc:hub-vpc}
+    - {tf: google_dns_managed_zone, name: onprem-forwarding-zone, in: vpc:hub-vpc}
+    - {tf: google_dns_policy, name: hub-inbound-policy, in: vpc:hub-vpc}
+    - {tf: google_dns_managed_zone, name: spoke-a-peering-zone, in: vpc:spoke-a}
+    - {tf: google_compute_ha_vpn_gateway, name: hub-vpn-gw, in: vpc:hub-vpc}
+    - {tf: google_compute_router, name: hub-router, in: vpc:hub-vpc}
+    - {tf: google_compute_external_vpn_gateway, name: onprem-peer-gw, in: datacenter}
+    - {tf: google_compute_instance, name: onprem-dns-server, in: datacenter}
+    - {tf: google_compute_instance, name: app-a, in: subnet:spoke-a-ew1}
+  actors: [datacenter]
+  flows:
+    - {from: vpc:hub-vpc, to: vpc:spoke-a, link: google_compute_network_peering}
+    - {from: onprem-peer-gw, to: hub-vpn-gw, label: IPsec, step: 1}
+    - {from: app-a, to: spoke-a-peering-zone, label: query corp.example.com, step: 2}
+    - {from: spoke-a-peering-zone, to: onprem-forwarding-zone, label: DNS peering to hub VPC, step: 3}
+    - {from: onprem-forwarding-zone, to: onprem-dns-server, label: "forward via 35.199.192.0/19", step: 4}
+    - {from: onprem-dns-server, to: hub-inbound-policy, label: query gcp.example.com via inbound proxy IP, step: 5}
+    - {from: hub-inbound-policy, to: hub-private-zone, label: resolve private zone, step: 6}
+
+- slug: cloud-dns-private-zones
+  title: Cloud DNS private zones for internal names
+  category: networking
+  tags: [cloud dns, private zone, reverse lookup zone, service directory zone, internal dns]
+  source: https://docs.cloud.google.com/dns/docs/zones/zones-overview
+  description: Private managed zones are authorized to one or more VPC networks and serve internal names such as internal.example.com to instances in those networks, alongside managed reverse lookup zones for PTR records and Service Directory zones for service discovery. A response policy or private zone can override public names, for example to point googleapis.com at private endpoints.
+  containers:
+    - project: workload
+      region: us-central1
+      vpcs:
+        - name: app-vpc
+          cidr: 10.170.0.0/16
+          subnets:
+            - {name: app-usc1, cidr: 10.170.0.0/24, region: us-central1}
+            - {name: db-usc1, cidr: 10.170.1.0/24, region: us-central1}
+  elements:
+    - {tf: google_dns_managed_zone, name: internal-private-zone, in: vpc:app-vpc}
+    - {tf: google_dns_managed_zone, name: reverse-lookup-zone, in: vpc:app-vpc}
+    - {tf: google_dns_managed_zone, name: service-directory-zone, in: vpc:app-vpc}
+    - {tf: google_dns_policy, name: logging-dns-policy, in: vpc:app-vpc}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:app-usc1}
+    - {tf: google_compute_address, name: db-internal-ip, in: subnet:db-usc1}
+    - {tf: google_compute_instance, name: db-vm, in: subnet:db-usc1}
+  actors: []
+  flows:
+    - {from: app-vm, to: internal-private-zone, label: resolve db.internal.example.com, step: 1}
+    - {from: internal-private-zone, to: db-internal-ip, label: A record to reserved internal IP, step: 2}
+    - {from: app-vm, to: db-vm, label: connect by name, step: 3}
+    - {from: db-vm, to: reverse-lookup-zone, label: PTR lookup of client IP, step: 4}
+    - {from: app-vm, to: service-directory-zone, label: discover registered services, step: 5}
+
+- slug: cross-cloud-interconnect-multicloud
+  title: Cross-Cloud Interconnect to another cloud provider
+  category: networking
+  tags: [cross-cloud interconnect, multicloud, aws, azure, vlan attachment, cloud router, redundancy]
+  source: https://docs.cloud.google.com/network-connectivity/docs/interconnect/concepts/cci-overview
+  description: Google provisions dedicated physical ports between its network and a remote cloud provider such as AWS or Azure in a supported location; the customer orders a primary and a redundant port in different edge availability domains, then configures VLAN attachments and Cloud Router BGP sessions to the remote provider's gateway. Ninety-nine point nine percent availability needs two connections in one metro and 99.99% needs pairs in two metros.
+  containers:
+    - datacenter: other-cloud-provider
+    - project: net-hub
+      region: us-east4
+      vpcs:
+        - name: multicloud-vpc
+          cidr: 10.180.0.0/16
+          subnets:
+            - {name: multicloud-use4, cidr: 10.180.0.0/24, region: us-east4}
+  elements:
+    - {tf: google_compute_router, name: cci-router, in: vpc:multicloud-vpc}
+    - {tf: google_compute_interconnect_attachment, name: cci-vlan-primary, in: vpc:multicloud-vpc}
+    - {tf: google_compute_interconnect_attachment, name: cci-vlan-redundant, in: vpc:multicloud-vpc}
+    - {tf: google_compute_instance, name: gcp-app, in: subnet:multicloud-use4}
+    - {tf: google_compute_firewall, name: allow-remote-cloud, in: vpc:multicloud-vpc}
+    - {tf: google_compute_router, name: remote-cloud-gateway, in: datacenter}
+    - {tf: google_compute_instance, name: remote-cloud-workload, in: datacenter}
+  actors: []
+  flows:
+    - {from: remote-cloud-gateway, to: cci-vlan-primary, label: Cross-Cloud Interconnect primary port, step: 1}
+    - {from: remote-cloud-gateway, to: cci-vlan-redundant, label: Cross-Cloud Interconnect redundant port, step: 1}
+    - {from: cci-router, to: remote-cloud-gateway, label: BGP, step: 2}
+    - {from: gcp-app, to: remote-cloud-workload, label: private inter-cloud traffic, step: 3}
+
+- slug: cloud-router-bgp-dynamic-routing
+  title: Cloud Router BGP dynamic routing with global routing mode
+  category: networking
+  tags: [cloud router, bgp, dynamic routing, global routing mode, custom route advertisement, md5]
+  source: https://docs.cloud.google.com/network-connectivity/docs/router/concepts/overview
+  description: Cloud Router is the managed BGP speaker for Cloud VPN, Cloud Interconnect and router appliances; it learns on-premises prefixes as dynamic routes and advertises VPC subnet ranges plus custom prefixes. With the VPC in global dynamic routing mode, routes learned by a Cloud Router in one region are programmed into all regions of the VPC.
+  containers:
+    - datacenter: on-premises
+    - project: net-hub
+      region: europe-west1
+      vpcs:
+        - name: global-vpc
+          cidr: 10.190.0.0/16
+          subnets:
+            - {name: app-ew1, cidr: 10.190.0.0/24, region: europe-west1}
+            - {name: app-asse1, cidr: 10.190.1.0/24, region: asia-southeast1}
+  elements:
+    - {tf: google_compute_router, name: cloud-router-ew1, in: subnet:app-ew1}
+    - {tf: google_compute_ha_vpn_gateway, name: ha-vpn-gw-ew1, in: subnet:app-ew1}
+    - {tf: google_compute_vpn_tunnel, name: tunnel-0, in: subnet:app-ew1}
+    - {tf: google_compute_vpn_tunnel, name: tunnel-1, in: subnet:app-ew1}
+    - {tf: google_compute_external_vpn_gateway, name: onprem-peer-gw, in: datacenter}
+    - {tf: google_compute_router, name: onprem-bgp-router, in: datacenter}
+    - {tf: google_compute_instance, name: app-ew1-vm, in: subnet:app-ew1}
+    - {tf: google_compute_instance, name: app-asse1-vm, in: subnet:app-asse1}
+  actors: [datacenter]
+  flows:
+    - {from: onprem-peer-gw, to: ha-vpn-gw-ew1, label: IPsec tunnels, step: 1}
+    - {from: cloud-router-ew1, to: onprem-bgp-router, label: BGP session with MD5 auth, step: 2}
+    - {from: onprem-bgp-router, to: cloud-router-ew1, label: advertise on-premises prefixes, step: 3}
+    - {from: cloud-router-ew1, to: onprem-bgp-router, label: advertise all subnets plus custom ranges, step: 4}
+    - {from: app-asse1-vm, to: onprem-bgp-router, label: uses route learned in europe-west1 via global routing, step: 5}
+
+- slug: network-intelligence-center-observability
+  title: Network Intelligence Center for topology and connectivity testing
+  category: observability
+  tags: [network intelligence center, connectivity tests, network topology, firewall insights, network analyzer, performance dashboard]
+  source: https://docs.cloud.google.com/network-intelligence-center/docs/overview
+  description: Network Intelligence Center provides Network Topology visualization, Connectivity Tests that simulate packets between endpoints across VPCs and hybrid links, Performance Dashboard latency and packet loss metrics, Firewall Insights and Network Analyzer for misconfiguration detection. Connectivity Tests are created as resources that evaluate reachability between a source and destination such as a VM, load balancer IP or on-premises address.
+  containers:
+    - datacenter: on-premises
+    - project: workload
+      region: europe-west1
+      vpcs:
+        - name: app-vpc
+          cidr: 10.200.0.0/16
+          subnets:
+            - {name: app-ew1, cidr: 10.200.0.0/24, region: europe-west1}
+            - {name: db-ew1, cidr: 10.200.1.0/24, region: europe-west1}
+  elements:
+    - {tf: google_network_management_connectivity_test, name: vm-to-db-test, in: project:workload}
+    - {tf: google_network_management_connectivity_test, name: vm-to-onprem-test, in: project:workload}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:app-ew1}
+    - {tf: google_compute_instance, name: db-vm, in: subnet:db-ew1}
+    - {tf: google_compute_network_firewall_policy, name: app-fw-policy, in: vpc:app-vpc}
+    - {tf: google_compute_ha_vpn_gateway, name: ha-vpn-gw, in: vpc:app-vpc}
+    - {tf: google_compute_router, name: vpn-router, in: vpc:app-vpc}
+    - {tf: google_compute_external_vpn_gateway, name: onprem-peer-gw, in: datacenter}
+  actors: [datacenter, user]
+  flows:
+    - {from: user, to: vm-to-db-test, label: run connectivity test, step: 1}
+    - {from: vm-to-db-test, to: app-vm, label: source endpoint, step: 2}
+    - {from: vm-to-db-test, to: db-vm, label: destination endpoint evaluated against firewall policy, step: 3}
+    - {from: vm-to-onprem-test, to: ha-vpn-gw, label: trace via VPN tunnel and Cloud Router routes, step: 4}
+    - {from: onprem-peer-gw, to: ha-vpn-gw, label: IPsec}
+    - {from: app-fw-policy, to: user, label: Firewall Insights on shadowed and unused rules, step: 5}

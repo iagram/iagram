@@ -1,0 +1,55 @@
+# Generated from the official reference (https://docs.aws.amazon.com/location/latest/developerguide/what-is.html); edit freely.
+title: Asset tracking with Amazon Location Service trackers and geofences
+category: iot
+tags:
+- amazon location
+- trackers
+- geofences
+- maps
+- eventbridge
+- fleet tracking
+source: https://docs.aws.amazon.com/location/latest/developerguide/what-is.html
+description: Mobile devices and vehicles send position updates to a Location Service tracker, which evaluates them against a linked geofence collection and emits ENTER and EXIT events to EventBridge. A
+  Lambda target persists position history in DynamoDB and notifies dispatchers through SNS, while a web app renders map tiles, place search and routes through API Gateway.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: grp-location-resources, type: common.group, name: location resources, parent: reg-eu-west-1}
+- {id: grp-events, type: common.group, name: events, parent: reg-eu-west-1}
+- {id: grp-app, type: common.group, name: app, parent: reg-eu-west-1}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: users, type: common.users, name: users}
+- {id: fleet-tracker, type: aws.res.aws_location_tracker, name: fleet-tracker, parent: grp-location-resources, props: {tracker_name: changeme}}
+- {id: depot-geofences, type: aws.res.aws_location_geofence_collection, name: depot-geofences, parent: grp-location-resources, props: {collection_name: changeme}}
+- id: fleet-map
+  type: aws.res.aws_location_map
+  name: fleet-map
+  parent: grp-location-resources
+  props: {configuration: {}, map_name: changeme}
+- {id: address-search, type: aws.res.aws_location_place_index, name: address-search, parent: grp-location-resources, props: {data_source: changeme, index_name: changeme}}
+- {id: delivery-routes, type: aws.res.aws_location_route_calculator, name: delivery-routes, parent: grp-location-resources, props: {calculator_name: changeme, data_source: changeme}}
+- {id: geofence-events-rule, type: aws.res.aws_cloudwatch_event_rule, name: geofence-events-rule, parent: grp-events}
+- {id: geofence-handler, type: aws.lambda_function, name: geofence-handler, parent: grp-events}
+- {id: position-history, type: aws.dynamodb_table, name: position-history, parent: grp-events}
+- {id: dispatch-notifications, type: aws.res.aws_sns_topic, name: dispatch-notifications, parent: grp-events}
+- {id: fleet-api, type: aws.res.aws_api_gateway_rest_api, name: fleet-api, parent: grp-app, props: {name: changeme}}
+- {id: dispatcher-users, type: aws.res.aws_cognito_user_pool, name: dispatcher-users, parent: grp-app, props: {name: changeme}}
+edges:
+- {from: mobile, to: fleet-tracker, label: BatchUpdateDevicePosition, step: '1'}
+- {from: fleet-tracker, to: depot-geofences, label: tracker association evaluates geofences, step: '2'}
+- {from: depot-geofences, to: geofence-events-rule, label: ENTER/EXIT events to EventBridge, step: '3'}
+- {from: geofence-events-rule, to: geofence-handler, link: aws_cloudwatch_event_target}
+- {from: geofence-handler, to: position-history, label: store arrival and departure, step: '4'}
+- {from: geofence-handler, to: dispatch-notifications, label: notify dispatch, step: '4'}
+- {from: users, to: fleet-api, label: dispatcher console, step: '5'}
+- {from: fleet-api, to: dispatcher-users, label: Cognito authorizer}
+- {from: fleet-api, to: fleet-map, label: map tiles}
+- {from: fleet-api, to: address-search, label: geocode delivery addresses}
+- {from: fleet-api, to: delivery-routes, label: calculate routes}
+- {from: fleet-api, to: fleet-tracker, label: GetDevicePosition}
+steps:
+- {n: '1', text: 'mobile → fleet-tracker: BatchUpdateDevicePosition'}
+- {n: '2', text: 'fleet-tracker → depot-geofences: tracker association evaluates geofences'}
+- {n: '3', text: 'depot-geofences → geofence-events-rule: ENTER/EXIT events to EventBridge'}
+- {n: '4', text: 'geofence-handler → position-history: store arrival and departure'}
+- {n: '5', text: 'users → fleet-api: dispatcher console'}

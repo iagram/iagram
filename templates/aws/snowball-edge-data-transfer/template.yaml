@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.aws.amazon.com/snowball/latest/developer-guide/how-it-works.html); edit freely.
+title: Offline data transfer and edge compute with Snowball Edge
+category: edge
+tags:
+- snow family
+- snowball edge
+- data migration
+- offline transfer
+- edge compute
+source: https://docs.aws.amazon.com/snowball/latest/developer-guide/how-it-works.html
+description: An import job ships a Snowball Edge device to a disconnected or bandwidth-constrained site, where local servers copy data onto it through the S3 adapter or NFS interface while EC2-compatible
+  instances and Lambda functions run on the device for local processing. The device is shipped back and AWS imports the data into the target S3 bucket, after which Glue and Athena catalog and query it and
+  lifecycle rules move it to cold storage.
+nodes:
+- {id: dc-remote-site, type: common.datacenter, name: remote-site}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-landing, type: common.group, name: landing, parent: reg-us-east-1}
+- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: server, type: common.server, name: server}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: site-file-server, type: aws.ec2_instance, name: site-file-server, parent: sub-reg-us-east-1-a}
+- {id: on-device-compute, type: aws.ec2_instance, name: on-device-compute, parent: sub-reg-us-east-1-a}
+- {id: import-bucket, type: aws.s3_bucket, name: import-bucket, parent: grp-landing}
+- {id: import-key, type: aws.res.aws_kms_key, name: import-key, parent: grp-landing}
+- {id: job-status, type: aws.res.aws_sns_topic, name: job-status, parent: grp-landing}
+- {id: post-import-validator, type: aws.lambda_function, name: post-import-validator, parent: grp-landing}
+- {id: imported-data-crawler, type: aws.res.aws_glue_crawler, name: imported-data-crawler, parent: grp-analytics, props: {database_name: changeme, name: changeme, role: changeme}}
+- {id: imported-catalog, type: aws.res.aws_glue_catalog_database, name: imported-catalog, parent: grp-analytics, props: {name: changeme}}
+- {id: imported-athena, type: aws.res.aws_athena_workgroup, name: imported-athena, parent: grp-analytics, props: {name: changeme}}
+edges:
+- {from: users, to: import-bucket, label: create import job for target bucket, step: '1'}
+- {from: import-bucket, to: import-key, label: encryption key for the job}
+- {from: server, to: site-file-server, label: data sources at the site}
+- {from: site-file-server, to: on-device-compute, label: copy via S3 adapter or NFS to device, step: '2'}
+- {from: on-device-compute, to: import-bucket, label: device shipped back and imported by AWS, step: '3'}
+- {from: job-status, to: post-import-validator, link: aws_sns_topic_subscription}
+- {from: post-import-validator, to: import-bucket, label: verify manifest checksums, step: '4'}
+- {from: imported-data-crawler, to: import-bucket, label: crawl imported objects, step: '5'}
+- {from: imported-data-crawler, to: imported-catalog, label: tables}
+- {from: imported-athena, to: imported-catalog, label: SQL queries, step: '6'}
+steps:
+- {n: '1', text: 'users → import-bucket: create import job for target bucket'}
+- {n: '2', text: 'site-file-server → on-device-compute: copy via S3 adapter or NFS to device'}
+- {n: '3', text: 'on-device-compute → import-bucket: device shipped back and imported by AWS'}
+- {n: '4', text: 'post-import-validator → import-bucket: verify manifest checksums'}
+- {n: '5', text: 'imported-data-crawler → import-bucket: crawl imported objects'}
+- {n: '6', text: 'imported-athena → imported-catalog: SQL queries'}

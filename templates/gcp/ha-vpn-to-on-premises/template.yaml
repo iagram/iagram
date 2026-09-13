@@ -1,0 +1,31 @@
+# Generated from the official reference (https://docs.cloud.google.com/network-connectivity/docs/vpn/concepts/topologies); edit freely.
+title: HA VPN to a peer VPN gateway
+category: networking
+tags:
+- ha vpn
+- ipsec
+- bgp
+- cloud router
+- external vpn gateway
+- 99.99% sla
+source: https://docs.cloud.google.com/network-connectivity/docs/vpn/concepts/topologies
+description: An HA VPN gateway with two interfaces connects to an on-premises peer gateway with one or two external IPs, carrying two IPsec tunnels that each run a BGP session to a Cloud Router. Active-active
+  or active-passive tunnel routing delivers a 99.99% availability SLA for the Google side.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west2}}
+- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-net-hub, props: {cidr: 10.60.0.0/16}}
+- {id: sub-hybrid-ew2, type: gcp.subnetwork, name: hybrid-ew2, parent: vpc-hybrid-vpc, props: {cidr: 10.60.0.0/24, region: europe-west2}}
+- {id: ha-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: ha-vpn-gw, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}}
+- {id: vpn-router, type: gcp.res.google_compute_router, name: vpn-router, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}}
+- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub}
+- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: onprem-peer-gw, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-peer-gw, parent: sub-prj-net-hub, props: {name: changeme}}
+- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-hybrid-ew2}
+- {id: allow-onprem, type: gcp.firewall_rule, name: allow-onprem, parent: vpc-hybrid-vpc}
+edges:
+- {from: vpn-router, to: onprem-peer-gw, label: BGP over both tunnels, step: '2'}
+- {from: app-vm, to: onprem-peer-gw, label: private traffic ECMP, step: '3'}
+steps:
+- {n: '2', text: 'vpn-router → onprem-peer-gw: BGP over both tunnels'}
+- {n: '3', text: 'app-vm → onprem-peer-gw: private traffic ECMP'}

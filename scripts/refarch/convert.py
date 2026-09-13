@@ -56,6 +56,11 @@ def required_props(eid, given):
         elif sch.get('type') == 'boolean': out[k] = True
     return out
 
+def sprops_az(s):
+    az = str(s.get('az', 'a'))
+    if az in list('abcdef'): return az
+    return 'a' if az in ('outpost', 'outposts', 'onprem') else '-' + az.lstrip('-')
+
 def convert(arch):
     nodes, edges, warn = [], [], []
     ids = {}          # ref key -> node id
@@ -114,15 +119,22 @@ def convert(arch):
                 ids[f] = fid
             continue
         rootname = c.get('account') or c.get('project') or c.get('subscription') or 'prod'
-        acct = ensure_account(rootname)
+        has_ous = provider == 'aws' and any(isinstance(g, dict) and 'accounts' in g for g in c.get('groups') or [])
+        if has_ous:
+            org = ids.get('org') or add('org', 'aws.organization', 'organization', None, {'root_id': 'r-abcd'})
+            ids['org'] = org
+            acct = account_by_name.get(rootname) or add(f'acct-{rootname}', 'aws.account', rootname, org)
+            account_by_name[rootname] = acct; ids[f'account:{rootname}'] = acct
+        else:
+            acct = ensure_account(rootname)
         if first_root is None: first_root = acct
         for g in c.get('groups') or []:
             if isinstance(g, dict) and 'accounts' in g:
-                gid = add(f'grp-{g["label"]}', 'common.group', g['label'], acct)
+                gid = add(f'ou-{g["label"]}', 'aws.organizational_unit', re.sub(r'\s*OU$', '', g['label']), ids['org'])
                 ids[f'group:{g["label"]}'] = gid
                 for a in g['accounts']:
                     aid = add(f'acct-{a}', 'aws.account', a, gid)
-                    ids[f'account:{a}'] = aid
+                    ids[f'account:{a}'] = aid; account_by_name[a] = aid
         rname = c.get('region') or (c.get('resource_group') or {}).get('location') if isinstance(c.get('resource_group'), dict) else c.get('region')
         if provider == 'azure':
             rg = c.get('resource_group') or {'name': f'rg-{rootname}', 'location': 'westeurope'}
@@ -150,11 +162,15 @@ def convert(arch):
                 parent = vid
                 if provider == 'aws' and s.get('az'):
                     if s['az'] not in azs:
-                        azs[s['az']] = add(f'az-{v["name"]}-{s["az"]}', 'aws.availability_zone', s['az'], vid, {'zone': s['az']})
+                        azs[s['az']] = add(f'az-{v["name"]}-{s["az"]}', 'aws.availability_zone', str(s['az']).lstrip('-'), vid, {'zone': sprops_az(s)})
                     parent = azs[s['az']]
                 stype = {'aws': 'aws.subnet', 'gcp': 'gcp.subnetwork', 'azure': 'azure.subnet'}[provider]
                 sprops = {'cidr': s.get('cidr', '10.0.0.0/24')}
-                if provider == 'aws': sprops.update({'az': s.get('az', 'a'), 'public': bool(s.get('public'))})
+                if provider == 'aws':
+                    az = str(s.get('az', 'a'))
+                    if az not in list('abcdef'):
+                        az = 'a' if az in ('outpost', 'outposts', 'onprem') else ('-' + az.lstrip('-'))
+                    sprops.update({'az': az, 'public': bool(s.get('public'))})
                 if provider == 'gcp' and s.get('region'): sprops['region'] = s['region']
                 sid = add(f'sub-{s["name"]}', stype, s['name'], parent, sprops)
                 ids[f'subnet:{s["name"]}'] = sid
@@ -180,6 +196,39 @@ def convert(arch):
             if not entry(t).get('transparent'): return t
             cid = node_parent.get(cid)
         return 'root'
+    implicit = {}
+    def region_of(cid):
+        cur = cid
+        while cur and node_type[cur] not in ('aws.region', 'gcp.project', 'azure.resource_group'):
+            cur = node_parent.get(cur)
+        return cur or first_region
+    def implicit_network(cid, want):
+        # an element needs a VPC/subnet the diagram did not draw: add one per region
+        reg = region_of(cid)
+        key = (reg, want)
+        if key in implicit: return implicit[key]
+        vtype = {'aws': 'aws.vpc', 'gcp': 'gcp.vpc', 'azure': 'azure.vnet'}[provider]
+        stype = {'aws': 'aws.subnet', 'gcp': 'gcp.subnetwork', 'azure': 'azure.subnet'}[provider]
+        vid = implicit.get((reg, vtype))
+        if not vid:
+            used = {n.get('props', {}).get('cidr') for n in nodes}
+            third = 200
+            while f'10.{third}.0.0/16' in used: third += 1
+            implicit['third'] = third
+            vid = add(f'vpc-{reg}', vtype, 'main', reg, {'cidr': f'10.{third}.0.0/16'} if provider != 'gcp' else {})
+            implicit[(reg, vtype)] = vid
+            warn.append(f'added an implicit {vtype} in {reg}')
+        if want == vtype: return vid
+        if provider == 'aws':
+            for i, z in enumerate('ab'):
+                azid = add(f'az-{reg}-{z}', 'aws.availability_zone', z, vid, {'zone': z})
+                sid = add(f'sub-{reg}-{z}', 'aws.subnet', f'private-{z}', azid, {'cidr': f'10.{implicit.get("third", 200)}.{i}.0/24', 'az': z, 'public': False})
+                implicit.setdefault((reg, stype), sid)
+        else:
+            sprops = {'cidr': f'10.{implicit.get("third", 200)}.0.0/24'}
+            if provider == 'gcp': sprops['region'] = 'europe-west1'
+            implicit[(reg, stype)] = add(f'sub-{reg}', stype, 'main', vid, sprops)
+        return implicit[(reg, stype)]
     def place(eid, cid):
         e = entry(eid)
         allowed = set(e.get('allowed_parents') or [])
@@ -187,6 +236,9 @@ def convert(arch):
         while cur:
             if '*' in allowed or logical_type(cur) in allowed or e.get('attachment'): return cur
             cur = node_parent.get(cur)
+        for want in (f'{provider}.subnet', 'gcp.subnetwork', f'{provider}.vpc', 'azure.vnet'):
+            if want in allowed:
+                return implicit_network(cid, want)
         return first_region if (logical_type(first_region) in allowed) else first_root
     link_nodes = {}
     for el in arch.get('elements') or []:
@@ -199,6 +251,12 @@ def convert(arch):
             link_nodes[el['name']] = tf; continue
         if e.get('attachment'):
             warn.append(f'{tf} ({el["name"]}) is configuration of another element; dropped'); continue
+        if e.get('component'):
+            # a member of a cluster box: place it inside an owner drawn in this architecture
+            owners = [nid for nid, t in node_type.items() if t in (e.get('allowed_parents') or [])]
+            if not owners:
+                warn.append(f'{tf} ({el["name"]}) is a component of a cluster that is not drawn; dropped'); continue
+            nid = add(el['name'], eid, el['name'], owners[0]); ids[el['name']] = nid; continue
         cid = resolve_container(el.get('in'))
         if cid is None:
             warn.append(f'{el["name"]}: unknown container {el.get("in")}; placed in region'); cid = first_region
@@ -207,6 +265,28 @@ def convert(arch):
         cid = place(eid, cid)
         nid = add(el['name'], eid, el['name'], cid)
         ids[el['name']] = nid
+    if provider == 'aws':
+        for vid, vt in list(node_type.items()):
+            if vt != 'aws.vpc': continue
+            azs = {}
+            for sid, st in node_type.items():
+                if st == 'aws.subnet':
+                    cur = node_parent.get(sid)
+                    while cur and cur != vid: cur = node_parent.get(cur)
+                    if cur == vid:
+                        azs.setdefault(next(n for n in nodes if n['id'] == sid)['props'].get('az', 'a'), node_parent.get(sid))
+            if not azs and not any(node_parent.get(x) == vid for x in node_type): continue
+            for z in 'abc':
+                if len(azs) >= 2: break
+                if z in azs: continue
+                parent = vid
+                if any(node_type[p] == 'aws.availability_zone' for p in azs.values()):
+                    parent = add(f'az-{vid}-{z}', 'aws.availability_zone', z, vid, {'zone': z})
+                vcidr = next(n for n in nodes if n['id'] == vid)['props'].get('cidr', '10.0.0.0/16')
+                base = '.'.join(vcidr.split('.')[:2])
+                add(f'sub-{vid}-{z}', 'aws.subnet', f'private-{z}', parent, {'cidr': f'{base}.25{ord(z)-97}.0/24', 'az': z, 'public': False})
+                azs[z] = parent
+                warn.append(f'added a second-AZ subnet to VPC {vid}')
     def endpoint(ref):
         if ref in ids: return ids[ref]
         if ref == 'datacenter': return ids.get('datacenter')
@@ -254,13 +334,37 @@ def repr_dict(d, data):
     return d.represent_mapping('tag:yaml.org,2002:map', data, flow_style=all(not isinstance(v, (dict, list)) or (isinstance(v, dict) and all(not isinstance(x, (dict, list)) for x in v.values())) for v in data.values()) and 'nodes' not in data)
 Dumper.add_representer(dict, repr_dict)
 
+from collections import Counter
+dropped_types = Counter(); unknown_types = Counter(); bad_links = Counter()
 archs = yaml.safe_load(open(src))
+seen_slugs = set(os.listdir(os.path.join(outdir, provider))) if os.path.isdir(os.path.join(outdir, provider)) else set()
+total = 0
 for arch in archs:
+    if arch['slug'] in seen_slugs and not os.path.exists(os.path.join(outdir, provider, arch['slug'], '.from-' + os.path.basename(src))):
+        print(f"{provider}/{arch['slug']}: slug already exists (another file); skipped"); continue
     spec, warn = convert(arch)
+    for w in warn:
+        m = re.match(r'(\S+) \(.*\) is configuration of another element', w)
+        if m: dropped_types[m.group(1)] += 1
+        m = re.match(r'unknown type (\S+)', w)
+        if m: unknown_types[m.group(1)] += 1
+        m = re.match(r'link (\S+) does not join', w)
+        if m: bad_links[m.group(1)] += 1
+    total += 1
     d = os.path.join(outdir, provider, arch['slug'])
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, 'template.yaml'), 'w') as f:
         f.write(f"# Generated from the official reference ({arch['source']}); edit freely.\n")
         yaml.dump(spec, f, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=200)
+    open(os.path.join(d, '.from-' + os.path.basename(src)), 'w').close()
     print(f"{provider}/{arch['slug']}: {len(spec['nodes'])} nodes, {len(spec['edges'])} edges" + (f"; {len(warn)} warnings" if warn else ''))
     for w in warn: print('   -', w)
+rep = os.path.join(os.path.dirname(os.path.abspath(src)), 'report-' + os.path.basename(src).replace('.yaml', '.txt'))
+with open(rep, 'w') as f:
+    f.write(f"{total} templates from {os.path.basename(src)}\n\nDropped as configuration (candidates for first_level):\n")
+    for t, n in dropped_types.most_common(): f.write(f"  {n:3d}  {t}\n")
+    f.write("\nUnknown Terraform types (not in the provider schema):\n")
+    for t, n in unknown_types.most_common(): f.write(f"  {n:3d}  {t}\n")
+    f.write("\nLinks that did not join their ends (drawn as arrows):\n")
+    for t, n in bad_links.most_common(): f.write(f"  {n:3d}  {t}\n")
+print('report:', rep)

@@ -1,0 +1,39 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/security/building-fine-grained-authorization-using-amazon-cognito-api-gateway-and-iam/); edit freely.
+title: Fine-grained API authorization with Cognito, API Gateway and IAM
+category: identity
+tags:
+- cognito
+- api gateway
+- lambda authorizer
+- jwt
+- fine-grained authorization
+- dynamodb
+source: https://aws.amazon.com/blogs/security/building-fine-grained-authorization-using-amazon-cognito-api-gateway-and-iam/
+description: Users authenticate against a Cognito user pool and present the access token to API Gateway, which invokes a Lambda authorizer that validates the JWT against the cached Cognito public keys.
+  The authorizer maps the user's Cognito group to an IAM policy stored in DynamoDB and returns it, so API Gateway allows or denies each method before invoking the backend Lambda function.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: customer-user-pool, type: aws.res.aws_cognito_user_pool, name: customer-user-pool, parent: reg-us-east-1, props: {name: changeme}}
+- {id: orders-api, type: aws.res.aws_api_gateway_rest_api, name: orders-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: authorizer-function, type: aws.lambda_function, name: authorizer-function, parent: reg-us-east-1}
+- {id: group-policy-table, type: aws.dynamodb_table, name: group-policy-table, parent: reg-us-east-1}
+- {id: orders-backend, type: aws.lambda_function, name: orders-backend, parent: reg-us-east-1}
+- {id: authorizer-role, type: aws.res.aws_iam_role, name: authorizer-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+- {id: api-access-logs, type: aws.res.aws_cloudwatch_log_group, name: api-access-logs, parent: reg-us-east-1}
+edges:
+- {from: users, to: customer-user-pool, label: sign in, step: '1'}
+- {from: customer-user-pool, to: users, label: JWT tokens, step: '2'}
+- {from: users, to: orders-api, label: request with bearer token, step: '3'}
+- {from: authorizer-function, to: customer-user-pool, label: fetch JWKS, step: '6'}
+- {from: authorizer-function, to: group-policy-table, label: lookup group policy, step: '7'}
+- {from: orders-api, to: orders-backend, label: allowed invoke, step: '8'}
+- {from: orders-api, to: api-access-logs, label: access logs}
+steps:
+- {n: '1', text: 'users → customer-user-pool: sign in'}
+- {n: '2', text: 'customer-user-pool → users: JWT tokens'}
+- {n: '3', text: 'users → orders-api: request with bearer token'}
+- {n: '6', text: 'authorizer-function → customer-user-pool: fetch JWKS'}
+- {n: '7', text: 'authorizer-function → group-policy-table: lookup group policy'}
+- {n: '8', text: 'orders-api → orders-backend: allowed invoke'}

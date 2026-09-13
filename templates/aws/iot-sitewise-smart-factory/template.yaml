@@ -1,0 +1,61 @@
+# Generated from the official reference (https://docs.aws.amazon.com/iot-sitewise/latest/userguide/what-is-sitewise.html); edit freely.
+title: Smart factory with IoT SiteWise Edge and asset models
+category: iot
+tags:
+- iot sitewise
+- opc ua
+- greengrass
+- industrial iot
+- oee
+- smart factory
+source: https://docs.aws.amazon.com/iot-sitewise/latest/userguide/what-is-sitewise.html
+description: A SiteWise Edge gateway running on Greengrass V2 reads OPC UA servers on the plant floor and streams equipment data to the cloud, where asset models compute transforms and metrics such as OEE
+  and SiteWise Monitor renders operator dashboards. IoT Core rules ingest MQTT devices into asset properties, alarms notify through SNS, and cold-tier data is exported to a customer S3 bucket for Athena
+  queries.
+nodes:
+- {id: dc-plant, type: common.datacenter, name: plant}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-eu-central-1}
+- {id: grp-storage-and-analytics, type: common.group, name: storage and analytics, parent: reg-eu-central-1}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-eu-central-1, type: aws.vpc, name: main, parent: reg-eu-central-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-central-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-central-1, props: {zone: a}}
+- {id: sub-reg-eu-central-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-central-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-central-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-central-1, props: {zone: b}}
+- {id: sub-reg-eu-central-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-central-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: sitewise-edge-gateway, type: aws.res.aws_iot_thing, name: sitewise-edge-gateway, parent: sub-reg-eu-central-1-a, props: {name: changeme}}
+- {id: opc-ua-server, type: aws.ec2_instance, name: opc-ua-server, parent: sub-reg-eu-central-1-a}
+- {id: mqtt-plc-thing, type: aws.res.aws_iot_thing, name: mqtt-plc-thing, parent: grp-ingestion, props: {name: changeme}}
+- {id: to-sitewise-rule, type: aws.res.aws_iot_topic_rule, name: to-sitewise-rule, parent: grp-ingestion, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: asset-model-sync, type: aws.lambda_function, name: asset-model-sync, parent: grp-ingestion}
+- {id: equipment-alarms, type: aws.res.aws_sns_topic, name: equipment-alarms, parent: grp-ingestion}
+- {id: sitewise-cold-tier, type: aws.s3_bucket, name: sitewise-cold-tier, parent: grp-storage-and-analytics}
+- {id: sitewise-catalog, type: aws.res.aws_glue_catalog_database, name: sitewise-catalog, parent: grp-storage-and-analytics, props: {name: changeme}}
+- {id: plant-analytics, type: aws.res.aws_athena_workgroup, name: plant-analytics, parent: grp-storage-and-analytics, props: {name: changeme}}
+- id: plant-dashboards
+  type: aws.res.aws_grafana_workspace
+  name: plant-dashboards
+  parent: grp-storage-and-analytics
+  props:
+    account_access_type: changeme
+    authentication_providers: []
+    permission_type: changeme
+edges:
+- {from: opc-ua-server, to: sitewise-edge-gateway, label: OPC UA subscriptions, step: '1'}
+- {from: sitewise-edge-gateway, to: asset-model-sync, label: Greengrass stream to SiteWise asset properties, step: '2'}
+- {from: mqtt-plc-thing, to: to-sitewise-rule, label: MQTT device data, step: '3'}
+- {from: to-sitewise-rule, to: asset-model-sync, label: iotSiteWise rule action BatchPutAssetPropertyValue, step: '3'}
+- {from: asset-model-sync, to: equipment-alarms, label: alarm state change, step: '4'}
+- {from: asset-model-sync, to: sitewise-cold-tier, label: cold tier export, step: '5'}
+- {from: sitewise-catalog, to: sitewise-cold-tier, label: table over exported data}
+- {from: plant-analytics, to: sitewise-catalog, label: historical SQL}
+- {from: users, to: plant-dashboards, label: OEE and MTBF dashboards, step: '6'}
+- {from: plant-dashboards, to: asset-model-sync, label: SiteWise datasource queries}
+steps:
+- {n: '1', text: 'opc-ua-server → sitewise-edge-gateway: OPC UA subscriptions'}
+- {n: '2', text: 'sitewise-edge-gateway → asset-model-sync: Greengrass stream to SiteWise asset properties'}
+- {n: '3', text: 'mqtt-plc-thing → to-sitewise-rule: MQTT device data'}
+- {n: '4', text: 'asset-model-sync → equipment-alarms: alarm state change'}
+- {n: '5', text: 'asset-model-sync → sitewise-cold-tier: cold tier export'}
+- {n: '6', text: 'users → plant-dashboards: OEE and MTBF dashboards'}

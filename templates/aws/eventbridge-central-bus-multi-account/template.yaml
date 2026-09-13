@@ -1,0 +1,47 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/simplifying-cross-account-access-with-amazon-eventbridge-resource-policies); edit freely.
+title: Centralized EventBridge event bus across accounts
+category: serverless
+tags:
+- eventbridge
+- event bus
+- multi-account
+- resource policy
+- archive
+source: https://aws.amazon.com/blogs/compute/simplifying-cross-account-access-with-amazon-eventbridge-resource-policies
+description: Producer accounts forward domain events from their local event bus to a central bus in a shared account; a resource policy on the central bus grants PutEvents to the organization. Rules on
+  the central bus route events on to consumer-account buses and an archive keeps a replayable copy.
+nodes:
+- {id: acct-orders-producer, type: aws.account, name: orders-producer}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-orders-producer, props: {region: us-east-1}}
+- {id: acct-central-events, type: aws.account, name: central-events}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-central-events, props: {region: us-east-1}}
+- {id: acct-billing-consumer, type: aws.account, name: billing-consumer}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-billing-consumer, props: {region: us-east-1}}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: order-service, type: aws.lambda_function, name: order-service, parent: sub-reg-us-east-1-a}
+- {id: orders-local-bus, type: aws.res.aws_cloudwatch_event_bus, name: orders-local-bus, parent: acct-orders-producer, props: {name: changeme}}
+- {id: forward-to-central, type: aws.res.aws_cloudwatch_event_rule, name: forward-to-central, parent: acct-orders-producer}
+- {id: central-bus, type: aws.res.aws_cloudwatch_event_bus, name: central-bus, parent: acct-central-events, props: {name: changeme}}
+- {id: central-archive, type: aws.res.aws_cloudwatch_event_archive, name: central-archive, parent: acct-central-events, props: {event_source_arn: changeme, name: changeme}}
+- {id: route-order-created, type: aws.res.aws_cloudwatch_event_rule, name: route-order-created, parent: acct-central-events}
+- {id: billing-bus, type: aws.res.aws_cloudwatch_event_bus, name: billing-bus, parent: acct-billing-consumer, props: {name: changeme}}
+- {id: invoice-on-order, type: aws.res.aws_cloudwatch_event_rule, name: invoice-on-order, parent: acct-billing-consumer}
+- {id: billing-service, type: aws.lambda_function, name: billing-service, parent: sub-reg-us-east-1-a}
+edges:
+- {from: order-service, to: orders-local-bus, label: PutEvents OrderCreated, step: '1'}
+- {from: orders-local-bus, to: forward-to-central, label: match source, step: '2'}
+- {from: forward-to-central, to: central-bus, link: aws_cloudwatch_event_target}
+- {from: central-bus, to: central-archive, label: archive all events}
+- {from: central-bus, to: route-order-created, label: detail-type OrderCreated, step: '3'}
+- {from: route-order-created, to: billing-bus, link: aws_cloudwatch_event_target}
+- {from: billing-bus, to: invoice-on-order, step: '4'}
+- {from: invoice-on-order, to: billing-service, link: aws_cloudwatch_event_target}
+steps:
+- {n: '1', text: 'order-service → orders-local-bus: PutEvents OrderCreated'}
+- {n: '2', text: 'orders-local-bus → forward-to-central: match source'}
+- {n: '3', text: 'central-bus → route-order-created: detail-type OrderCreated'}
+- {n: '4', text: billing-bus → invoice-on-order}

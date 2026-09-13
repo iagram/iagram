@@ -1,0 +1,76 @@
+# Generated from the official reference (https://docs.aws.amazon.com/datasync/latest/userguide/how-datasync-transfer-works.html); edit freely.
+title: DataSync migration of on-premises NFS and SMB shares to S3 and EFS
+category: migration
+tags:
+- datasync
+- nfs
+- smb
+- s3
+- efs
+- direct connect
+- vpc endpoint
+- online data transfer
+source: https://docs.aws.amazon.com/datasync/latest/userguide/how-datasync-transfer-works.html
+description: A DataSync agent deployed as a VM next to the on-premises file servers reads the NFS and SMB locations and transfers data over TLS to a DataSync VPC service endpoint reached through Direct
+  Connect. Separate tasks write the file shares to an S3 bucket and an EFS file system, verifying checksums and running on a schedule to copy only changed data until cutover.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-datasync-landing, type: aws.vpc, name: datasync-landing, parent: reg-eu-west-1, props: {cidr: 10.160.0.0/16}}
+- {id: az-datasync-landing-a, type: aws.availability_zone, name: a, parent: vpc-datasync-landing, props: {zone: a}}
+- {id: sub-ds-private-a, type: aws.subnet, name: ds-private-a, parent: az-datasync-landing-a, props: {cidr: 10.160.1.0/24, az: a, public: false}}
+- {id: az-datasync-landing-b, type: aws.availability_zone, name: b, parent: vpc-datasync-landing, props: {zone: b}}
+- {id: sub-ds-private-b, type: aws.subnet, name: ds-private-b, parent: az-datasync-landing-b, props: {cidr: 10.160.2.0/24, az: b, public: false}}
+- {id: server, type: common.server, name: server}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: onprem-agent, type: aws.res.aws_datasync_agent, name: onprem-agent, parent: sub-reg-eu-west-1-a}
+- {id: ds-dc-router, type: aws.res.aws_customer_gateway, name: ds-dc-router, parent: sub-reg-eu-west-1-a, props: {type: changeme}}
+- {id: ds-dx, type: aws.res.aws_dx_connection, name: ds-dx, parent: reg-eu-west-1, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: datasync-endpoint, type: aws.res.aws_vpc_endpoint, name: datasync-endpoint, parent: sub-ds-private-a, props: {vpc_id: changeme}}
+- id: nfs-share
+  type: aws.res.aws_datasync_location_nfs
+  name: nfs-share
+  parent: reg-eu-west-1
+  props: {on_prem_config: {}, server_hostname: changeme, subdirectory: changeme}
+- id: smb-share
+  type: aws.res.aws_datasync_location_smb
+  name: smb-share
+  parent: reg-eu-west-1
+  props:
+    agent_arns: []
+    password: changeme
+    server_hostname: changeme
+    subdirectory: changeme
+    user: changeme
+- id: archive-location
+  type: aws.res.aws_datasync_location_s3
+  name: archive-location
+  parent: reg-eu-west-1
+  props: {s3_bucket_arn: changeme, s3_config: {}, subdirectory: changeme}
+- {id: nfs-to-s3, type: aws.res.aws_datasync_task, name: nfs-to-s3, parent: reg-eu-west-1, props: {destination_location_arn: changeme, source_location_arn: changeme}}
+- {id: smb-to-efs, type: aws.res.aws_datasync_task, name: smb-to-efs, parent: reg-eu-west-1, props: {destination_location_arn: changeme, source_location_arn: changeme}}
+- {id: archive-bucket, type: aws.s3_bucket, name: archive-bucket, parent: reg-eu-west-1}
+- {id: home-dirs, type: aws.res.aws_efs_file_system, name: home-dirs, parent: vpc-datasync-landing}
+edges:
+- {from: server, to: onprem-agent, label: NFS / SMB reads, step: '1'}
+- {from: nfs-share, to: server, label: source location}
+- {from: smb-share, to: server, label: source location}
+- {from: ds-dc-router, to: ds-dx, label: Direct Connect, step: '2'}
+- {from: ds-dx, to: vpc-datasync-landing, label: dx gateway association}
+- {from: onprem-agent, to: datasync-endpoint, label: TLS transfer via VPC service endpoint, step: '3'}
+- {from: nfs-to-s3, to: nfs-share, label: source}
+- {from: nfs-to-s3, to: archive-location, label: destination}
+- {from: archive-location, to: archive-bucket}
+- {from: smb-to-efs, to: smb-share, label: source}
+- {from: datasync-endpoint, to: archive-bucket, label: scheduled incremental copies with verification, step: '4'}
+- {from: datasync-endpoint, to: home-dirs, label: scheduled incremental copies}
+steps:
+- {n: '1', text: 'server → onprem-agent: NFS / SMB reads'}
+- {n: '2', text: 'ds-dc-router → ds-dx: Direct Connect'}
+- {n: '3', text: 'onprem-agent → datasync-endpoint: TLS transfer via VPC service endpoint'}
+- {n: '4', text: 'datasync-endpoint → archive-bucket: scheduled incremental copies with verification'}

@@ -1,0 +1,67 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/query-any-data-source-with-amazon-athenas-new-federated-query/); edit freely.
+title: Athena federated query across data sources with Lambda connectors
+category: analytics-bi
+tags:
+- athena
+- federated query
+- lambda connectors
+- dynamodb
+- rds
+- cloudwatch logs
+- redshift
+source: https://aws.amazon.com/blogs/big-data/query-any-data-source-with-amazon-athenas-new-federated-query/
+description: Athena registers each external source as a data catalog backed by a Lambda data source connector, so one SQL statement can join S3 data with DynamoDB, an RDS database, CloudWatch Logs and Redshift.
+  Connectors run on demand in Lambda, spill large results to an S3 spill bucket and let analysts query in place without first copying data into the lake.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-federated-sources, type: common.group, name: federated sources, parent: reg-us-east-1}
+- {id: vpc-sources, type: aws.vpc, name: sources, parent: reg-us-east-1, props: {cidr: 10.150.0.0/16}}
+- {id: az-sources-a, type: aws.availability_zone, name: a, parent: vpc-sources, props: {zone: a}}
+- {id: sub-src-private-a, type: aws.subnet, name: src-private-a, parent: az-sources-a, props: {cidr: 10.150.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: federated-athena, type: aws.res.aws_athena_workgroup, name: federated-athena, parent: reg-us-east-1, props: {name: changeme}}
+- id: dynamodb-catalog
+  type: aws.res.aws_athena_data_catalog
+  name: dynamodb-catalog
+  parent: reg-us-east-1
+  props: {description: changeme, name: changeme, parameters: {}, type: changeme}
+- id: postgres-catalog
+  type: aws.res.aws_athena_data_catalog
+  name: postgres-catalog
+  parent: reg-us-east-1
+  props: {description: changeme, name: changeme, parameters: {}, type: changeme}
+- id: cwlogs-catalog
+  type: aws.res.aws_athena_data_catalog
+  name: cwlogs-catalog
+  parent: reg-us-east-1
+  props: {description: changeme, name: changeme, parameters: {}, type: changeme}
+- {id: dynamodb-connector, type: aws.lambda_function, name: dynamodb-connector, parent: reg-us-east-1}
+- {id: jdbc-connector, type: aws.lambda_function, name: jdbc-connector, parent: sub-src-private-a}
+- {id: cwlogs-connector, type: aws.lambda_function, name: cwlogs-connector, parent: reg-us-east-1}
+- {id: orders-table, type: aws.dynamodb_table, name: orders-table, parent: grp-federated-sources}
+- {id: customers-postgres, type: aws.res.aws_rds_cluster, name: customers-postgres, parent: sub-src-private-a, props: {engine: changeme}}
+- {id: app-logs, type: aws.res.aws_cloudwatch_log_group, name: app-logs, parent: grp-federated-sources}
+- {id: data-lake, type: aws.s3_bucket, name: data-lake, parent: reg-us-east-1}
+- {id: spill-bucket, type: aws.s3_bucket, name: spill-bucket, parent: reg-us-east-1}
+- {id: az-vpc-sources-b, type: aws.availability_zone, name: b, parent: vpc-sources, props: {zone: b}}
+- {id: sub-vpc-sources-b, type: aws.subnet, name: private-b, parent: az-vpc-sources-b, props: {cidr: 10.150.251.0/24, az: b, public: false}}
+edges:
+- {from: users, to: federated-athena, label: single SQL join, step: '1'}
+- {from: federated-athena, to: data-lake, label: lake tables via Glue catalog, step: '2'}
+- {from: federated-athena, to: dynamodb-catalog, step: '2'}
+- {from: federated-athena, to: postgres-catalog, step: '2'}
+- {from: federated-athena, to: cwlogs-catalog, step: '2'}
+- {from: dynamodb-catalog, to: dynamodb-connector, label: LAMBDA catalog, step: '3'}
+- {from: postgres-catalog, to: jdbc-connector, label: LAMBDA catalog, step: '3'}
+- {from: cwlogs-catalog, to: cwlogs-connector, label: LAMBDA catalog, step: '3'}
+- {from: dynamodb-connector, to: orders-table, label: scan with pushdown, step: '4'}
+- {from: jdbc-connector, to: customers-postgres, label: JDBC, step: '4'}
+- {from: cwlogs-connector, to: app-logs, label: filter log events, step: '4'}
+- {from: jdbc-connector, to: spill-bucket, label: spill large results, step: '5'}
+steps:
+- {n: '1', text: 'users → federated-athena: single SQL join'}
+- {n: '2', text: 'federated-athena → data-lake: lake tables via Glue catalog'}
+- {n: '3', text: 'dynamodb-catalog → dynamodb-connector: LAMBDA catalog'}
+- {n: '4', text: 'dynamodb-connector → orders-table: scan with pushdown'}
+- {n: '5', text: 'jdbc-connector → spill-bucket: spill large results'}

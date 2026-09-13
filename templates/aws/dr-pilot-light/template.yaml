@@ -1,0 +1,63 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html); edit freely.
+title: Pilot light disaster recovery across two Regions
+category: resilience
+tags:
+- disaster recovery
+- pilot light
+- aurora global database
+- s3 replication
+- route 53
+- application recovery controller
+source: https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html
+description: Data stores are always on in the recovery Region through Aurora Global Database and S3 Cross-Region Replication, while the application tier is deployed from the same CloudFormation template
+  with its Auto Scaling group at zero capacity. On failover the secondary Aurora cluster is promoted, the group is scaled out and Route 53 traffic is switched using a health check or an ARC routing control.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: primary}
+- {id: vpc-pl-primary, type: aws.vpc, name: pl-primary, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-pl-primary-a, type: aws.availability_zone, name: a, parent: vpc-pl-primary, props: {zone: a}}
+- {id: sub-pl-p-public-a, type: aws.subnet, name: pl-p-public-a, parent: az-pl-primary-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-pl-primary-b, type: aws.availability_zone, name: b, parent: vpc-pl-primary, props: {zone: b}}
+- {id: sub-pl-p-public-b, type: aws.subnet, name: pl-p-public-b, parent: az-pl-primary-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-pl-p-db-a, type: aws.subnet, name: pl-p-db-a, parent: az-pl-primary-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: secondary}
+- {id: vpc-pl-secondary, type: aws.vpc, name: pl-secondary, parent: reg-us-west-2, props: {cidr: 10.1.0.0/16}}
+- {id: az-pl-secondary-a, type: aws.availability_zone, name: a, parent: vpc-pl-secondary, props: {zone: a}}
+- {id: sub-pl-s-public-a, type: aws.subnet, name: pl-s-public-a, parent: az-pl-secondary-a, props: {cidr: 10.1.0.0/24, az: a, public: true}}
+- {id: az-pl-secondary-b, type: aws.availability_zone, name: b, parent: vpc-pl-secondary, props: {zone: b}}
+- {id: sub-pl-s-public-b, type: aws.subnet, name: pl-s-public-b, parent: az-pl-secondary-b, props: {cidr: 10.1.1.0/24, az: b, public: true}}
+- {id: sub-pl-s-db-a, type: aws.subnet, name: pl-s-db-a, parent: az-pl-secondary-a, props: {cidr: 10.1.10.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: app-zone, type: aws.route53_zone, name: app-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: primary-check, type: aws.res.aws_route53_health_check, name: primary-check, parent: reg-us-east-1, props: {type: changeme}}
+- {id: primary-alb, type: aws.alb, name: primary-alb, parent: vpc-pl-primary}
+- {id: primary-asg, type: aws.res.aws_autoscaling_group, name: primary-asg, parent: vpc-pl-primary, props: {max_size: 1, min_size: 1}}
+- {id: orders-global, type: aws.res.aws_rds_global_cluster, name: orders-global, parent: reg-us-east-1, props: {global_cluster_identifier: changeme}}
+- {id: orders-primary, type: aws.res.aws_rds_cluster, name: orders-primary, parent: sub-pl-p-db-a, props: {engine: changeme}}
+- {id: media-primary, type: aws.s3_bucket, name: media-primary, parent: reg-us-east-1}
+- {id: standby-stack, type: aws.res.aws_cloudformation_stack, name: standby-stack, parent: reg-us-west-2, props: {name: changeme}}
+- {id: standby-alb, type: aws.alb, name: standby-alb, parent: vpc-pl-secondary}
+- {id: standby-asg, type: aws.res.aws_autoscaling_group, name: standby-asg, parent: vpc-pl-secondary, props: {max_size: 1, min_size: 1}}
+- {id: orders-secondary, type: aws.res.aws_rds_cluster, name: orders-secondary, parent: sub-pl-s-db-a, props: {engine: changeme}}
+- {id: media-secondary, type: aws.s3_bucket, name: media-secondary, parent: reg-us-west-2}
+edges:
+- {from: users, to: app-zone, label: DNS, step: '1'}
+- {from: app-zone, to: primary-alb, label: PRIMARY failover record, step: '2'}
+- {from: primary-check, to: primary-alb, label: HTTPS health check}
+- {from: primary-alb, to: primary-asg, step: '3'}
+- {from: primary-asg, to: orders-primary, label: read/write, step: '4'}
+- {from: primary-asg, to: media-primary, label: objects}
+- {from: orders-global, to: orders-primary, label: primary cluster}
+- {from: orders-global, to: orders-secondary, label: secondary cluster (read-only)}
+- {from: orders-primary, to: orders-secondary, label: storage-level replication}
+- {from: media-primary, to: media-secondary, label: S3 Cross-Region Replication}
+- {from: standby-stack, to: standby-asg, label: deployed with desired capacity 0}
+- {from: standby-stack, to: standby-alb, label: core infrastructure pre-created}
+- {from: app-zone, to: standby-alb, label: SECONDARY record}
+- {from: standby-alb, to: standby-asg, label: scale out on failover}
+- {from: standby-asg, to: orders-secondary, label: read/write after promotion}
+steps:
+- {n: '1', text: 'users → app-zone: DNS'}
+- {n: '2', text: 'app-zone → primary-alb: PRIMARY failover record'}
+- {n: '3', text: primary-alb → primary-asg}
+- {n: '4', text: 'primary-asg → orders-primary: read/write'}

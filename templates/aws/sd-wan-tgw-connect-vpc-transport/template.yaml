@@ -1,0 +1,53 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/simplify-sd-wan-connectivity-with-aws-transit-gateway-connect/); edit freely.
+title: SD-WAN appliances integrated with Transit Gateway Connect over a VPC attachment
+category: networking
+tags:
+- sd-wan
+- transit gateway connect
+- gre
+- bgp
+- virtual appliance
+- branch offices
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/simplify-sd-wan-connectivity-with-aws-transit-gateway-connect/
+description: SD-WAN virtual appliances run in a dedicated transport VPC whose attachment serves as the underlay for a Transit Gateway Connect attachment; each appliance is a Connect peer that builds a GRE
+  tunnel to the Transit Gateway and exchanges routes over BGP. Branch sites reach the appliances through the SD-WAN overlay across the internet, and their prefixes are propagated dynamically into TGW route
+  tables without IPsec throughput limits or static routes.
+nodes:
+- {id: dc-branch-offices, type: common.datacenter, name: branch-offices}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-sdwan-transport, type: aws.vpc, name: sdwan-transport, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-sdwan-transport-a, type: aws.availability_zone, name: a, parent: vpc-sdwan-transport, props: {zone: a}}
+- {id: sub-sdwan-public-a, type: aws.subnet, name: sdwan-public-a, parent: az-sdwan-transport-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-sdwan-transport-b, type: aws.availability_zone, name: b, parent: vpc-sdwan-transport, props: {zone: b}}
+- {id: sub-sdwan-public-b, type: aws.subnet, name: sdwan-public-b, parent: az-sdwan-transport-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-sdwan-tgw-a, type: aws.subnet, name: sdwan-tgw-a, parent: az-sdwan-transport-a, props: {cidr: 10.0.2.0/28, az: a, public: false}}
+- {id: vpc-workload, type: aws.vpc, name: workload, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-workload-a, type: aws.availability_zone, name: a, parent: vpc-workload, props: {zone: a}}
+- {id: sub-workload-private-a, type: aws.subnet, name: workload-private-a, parent: az-workload-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: internet, type: common.internet, name: internet}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1}
+- {id: sdwan-connect, type: aws.res.aws_ec2_transit_gateway_connect, name: sdwan-connect, parent: reg-us-east-1, props: {transit_gateway_id: changeme, transport_attachment_id: changeme}}
+- {id: sdwan-appliance-a, type: aws.ec2_instance, name: sdwan-appliance-a, parent: sub-sdwan-public-a}
+- {id: sdwan-appliance-b, type: aws.ec2_instance, name: sdwan-appliance-b, parent: sub-sdwan-public-b}
+- {id: sdwan-igw, type: aws.res.aws_internet_gateway, name: sdwan-igw, parent: vpc-sdwan-transport}
+- {id: workload-server, type: aws.ec2_instance, name: workload-server, parent: sub-workload-private-a}
+- {id: az-vpc-workload-b, type: aws.availability_zone, name: b, parent: vpc-workload, props: {zone: b}}
+- {id: sub-vpc-workload-b, type: aws.subnet, name: private-b, parent: az-vpc-workload-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+edges:
+- {from: hub-tgw, to: vpc-sdwan-transport, label: transport attachment, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-workload, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: sdwan-connect, to: hub-tgw, label: Connect attachment over transport}
+- {from: sdwan-appliance-a, to: sdwan-connect, label: GRE + BGP}
+- {from: sdwan-appliance-b, to: sdwan-connect, label: GRE + BGP}
+- {from: dc-branch-offices, to: internet, label: SD-WAN overlay tunnels, step: '1'}
+- {from: internet, to: sdwan-igw, step: '2'}
+- {from: sdwan-igw, to: sdwan-appliance-a, step: '3'}
+- {from: sdwan-appliance-a, to: hub-tgw, label: 'GRE tunnel, branch prefixes via BGP', step: '4'}
+- {from: hub-tgw, to: workload-server, step: '5'}
+steps:
+- {n: '1', text: 'datacenter → internet: SD-WAN overlay tunnels'}
+- {n: '2', text: internet → sdwan-igw}
+- {n: '3', text: sdwan-igw → sdwan-appliance-a}
+- {n: '4', text: 'sdwan-appliance-a → hub-tgw: GRE tunnel, branch prefixes via BGP'}
+- {n: '5', text: hub-tgw → workload-server}

@@ -1,0 +1,43 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/accelerating-workloads-using-parallelism-in-aws-step-functions/); edit freely.
+title: Parallel fan-out and fan-in with nested Step Functions
+category: serverless
+tags:
+- step functions
+- parallel
+- map
+- fan-out
+- nested workflows
+source: https://aws.amazon.com/blogs/compute/accelerating-workloads-using-parallelism-in-aws-step-functions/
+description: An orchestrator state machine uses a Parallel state and a Map state to start many child workflow executions concurrently, each running a Lambda task and writing its result to DynamoDB. When
+  all branches complete, an aggregation function reads the results, writes a report to S3 and publishes a completion notification.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: user, type: common.user, name: user}
+- {id: test-orchestrator, type: aws.res.aws_sfn_state_machine, name: test-orchestrator, parent: reg-us-west-2, props: {definition: changeme, role_arn: changeme}}
+- {id: test-case-worker, type: aws.res.aws_sfn_state_machine, name: test-case-worker, parent: reg-us-west-2, props: {definition: changeme, role_arn: changeme}}
+- {id: prepare-test-set, type: aws.lambda_function, name: prepare-test-set, parent: reg-us-west-2}
+- {id: run-test-case, type: aws.lambda_function, name: run-test-case, parent: reg-us-west-2}
+- {id: aggregate-results, type: aws.lambda_function, name: aggregate-results, parent: reg-us-west-2}
+- {id: test-results, type: aws.dynamodb_table, name: test-results, parent: reg-us-west-2}
+- {id: test-reports, type: aws.s3_bucket, name: test-reports, parent: reg-us-west-2}
+- {id: run-completed, type: aws.res.aws_sns_topic, name: run-completed, parent: reg-us-west-2}
+edges:
+- {from: user, to: test-orchestrator, label: StartExecution, step: '1'}
+- {from: test-orchestrator, to: prepare-test-set, step: '2'}
+- {from: test-orchestrator, to: test-case-worker, label: Map state StartExecution.sync, step: '3'}
+- {from: test-case-worker, to: run-test-case, label: Parallel branches, step: '4'}
+- {from: run-test-case, to: test-results, label: PutItem, step: '5'}
+- {from: test-orchestrator, to: aggregate-results, label: fan-in, step: '6'}
+- {from: aggregate-results, to: test-results, label: Query}
+- {from: aggregate-results, to: test-reports, label: PutObject report, step: '7'}
+- {from: aggregate-results, to: run-completed, label: Publish, step: '8'}
+steps:
+- {n: '1', text: 'user → test-orchestrator: StartExecution'}
+- {n: '2', text: test-orchestrator → prepare-test-set}
+- {n: '3', text: 'test-orchestrator → test-case-worker: Map state StartExecution.sync'}
+- {n: '4', text: 'test-case-worker → run-test-case: Parallel branches'}
+- {n: '5', text: 'run-test-case → test-results: PutItem'}
+- {n: '6', text: 'test-orchestrator → aggregate-results: fan-in'}
+- {n: '7', text: 'aggregate-results → test-reports: PutObject report'}
+- {n: '8', text: 'aggregate-results → run-completed: Publish'}

@@ -1,0 +1,35 @@
+# Generated from the official reference (https://docs.cloud.google.com/composer/docs/how-to/using/using-dataflow-template-operator); edit freely.
+title: Batch ETL with Cloud Composer and Dataflow templates
+category: data
+tags:
+- batch etl
+- cloud composer
+- airflow
+- dataflow
+- bigquery
+source: https://docs.cloud.google.com/composer/docs/how-to/using/using-dataflow-template-operator
+description: An Airflow DAG in Cloud Composer waits for input files in a Cloud Storage bucket and launches the GCS Text to BigQuery Dataflow template with a JavaScript UDF and JSON schema stored alongside
+  the data. Dataflow transforms the files and loads them into a BigQuery table, and downstream DAG tasks run BigQuery SQL to build aggregates.
+nodes:
+- {id: prj-batch-etl, type: gcp.project, name: batch-etl, props: {project_id: batch-etl-123456, project: changeme, region: us-central1}}
+- {id: vpc-composer-vpc, type: gcp.vpc, name: composer-vpc, parent: prj-batch-etl, props: {cidr: 10.30.0.0/16}}
+- {id: sub-composer-subnet, type: gcp.subnetwork, name: composer-subnet, parent: vpc-composer-vpc, props: {cidr: 10.30.1.0/24, region: us-central1}}
+- {id: server, type: common.server, name: server}
+- {id: input-files-bucket, type: gcp.storage_bucket, name: input-files-bucket, parent: prj-batch-etl}
+- {id: udf-schema-bucket, type: gcp.storage_bucket, name: udf-schema-bucket, parent: prj-batch-etl}
+- {id: etl-composer-env, type: gcp.res.google_composer_environment, name: etl-composer-env, parent: sub-composer-subnet, props: {name: changeme}}
+- {id: gcs-text-to-bq-job, type: gcp.res.google_dataflow_job, name: gcs-text-to-bq-job, parent: sub-composer-subnet, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: dataflow-staging-bucket, type: gcp.storage_bucket, name: dataflow-staging-bucket, parent: prj-batch-etl}
+- {id: etl-dataset, type: gcp.bigquery_dataset, name: etl-dataset, parent: prj-batch-etl}
+edges:
+- {from: server, to: input-files-bucket, label: nightly file drop, step: '1'}
+- {from: etl-composer-env, to: input-files-bucket, label: GCS sensor, step: '2'}
+- {from: etl-composer-env, to: gcs-text-to-bq-job, label: DataflowTemplatedJobStartOperator, step: '3'}
+- {from: gcs-text-to-bq-job, to: udf-schema-bucket, label: read UDF and schema, step: '4'}
+- {from: gcs-text-to-bq-job, to: dataflow-staging-bucket, label: staging, step: '5'}
+steps:
+- {n: '1', text: 'server → input-files-bucket: nightly file drop'}
+- {n: '2', text: 'etl-composer-env → input-files-bucket: GCS sensor'}
+- {n: '3', text: 'etl-composer-env → gcs-text-to-bq-job: DataflowTemplatedJobStartOperator'}
+- {n: '4', text: 'gcs-text-to-bq-job → udf-schema-bucket: read UDF and schema'}
+- {n: '5', text: 'gcs-text-to-bq-job → dataflow-staging-bucket: staging'}

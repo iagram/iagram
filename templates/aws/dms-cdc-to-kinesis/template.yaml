@@ -1,0 +1,50 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/database/use-the-aws-database-migration-service-to-stream-change-data-to-amazon-kinesis-data-streams/); edit freely.
+title: Change data capture from relational databases to Kinesis with AWS DMS
+category: database
+tags:
+- dms
+- change data capture
+- kinesis data streams
+- firehose
+- s3
+- oracle
+source: https://aws.amazon.com/blogs/database/use-the-aws-database-migration-service-to-stream-change-data-to-amazon-kinesis-data-streams/
+description: An AWS DMS replication instance reads the transaction log of a relational database such as Oracle on RDS and publishes insert, update and delete events to a Kinesis data stream as the target
+  endpoint. Consumers such as Lambda process the changes in near real time while a Firehose delivery stream archives them to S3 for analytics.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-data-vpc, type: aws.vpc, name: data-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-data-vpc-a, type: aws.availability_zone, name: a, parent: vpc-data-vpc, props: {zone: a}}
+- {id: sub-db-a, type: aws.subnet, name: db-a, parent: az-data-vpc-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: az-data-vpc-b, type: aws.availability_zone, name: b, parent: vpc-data-vpc, props: {zone: b}}
+- {id: sub-db-b, type: aws.subnet, name: db-b, parent: az-data-vpc-b, props: {cidr: 10.0.2.0/24, az: b, public: false}}
+- {id: client, type: common.client, name: client}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: source-oracle, type: aws.rds_instance, name: source-oracle, parent: sub-reg-us-east-1-a}
+- {id: dms-replication, type: aws.res.aws_dms_replication_instance, name: dms-replication, parent: vpc-data-vpc, props: {replication_instance_class: changeme, replication_instance_id: changeme}}
+- {id: kinesis-target, type: aws.res.aws_dms_endpoint, name: kinesis-target, parent: reg-us-east-1, props: {endpoint_id: changeme, endpoint_type: changeme, engine_name: changeme}}
+- {id: cdc-stream, type: aws.res.aws_kinesis_stream, name: cdc-stream, parent: reg-us-east-1, props: {name: changeme}}
+- {id: change-consumer, type: aws.lambda_function, name: change-consumer, parent: reg-us-east-1}
+- {id: archive-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: archive-delivery, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
+- {id: cdc-archive, type: aws.s3_bucket, name: cdc-archive, parent: reg-us-east-1}
+edges:
+- {from: client, to: source-oracle, label: OLTP writes, step: '1'}
+- {from: source-oracle, to: dms-replication, label: transaction log CDC, step: '2'}
+- {from: dms-replication, to: kinesis-target, label: DMS task, step: '3'}
+- {from: kinesis-target, to: cdc-stream, label: PutRecords JSON, step: '4'}
+- {from: cdc-stream, to: change-consumer, step: '5', link: aws_lambda_event_source_mapping}
+- {from: cdc-stream, to: archive-delivery, label: Firehose source, step: '6'}
+- {from: archive-delivery, to: cdc-archive, label: archive, step: '7'}
+steps:
+- {n: '1', text: 'client → source-oracle: OLTP writes'}
+- {n: '2', text: 'source-oracle → dms-replication: transaction log CDC'}
+- {n: '3', text: 'dms-replication → kinesis-target: DMS task'}
+- {n: '4', text: 'kinesis-target → cdc-stream: PutRecords JSON'}
+- {n: '5', text: cdc-stream → change-consumer}
+- {n: '6', text: 'cdc-stream → archive-delivery: Firehose source'}
+- {n: '7', text: 'archive-delivery → cdc-archive: archive'}

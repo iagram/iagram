@@ -1,0 +1,49 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/hybrid-cloud-architectures-using-aws-direct-connect-gateway/); edit freely.
+title: Direct Connect gateway with a private VIF reaching VPCs in multiple Regions
+category: networking
+tags:
+- direct connect
+- private virtual interface
+- direct connect gateway
+- virtual private gateway
+- multi-region
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/hybrid-cloud-architectures-using-aws-direct-connect-gateway/
+description: A single Direct Connect connection carries a private virtual interface to a globally scoped Direct Connect gateway, which is associated with virtual private gateways attached to VPCs in two
+  different Regions. Routes for each VPC are advertised to the customer router over one BGP session, and the gateway does not forward traffic between the associated VPCs or back toward on-premises through
+  another VIF.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-dx-location, type: common.group, name: dx-location, parent: reg-us-east-1}
+- {id: vpc-east-app, type: aws.vpc, name: east-app, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-east-app-a, type: aws.availability_zone, name: a, parent: vpc-east-app, props: {zone: a}}
+- {id: sub-east-private-a, type: aws.subnet, name: east-private-a, parent: az-east-app-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: reg-ap-southeast-1, type: aws.region, name: ap-southeast-1, parent: acct-prod, props: {region: ap-southeast-1}}
+- {id: vpc-apac-app, type: aws.vpc, name: apac-app, parent: reg-ap-southeast-1, props: {cidr: 10.21.0.0/16}}
+- {id: az-apac-app-a, type: aws.availability_zone, name: a, parent: vpc-apac-app, props: {zone: a}}
+- {id: sub-apac-private-a, type: aws.subnet, name: apac-private-a, parent: az-apac-app-a, props: {cidr: 10.21.1.0/24, az: a, public: false}}
+- {id: dx-connection, type: aws.res.aws_dx_connection, name: dx-connection, parent: grp-dx-location, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: private-vif, type: aws.res.aws_dx_private_virtual_interface, name: private-vif, parent: grp-dx-location, props: {address_family: changeme, connection_id: changeme, name: changeme, vlan: 1}}
+- {id: dx-gateway, type: aws.res.aws_dx_gateway, name: dx-gateway, parent: reg-us-east-1, props: {amazon_side_asn: changeme, name: changeme}}
+- {id: east-vgw, type: aws.res.aws_vpn_gateway, name: east-vgw, parent: vpc-east-app}
+- {id: apac-vgw, type: aws.res.aws_vpn_gateway, name: apac-vgw, parent: vpc-apac-app}
+- {id: east-server, type: aws.ec2_instance, name: east-server, parent: sub-east-private-a}
+- {id: apac-server, type: aws.ec2_instance, name: apac-server, parent: sub-apac-private-a}
+- {id: az-vpc-east-app-b, type: aws.availability_zone, name: b, parent: vpc-east-app, props: {zone: b}}
+- {id: sub-vpc-east-app-b, type: aws.subnet, name: private-b, parent: az-vpc-east-app-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-apac-app-b, type: aws.availability_zone, name: b, parent: vpc-apac-app, props: {zone: b}}
+- {id: sub-vpc-apac-app-b, type: aws.subnet, name: private-b, parent: az-vpc-apac-app-b, props: {cidr: 10.21.251.0/24, az: b, public: false}}
+edges:
+- {from: dc-on-premises, to: dx-connection, label: 1 or 10 Gbps cross-connect, step: '1'}
+- {from: dx-connection, to: private-vif, label: '802.1Q VLAN, BGP', step: '2'}
+- {from: private-vif, to: dx-gateway, step: '3'}
+- {from: dx-gateway, to: east-vgw, link: aws_dx_gateway_association}
+- {from: dx-gateway, to: apac-vgw, link: aws_dx_gateway_association}
+- {from: east-vgw, to: east-server, label: propagated route, step: '4'}
+- {from: apac-vgw, to: apac-server, label: cross-Region over AWS backbone}
+steps:
+- {n: '1', text: 'datacenter → dx-connection: 1 or 10 Gbps cross-connect'}
+- {n: '2', text: 'dx-connection → private-vif: 802.1Q VLAN, BGP'}
+- {n: '3', text: private-vif → dx-gateway}
+- {n: '4', text: 'east-vgw → east-server: propagated route'}

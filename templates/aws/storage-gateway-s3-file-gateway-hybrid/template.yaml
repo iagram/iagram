@@ -1,0 +1,48 @@
+# Generated from the official reference (https://docs.aws.amazon.com/filegateway/latest/files3/what-is-file-s3.html); edit freely.
+title: Hybrid file storage with S3 File Gateway
+category: storage
+tags:
+- storage gateway
+- s3 file gateway
+- nfs
+- smb
+- hybrid storage
+- local cache
+- cross-region replication
+source: https://docs.aws.amazon.com/filegateway/latest/files3/what-is-file-s3.html
+description: An S3 File Gateway VM in the data center exposes NFS and SMB file shares that map to S3 buckets, keeping recently used data in a local cache while objects are stored durably in S3. Cloud applications
+  read the same objects directly, lifecycle rules tier them to colder classes, and Cross-Region Replication provides an off-site copy.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: primary}
+- {id: vpc-sgw-cloud, type: aws.vpc, name: sgw-cloud, parent: reg-us-east-1, props: {cidr: 10.170.0.0/16}}
+- {id: az-sgw-cloud-a, type: aws.availability_zone, name: a, parent: vpc-sgw-cloud, props: {zone: a}}
+- {id: sub-sgw-private-a, type: aws.subnet, name: sgw-private-a, parent: az-sgw-cloud-a, props: {cidr: 10.170.1.0/24, az: a, public: false}}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: secondary}
+- {id: users, type: common.users, name: users}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: file-gateway-vm, type: aws.res.aws_storagegateway_gateway, name: file-gateway-vm, parent: sub-reg-us-east-1-a, props: {gateway_name: changeme, gateway_timezone: changeme}}
+- {id: sgw-dc-router, type: aws.res.aws_customer_gateway, name: sgw-dc-router, parent: sub-reg-us-east-1-a, props: {type: changeme}}
+- {id: engineering-files, type: aws.s3_bucket, name: engineering-files, parent: reg-us-east-1}
+- {id: finance-files, type: aws.s3_bucket, name: finance-files, parent: reg-us-east-1}
+- {id: storagegateway-endpoint, type: aws.res.aws_vpc_endpoint, name: storagegateway-endpoint, parent: sub-sgw-private-a, props: {vpc_id: changeme}}
+- {id: analytics-worker, type: aws.ec2_instance, name: analytics-worker, parent: sub-sgw-private-a}
+- {id: files-dr-copy, type: aws.s3_bucket, name: files-dr-copy, parent: reg-us-west-2}
+- {id: az-vpc-sgw-cloud-b, type: aws.availability_zone, name: b, parent: vpc-sgw-cloud, props: {zone: b}}
+- {id: sub-vpc-sgw-cloud-b, type: aws.subnet, name: private-b, parent: az-vpc-sgw-cloud-b, props: {cidr: 10.170.251.0/24, az: b, public: false}}
+edges:
+- {from: users, to: file-gateway-vm, label: NFS v3/v4.1 and SMB mounts, step: '1'}
+- {from: sgw-dc-router, to: vpc-sgw-cloud, label: Site-to-Site VPN}
+- {from: file-gateway-vm, to: storagegateway-endpoint, label: gateway traffic over private VPC endpoint, step: '2'}
+- {from: analytics-worker, to: engineering-files, label: direct S3 access from the cloud, step: '4'}
+- {from: engineering-files, to: files-dr-copy, label: Cross-Region Replication}
+- {from: finance-files, to: files-dr-copy, label: Cross-Region Replication}
+steps:
+- {n: '1', text: 'users → file-gateway-vm: NFS v3/v4.1 and SMB mounts'}
+- {n: '2', text: 'file-gateway-vm → storagegateway-endpoint: gateway traffic over private VPC endpoint'}
+- {n: '4', text: 'analytics-worker → engineering-files: direct S3 access from the cloud'}

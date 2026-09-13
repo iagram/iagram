@@ -1,0 +1,42 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/using-amazon-cloudfront-and-amazon-s3-to-build-multi-region-active-active-geo-proximity-applications/); edit freely.
+title: Multi-Region active-active static content with CloudFront and S3
+category: resilience
+tags:
+- multi-region
+- active-active
+- cloudfront
+- origin group
+- s3 replication
+- lambda@edge
+- route 53
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/using-amazon-cloudfront-and-amazon-s3-to-build-multi-region-active-active-geo-proximity-applications/
+description: Content is written to an S3 bucket in each Region and kept in sync with two-way replication, and a single CloudFront distribution uses an origin-request Lambda@Edge function to route each cache
+  miss to the bucket nearest the requesting edge location. A CloudFront origin group retries against the other Region when the primary returns an error, so a regional S3 impairment does not take the site
+  down.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: users, type: common.users, name: users}
+- {id: site-zone, type: aws.route53_zone, name: site-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: site-cert, type: aws.res.aws_acm_certificate, name: site-cert, parent: reg-us-east-1}
+- {id: site-cdn, type: aws.cloudfront_distribution, name: site-cdn, parent: grp-global-edge}
+- {id: origin-router-edge, type: aws.lambda_function, name: origin-router-edge, parent: grp-global-edge}
+- {id: content-us, type: aws.s3_bucket, name: content-us, parent: reg-us-east-1}
+- {id: content-eu, type: aws.s3_bucket, name: content-eu, parent: reg-eu-west-1}
+edges:
+- {from: users, to: site-zone, label: DNS, step: '1'}
+- {from: users, to: site-cdn, label: HTTPS at nearest edge, step: '2'}
+- {from: site-cert, to: site-cdn, label: TLS certificate}
+- {from: site-cdn, to: origin-router-edge, label: origin request on cache miss, step: '3'}
+- {from: origin-router-edge, to: site-cdn, label: set origin to closest bucket, step: '4'}
+- {from: site-cdn, to: content-us, label: primary origin for Americas, step: '5'}
+- {from: site-cdn, to: content-eu, label: primary origin for Europe, step: '5'}
+- {from: site-cdn, to: content-eu, label: origin group failover on 5xx from us-east-1}
+steps:
+- {n: '1', text: 'users → site-zone: DNS'}
+- {n: '2', text: 'users → site-cdn: HTTPS at nearest edge'}
+- {n: '3', text: 'site-cdn → origin-router-edge: origin request on cache miss'}
+- {n: '4', text: 'origin-router-edge → site-cdn: set origin to closest bucket'}
+- {n: '5', text: 'site-cdn → content-us: primary origin for Americas'}

@@ -1,0 +1,50 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/aws/introducing-cloudfront-functions-run-your-code-at-the-edge-with-low-latency-at-any-scale/); edit freely.
+title: Lightweight edge logic with CloudFront Functions
+category: edge
+tags:
+- cloudfront functions
+- url rewrite
+- header manipulation
+- a/b testing
+- cache key
+source: https://aws.amazon.com/blogs/aws/introducing-cloudfront-functions-run-your-code-at-the-edge-with-low-latency-at-any-scale/
+description: CloudFront Functions run sub-millisecond JavaScript at every edge location on viewer-request and viewer-response events for cache-key normalization, URL rewrites and redirects, header manipulation,
+  and cookie-based A/B routing. Heavier logic such as network calls or origin selection stays in Lambda@Edge, while the origin content comes from S3 and an Application Load Balancer.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: vpc-origin, type: aws.vpc, name: origin, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-origin-a, type: aws.availability_zone, name: a, parent: vpc-origin, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-origin-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-origin-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: site-cdn, type: aws.cloudfront_distribution, name: site-cdn, parent: grp-global-edge}
+- {id: viewer-request-rewrite, type: aws.res.aws_cloudfront_function, name: viewer-request-rewrite, parent: grp-global-edge, props: {code: changeme, name: changeme, runtime: changeme}}
+- {id: viewer-response-headers, type: aws.res.aws_cloudfront_function, name: viewer-response-headers, parent: grp-global-edge, props: {code: changeme, name: changeme, runtime: changeme}}
+- {id: origin-request-edge, type: aws.lambda_function, name: origin-request-edge, parent: grp-global-edge}
+- {id: static-origin, type: aws.s3_bucket, name: static-origin, parent: reg-us-east-1}
+- {id: origin-igw, type: aws.res.aws_internet_gateway, name: origin-igw, parent: vpc-origin}
+- {id: app-alb, type: aws.alb, name: app-alb, parent: vpc-origin}
+- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-app-a}
+- {id: az-vpc-origin-b, type: aws.availability_zone, name: b, parent: vpc-origin, props: {zone: b}}
+- {id: sub-vpc-origin-b, type: aws.subnet, name: private-b, parent: az-vpc-origin-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
+edges:
+- {from: users, to: site-cdn, label: HTTPS, step: '1'}
+- {from: site-cdn, to: viewer-request-rewrite, label: viewer request, step: '2'}
+- {from: viewer-request-rewrite, to: site-cdn, label: 'normalized URI, A/B cookie, redirect', step: '3'}
+- {from: site-cdn, to: origin-request-edge, label: origin request (Lambda@Edge) on miss, step: '4'}
+- {from: site-cdn, to: static-origin, label: static origin, step: '5'}
+- {from: site-cdn, to: app-alb, label: dynamic origin, step: '5'}
+- {from: app-alb, to: app-server}
+- {from: origin-igw, to: app-alb}
+- {from: site-cdn, to: viewer-response-headers, label: viewer response adds security headers, step: '6'}
+- {from: site-cdn, to: users, label: response, step: '7'}
+steps:
+- {n: '1', text: 'users → site-cdn: HTTPS'}
+- {n: '2', text: 'site-cdn → viewer-request-rewrite: viewer request'}
+- {n: '3', text: 'viewer-request-rewrite → site-cdn: normalized URI, A/B cookie, redirect'}
+- {n: '4', text: 'site-cdn → origin-request-edge: origin request (Lambda@Edge) on miss'}
+- {n: '5', text: 'site-cdn → static-origin: static origin'}
+- {n: '6', text: 'site-cdn → viewer-response-headers: viewer response adds security headers'}
+- {n: '7', text: 'site-cdn → users: response'}

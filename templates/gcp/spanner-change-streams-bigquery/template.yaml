@@ -1,0 +1,37 @@
+# Generated from the official reference (https://docs.cloud.google.com/dataflow/docs/guides/templates/provided/cloud-spanner-change-streams-to-bigquery); edit freely.
+title: Spanner change streams to BigQuery for operational analytics
+category: database
+tags:
+- spanner
+- change streams
+- dataflow template
+- bigquery
+- cdc
+source: https://docs.cloud.google.com/dataflow/docs/guides/templates/provided/cloud-spanner-change-streams-to-bigquery
+description: A change stream on a Spanner database records every insert, update and delete, and the Spanner change streams to BigQuery Dataflow template reads it, converts change records into rows with
+  commit timestamp and modification type, and appends them to BigQuery tables. A separate Spanner metadata database tracks partition progress and failed records are written to a Cloud Storage dead-letter
+  path.
+nodes:
+- {id: prj-spanner-analytics, type: gcp.project, name: spanner-analytics, props: {project_id: spanner-analytics-123456, project: changeme, region: us-central1}}
+- {id: grp-oltp, type: common.group, name: oltp, parent: prj-spanner-analytics}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: prj-spanner-analytics}
+- {id: grp-analytics, type: common.group, name: analytics, parent: prj-spanner-analytics}
+- {id: client, type: common.client, name: client}
+- {id: users, type: common.users, name: users}
+- {id: orders-spanner-instance, type: gcp.res.google_spanner_instance, name: orders-spanner-instance, parent: grp-oltp, props: {config: changeme, display_name: changeme}}
+- {id: orders-api-service, type: gcp.cloud_run_service, name: orders-api-service, parent: grp-oltp}
+- {id: cdc-deadletter-bucket, type: gcp.storage_bucket, name: cdc-deadletter-bucket, parent: grp-pipeline}
+- {id: orders-changelog-dataset, type: gcp.bigquery_dataset, name: orders-changelog-dataset, parent: grp-analytics}
+- id: ops-looker
+  type: gcp.res.google_looker_instance
+  name: ops-looker
+  parent: grp-analytics
+  props: {name: changeme, oauth_config: {}}
+edges:
+- {from: client, to: orders-api-service, label: HTTPS, step: '1'}
+- {from: ops-looker, to: orders-changelog-dataset, label: query, step: '7'}
+- {from: users, to: ops-looker, label: operational dashboards, step: '8'}
+steps:
+- {n: '1', text: 'client → orders-api-service: HTTPS'}
+- {n: '7', text: 'ops-looker → orders-changelog-dataset: query'}
+- {n: '8', text: 'users → ops-looker: operational dashboards'}

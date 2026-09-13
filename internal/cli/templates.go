@@ -49,6 +49,7 @@ func runTemplates(args []string, stdout io.Writer) error {
 		if len(rest) != 1 {
 			return fmt.Errorf("usage: iagram templates build DIR")
 		}
+		var failures []string
 		for _, t := range list {
 			if r := validate.Run(cat, t.Document); !r.OK() {
 				var msgs []string
@@ -57,7 +58,8 @@ func runTemplates(args []string, stdout io.Writer) error {
 						msgs = append(msgs, fmt.Sprintf("%s%s: %s", p.Node, p.Edge, p.Message))
 					}
 				}
-				return fmt.Errorf("%s: %s", t.ID, strings.Join(msgs, "; "))
+				failures = append(failures, fmt.Sprintf("%s: %s", t.ID, strings.Join(msgs, "; ")))
+				continue
 			}
 			dir := filepath.Join(rest[0], t.Provider, t.Slug)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -71,6 +73,9 @@ func runTemplates(args []string, stdout io.Writer) error {
 				return err
 			}
 			fmt.Fprintf(stdout, "wrote %s (%d elements)\n", filepath.Join(dir, "iagram.iad"), t.Elements)
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("%d template(s) invalid:\n  %s", len(failures), strings.Join(failures, "\n  "))
 		}
 		return nil
 	}

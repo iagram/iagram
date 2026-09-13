@@ -1,0 +1,60 @@
+# Generated from the official reference (https://docs.aws.amazon.com/vpc/latest/tgw/transit-gateway-isolated-shared.html); edit freely.
+title: Network segmentation with Transit Gateway route tables and a shared-services VPC
+category: networking
+tags:
+- transit gateway
+- segmentation
+- route tables
+- isolated vpcs
+- shared services
+source: https://docs.aws.amazon.com/vpc/latest/tgw/transit-gateway-isolated-shared.html
+description: 'Two Transit Gateway route tables implement segmentation: the isolated VPCs are associated with a route table that only holds a propagated route to the shared-services VPC and the VPN, so they
+  cannot reach each other, while the shared-services and VPN attachments use a second route table that propagates routes from every VPC. The result is a hub where every workload reaches shared tooling and
+  on-premises, but workload VPCs stay mutually isolated without any VPC peering.'
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-shared-services, type: aws.vpc, name: shared-services, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-shared-services-a, type: aws.availability_zone, name: a, parent: vpc-shared-services, props: {zone: a}}
+- {id: sub-shared-private-a, type: aws.subnet, name: shared-private-a, parent: az-shared-services-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: vpc-isolated-a, type: aws.vpc, name: isolated-a, parent: reg-eu-west-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-isolated-a-a, type: aws.availability_zone, name: a, parent: vpc-isolated-a, props: {zone: a}}
+- {id: sub-isolated-a-private, type: aws.subnet, name: isolated-a-private, parent: az-isolated-a-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-isolated-b, type: aws.vpc, name: isolated-b, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}}
+- {id: az-isolated-b-a, type: aws.availability_zone, name: a, parent: vpc-isolated-b, props: {zone: a}}
+- {id: sub-isolated-b-private, type: aws.subnet, name: isolated-b-private, parent: az-isolated-b-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-eu-west-1}
+- {id: isolated-rt, type: aws.res.aws_ec2_transit_gateway_route_table, name: isolated-rt, parent: reg-eu-west-1, props: {transit_gateway_id: changeme}}
+- {id: shared-rt, type: aws.res.aws_ec2_transit_gateway_route_table, name: shared-rt, parent: reg-eu-west-1, props: {transit_gateway_id: changeme}}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-eu-west-1-a, props: {type: changeme}}
+- {id: directory-server, type: aws.ec2_instance, name: directory-server, parent: sub-shared-private-a}
+- {id: app-a, type: aws.ec2_instance, name: app-a, parent: sub-isolated-a-private}
+- {id: app-b, type: aws.ec2_instance, name: app-b, parent: sub-isolated-b-private}
+- {id: az-vpc-shared-services-b, type: aws.availability_zone, name: b, parent: vpc-shared-services, props: {zone: b}}
+- {id: sub-vpc-shared-services-b, type: aws.subnet, name: private-b, parent: az-vpc-shared-services-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
+- {id: az-vpc-isolated-a-b, type: aws.availability_zone, name: b, parent: vpc-isolated-a, props: {zone: b}}
+- {id: sub-vpc-isolated-a-b, type: aws.subnet, name: private-b, parent: az-vpc-isolated-a-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-isolated-b-b, type: aws.availability_zone, name: b, parent: vpc-isolated-b, props: {zone: b}}
+- {id: sub-vpc-isolated-b-b, type: aws.subnet, name: private-b, parent: az-vpc-isolated-b-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+edges:
+- {from: hub-tgw, to: vpc-isolated-a, label: associated with isolated-rt, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-isolated-b, label: associated with isolated-rt, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-shared-services, label: associated with shared-rt, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: dc-on-premises, to: dc-cgw}
+- {from: app-a, to: hub-tgw, label: isolated-rt (shared + VPN routes only), step: '1'}
+- {from: hub-tgw, to: directory-server, step: '2'}
+- {from: directory-server, to: hub-tgw, label: shared-rt has all VPC routes, step: '3'}
+- {from: hub-tgw, to: app-b, step: '4'}
+- {from: app-a, to: app-b, label: 'blocked, no route in isolated-rt'}
+- {from: dc-cgw, to: hub-tgw, label: IPsec, link: aws_vpn_connection}
+steps:
+- {n: '1', text: 'app-a → hub-tgw: isolated-rt (shared + VPN routes only)'}
+- {n: '2', text: hub-tgw → directory-server}
+- {n: '3', text: 'directory-server → hub-tgw: shared-rt has all VPC routes'}
+- {n: '4', text: hub-tgw → app-b}

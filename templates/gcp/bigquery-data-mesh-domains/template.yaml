@@ -1,0 +1,49 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/data-mesh); edit freely.
+title: Data mesh with BigQuery domain projects and central governance
+category: data
+tags:
+- data mesh
+- bigquery
+- dataplex
+- domains
+- data products
+source: https://docs.cloud.google.com/architecture/data-mesh
+description: Domain teams own producer projects where they ingest and curate data products in BigQuery, while a central governance project runs Dataplex to catalog, classify and apply policies across domains.
+  Consumer projects query authorized views and shared datasets without copying data, and a platform team provides the common infrastructure and Pub/Sub ingestion.
+nodes:
+- {id: prj-sales-domain, type: gcp.project, name: sales-domain, props: {project_id: sales-domain-123456, project: changeme, region: europe-west1}}
+- {id: prj-marketing-domain, type: gcp.project, name: marketing-domain, props: {project_id: marketing-domain-123456, project: changeme, region: europe-west1}}
+- {id: prj-central-governance, type: gcp.project, name: central-governance, props: {project_id: central-governance-123456, project: changeme, region: europe-west1}}
+- {id: prj-consumer-analytics, type: gcp.project, name: consumer-analytics, props: {project_id: consumer-analytics-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: device, type: common.device, name: device}
+- {id: sales-events-topic, type: gcp.pubsub_topic, name: sales-events-topic, parent: prj-sales-domain}
+- {id: sales-ingest-job, type: gcp.res.google_dataflow_job, name: sales-ingest-job, parent: prj-sales-domain, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: sales-product-dataset, type: gcp.bigquery_dataset, name: sales-product-dataset, parent: prj-sales-domain}
+- {id: marketing-raw-bucket, type: gcp.storage_bucket, name: marketing-raw-bucket, parent: prj-marketing-domain}
+- {id: marketing-product-dataset, type: gcp.bigquery_dataset, name: marketing-product-dataset, parent: prj-marketing-domain}
+- {id: mesh-catalog-lake, type: gcp.res.google_dataplex_lake, name: mesh-catalog-lake, parent: prj-central-governance, props: {location: westeurope, name: changeme}}
+- {id: consumer-views-dataset, type: gcp.bigquery_dataset, name: consumer-views-dataset, parent: prj-consumer-analytics}
+- id: consumer-looker
+  type: gcp.res.google_looker_instance
+  name: consumer-looker
+  parent: prj-consumer-analytics
+  props: {name: changeme, oauth_config: {}}
+edges:
+- {from: device, to: sales-events-topic, label: events, step: '1'}
+- {from: sales-events-topic, to: sales-ingest-job, label: stream, step: '2'}
+- {from: sales-ingest-job, to: sales-product-dataset, label: write product tables, step: '3'}
+- {from: marketing-raw-bucket, to: marketing-product-dataset, label: load, step: '4'}
+- {from: consumer-views-dataset, to: sales-product-dataset, label: authorized views, step: '7'}
+- {from: consumer-views-dataset, to: marketing-product-dataset, label: authorized views, step: '8'}
+- {from: consumer-looker, to: consumer-views-dataset, label: query, step: '9'}
+- {from: users, to: consumer-looker, label: explore, step: '10'}
+steps:
+- {n: '1', text: 'device → sales-events-topic: events'}
+- {n: '2', text: 'sales-events-topic → sales-ingest-job: stream'}
+- {n: '3', text: 'sales-ingest-job → sales-product-dataset: write product tables'}
+- {n: '4', text: 'marketing-raw-bucket → marketing-product-dataset: load'}
+- {n: '7', text: 'consumer-views-dataset → sales-product-dataset: authorized views'}
+- {n: '8', text: 'consumer-views-dataset → marketing-product-dataset: authorized views'}
+- {n: '9', text: 'consumer-looker → consumer-views-dataset: query'}
+- {n: '10', text: 'users → consumer-looker: explore'}

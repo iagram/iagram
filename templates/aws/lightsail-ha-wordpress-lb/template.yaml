@@ -1,0 +1,49 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/deploying-a-highly-available-wordpress-site-on-amazon-lightsail-part-4-increasing-performance-and-scalability-with-a-lightsail-load-balancer/); edit freely.
+title: Highly available WordPress on Amazon Lightsail
+category: web
+tags:
+- lightsail
+- wordpress
+- lightsail load balancer
+- managed database
+- lightsail bucket
+- cdn
+source: https://aws.amazon.com/blogs/compute/deploying-a-highly-available-wordpress-site-on-amazon-lightsail-part-4-increasing-performance-and-scalability-with-a-lightsail-load-balancer/
+description: Multiple WordPress instances cloned from a snapshot and spread across Availability Zones sit behind a Lightsail load balancer that terminates TLS with a managed certificate. All instances write
+  to one highly available Lightsail managed MySQL database, and media uploads are offloaded to a Lightsail bucket served through a Lightsail CDN distribution.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-lightsail, type: common.group, name: lightsail, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: site-domain, type: aws.res.aws_lightsail_domain, name: site-domain, parent: grp-lightsail, props: {domain_name: changeme}}
+- {id: lb-cert, type: aws.res.aws_lightsail_certificate, name: lb-cert, parent: grp-lightsail, props: {name: changeme}}
+- {id: wp-lb, type: aws.res.aws_lightsail_lb, name: wp-lb, parent: grp-lightsail, props: {instance_port: 1, name: changeme}}
+- {id: wp-1, type: aws.res.aws_lightsail_instance, name: wp-1, parent: grp-lightsail, props: {availability_zone: changeme, blueprint_id: changeme, bundle_id: changeme, name: changeme}}
+- {id: wp-2, type: aws.res.aws_lightsail_instance, name: wp-2, parent: grp-lightsail, props: {availability_zone: changeme, blueprint_id: changeme, bundle_id: changeme, name: changeme}}
+- {id: wp-db, type: aws.res.aws_lightsail_database, name: wp-db, parent: grp-lightsail, props: {blueprint_id: changeme, bundle_id: changeme, master_database_name: changeme, master_password: changeme, master_username: changeme,
+    relational_database_name: changeme}}
+- {id: wp-media, type: aws.res.aws_lightsail_bucket, name: wp-media, parent: grp-lightsail, props: {bundle_id: changeme, name: changeme}}
+- id: media-cdn
+  type: aws.res.aws_lightsail_distribution
+  name: media-cdn
+  parent: grp-lightsail
+  props: {bundle_id: changeme, default_cache_behavior: {}, name: changeme, origin: {}}
+edges:
+- {from: users, to: site-domain, label: DNS, step: '1'}
+- {from: users, to: wp-lb, label: HTTPS, step: '2'}
+- {from: lb-cert, to: wp-lb, label: managed TLS certificate}
+- {from: wp-lb, to: wp-1, label: HTTP with session persistence, step: '3'}
+- {from: wp-lb, to: wp-2, label: HTTP with session persistence}
+- {from: wp-1, to: wp-db, label: MySQL, step: '4'}
+- {from: wp-2, to: wp-db, label: MySQL}
+- {from: wp-1, to: wp-media, label: offload uploads, step: '5'}
+- {from: media-cdn, to: wp-media, label: origin}
+- {from: users, to: media-cdn, label: media assets, step: '6'}
+steps:
+- {n: '1', text: 'users → site-domain: DNS'}
+- {n: '2', text: 'users → wp-lb: HTTPS'}
+- {n: '3', text: 'wp-lb → wp-1: HTTP with session persistence'}
+- {n: '4', text: 'wp-1 → wp-db: MySQL'}
+- {n: '5', text: 'wp-1 → wp-media: offload uploads'}
+- {n: '6', text: 'users → media-cdn: media assets'}

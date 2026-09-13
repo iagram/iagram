@@ -1,0 +1,44 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/scheduling-email-campaigns-at-scale-with-amazon-eventbridge-scheduler/); edit freely.
+title: Scheduled jobs at scale with EventBridge Scheduler
+category: serverless
+tags:
+- eventbridge scheduler
+- cron
+- one-time schedule
+- lambda
+- ses
+source: https://aws.amazon.com/blogs/compute/scheduling-email-campaigns-at-scale-with-amazon-eventbridge-scheduler/
+description: An API creates one-time or recurring EventBridge Scheduler schedules inside a schedule group, one per campaign; when a schedule fires it invokes a Lambda function that personalizes and sends
+  email through SES. Failed invocations go to a dead-letter queue and completed one-time schedules are deleted automatically.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: user, type: common.user, name: user}
+- {id: campaign-api, type: aws.res.aws_api_gateway_rest_api, name: campaign-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: create-schedule, type: aws.lambda_function, name: create-schedule, parent: reg-us-east-1}
+- {id: campaigns, type: aws.dynamodb_table, name: campaigns, parent: reg-us-east-1}
+- id: send-campaign
+  type: aws.res.aws_scheduler_schedule
+  name: send-campaign
+  parent: reg-us-east-1
+  props: {flexible_time_window: {}, schedule_expression: changeme, target: {}}
+- {id: send-personalized-email, type: aws.lambda_function, name: send-personalized-email, parent: reg-us-east-1}
+- {id: marketing-sender, type: aws.res.aws_ses_email_identity, name: marketing-sender, parent: reg-us-east-1, props: {email: changeme}}
+- {id: scheduler-dlq, type: aws.sqs_queue, name: scheduler-dlq, parent: reg-us-east-1}
+edges:
+- {from: user, to: campaign-api, label: POST /campaigns, step: '1'}
+- {from: campaign-api, to: create-schedule, step: '2'}
+- {from: create-schedule, to: campaigns, label: PutItem, step: '3'}
+- {from: create-schedule, to: send-campaign, label: CreateSchedule at(...), step: '4'}
+- {from: send-campaign, to: send-personalized-email, label: invoke at scheduled time, step: '5'}
+- {from: send-personalized-email, to: campaigns, label: read recipients, step: '6'}
+- {from: send-personalized-email, to: marketing-sender, label: SES SendEmail, step: '7'}
+- {from: send-campaign, to: scheduler-dlq, label: undeliverable invocations}
+steps:
+- {n: '1', text: 'user → campaign-api: POST /campaigns'}
+- {n: '2', text: campaign-api → create-schedule}
+- {n: '3', text: 'create-schedule → campaigns: PutItem'}
+- {n: '4', text: 'create-schedule → send-campaign: CreateSchedule at(...)'}
+- {n: '5', text: 'send-campaign → send-personalized-email: invoke at scheduled time'}
+- {n: '6', text: 'send-personalized-email → campaigns: read recipients'}
+- {n: '7', text: 'send-personalized-email → marketing-sender: SES SendEmail'}

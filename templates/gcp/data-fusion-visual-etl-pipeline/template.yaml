@@ -1,0 +1,33 @@
+# Generated from the official reference (https://docs.cloud.google.com/data-fusion/docs/tutorials/targeting-campaign-pipeline); edit freely.
+title: Visual ETL pipeline with Cloud Data Fusion
+category: data
+tags:
+- data fusion
+- cdap
+- etl
+- wrangler
+- dataproc
+- bigquery
+source: https://docs.cloud.google.com/data-fusion/docs/tutorials/targeting-campaign-pipeline
+description: A Cloud Data Fusion instance hosts a visual CDAP pipeline that reads customer CSV files from Cloud Storage, cleans them with Wrangler transformations, joins them against a lookup table in BigQuery
+  and writes the result to a BigQuery output table. Each pipeline run executes on an ephemeral Dataproc cluster provisioned by Data Fusion.
+nodes:
+- {id: prj-data-fusion, type: gcp.project, name: data-fusion, props: {project_id: data-fusion-123456, project: changeme, region: us-central1}}
+- {id: vpc-fusion-vpc, type: gcp.vpc, name: fusion-vpc, parent: prj-data-fusion, props: {cidr: 10.60.0.0/16}}
+- {id: sub-dataproc-subnet, type: gcp.subnetwork, name: dataproc-subnet, parent: vpc-fusion-vpc, props: {cidr: 10.60.1.0/24, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: customers-csv-bucket, type: gcp.storage_bucket, name: customers-csv-bucket, parent: prj-data-fusion}
+- {id: etl-fusion-instance, type: gcp.res.google_data_fusion_instance, name: etl-fusion-instance, parent: prj-data-fusion, props: {name: changeme, type: changeme}}
+- {id: fusion-ephemeral-dataproc, type: gcp.res.google_dataproc_cluster, name: fusion-ephemeral-dataproc, parent: sub-dataproc-subnet, props: {name: changeme}}
+- {id: campaign-dataset, type: gcp.bigquery_dataset, name: campaign-dataset, parent: prj-data-fusion}
+- {id: fusion-temp-bucket, type: gcp.storage_bucket, name: fusion-temp-bucket, parent: prj-data-fusion}
+edges:
+- {from: users, to: etl-fusion-instance, label: design pipeline in Studio, step: '1'}
+- {from: etl-fusion-instance, to: fusion-ephemeral-dataproc, label: provision and run, step: '2'}
+- {from: fusion-ephemeral-dataproc, to: customers-csv-bucket, label: read CSV, step: '3'}
+- {from: fusion-ephemeral-dataproc, to: fusion-temp-bucket, label: staging, step: '5'}
+steps:
+- {n: '1', text: 'users → etl-fusion-instance: design pipeline in Studio'}
+- {n: '2', text: 'etl-fusion-instance → fusion-ephemeral-dataproc: provision and run'}
+- {n: '3', text: 'fusion-ephemeral-dataproc → customers-csv-bucket: read CSV'}
+- {n: '5', text: 'fusion-ephemeral-dataproc → fusion-temp-bucket: staging'}

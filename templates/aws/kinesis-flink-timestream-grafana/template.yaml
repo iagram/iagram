@@ -1,0 +1,48 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/database/near-real-time-processing-with-amazon-kinesis-amazon-timestream-and-grafana/); edit freely.
+title: Near real-time IoT time series processing with Kinesis, Flink, Timestream and Grafana
+category: iot
+tags:
+- timestream
+- time series
+- managed service for apache flink
+- kinesis data streams
+- grafana
+- iot
+source: https://aws.amazon.com/blogs/database/near-real-time-processing-with-amazon-kinesis-amazon-timestream-and-grafana/
+description: Simulated IoT devices publish events to a Kinesis data stream; a Managed Service for Apache Flink application transforms records, detects out-of-order timestamps and writes them to an Amazon
+  Timestream table. A parallel Firehose consumer archives raw events to S3, and Grafana queries Timestream for operational dashboards.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-storage, type: common.group, name: storage, parent: reg-us-east-1}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: device-simulator, type: aws.lambda_function, name: device-simulator, parent: grp-ingestion}
+- {id: sensor-stream, type: aws.res.aws_kinesis_stream, name: sensor-stream, parent: grp-ingestion, props: {name: changeme}}
+- {id: timeseries-flink-app, type: aws.res.aws_kinesisanalyticsv2_application, name: timeseries-flink-app, parent: grp-ingestion, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: iot-timeseries, type: aws.res.aws_timestreamwrite_database, name: iot-timeseries, parent: grp-storage, props: {database_name: changeme}}
+- {id: raw-archive-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: raw-archive-delivery, parent: grp-storage, props: {destination: changeme, name: changeme}}
+- {id: raw-events-bucket, type: aws.s3_bucket, name: raw-events-bucket, parent: grp-storage}
+- id: ops-grafana
+  type: aws.res.aws_grafana_workspace
+  name: ops-grafana
+  parent: reg-us-east-1
+  props:
+    account_access_type: changeme
+    authentication_providers: []
+    permission_type: changeme
+edges:
+- {from: device, to: device-simulator, label: simulated telemetry, step: '1'}
+- {from: device-simulator, to: sensor-stream, label: PutRecords, step: '2'}
+- {from: sensor-stream, to: timeseries-flink-app, label: Flink Kinesis source, step: '3'}
+- {from: sensor-stream, to: raw-archive-delivery, label: Firehose source, step: '6'}
+- {from: raw-archive-delivery, to: raw-events-bucket, label: raw archive, step: '7'}
+- {from: users, to: ops-grafana, label: dashboards, step: '9'}
+steps:
+- {n: '1', text: 'device → device-simulator: simulated telemetry'}
+- {n: '2', text: 'device-simulator → sensor-stream: PutRecords'}
+- {n: '3', text: 'sensor-stream → timeseries-flink-app: Flink Kinesis source'}
+- {n: '6', text: 'sensor-stream → raw-archive-delivery: Firehose source'}
+- {n: '7', text: 'raw-archive-delivery → raw-events-bucket: raw archive'}
+- {n: '9', text: 'users → ops-grafana: dashboards'}

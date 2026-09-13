@@ -1,0 +1,44 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/using-amazon-msk-as-an-event-source-for-aws-lambda/); edit freely.
+title: Amazon MSK as a Lambda event source
+category: serverless
+tags:
+- msk
+- kafka
+- lambda
+- event source mapping
+- sasl scram
+source: https://aws.amazon.com/blogs/compute/using-amazon-msk-as-an-event-source-for-aws-lambda/
+description: A Lambda event source mapping polls a topic on an MSK cluster inside private subnets, authenticating with SASL/SCRAM credentials from Secrets Manager, and invokes the function with batches
+  of records. Interface endpoints for Lambda and STS in the cluster VPC let the poller reach the control plane without a NAT gateway.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-streaming, type: aws.vpc, name: streaming, parent: reg-eu-west-1, props: {cidr: 10.20.0.0/16}}
+- {id: az-streaming-a, type: aws.availability_zone, name: a, parent: vpc-streaming, props: {zone: a}}
+- {id: sub-kafka-a, type: aws.subnet, name: kafka-a, parent: az-streaming-a, props: {cidr: 10.20.1.0/24, az: a, public: false}}
+- {id: az-streaming-b, type: aws.availability_zone, name: b, parent: vpc-streaming, props: {zone: b}}
+- {id: sub-kafka-b, type: aws.subnet, name: kafka-b, parent: az-streaming-b, props: {cidr: 10.20.2.0/24, az: b, public: false}}
+- id: events-cluster
+  type: aws.res.aws_msk_cluster
+  name: events-cluster
+  parent: vpc-streaming
+  props: {broker_node_group_info: {}, cluster_name: changeme, kafka_version: changeme, number_of_broker_nodes: 1}
+- {id: producer-app, type: aws.ec2_instance, name: producer-app, parent: sub-kafka-a}
+- {id: kafka-scram-credentials, type: aws.res.aws_secretsmanager_secret, name: kafka-scram-credentials, parent: reg-eu-west-1}
+- {id: lambda-endpoint, type: aws.res.aws_vpc_endpoint, name: lambda-endpoint, parent: sub-kafka-a, props: {vpc_id: changeme}}
+- {id: sts-endpoint, type: aws.res.aws_vpc_endpoint, name: sts-endpoint, parent: sub-kafka-b, props: {vpc_id: changeme}}
+- {id: kafka-consumer, type: aws.lambda_function, name: kafka-consumer, parent: reg-eu-west-1}
+- {id: processed-events, type: aws.dynamodb_table, name: processed-events, parent: reg-eu-west-1}
+- {id: kafka-failures, type: aws.sqs_queue, name: kafka-failures, parent: reg-eu-west-1}
+edges:
+- {from: producer-app, to: events-cluster, label: produce to topic, step: '1'}
+- {from: events-cluster, to: kafka-consumer, link: aws_lambda_event_source_mapping}
+- {from: kafka-consumer, to: kafka-scram-credentials, label: SASL/SCRAM secret, step: '2'}
+- {from: kafka-consumer, to: lambda-endpoint, label: poller control plane}
+- {from: kafka-consumer, to: sts-endpoint, label: assume role}
+- {from: kafka-consumer, to: processed-events, label: BatchWriteItem, step: '3'}
+- {from: kafka-consumer, to: kafka-failures, label: on-failure destination}
+steps:
+- {n: '1', text: 'producer-app → events-cluster: produce to topic'}
+- {n: '2', text: 'kafka-consumer → kafka-scram-credentials: SASL/SCRAM secret'}
+- {n: '3', text: 'kafka-consumer → processed-events: BatchWriteItem'}

@@ -1,0 +1,42 @@
+# Generated from the official reference (https://docs.cloud.google.com/vpc/docs/configure-private-google-access-hybrid); edit freely.
+title: Private Google Access for on-premises hosts
+category: networking
+tags:
+- private google access
+- private.googleapis.com
+- restricted.googleapis.com
+- custom route advertisement
+- cloud dns
+source: https://docs.cloud.google.com/vpc/docs/configure-private-google-access-hybrid
+description: On-premises hosts reach Google APIs over Cloud VPN or Cloud Interconnect by resolving googleapis.com to the private.googleapis.com range 199.36.153.8/30 (or restricted.googleapis.com 199.36.153.4/30)
+  through a Cloud DNS private zone with an inbound server policy. The Cloud Router advertises that range to on-premises with a custom route advertisement, and the VPC has a static route for it to the default
+  internet gateway.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: us-east1}}
+- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-workload, props: {cidr: 10.90.0.0/16}}
+- {id: sub-hybrid-use1, type: gcp.subnetwork, name: hybrid-use1, parent: vpc-hybrid-vpc, props: {cidr: 10.90.0.0/24, region: us-east1}}
+- {id: saas, type: common.saas, name: saas}
+- {id: ha-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: ha-vpn-gw, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}}
+- {id: vpn-router, type: gcp.res.google_compute_router, name: vpn-router, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}}
+- {id: vpc-prj-workload, type: gcp.vpc, name: main, parent: prj-workload}
+- {id: sub-prj-workload, type: gcp.subnetwork, name: main, parent: vpc-prj-workload, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: onprem-peer-gw, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-peer-gw, parent: sub-prj-workload, props: {name: changeme}}
+- {id: googleapis-zone, type: gcp.cloud_dns_zone, name: googleapis-zone, parent: prj-workload, props: {domain: example.com}}
+- {id: inbound-dns-policy, type: gcp.res.google_dns_policy, name: inbound-dns-policy, parent: vpc-hybrid-vpc, props: {name: changeme}}
+- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-hybrid-use1}
+- {id: onprem-server, type: gcp.compute_instance, name: onprem-server, parent: sub-prj-workload}
+edges:
+- {from: onprem-server, to: inbound-dns-policy, label: DNS query for googleapis.com, step: '1'}
+- {from: inbound-dns-policy, to: googleapis-zone, label: CNAME to private.googleapis.com, step: '2'}
+- {from: onprem-peer-gw, to: ha-vpn-gw, label: IPsec, step: '3'}
+- {from: vpn-router, to: onprem-peer-gw, label: advertise 199.36.153.8/30 via BGP, step: '4'}
+- {from: onprem-server, to: saas, label: Google APIs via private.googleapis.com, step: '5'}
+- {from: app-vm, to: saas, label: Private Google Access from subnet, step: '6'}
+steps:
+- {n: '1', text: 'onprem-server → inbound-dns-policy: DNS query for googleapis.com'}
+- {n: '2', text: 'inbound-dns-policy → googleapis-zone: CNAME to private.googleapis.com'}
+- {n: '3', text: 'onprem-peer-gw → ha-vpn-gw: IPsec'}
+- {n: '4', text: 'vpn-router → onprem-peer-gw: advertise 199.36.153.8/30 via BGP'}
+- {n: '5', text: 'onprem-server → saas: Google APIs via private.googleapis.com'}
+- {n: '6', text: 'app-vm → saas: Private Google Access from subnet'}

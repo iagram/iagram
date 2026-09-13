@@ -1,0 +1,50 @@
+# Generated from the official reference (https://docs.aws.amazon.com/amplify/latest/userguide/server-side-rendering-amplify.html); edit freely.
+title: Amplify Hosting for a server-side rendered Next.js site
+category: web
+tags:
+- amplify hosting
+- next.js
+- ssr
+- ssg
+- ci/cd
+- cloudfront
+- custom domain
+source: https://docs.aws.amazon.com/amplify/latest/userguide/server-side-rendering-amplify.html
+description: Amplify Hosting connects to a Git repository, builds the Next.js app on each push, and deploys static pages and assets to an S3-backed CloudFront distribution while SSR routes run on Amplify
+  Hosting compute. A custom domain from Route 53 is attached with an automatically managed certificate, and the rendered pages call a backend API and DynamoDB table.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: grp-amplify, type: common.group, name: amplify, parent: reg-us-east-1}
+- {id: grp-backend, type: common.group, name: backend, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: site-zone, type: aws.route53_zone, name: site-zone, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: site-cert, type: aws.res.aws_acm_certificate, name: site-cert, parent: reg-us-east-1}
+- {id: nextjs-app, type: aws.res.aws_amplify_app, name: nextjs-app, parent: grp-amplify, props: {name: changeme}}
+- {id: hosting-cdn, type: aws.cloudfront_distribution, name: hosting-cdn, parent: grp-global-edge}
+- {id: build-artifacts, type: aws.s3_bucket, name: build-artifacts, parent: grp-amplify}
+- {id: ssr-compute, type: aws.lambda_function, name: ssr-compute, parent: grp-amplify}
+- {id: data-api, type: aws.res.aws_appsync_graphql_api, name: data-api, parent: grp-backend, props: {authentication_type: changeme, name: changeme}}
+- {id: content-table, type: aws.dynamodb_table, name: content-table, parent: grp-backend}
+edges:
+- {from: saas, to: nextjs-app, label: Git push webhook, step: '1'}
+- {from: nextjs-app, to: build-artifacts, label: build output, step: '2'}
+- {from: nextjs-app, to: hosting-cdn, label: deploy branch, step: '3'}
+- {from: site-cert, to: hosting-cdn, label: managed TLS certificate}
+- {from: users, to: site-zone, label: DNS, step: '4'}
+- {from: users, to: hosting-cdn, label: HTTPS, step: '5'}
+- {from: hosting-cdn, to: build-artifacts, label: static pages and assets, step: '6'}
+- {from: hosting-cdn, to: ssr-compute, label: SSR route render, step: '6'}
+- {from: ssr-compute, to: data-api, label: GraphQL query, step: '7'}
+- {from: data-api, to: content-table, label: resolver, step: '8'}
+steps:
+- {n: '1', text: 'saas → nextjs-app: Git push webhook'}
+- {n: '2', text: 'nextjs-app → build-artifacts: build output'}
+- {n: '3', text: 'nextjs-app → hosting-cdn: deploy branch'}
+- {n: '4', text: 'users → site-zone: DNS'}
+- {n: '5', text: 'users → hosting-cdn: HTTPS'}
+- {n: '6', text: 'hosting-cdn → build-artifacts: static pages and assets'}
+- {n: '7', text: 'ssr-compute → data-api: GraphQL query'}
+- {n: '8', text: 'data-api → content-table: resolver'}

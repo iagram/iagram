@@ -1,0 +1,68 @@
+# Generated from the official reference (https://docs.aws.amazon.com/eks/latest/best-practices/karpenter.html); edit freely.
+title: Just-in-time node provisioning on EKS with Karpenter
+category: containers
+tags:
+- eks
+- karpenter
+- autoscaling
+- nodepool
+- spot
+- interruption handling
+source: https://docs.aws.amazon.com/eks/latest/best-practices/karpenter.html
+description: Karpenter runs on a small managed node group (or Fargate) and watches for unschedulable pods, then calls the EC2 Fleet API directly to launch right-sized instances from a diverse set of types
+  defined in a NodePool, without Auto Scaling groups. An EventBridge rule forwards Spot interruption and instance health events to an SQS queue that Karpenter drains so it can cordon and replace nodes ahead
+  of termination, and consolidation removes under-used nodes.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}}
+- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-eks-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.0.16.0/20, az: a, public: false}}
+- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.0.32.0/20, az: b, public: false}}
+- {id: az-eks-c, type: aws.availability_zone, name: c, parent: vpc-eks, props: {zone: c}}
+- {id: sub-private-c, type: aws.subnet, name: private-c, parent: az-eks-c, props: {cidr: 10.0.48.0/20, az: c, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-eks}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: karpenter-cluster, type: aws.eks_cluster, name: karpenter-cluster, parent: vpc-eks}
+- id: karpenter-controller-nodes
+  type: aws.res.aws_eks_node_group
+  name: karpenter-controller-nodes
+  parent: karpenter-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- {id: karpenter-controller-role, type: aws.res.aws_iam_role, name: karpenter-controller-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}}
+- {id: karpenter-node-role, type: aws.res.aws_iam_role, name: karpenter-node-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}}
+- {id: interruption-queue, type: aws.sqs_queue, name: interruption-queue, parent: reg-us-west-2}
+- {id: spot-interruption-rule, type: aws.res.aws_cloudwatch_event_rule, name: spot-interruption-rule, parent: reg-us-west-2}
+- {id: karpenter-node-b, type: aws.ec2_instance, name: karpenter-node-b, parent: sub-private-b}
+- {id: karpenter-node-c, type: aws.ec2_instance, name: karpenter-node-c, parent: sub-private-c}
+- id: cluster-oidc
+  type: aws.res.aws_iam_openid_connect_provider
+  name: cluster-oidc
+  parent: reg-us-west-2
+  props:
+    client_id_list: []
+    url: changeme
+edges:
+- {from: user, to: karpenter-cluster, label: apply Deployment (pods pending), step: '1'}
+- {from: karpenter-cluster, to: karpenter-controller-nodes, label: Karpenter controller pods watch pending pods, step: '2'}
+- {from: karpenter-controller-nodes, to: karpenter-node-b, label: EC2 CreateFleet (NodePool requirements), step: '3'}
+- {from: karpenter-controller-nodes, to: karpenter-node-c, label: EC2 CreateFleet (NodePool requirements), step: '3'}
+- {from: karpenter-node-b, to: karpenter-cluster, label: node joins, step: '4'}
+- {from: karpenter-controller-role, to: karpenter-controller-nodes, label: IRSA / Pod Identity}
+- {from: cluster-oidc, to: karpenter-controller-role, label: trust}
+- {from: karpenter-node-role, to: karpenter-node-b, label: instance profile}
+- {from: spot-interruption-rule, to: interruption-queue, label: Spot interruption / rebalance / health events, link: aws_cloudwatch_event_target}
+- {from: karpenter-controller-nodes, to: interruption-queue, label: poll}
+- {from: karpenter-node-b, to: nat-a, label: outbound}
+steps:
+- {n: '1', text: 'user → karpenter-cluster: apply Deployment (pods pending)'}
+- {n: '2', text: 'karpenter-cluster → karpenter-controller-nodes: Karpenter controller pods watch pending pods'}
+- {n: '3', text: 'karpenter-controller-nodes → karpenter-node-b: EC2 CreateFleet (NodePool requirements)'}
+- {n: '4', text: 'karpenter-node-b → karpenter-cluster: node joins'}

@@ -1,0 +1,47 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/live-streaming-on-aws/solution-overview.html); edit freely.
+title: Live streaming with MediaLive, MediaPackage, and CloudFront
+category: media
+tags:
+- live streaming
+- medialive
+- mediapackage
+- hls
+- dash
+- cloudfront
+- contributor encoder
+source: https://docs.aws.amazon.com/solutions/latest/live-streaming-on-aws/solution-overview.html
+description: A contribution encoder pushes a live feed to an AWS Elemental MediaLive input, and a MediaLive channel encodes it into an adaptive bitrate ladder that is sent to a MediaPackage channel. MediaPackage
+  packages the stream as HLS, DASH, and CMAF endpoints that a CloudFront distribution delivers to viewers, with an optional demo player hosted on S3.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-west-2}
+- {id: grp-ingest, type: common.group, name: ingest, parent: reg-us-west-2}
+- {id: grp-origin, type: common.group, name: origin, parent: reg-us-west-2}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: rtmp-input, type: aws.res.aws_medialive_input, name: rtmp-input, parent: grp-ingest, props: {name: changeme, type: changeme}}
+- id: live-encoder
+  type: aws.res.aws_medialive_channel
+  name: live-encoder
+  parent: grp-ingest
+  props:
+    channel_class: changeme
+    destinations: []
+    encoder_settings: {}
+    input_attachments: []
+    input_specification: {}
+    name: changeme
+- {id: demo-player, type: aws.s3_bucket, name: demo-player, parent: grp-origin}
+- {id: live-cdn, type: aws.cloudfront_distribution, name: live-cdn, parent: grp-global-edge}
+- {id: stream-health, type: aws.res.aws_cloudwatch_dashboard, name: stream-health, parent: reg-us-west-2, props: {dashboard_body: changeme, dashboard_name: changeme}}
+edges:
+- {from: device, to: rtmp-input, label: RTMP/RTP contribution feed, step: '1'}
+- {from: rtmp-input, to: live-encoder, label: attached input, step: '2'}
+- {from: demo-player, to: live-cdn, label: player page origin}
+- {from: users, to: live-cdn, label: playback, step: '5'}
+- {from: live-encoder, to: stream-health, label: channel metrics}
+steps:
+- {n: '1', text: 'device → rtmp-input: RTMP/RTP contribution feed'}
+- {n: '2', text: 'rtmp-input → live-encoder: attached input'}
+- {n: '5', text: 'users → live-cdn: playback'}

@@ -1,0 +1,41 @@
+# Generated from the official reference (https://docs.cloud.google.com/pubsub/docs/bigquery); edit freely.
+title: Real-time dashboards with Pub/Sub BigQuery subscriptions and BI Engine
+category: analytics-bi
+tags:
+- real-time dashboard
+- pub/sub
+- bigquery subscription
+- bi engine
+- looker studio
+source: https://docs.cloud.google.com/pubsub/docs/bigquery
+description: A Pub/Sub BigQuery subscription writes messages directly into a BigQuery table using the Storage Write API with no intermediate pipeline, and a dead-letter topic captures messages that cannot
+  be written. A BI Engine reservation accelerates the dashboard queries and Looker Studio refreshes charts against a materialized view over the live table.
+nodes:
+- {id: prj-realtime-bi, type: gcp.project, name: realtime-bi, props: {project_id: realtime-bi-123456, project: changeme, region: us-central1}}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: metrics-avro-schema, type: gcp.res.google_pubsub_schema, name: metrics-avro-schema, parent: prj-realtime-bi, props: {name: changeme}}
+- {id: metrics-topic, type: gcp.pubsub_topic, name: metrics-topic, parent: prj-realtime-bi}
+- {id: metrics-bigquery-sub, type: gcp.res.google_pubsub_subscription, name: metrics-bigquery-sub, parent: prj-realtime-bi, props: {name: changeme, topic: changeme}}
+- {id: metrics-deadletter-topic, type: gcp.pubsub_topic, name: metrics-deadletter-topic, parent: prj-realtime-bi}
+- {id: realtime-dataset, type: gcp.bigquery_dataset, name: realtime-dataset, parent: prj-realtime-bi}
+- {id: dashboard-bi-engine, type: gcp.res.google_bigquery_bi_reservation, name: dashboard-bi-engine, parent: prj-realtime-bi, props: {location: westeurope}}
+- id: realtime-looker
+  type: gcp.res.google_looker_instance
+  name: realtime-looker
+  parent: prj-realtime-bi
+  props: {name: changeme, oauth_config: {}}
+edges:
+- {from: device, to: metrics-topic, label: publish metrics, step: '1'}
+- {from: metrics-avro-schema, to: metrics-topic, label: schema validation, step: '2'}
+- {from: metrics-topic, to: metrics-bigquery-sub, label: deliver, step: '3'}
+- {from: metrics-bigquery-sub, to: metrics-deadletter-topic, label: failed writes, step: '5'}
+- {from: dashboard-bi-engine, to: realtime-dataset, label: in-memory acceleration, step: '7'}
+- {from: users, to: realtime-looker, label: live dashboards, step: '9'}
+steps:
+- {n: '1', text: 'device → metrics-topic: publish metrics'}
+- {n: '2', text: 'metrics-avro-schema → metrics-topic: schema validation'}
+- {n: '3', text: 'metrics-topic → metrics-bigquery-sub: deliver'}
+- {n: '5', text: 'metrics-bigquery-sub → metrics-deadletter-topic: failed writes'}
+- {n: '7', text: 'dashboard-bi-engine → realtime-dataset: in-memory acceleration'}
+- {n: '9', text: 'users → realtime-looker: live dashboards'}

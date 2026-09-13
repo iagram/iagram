@@ -1,0 +1,50 @@
+# Generated from the official reference (https://docs.aws.amazon.com/reference-architecture-diagrams/latest/modern-serverless-mobile-web/modern-serverless-mobile-web.html); edit freely.
+title: Modern serverless mobile and web backend with Amplify, Cognito, and AppSync
+category: web
+tags:
+- amplify
+- appsync
+- graphql
+- cognito
+- mobile backend
+- dynamodb
+- pinpoint
+source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/modern-serverless-mobile-web/modern-serverless-mobile-web.html
+description: Mobile and web clients built with the Amplify libraries authenticate against a Cognito user pool and exchange the JWT for AWS credentials through an identity pool. Authenticated clients run
+  GraphQL queries, mutations, and subscriptions on AppSync, whose resolvers read DynamoDB directly or invoke Lambda for business logic, while user files land in S3 and Pinpoint records analytics events.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: grp-identity, type: common.group, name: identity, parent: reg-us-west-2}
+- {id: grp-api, type: common.group, name: api, parent: reg-us-west-2}
+- {id: grp-data, type: common.group, name: data, parent: reg-us-west-2}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: users, type: common.users, name: users}
+- {id: client-app, type: aws.res.aws_amplify_app, name: client-app, parent: reg-us-west-2, props: {name: changeme}}
+- {id: user-pool, type: aws.res.aws_cognito_user_pool, name: user-pool, parent: grp-identity, props: {name: changeme}}
+- {id: identity-pool, type: aws.res.aws_cognito_identity_pool, name: identity-pool, parent: grp-identity, props: {identity_pool_name: changeme}}
+- {id: graphql-api, type: aws.res.aws_appsync_graphql_api, name: graphql-api, parent: grp-api, props: {authentication_type: changeme, name: changeme}}
+- {id: business-logic, type: aws.lambda_function, name: business-logic, parent: grp-api}
+- {id: app-data, type: aws.dynamodb_table, name: app-data, parent: grp-data}
+- {id: user-uploads, type: aws.s3_bucket, name: user-uploads, parent: grp-data}
+- {id: analytics, type: aws.res.aws_pinpoint_app, name: analytics, parent: grp-data}
+edges:
+- {from: mobile, to: user-pool, label: sign in, step: '1'}
+- {from: user-pool, to: mobile, label: JWT tokens, step: '2'}
+- {from: mobile, to: identity-pool, label: exchange JWT for AWS credentials, step: '3'}
+- {from: mobile, to: graphql-api, label: GraphQL query/mutation/subscription, step: '4'}
+- {from: users, to: graphql-api, label: GraphQL from web client}
+- {from: graphql-api, to: user-pool, label: token authorization}
+- {from: graphql-api, to: app-data, label: DynamoDB resolver, step: '5'}
+- {from: graphql-api, to: business-logic, label: Lambda resolver, step: '5'}
+- {from: business-logic, to: app-data, label: read/write}
+- {from: mobile, to: user-uploads, label: Amplify Storage upload with temporary credentials, step: '6'}
+- {from: mobile, to: analytics, label: analytics events}
+- {from: client-app, to: mobile, label: hosted web build}
+steps:
+- {n: '1', text: 'mobile → user-pool: sign in'}
+- {n: '2', text: 'user-pool → mobile: JWT tokens'}
+- {n: '3', text: 'mobile → identity-pool: exchange JWT for AWS credentials'}
+- {n: '4', text: 'mobile → graphql-api: GraphQL query/mutation/subscription'}
+- {n: '5', text: 'graphql-api → app-data: DynamoDB resolver'}
+- {n: '6', text: 'mobile → user-uploads: Amplify Storage upload with temporary credentials'}

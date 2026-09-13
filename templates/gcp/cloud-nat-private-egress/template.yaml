@@ -1,0 +1,34 @@
+# Generated from the official reference (https://docs.cloud.google.com/nat/docs/overview); edit freely.
+title: Cloud NAT for private instances
+category: networking
+tags:
+- cloud nat
+- public nat
+- cloud router
+- no external ip
+- egress
+source: https://docs.cloud.google.com/nat/docs/overview
+description: Compute Engine and GKE nodes without external IPs send outbound internet traffic through a regional Public NAT gateway configured on a Cloud Router for selected subnets. The gateway is a distributed
+  software-defined service with no proxy VM, and it does not allow unsolicited inbound connections.
+nodes:
+- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: europe-west1}}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-workload, props: {cidr: 10.100.0.0/16}}
+- {id: sub-private-ew1, type: gcp.subnetwork, name: private-ew1, parent: vpc-app-vpc, props: {cidr: 10.100.0.0/24, region: europe-west1}}
+- {id: sub-private-ew1-b, type: gcp.subnetwork, name: private-ew1-b, parent: vpc-app-vpc, props: {cidr: 10.100.1.0/24, region: europe-west1}}
+- {id: internet, type: common.internet, name: internet}
+- {id: nat-router, type: gcp.res.google_compute_router, name: nat-router, parent: vpc-app-vpc, props: {name: changeme, network: changeme}}
+- {id: public-nat-gw, type: gcp.res.google_compute_router_nat, name: public-nat-gw, parent: vpc-app-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+- {id: nat-ip-1, type: gcp.res.google_compute_address, name: nat-ip-1, parent: prj-workload, props: {name: changeme}}
+- {id: nat-ip-2, type: gcp.res.google_compute_address, name: nat-ip-2, parent: prj-workload, props: {name: changeme}}
+- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-private-ew1}
+- {id: batch-vm, type: gcp.compute_instance, name: batch-vm, parent: sub-private-ew1-b}
+- {id: deny-all-ingress, type: gcp.firewall_rule, name: deny-all-ingress, parent: vpc-app-vpc}
+edges:
+- {from: app-vm, to: public-nat-gw, label: outbound TCP/UDP from private IP, step: '1'}
+- {from: batch-vm, to: public-nat-gw, label: outbound package downloads, step: '1'}
+- {from: public-nat-gw, to: nat-ip-1, label: source NAT to static IP, step: '2'}
+- {from: nat-ip-1, to: internet, label: egress, step: '3'}
+steps:
+- {n: '1', text: 'app-vm → public-nat-gw: outbound TCP/UDP from private IP'}
+- {n: '2', text: 'public-nat-gw → nat-ip-1: source NAT to static IP'}
+- {n: '3', text: 'nat-ip-1 → internet: egress'}

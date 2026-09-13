@@ -1,0 +1,51 @@
+# Generated from the official reference (https://docs.aws.amazon.com/greengrass/v2/developerguide/perform-machine-learning-inference.html); edit freely.
+title: IoT Greengrass edge ML inference with cloud-trained models
+category: iot
+tags:
+- greengrass
+- edge inference
+- sagemaker
+- ml components
+- iot core
+source: https://docs.aws.amazon.com/greengrass/v2/developerguide/perform-machine-learning-inference.html
+description: Models are trained in SageMaker and stored in S3, then deployed to Greengrass core devices as model, runtime and inference components so that inference runs locally on camera or sensor data.
+  Inference results and low-confidence samples are published through IoT Core to a Kinesis stream and an S3 bucket that feeds the next training round.
+nodes:
+- {id: dc-factory-site, type: common.datacenter, name: factory-site}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: grp-model-build, type: common.group, name: model build, parent: reg-eu-west-1}
+- {id: grp-results, type: common.group, name: results, parent: reg-eu-west-1}
+- {id: device, type: common.device, name: device}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: greengrass-core, type: aws.res.aws_iot_thing, name: greengrass-core, parent: sub-reg-eu-west-1-a, props: {name: changeme}}
+- {id: defect-detector, type: aws.res.aws_sagemaker_model, name: defect-detector, parent: grp-model-build, props: {execution_role_arn: changeme}}
+- {id: model-validation-endpoint, type: aws.res.aws_sagemaker_endpoint, name: model-validation-endpoint, parent: grp-model-build, props: {endpoint_config_name: changeme}}
+- {id: model-artifacts, type: aws.s3_bucket, name: model-artifacts, parent: grp-model-build}
+- {id: inference-results-rule, type: aws.res.aws_iot_topic_rule, name: inference-results-rule, parent: grp-results, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
+- {id: inference-stream, type: aws.res.aws_kinesis_stream, name: inference-stream, parent: grp-results, props: {name: changeme}}
+- {id: results-aggregator, type: aws.lambda_function, name: results-aggregator, parent: grp-results}
+- {id: inference-results, type: aws.dynamodb_table, name: inference-results, parent: grp-results}
+- {id: retraining-samples, type: aws.s3_bucket, name: retraining-samples, parent: grp-results}
+edges:
+- {from: defect-detector, to: model-artifacts, label: export compiled model, step: '1'}
+- {from: model-artifacts, to: greengrass-core, label: model component artifact download, step: '2'}
+- {from: device, to: greengrass-core, label: camera frames over local network, step: '3'}
+- {from: greengrass-core, to: inference-results-rule, label: MQTT inference results, step: '4'}
+- {from: inference-results-rule, to: inference-stream, label: kinesis action}
+- {from: inference-stream, to: results-aggregator, link: aws_lambda_event_source_mapping}
+- {from: results-aggregator, to: inference-results, label: per-line quality metrics, step: '5'}
+- {from: greengrass-core, to: retraining-samples, label: low-confidence images via stream manager, step: '6'}
+- {from: retraining-samples, to: defect-detector, label: next training dataset}
+- {from: model-validation-endpoint, to: defect-detector, label: cloud validation of candidate model}
+steps:
+- {n: '1', text: 'defect-detector → model-artifacts: export compiled model'}
+- {n: '2', text: 'model-artifacts → greengrass-core: model component artifact download'}
+- {n: '3', text: 'device → greengrass-core: camera frames over local network'}
+- {n: '4', text: 'greengrass-core → inference-results-rule: MQTT inference results'}
+- {n: '5', text: 'results-aggregator → inference-results: per-line quality metrics'}
+- {n: '6', text: 'greengrass-core → retraining-samples: low-confidence images via stream manager'}

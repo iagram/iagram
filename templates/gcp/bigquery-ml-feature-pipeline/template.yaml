@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.cloud.google.com/bigquery/docs/bqml-introduction); edit freely.
+title: ML feature pipelines with BigQuery ML and Vertex AI
+category: ml
+tags:
+- bigquery ml
+- feature engineering
+- scheduled queries
+- vertex ai
+- model registry
+source: https://docs.cloud.google.com/bigquery/docs/bqml-introduction
+description: Scheduled queries transform raw event tables into a feature dataset in BigQuery, and CREATE MODEL statements train BigQuery ML models in SQL directly on those features. Trained models are registered
+  in Vertex AI Model Registry and deployed to an endpoint for online prediction, while batch predictions run with ML.PREDICT back into BigQuery tables.
+nodes:
+- {id: prj-ml-analytics, type: gcp.project, name: ml-analytics, props: {project_id: ml-analytics-123456, project: changeme, region: us-central1}}
+- {id: grp-features, type: common.group, name: features, parent: prj-ml-analytics}
+- {id: grp-training, type: common.group, name: training, parent: prj-ml-analytics}
+- {id: grp-serving, type: common.group, name: serving, parent: prj-ml-analytics}
+- {id: users, type: common.users, name: users}
+- {id: client, type: common.client, name: client}
+- {id: raw-events-bucket, type: gcp.storage_bucket, name: raw-events-bucket, parent: grp-features}
+- {id: raw-events-dataset, type: gcp.bigquery_dataset, name: raw-events-dataset, parent: grp-features}
+- id: feature-scheduled-query
+  type: gcp.res.google_bigquery_data_transfer_config
+  name: feature-scheduled-query
+  parent: grp-features
+  props: {data_source_id: changeme, display_name: changeme, params: {}}
+- {id: features-dataset, type: gcp.bigquery_dataset, name: features-dataset, parent: grp-features}
+- {id: churn-online-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: churn-online-endpoint, parent: grp-serving, props: {display_name: changeme, location: westeurope, name: changeme}}
+- {id: churn-api-service, type: gcp.cloud_run_service, name: churn-api-service, parent: grp-serving}
+edges:
+- {from: raw-events-bucket, to: raw-events-dataset, label: load, step: '1'}
+- {from: feature-scheduled-query, to: raw-events-dataset, label: read events, step: '2'}
+- {from: churn-api-service, to: churn-online-endpoint, label: online prediction, step: '7'}
+- {from: client, to: churn-api-service, label: HTTPS, step: '8'}
+steps:
+- {n: '1', text: 'raw-events-bucket → raw-events-dataset: load'}
+- {n: '2', text: 'feature-scheduled-query → raw-events-dataset: read events'}
+- {n: '7', text: 'churn-api-service → churn-online-endpoint: online prediction'}
+- {n: '8', text: 'client → churn-api-service: HTTPS'}

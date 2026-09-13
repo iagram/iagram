@@ -1,0 +1,63 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/networking-and-content-delivery/deployment-models-for-aws-network-firewall/); edit freely.
+title: Centralized Network Firewall inspection VPC with Transit Gateway
+category: security
+tags:
+- network firewall
+- inspection vpc
+- transit gateway
+- east-west
+- egress filtering
+source: https://aws.amazon.com/blogs/networking-and-content-delivery/deployment-models-for-aws-network-firewall/
+description: Spoke VPCs attach to a Transit Gateway whose route tables send all inter-VPC and egress traffic through a dedicated inspection VPC, where Network Firewall endpoints sit in their own subnets
+  separate from the Transit Gateway attachment subnets. A central egress path through a NAT gateway and internet gateway lets the firewall enforce stateful domain and Suricata rules on all outbound flows.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-inspection, type: aws.vpc, name: inspection, parent: reg-us-east-1, props: {cidr: 10.100.0.0/16}}
+- {id: az-inspection-a, type: aws.availability_zone, name: a, parent: vpc-inspection, props: {zone: a}}
+- {id: sub-tgw-attach-a, type: aws.subnet, name: tgw-attach-a, parent: az-inspection-a, props: {cidr: 10.100.0.0/28, az: a, public: false}}
+- {id: sub-firewall-a, type: aws.subnet, name: firewall-a, parent: az-inspection-a, props: {cidr: 10.100.1.0/28, az: a, public: false}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-inspection-a, props: {cidr: 10.100.2.0/24, az: a, public: true}}
+- {id: vpc-spoke-a, type: aws.vpc, name: spoke-a, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
+- {id: az-spoke-a-a, type: aws.availability_zone, name: a, parent: vpc-spoke-a, props: {zone: a}}
+- {id: sub-spoke-a-private, type: aws.subnet, name: spoke-a-private, parent: az-spoke-a-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: vpc-spoke-b, type: aws.vpc, name: spoke-b, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}}
+- {id: az-spoke-b-a, type: aws.availability_zone, name: a, parent: vpc-spoke-b, props: {zone: a}}
+- {id: sub-spoke-b-private, type: aws.subnet, name: spoke-b-private, parent: az-spoke-b-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
+- {id: internet, type: common.internet, name: internet}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1}
+- {id: central-firewall, type: aws.res.aws_networkfirewall_firewall, name: central-firewall, parent: sub-firewall-a, props: {firewall_policy_arn: changeme, name: changeme}}
+- id: inspection-policy
+  type: aws.res.aws_networkfirewall_firewall_policy
+  name: inspection-policy
+  parent: vpc-inspection
+  props: {firewall_policy: {}, name: changeme}
+- {id: egress-domain-rules, type: aws.res.aws_networkfirewall_rule_group, name: egress-domain-rules, parent: vpc-inspection, props: {capacity: 1, name: changeme, type: changeme}}
+- {id: central-nat, type: aws.res.aws_nat_gateway, name: central-nat, parent: sub-public-a}
+- {id: inspection-igw, type: aws.res.aws_internet_gateway, name: inspection-igw, parent: vpc-inspection}
+- {id: firewall-log-bucket, type: aws.s3_bucket, name: firewall-log-bucket, parent: reg-us-east-1}
+- {id: spoke-a-app, type: aws.ec2_instance, name: spoke-a-app, parent: sub-spoke-a-private}
+- {id: spoke-b-app, type: aws.ec2_instance, name: spoke-b-app, parent: sub-spoke-b-private}
+- {id: az-vpc-inspection-b, type: aws.availability_zone, name: b, parent: vpc-inspection, props: {zone: b}}
+- {id: sub-vpc-inspection-b, type: aws.subnet, name: private-b, parent: az-vpc-inspection-b, props: {cidr: 10.100.251.0/24, az: b, public: false}}
+- {id: az-vpc-spoke-a-b, type: aws.availability_zone, name: b, parent: vpc-spoke-a, props: {zone: b}}
+- {id: sub-vpc-spoke-a-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-a-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: az-vpc-spoke-b-b, type: aws.availability_zone, name: b, parent: vpc-spoke-b, props: {zone: b}}
+- {id: sub-vpc-spoke-b-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-b-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+edges:
+- {from: hub-tgw, to: vpc-spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-inspection, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: spoke-a-app, to: hub-tgw, label: east-west traffic, step: '1'}
+- {from: hub-tgw, to: central-firewall, label: route to inspection, step: '2'}
+- {from: central-firewall, to: spoke-b-app, label: inspected traffic, step: '3'}
+- {from: central-firewall, to: central-nat, label: egress after inspection, step: '4'}
+- {from: central-nat, to: inspection-igw, label: NAT, step: '5'}
+- {from: inspection-igw, to: internet, label: outbound, step: '6'}
+steps:
+- {n: '1', text: 'spoke-a-app → hub-tgw: east-west traffic'}
+- {n: '2', text: 'hub-tgw → central-firewall: route to inspection'}
+- {n: '3', text: 'central-firewall → spoke-b-app: inspected traffic'}
+- {n: '4', text: 'central-firewall → central-nat: egress after inspection'}
+- {n: '5', text: 'central-nat → inspection-igw: NAT'}
+- {n: '6', text: 'inspection-igw → internet: outbound'}

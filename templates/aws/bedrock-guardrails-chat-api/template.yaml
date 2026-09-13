@@ -1,0 +1,38 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/build-safe-and-responsible-generative-ai-applications-with-guardrails/); edit freely.
+title: Guardrailed chat API with Amazon Bedrock Guardrails
+category: ml
+tags:
+- bedrock guardrails
+- responsible ai
+- content filters
+- pii redaction
+- chat
+source: https://aws.amazon.com/blogs/machine-learning/build-safe-and-responsible-generative-ai-applications-with-guardrails/
+description: A Lambda function behind API Gateway invokes a Bedrock foundation model with a guardrail identifier so denied topics, content filters, word filters and PII redaction are applied to both prompt
+  and completion. Model invocation logging writes full request and response payloads to CloudWatch Logs and S3, and session state lives in DynamoDB.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: chat-users, type: aws.res.aws_cognito_user_pool, name: chat-users, parent: reg-us-east-1, props: {name: changeme}}
+- {id: chat-api, type: aws.res.aws_api_gateway_rest_api, name: chat-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: chat-fn, type: aws.lambda_function, name: chat-fn, parent: reg-us-east-1}
+- {id: safety-guardrail, type: aws.res.aws_bedrock_guardrail, name: safety-guardrail, parent: reg-us-east-1, props: {blocked_input_messaging: changeme, blocked_outputs_messaging: changeme, name: changeme}}
+- {id: sessions, type: aws.dynamodb_table, name: sessions, parent: reg-us-east-1}
+- {id: bedrock-invocation-logs, type: aws.res.aws_cloudwatch_log_group, name: bedrock-invocation-logs, parent: reg-us-east-1}
+- {id: invocation-log-archive, type: aws.s3_bucket, name: invocation-log-archive, parent: reg-us-east-1}
+- {id: blocked-prompt-alerts, type: aws.res.aws_sns_topic, name: blocked-prompt-alerts, parent: reg-us-east-1}
+edges:
+- {from: users, to: chat-api, label: HTTPS with Cognito JWT, step: '1'}
+- {from: chat-api, to: chat-fn, step: '2'}
+- {from: chat-fn, to: safety-guardrail, label: InvokeModel with guardrailIdentifier, step: '3'}
+- {from: safety-guardrail, to: chat-fn, label: filtered completion or blocked message, step: '4'}
+- {from: chat-fn, to: sessions, label: persist turn}
+- {from: safety-guardrail, to: bedrock-invocation-logs, label: model invocation logging}
+- {from: bedrock-invocation-logs, to: invocation-log-archive, label: S3 log delivery}
+- {from: chat-fn, to: blocked-prompt-alerts, label: GUARDRAIL_INTERVENED}
+steps:
+- {n: '1', text: 'users → chat-api: HTTPS with Cognito JWT'}
+- {n: '2', text: chat-api → chat-fn}
+- {n: '3', text: 'chat-fn → safety-guardrail: InvokeModel with guardrailIdentifier'}
+- {n: '4', text: 'safety-guardrail → chat-fn: filtered completion or blocked message'}

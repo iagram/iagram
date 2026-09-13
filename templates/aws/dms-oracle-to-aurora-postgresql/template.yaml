@@ -1,0 +1,62 @@
+# Generated from the official reference (https://docs.aws.amazon.com/dms/latest/oracle-to-aurora-postgresql-migration-playbook/chap-oracle-aurora-pg.html); edit freely.
+title: Oracle to Aurora PostgreSQL with AWS SCT and DMS
+category: migration
+tags:
+- dms
+- schema conversion tool
+- oracle
+- aurora postgresql
+- heterogeneous migration
+- cdc
+source: https://docs.aws.amazon.com/dms/latest/oracle-to-aurora-postgresql-migration-playbook/chap-oracle-aurora-pg.html
+description: AWS SCT (or DMS Schema Conversion) converts the Oracle schema, PL/SQL and code objects to PostgreSQL and applies them to an Aurora PostgreSQL cluster. A DMS replication instance then runs a
+  full-load-plus-CDC task from the on-premises Oracle source endpoint to the Aurora target endpoint over a VPN, keeping both databases in sync until the application is repointed.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-dms-target, type: aws.vpc, name: dms-target, parent: reg-us-east-1, props: {cidr: 10.140.0.0/16}}
+- {id: az-dms-target-a, type: aws.availability_zone, name: a, parent: vpc-dms-target, props: {zone: a}}
+- {id: sub-dms-private-a, type: aws.subnet, name: dms-private-a, parent: az-dms-target-a, props: {cidr: 10.140.1.0/24, az: a, public: false}}
+- {id: sub-dms-db-a, type: aws.subnet, name: dms-db-a, parent: az-dms-target-a, props: {cidr: 10.140.10.0/24, az: a, public: false}}
+- {id: az-dms-target-b, type: aws.availability_zone, name: b, parent: vpc-dms-target, props: {zone: b}}
+- {id: sub-dms-db-b, type: aws.subnet, name: dms-db-b, parent: az-dms-target-b, props: {cidr: 10.140.11.0/24, az: b, public: false}}
+- {id: database, type: common.database, name: database}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: dms-dc-router, type: aws.res.aws_customer_gateway, name: dms-dc-router, parent: sub-reg-us-east-1-a, props: {type: changeme}}
+- {id: oracle-pg-repl, type: aws.res.aws_dms_replication_instance, name: oracle-pg-repl, parent: sub-dms-private-a, props: {replication_instance_class: changeme, replication_instance_id: changeme}}
+- {id: oracle-source, type: aws.res.aws_dms_endpoint, name: oracle-source, parent: reg-us-east-1, props: {endpoint_id: changeme, endpoint_type: changeme, engine_name: changeme}}
+- {id: aurora-pg-target, type: aws.res.aws_dms_endpoint, name: aurora-pg-target, parent: reg-us-east-1, props: {endpoint_id: changeme, endpoint_type: changeme, engine_name: changeme}}
+- {id: full-load-cdc, type: aws.res.aws_dms_replication_task, name: full-load-cdc, parent: reg-us-east-1, props: {migration_type: changeme, replication_instance_arn: changeme, replication_task_id: changeme,
+    source_endpoint_arn: changeme, table_mappings: changeme, target_endpoint_arn: changeme}}
+- {id: aurora-pg, type: aws.res.aws_rds_cluster, name: aurora-pg, parent: sub-dms-db-a, props: {engine: changeme}}
+- {id: aurora-pg-writer, type: aws.res.aws_rds_cluster_instance, name: aurora-pg-writer, parent: aurora-pg, props: {cluster_identifier: changeme, engine: changeme, instance_class: changeme}}
+- {id: aurora-pg-reader, type: aws.res.aws_rds_cluster_instance, name: aurora-pg-reader, parent: aurora-pg, props: {cluster_identifier: changeme, engine: changeme, instance_class: changeme}}
+- {id: db-credentials, type: aws.res.aws_secretsmanager_secret, name: db-credentials, parent: reg-us-east-1}
+- {id: sct-assessment-reports, type: aws.s3_bucket, name: sct-assessment-reports, parent: reg-us-east-1}
+- {id: app-server-pg, type: aws.ec2_instance, name: app-server-pg, parent: sub-dms-private-a}
+edges:
+- {from: dms-dc-router, to: vpc-dms-target, label: Site-to-Site VPN}
+- {from: database, to: sct-assessment-reports, label: SCT assessment report, step: '1'}
+- {from: database, to: aurora-pg, label: converted schema applied by SCT, step: '2'}
+- {from: oracle-source, to: database, label: Oracle source endpoint (LogMiner / Binary Reader)}
+- {from: aurora-pg-target, to: aurora-pg, label: PostgreSQL target endpoint}
+- {from: db-credentials, to: oracle-source, label: credentials}
+- {from: db-credentials, to: aurora-pg-target}
+- {from: full-load-cdc, to: oracle-pg-repl, label: task runs on replication instance, step: '3'}
+- {from: oracle-pg-repl, to: oracle-source, label: full load then CDC reads, step: '4'}
+- {from: oracle-pg-repl, to: aurora-pg-target, label: apply changes, step: '5'}
+- {from: aurora-pg, to: aurora-pg-writer, label: writer}
+- {from: aurora-pg, to: aurora-pg-reader, label: reader}
+- {from: app-server-pg, to: aurora-pg-writer, label: repointed application after validation, step: '6'}
+steps:
+- {n: '1', text: 'database → sct-assessment-reports: SCT assessment report'}
+- {n: '2', text: 'database → aurora-pg: converted schema applied by SCT'}
+- {n: '3', text: 'full-load-cdc → oracle-pg-repl: task runs on replication instance'}
+- {n: '4', text: 'oracle-pg-repl → oracle-source: full load then CDC reads'}
+- {n: '5', text: 'oracle-pg-repl → aurora-pg-target: apply changes'}
+- {n: '6', text: 'app-server-pg → aurora-pg-writer: repointed application after validation'}

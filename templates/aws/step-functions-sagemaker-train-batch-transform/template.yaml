@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.aws.amazon.com/step-functions/latest/dg/sample-train-model.html); edit freely.
+title: Step Functions orchestrating SageMaker training and batch transform
+category: ml
+tags:
+- step functions
+- sagemaker training job
+- batch transform
+- batch inference
+- orchestration
+source: https://docs.aws.amazon.com/step-functions/latest/dg/sample-train-model.html
+description: A Step Functions state machine first calls a Lambda function that seeds an S3 bucket with the training and test datasets. It then uses the optimized SageMaker integration to run a training
+  job, create a model from the resulting artifact and run a batch transform job that writes predictions back to S3, with a notification when the workflow ends.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: user, type: common.user, name: user}
+- {id: train-and-transform, type: aws.res.aws_sfn_state_machine, name: train-and-transform, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: seed-data-fn, type: aws.lambda_function, name: seed-data-fn, parent: reg-us-east-1}
+- {id: training-data, type: aws.s3_bucket, name: training-data, parent: reg-us-east-1}
+- {id: xgboost-model, type: aws.res.aws_sagemaker_model, name: xgboost-model, parent: reg-us-east-1, props: {execution_role_arn: changeme}}
+- {id: transform-output, type: aws.s3_bucket, name: transform-output, parent: reg-us-east-1}
+- {id: weekly-schedule, type: aws.res.aws_cloudwatch_event_rule, name: weekly-schedule, parent: reg-us-east-1}
+- {id: workflow-complete, type: aws.res.aws_sns_topic, name: workflow-complete, parent: reg-us-east-1}
+edges:
+- {from: weekly-schedule, to: train-and-transform, link: aws_cloudwatch_event_target}
+- {from: user, to: train-and-transform, label: StartExecution}
+- {from: train-and-transform, to: seed-data-fn, label: Generate dataset task, step: '1'}
+- {from: seed-data-fn, to: training-data, label: upload train and test CSV, step: '2'}
+- {from: training-data, to: train-and-transform, label: 'sagemaker:createTrainingJob.sync', step: '3'}
+- {from: train-and-transform, to: xgboost-model, label: 'sagemaker:createModel', step: '4'}
+- {from: xgboost-model, to: transform-output, label: 'sagemaker:createTransformJob.sync', step: '5'}
+- {from: train-and-transform, to: workflow-complete, label: Publish result, step: '6'}
+steps:
+- {n: '1', text: 'train-and-transform → seed-data-fn: Generate dataset task'}
+- {n: '2', text: 'seed-data-fn → training-data: upload train and test CSV'}
+- {n: '3', text: 'training-data → train-and-transform: sagemaker:createTrainingJob.sync'}
+- {n: '4', text: 'train-and-transform → xgboost-model: sagemaker:createModel'}
+- {n: '5', text: 'xgboost-model → transform-output: sagemaker:createTransformJob.sync'}
+- {n: '6', text: 'train-and-transform → workflow-complete: Publish result'}

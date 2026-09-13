@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.cloud.google.com/armor/docs/cloud-armor-overview); edit freely.
+title: Cloud Armor with global external Application Load Balancer
+category: security
+tags:
+- cloud armor
+- waf
+- ddos
+- global external application load balancer
+- anycast
+- cloud cdn
+source: https://docs.cloud.google.com/armor/docs/cloud-armor-overview
+description: A global external Application Load Balancer with a single anycast IP fronts backend services in multiple regions; a Cloud Armor security policy attached to each backend service filters traffic
+  at Google's edge with preconfigured WAF rules, rate limiting and adaptive protection. Layer 3 and 4 volumetric attacks are absorbed by the load balancing infrastructure before reaching backends.
+nodes:
+- {id: prj-web-frontend, type: gcp.project, name: web-frontend, props: {project_id: web-frontend-123456, project: changeme, region: us-central1}}
+- {id: vpc-web-vpc, type: gcp.vpc, name: web-vpc, parent: prj-web-frontend, props: {cidr: 10.130.0.0/16}}
+- {id: sub-web-usc1, type: gcp.subnetwork, name: web-usc1, parent: vpc-web-vpc, props: {cidr: 10.130.0.0/24, region: us-central1}}
+- {id: sub-web-ew1, type: gcp.subnetwork, name: web-ew1, parent: vpc-web-vpc, props: {cidr: 10.130.1.0/24, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: global-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: global-https-rule, parent: prj-web-frontend, props: {name: changeme, target: changeme}}
+- {id: anycast-ip, type: gcp.res.google_compute_address, name: anycast-ip, parent: prj-web-frontend, props: {name: changeme}}
+- {id: edge-waf-policy, type: gcp.res.google_compute_security_policy, name: edge-waf-policy, parent: prj-web-frontend, props: {name: changeme}}
+- {id: web-backend, type: gcp.res.google_compute_backend_service, name: web-backend, parent: prj-web-frontend, props: {name: changeme}}
+- {id: web-usc1-vm, type: gcp.compute_instance, name: web-usc1-vm, parent: sub-web-usc1}
+- {id: web-ew1-vm, type: gcp.compute_instance, name: web-ew1-vm, parent: sub-web-ew1}
+- {id: allow-glb-health-checks, type: gcp.firewall_rule, name: allow-glb-health-checks, parent: vpc-web-vpc}
+edges:
+- {from: users, to: global-https-rule, label: HTTPS to anycast IP, step: '1'}
+- {from: internet, to: global-https-rule, label: attack traffic, step: '1'}
+- {from: global-https-rule, to: edge-waf-policy, label: evaluate WAF and rate-limit rules at edge, step: '2'}
+- {from: edge-waf-policy, to: web-backend, label: allowed requests, step: '3'}
+- {from: web-backend, to: web-usc1-vm, label: nearest healthy region, step: '4'}
+- {from: web-backend, to: web-ew1-vm, label: failover region, step: '4'}
+steps:
+- {n: '1', text: 'users → global-https-rule: HTTPS to anycast IP'}
+- {n: '2', text: 'global-https-rule → edge-waf-policy: evaluate WAF and rate-limit rules at edge'}
+- {n: '3', text: 'edge-waf-policy → web-backend: allowed requests'}
+- {n: '4', text: 'web-backend → web-usc1-vm: nearest healthy region'}

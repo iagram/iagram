@@ -1,0 +1,56 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/build-a-data-pipeline-to-automatically-discover-and-mask-pii-data-with-aws-glue-databrew/); edit freely.
+title: Discover and mask PII with Glue DataBrew orchestrated by Step Functions
+category: data
+tags:
+- glue databrew
+- pii
+- step functions
+- eventbridge
+- lambda
+- s3
+source: https://aws.amazon.com/blogs/big-data/build-a-data-pipeline-to-automatically-discover-and-mask-pii-data-with-aws-glue-databrew/
+description: An object landing in the raw bucket sends an S3 event to EventBridge, which starts a Step Functions state machine; the workflow runs a DataBrew profile job to detect PII columns, a Lambda builds
+  a recipe of masking transformations, and a DataBrew recipe job writes the masked output. Results land in a curated bucket and the workflow notifies operators through SNS.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-raw-zone, type: common.group, name: raw zone, parent: reg-us-east-1}
+- {id: grp-curated-zone, type: common.group, name: curated zone, parent: reg-us-east-1}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: raw-uploads, type: aws.s3_bucket, name: raw-uploads, parent: grp-raw-zone}
+- {id: object-created, type: aws.res.aws_cloudwatch_event_rule, name: object-created, parent: reg-us-east-1}
+- {id: pii-workflow, type: aws.res.aws_sfn_state_machine, name: pii-workflow, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- id: databrew-profile-job
+  type: aws.res.aws_glue_job
+  name: databrew-profile-job
+  parent: reg-us-east-1
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: build-mask-recipe, type: aws.lambda_function, name: build-mask-recipe, parent: reg-us-east-1}
+- id: databrew-recipe-job
+  type: aws.res.aws_glue_job
+  name: databrew-recipe-job
+  parent: reg-us-east-1
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: masked-output, type: aws.s3_bucket, name: masked-output, parent: grp-curated-zone}
+- {id: pipeline-status, type: aws.res.aws_sns_topic, name: pipeline-status, parent: reg-us-east-1}
+edges:
+- {from: user, to: raw-uploads, label: upload dataset, step: '1'}
+- {from: raw-uploads, to: object-created, label: S3 event notification, step: '2'}
+- {from: object-created, to: pii-workflow, link: aws_cloudwatch_event_target}
+- {from: pii-workflow, to: databrew-profile-job, label: profile job with PII detection, step: '3'}
+- {from: databrew-profile-job, to: raw-uploads, label: read sample, step: '3'}
+- {from: pii-workflow, to: build-mask-recipe, label: profile results, step: '4'}
+- {from: build-mask-recipe, to: databrew-recipe-job, label: 'create recipe (hash, redact)', step: '4'}
+- {from: pii-workflow, to: databrew-recipe-job, label: run recipe job, step: '5'}
+- {from: databrew-recipe-job, to: masked-output, label: masked Parquet, step: '6'}
+- {from: pii-workflow, to: pipeline-status, label: success or failure, step: '7'}
+- {from: pipeline-status, to: users, label: email}
+steps:
+- {n: '1', text: 'user → raw-uploads: upload dataset'}
+- {n: '2', text: 'raw-uploads → object-created: S3 event notification'}
+- {n: '3', text: 'pii-workflow → databrew-profile-job: profile job with PII detection'}
+- {n: '4', text: 'pii-workflow → build-mask-recipe: profile results'}
+- {n: '5', text: 'pii-workflow → databrew-recipe-job: run recipe job'}
+- {n: '6', text: 'databrew-recipe-job → masked-output: masked Parquet'}
+- {n: '7', text: 'pii-workflow → pipeline-status: success or failure'}

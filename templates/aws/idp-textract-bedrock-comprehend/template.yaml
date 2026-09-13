@@ -1,0 +1,54 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/machine-learning/intelligent-document-processing-with-amazon-textract-amazon-bedrock-and-langchain/); edit freely.
+title: Intelligent document processing with Textract, Comprehend and Bedrock
+category: ml
+tags:
+- intelligent document processing
+- textract
+- comprehend
+- bedrock
+- step functions
+- sqs
+source: https://aws.amazon.com/blogs/machine-learning/intelligent-document-processing-with-amazon-textract-amazon-bedrock-and-langchain/
+description: Documents uploaded to S3 start a Step Functions workflow that submits asynchronous Textract analysis jobs; completion notifications reach SQS through SNS and a Lambda collects the extracted
+  text. A classification step routes each document through a Comprehend custom classifier or a Bedrock model, and a Bedrock extraction step returns structured fields that are stored in DynamoDB and S3.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: inbound-documents, type: aws.s3_bucket, name: inbound-documents, parent: reg-us-east-1}
+- {id: idp-workflow, type: aws.res.aws_sfn_state_machine, name: idp-workflow, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: start-textract-fn, type: aws.lambda_function, name: start-textract-fn, parent: reg-us-east-1}
+- {id: textract-job-status, type: aws.res.aws_sns_topic, name: textract-job-status, parent: reg-us-east-1}
+- {id: textract-results, type: aws.sqs_queue, name: textract-results, parent: reg-us-east-1}
+- {id: collect-text-fn, type: aws.lambda_function, name: collect-text-fn, parent: reg-us-east-1}
+- id: doc-type-classifier
+  type: aws.res.aws_comprehend_document_classifier
+  name: doc-type-classifier
+  parent: reg-us-east-1
+  props: {data_access_role_arn: changeme, input_data_config: {}, language_code: changeme, name: changeme}
+- {id: classify-fn, type: aws.lambda_function, name: classify-fn, parent: reg-us-east-1}
+- {id: extract-fields-fn, type: aws.lambda_function, name: extract-fields-fn, parent: reg-us-east-1}
+- {id: extracted-fields, type: aws.dynamodb_table, name: extracted-fields, parent: reg-us-east-1}
+- {id: processed-documents, type: aws.s3_bucket, name: processed-documents, parent: reg-us-east-1}
+edges:
+- {from: users, to: inbound-documents, label: upload PDF, step: '1'}
+- {from: inbound-documents, to: idp-workflow, label: S3 event via EventBridge, step: '2'}
+- {from: idp-workflow, to: start-textract-fn, step: '3'}
+- {from: start-textract-fn, to: textract-job-status, label: StartDocumentAnalysis with NotificationChannel, step: '4'}
+- {from: textract-job-status, to: textract-results, link: aws_sns_topic_subscription}
+- {from: textract-results, to: collect-text-fn, link: aws_lambda_event_source_mapping}
+- {from: collect-text-fn, to: idp-workflow, label: SendTaskSuccess with text, step: '5'}
+- {from: idp-workflow, to: classify-fn, step: '6'}
+- {from: classify-fn, to: doc-type-classifier, label: ClassifyDocument}
+- {from: idp-workflow, to: extract-fields-fn, label: Bedrock extraction prompt, step: '7'}
+- {from: extract-fields-fn, to: extracted-fields, label: structured JSON, step: '8'}
+- {from: extract-fields-fn, to: processed-documents, label: outputs}
+steps:
+- {n: '1', text: 'users → inbound-documents: upload PDF'}
+- {n: '2', text: 'inbound-documents → idp-workflow: S3 event via EventBridge'}
+- {n: '3', text: idp-workflow → start-textract-fn}
+- {n: '4', text: 'start-textract-fn → textract-job-status: StartDocumentAnalysis with NotificationChannel'}
+- {n: '5', text: 'collect-text-fn → idp-workflow: SendTaskSuccess with text'}
+- {n: '6', text: idp-workflow → classify-fn}
+- {n: '7', text: 'idp-workflow → extract-fields-fn: Bedrock extraction prompt'}
+- {n: '8', text: 'extract-fields-fn → extracted-fields: structured JSON'}

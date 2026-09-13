@@ -1,0 +1,51 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/build-a-modern-data-architecture-and-data-mesh-pattern-at-scale-using-aws-lake-formation-tag-based-access-control/); edit freely.
+title: Data mesh with Lake Formation tag-based access control
+category: data
+tags:
+- data mesh
+- lake formation
+- lf-tags
+- cross-account
+- ram
+- athena
+source: https://aws.amazon.com/blogs/big-data/build-a-modern-data-architecture-and-data-mesh-pattern-at-scale-using-aws-lake-formation-tag-based-access-control/
+description: A producer account stores domain data in S3 and crawls it with Glue, a central governance account owns the Lake Formation catalog, LF-tag ontology and cross-account shares through AWS RAM,
+  and a consumer account queries through resource links with Athena. Permissions are granted on tags such as line of business and classification rather than on individual tables, so producers keep ownership
+  while governance stays central.
+nodes:
+- {id: acct-producer, type: aws.account, name: producer}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-producer, props: {region: us-east-1}}
+- {id: acct-governance, type: aws.account, name: governance}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-governance, props: {region: us-east-1}}
+- {id: acct-consumer, type: aws.account, name: consumer}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-consumer, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: retail-raw, type: aws.s3_bucket, name: retail-raw, parent: reg-us-east-1}
+- {id: cards-raw, type: aws.s3_bucket, name: cards-raw, parent: reg-us-east-1}
+- {id: producer-crawler, type: aws.res.aws_glue_crawler, name: producer-crawler, parent: acct-producer, props: {database_name: changeme, name: changeme, role: changeme}}
+- {id: producer-resource-link, type: aws.res.aws_glue_catalog_database, name: producer-resource-link, parent: acct-producer, props: {name: changeme}}
+- {id: central-lake-location, type: aws.res.aws_lakeformation_resource, name: central-lake-location, parent: acct-governance, props: {arn: changeme}}
+- {id: central-catalog, type: aws.res.aws_glue_catalog_database, name: central-catalog, parent: acct-governance, props: {name: changeme}}
+- {id: lf-admin-settings, type: aws.res.aws_lakeformation_data_lake_settings, name: lf-admin-settings, parent: acct-governance}
+- {id: catalog-share, type: aws.res.aws_ram_resource_share, name: catalog-share, parent: acct-governance, props: {name: changeme}}
+- {id: consumer-resource-link, type: aws.res.aws_glue_catalog_database, name: consumer-resource-link, parent: acct-consumer, props: {name: changeme}}
+- {id: analyst-workgroup, type: aws.res.aws_athena_workgroup, name: analyst-workgroup, parent: acct-consumer, props: {name: changeme}}
+edges:
+- {from: producer-crawler, to: retail-raw, label: crawl, step: '1'}
+- {from: producer-crawler, to: cards-raw, label: crawl, step: '1'}
+- {from: producer-crawler, to: producer-resource-link, label: tables via resource link, step: '2'}
+- {from: producer-resource-link, to: central-catalog, label: points to shared database, step: '2'}
+- {from: central-lake-location, to: retail-raw, label: registered S3 location, step: '3'}
+- {from: lf-admin-settings, to: central-catalog, label: 'LF-tags: LOB, Classification', step: '4'}
+- {from: catalog-share, to: consumer-resource-link, label: RAM share of tagged tables, step: '5'}
+- {from: consumer-resource-link, to: central-catalog, label: resource link, step: '5'}
+- {from: analyst-workgroup, to: consumer-resource-link, label: Athena SQL, step: '6'}
+- {from: users, to: analyst-workgroup, label: analysts, step: '7'}
+steps:
+- {n: '1', text: 'producer-crawler → retail-raw: crawl'}
+- {n: '2', text: 'producer-crawler → producer-resource-link: tables via resource link'}
+- {n: '3', text: 'central-lake-location → retail-raw: registered S3 location'}
+- {n: '4', text: 'lf-admin-settings → central-catalog: LF-tags: LOB, Classification'}
+- {n: '5', text: 'catalog-share → consumer-resource-link: RAM share of tagged tables'}
+- {n: '6', text: 'analyst-workgroup → consumer-resource-link: Athena SQL'}
+- {n: '7', text: 'users → analyst-workgroup: analysts'}

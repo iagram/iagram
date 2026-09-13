@@ -1,0 +1,45 @@
+# Generated from the official reference (https://docs.aws.amazon.com/personalize/latest/dg/how-it-works.html); edit freely.
+title: Real-time recommendations with Amazon Personalize
+category: ml
+tags:
+- personalize
+- recommendations
+- event tracker
+- kinesis
+- api gateway
+source: https://docs.aws.amazon.com/personalize/latest/dg/how-it-works.html
+description: Historical interactions, items and users are exported to S3 and imported into a Personalize dataset group where a solution version is trained and deployed as a campaign. Clickstream events
+  flow through Kinesis to a Lambda that calls PutEvents on the event tracker, and an API Gateway backed Lambda calls GetRecommendations and enriches results with item metadata from DynamoDB.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: users, type: common.users, name: users}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: interactions-export, type: aws.s3_bucket, name: interactions-export, parent: reg-us-east-1}
+- {id: personalize-training, type: aws.res.aws_sfn_state_machine, name: personalize-training, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: weekly-retrain, type: aws.res.aws_cloudwatch_event_rule, name: weekly-retrain, parent: reg-us-east-1}
+- {id: clickstream, type: aws.res.aws_kinesis_stream, name: clickstream, parent: reg-us-east-1, props: {name: changeme}}
+- {id: put-events-fn, type: aws.lambda_function, name: put-events-fn, parent: reg-us-east-1}
+- {id: recommendations-api, type: aws.res.aws_api_gateway_rest_api, name: recommendations-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: get-recommendations-fn, type: aws.lambda_function, name: get-recommendations-fn, parent: reg-us-east-1}
+- {id: item-catalog, type: aws.dynamodb_table, name: item-catalog, parent: reg-us-east-1}
+edges:
+- {from: weekly-retrain, to: personalize-training, link: aws_cloudwatch_event_target}
+- {from: interactions-export, to: personalize-training, label: CreateDatasetImportJob from S3, step: '1'}
+- {from: personalize-training, to: personalize-training, label: CreateSolutionVersion then UpdateCampaign, step: '2'}
+- {from: mobile, to: clickstream, label: view and purchase events, step: '3'}
+- {from: clickstream, to: put-events-fn, link: aws_lambda_event_source_mapping}
+- {from: put-events-fn, to: personalize-training, label: PutEvents to event tracker, step: '4'}
+- {from: users, to: recommendations-api, label: GET /recommendations, step: '5'}
+- {from: recommendations-api, to: get-recommendations-fn, step: '6'}
+- {from: get-recommendations-fn, to: personalize-training, label: GetRecommendations from campaign, step: '7'}
+- {from: get-recommendations-fn, to: item-catalog, label: BatchGetItem metadata, step: '8'}
+steps:
+- {n: '1', text: 'interactions-export → personalize-training: CreateDatasetImportJob from S3'}
+- {n: '2', text: 'personalize-training → personalize-training: CreateSolutionVersion then UpdateCampaign'}
+- {n: '3', text: 'mobile → clickstream: view and purchase events'}
+- {n: '4', text: 'put-events-fn → personalize-training: PutEvents to event tracker'}
+- {n: '5', text: 'users → recommendations-api: GET /recommendations'}
+- {n: '6', text: recommendations-api → get-recommendations-fn}
+- {n: '7', text: 'get-recommendations-fn → personalize-training: GetRecommendations from campaign'}
+- {n: '8', text: 'get-recommendations-fn → item-catalog: BatchGetItem metadata'}

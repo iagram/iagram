@@ -1,0 +1,69 @@
+# Generated from the official reference (https://docs.aws.amazon.com/whitepapers/latest/migrating-magento-open-source-adobe-commerce-to-aws/reference-architecture.html); edit freely.
+title: Magento Open Source and Adobe Commerce on AWS
+category: web
+tags:
+- magento
+- adobe commerce
+- e-commerce
+- opensearch
+- elasticache
+- efs
+- aurora
+source: https://docs.aws.amazon.com/whitepapers/latest/migrating-magento-open-source-adobe-commerce-to-aws/reference-architecture.html
+description: Magento web and admin nodes run in Auto Scaling groups behind an Application Load Balancer, sharing media and var directories through EFS and caching sessions and full pages in ElastiCache
+  for Redis. Catalog search runs on an OpenSearch domain, the store database on Aurora MySQL, and CloudFront with AWS WAF delivers the storefront and shields it from bots.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: vpc-magento, type: aws.vpc, name: magento, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-magento-a, type: aws.availability_zone, name: a, parent: vpc-magento, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-magento-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-magento-b, type: aws.availability_zone, name: b, parent: vpc-magento, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-magento-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-magento-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-magento-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-magento-a, props: {cidr: 10.0.20.0/24, az: a, public: false}}
+- {id: sub-data-b, type: aws.subnet, name: data-b, parent: az-magento-b, props: {cidr: 10.0.21.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: store-cdn, type: aws.cloudfront_distribution, name: store-cdn, parent: grp-global-edge}
+- id: store-waf
+  type: aws.res.aws_wafv2_web_acl
+  name: store-waf
+  parent: grp-global-edge
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+- {id: store-media, type: aws.s3_bucket, name: store-media, parent: reg-us-east-1}
+- {id: magento-igw, type: aws.res.aws_internet_gateway, name: magento-igw, parent: vpc-magento}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: store-alb, type: aws.alb, name: store-alb, parent: vpc-magento}
+- {id: web-asg, type: aws.res.aws_autoscaling_group, name: web-asg, parent: vpc-magento, props: {max_size: 1, min_size: 1}}
+- {id: web-a, type: aws.ec2_instance, name: web-a, parent: sub-app-a}
+- {id: web-b, type: aws.ec2_instance, name: web-b, parent: sub-app-b}
+- {id: admin-cron, type: aws.ec2_instance, name: admin-cron, parent: sub-app-a}
+- {id: magento-shared, type: aws.res.aws_efs_file_system, name: magento-shared, parent: vpc-magento}
+- {id: redis-cache, type: aws.res.aws_elasticache_replication_group, name: redis-cache, parent: sub-data-a, props: {description: changeme, replication_group_id: changeme}}
+- {id: catalog-search, type: aws.res.aws_opensearch_domain, name: catalog-search, parent: sub-data-b, props: {domain_name: changeme}}
+- {id: store-aurora, type: aws.res.aws_rds_cluster, name: store-aurora, parent: sub-data-b, props: {engine: changeme}}
+edges:
+- {from: users, to: store-cdn, label: HTTPS, step: '1'}
+- {from: store-waf, to: store-cdn, label: bot control and managed rules}
+- {from: store-cdn, to: store-media, label: static media origin}
+- {from: store-cdn, to: store-alb, label: storefront origin, step: '2'}
+- {from: store-alb, to: web-a, step: '3'}
+- {from: store-alb, to: web-b}
+- {from: web-asg, to: web-a, label: scales}
+- {from: web-a, to: magento-shared, label: pub/media and var over NFS}
+- {from: admin-cron, to: magento-shared, label: NFS}
+- {from: web-a, to: redis-cache, label: sessions and full page cache, step: '4'}
+- {from: web-a, to: catalog-search, label: product search, step: '5'}
+- {from: web-a, to: store-aurora, label: MySQL, step: '6'}
+- {from: admin-cron, to: store-aurora, label: indexers and cron}
+- {from: web-a, to: nat-a}
+- {from: nat-a, to: magento-igw}
+steps:
+- {n: '1', text: 'users → store-cdn: HTTPS'}
+- {n: '2', text: 'store-cdn → store-alb: storefront origin'}
+- {n: '3', text: store-alb → web-a}
+- {n: '4', text: 'web-a → redis-cache: sessions and full page cache'}
+- {n: '5', text: 'web-a → catalog-search: product search'}
+- {n: '6', text: 'web-a → store-aurora: MySQL'}

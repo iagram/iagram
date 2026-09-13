@@ -1,0 +1,56 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/create-an-apache-hudi-based-near-real-time-transactional-data-lake-using-aws-dms-amazon-kinesis-aws-glue-streaming-etl-and-data-visualization-using-amazon-quicksight); edit freely.
+title: Near real-time transactional lake with DMS, Kinesis, Glue streaming and Hudi
+category: data
+tags:
+- cdc
+- dms
+- kinesis
+- glue streaming
+- apache hudi
+- athena
+- quicksight
+source: https://aws.amazon.com/blogs/big-data/create-an-apache-hudi-based-near-real-time-transactional-data-lake-using-aws-dms-amazon-kinesis-aws-glue-streaming-etl-and-data-visualization-using-amazon-quicksight
+description: DMS captures changes from an RDS database and publishes them to a Kinesis data stream, where a Glue streaming job consumes them continuously and upserts into Apache Hudi tables on S3. The Hudi
+  tables are registered in the Glue Data Catalog so Athena queries and QuickSight dashboards reflect inserts and updates within minutes.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-source, type: aws.vpc, name: source, parent: reg-us-east-1, props: {cidr: 10.120.0.0/16}}
+- {id: az-source-a, type: aws.availability_zone, name: a, parent: vpc-source, props: {zone: a}}
+- {id: sub-src-private-a, type: aws.subnet, name: src-private-a, parent: az-source-a, props: {cidr: 10.120.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: source-rds, type: aws.rds_instance, name: source-rds, parent: sub-src-private-a}
+- {id: cdc-dms, type: aws.res.aws_dms_replication_instance, name: cdc-dms, parent: sub-src-private-a, props: {replication_instance_class: changeme, replication_instance_id: changeme}}
+- {id: cdc-stream, type: aws.res.aws_kinesis_stream, name: cdc-stream, parent: reg-us-east-1, props: {name: changeme}}
+- id: hudi-streaming-job
+  type: aws.res.aws_glue_job
+  name: hudi-streaming-job
+  parent: reg-us-east-1
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: hudi-lake, type: aws.s3_bucket, name: hudi-lake, parent: reg-us-east-1}
+- {id: hudi-db, type: aws.res.aws_glue_catalog_database, name: hudi-db, parent: reg-us-east-1, props: {name: changeme}}
+- {id: hudi-athena, type: aws.res.aws_athena_workgroup, name: hudi-athena, parent: reg-us-east-1, props: {name: changeme}}
+- id: hudi-dashboards
+  type: aws.res.aws_quicksight_data_source
+  name: hudi-dashboards
+  parent: reg-us-east-1
+  props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+- {id: az-vpc-source-b, type: aws.availability_zone, name: b, parent: vpc-source, props: {zone: b}}
+- {id: sub-vpc-source-b, type: aws.subnet, name: private-b, parent: az-vpc-source-b, props: {cidr: 10.120.251.0/24, az: b, public: false}}
+edges:
+- {from: source-rds, to: cdc-dms, label: transaction log CDC, step: '1'}
+- {from: cdc-dms, to: cdc-stream, label: change records, step: '2'}
+- {from: cdc-stream, to: hudi-streaming-job, label: Glue streaming consumer, step: '3'}
+- {from: hudi-streaming-job, to: hudi-lake, label: Hudi upserts, step: '4'}
+- {from: hudi-streaming-job, to: hudi-db, label: register Hudi tables, step: '4'}
+- {from: hudi-athena, to: hudi-db, label: SQL, step: '5'}
+- {from: hudi-dashboards, to: hudi-athena, step: '6'}
+- {from: users, to: hudi-dashboards, step: '7'}
+steps:
+- {n: '1', text: 'source-rds → cdc-dms: transaction log CDC'}
+- {n: '2', text: 'cdc-dms → cdc-stream: change records'}
+- {n: '3', text: 'cdc-stream → hudi-streaming-job: Glue streaming consumer'}
+- {n: '4', text: 'hudi-streaming-job → hudi-lake: Hudi upserts'}
+- {n: '5', text: 'hudi-athena → hudi-db: SQL'}
+- {n: '6', text: hudi-dashboards → hudi-athena}
+- {n: '7', text: users → hudi-dashboards}

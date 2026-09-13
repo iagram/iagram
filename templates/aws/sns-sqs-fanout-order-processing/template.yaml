@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.aws.amazon.com/sns/latest/dg/sns-sqs-as-subscriber.html); edit freely.
+title: SNS to SQS fan-out with parallel Lambda consumers
+category: serverless
+tags:
+- sns
+- sqs
+- fan-out
+- lambda
+- decoupling
+source: https://docs.aws.amazon.com/sns/latest/dg/sns-sqs-as-subscriber.html
+description: A producer publishes one order event to an SNS topic; three SQS queues subscribed to the topic each receive a copy, so inventory, shipping and analytics consumers process independently and
+  at their own pace. Each queue has a dead-letter queue and a Lambda function attached through an event source mapping.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: client, type: common.client, name: client}
+- {id: order-api-handler, type: aws.lambda_function, name: order-api-handler, parent: reg-eu-west-1}
+- {id: order-events, type: aws.res.aws_sns_topic, name: order-events, parent: reg-eu-west-1}
+- {id: inventory-queue, type: aws.sqs_queue, name: inventory-queue, parent: reg-eu-west-1}
+- {id: shipping-queue, type: aws.sqs_queue, name: shipping-queue, parent: reg-eu-west-1}
+- {id: analytics-queue, type: aws.sqs_queue, name: analytics-queue, parent: reg-eu-west-1}
+- {id: fanout-dlq, type: aws.sqs_queue, name: fanout-dlq, parent: reg-eu-west-1}
+- {id: inventory-consumer, type: aws.lambda_function, name: inventory-consumer, parent: reg-eu-west-1}
+- {id: shipping-consumer, type: aws.lambda_function, name: shipping-consumer, parent: reg-eu-west-1}
+- {id: analytics-consumer, type: aws.lambda_function, name: analytics-consumer, parent: reg-eu-west-1}
+edges:
+- {from: client, to: order-api-handler, label: place order, step: '1'}
+- {from: order-api-handler, to: order-events, label: Publish, step: '2'}
+- {from: order-events, to: inventory-queue, link: aws_sns_topic_subscription}
+- {from: order-events, to: shipping-queue, link: aws_sns_topic_subscription}
+- {from: order-events, to: analytics-queue, link: aws_sns_topic_subscription}
+- {from: inventory-queue, to: inventory-consumer, link: aws_lambda_event_source_mapping}
+- {from: shipping-queue, to: shipping-consumer, link: aws_lambda_event_source_mapping}
+- {from: analytics-queue, to: analytics-consumer, link: aws_lambda_event_source_mapping}
+- {from: inventory-queue, to: fanout-dlq, label: redrive after maxReceiveCount}
+- {from: shipping-queue, to: fanout-dlq, label: redrive after maxReceiveCount}
+steps:
+- {n: '1', text: 'client → order-api-handler: place order'}
+- {n: '2', text: 'order-api-handler → order-events: Publish'}

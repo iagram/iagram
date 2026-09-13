@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.cloud.google.com/bigquery/docs/geospatial-intro); edit freely.
+title: Geospatial analytics with BigQuery GEOGRAPHY and streaming locations
+category: analytics-bi
+tags:
+- geospatial
+- bigquery gis
+- geography
+- pub/sub
+- dataflow
+- looker
+source: https://docs.cloud.google.com/bigquery/docs/geospatial-intro
+description: Vehicle and customer location events stream through Pub/Sub and Dataflow into BigQuery tables with GEOGRAPHY columns, while static boundaries and store locations are loaded from GeoJSON and
+  shapefiles in Cloud Storage. Geography functions such as ST_DWITHIN and ST_CONTAINS join the streams against polygons, and Looker and BigQuery Geo Viz render the results on maps.
+nodes:
+- {id: prj-geo-analytics, type: gcp.project, name: geo-analytics, props: {project_id: geo-analytics-123456, project: changeme, region: us-central1}}
+- {id: grp-ingest, type: common.group, name: ingest, parent: prj-geo-analytics}
+- {id: grp-geospatial-warehouse, type: common.group, name: geospatial warehouse, parent: prj-geo-analytics}
+- {id: grp-visualize, type: common.group, name: visualize, parent: prj-geo-analytics}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: vehicle-locations-topic, type: gcp.pubsub_topic, name: vehicle-locations-topic, parent: grp-ingest}
+- {id: locations-to-bq-job, type: gcp.res.google_dataflow_job, name: locations-to-bq-job, parent: grp-ingest, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}}
+- {id: geojson-boundaries-bucket, type: gcp.storage_bucket, name: geojson-boundaries-bucket, parent: grp-ingest}
+- {id: geo-dataset, type: gcp.bigquery_dataset, name: geo-dataset, parent: grp-geospatial-warehouse}
+- id: zone-metrics-scheduled-query
+  type: gcp.res.google_bigquery_data_transfer_config
+  name: zone-metrics-scheduled-query
+  parent: grp-geospatial-warehouse
+  props: {data_source_id: changeme, display_name: changeme, params: {}}
+- id: geo-looker
+  type: gcp.res.google_looker_instance
+  name: geo-looker
+  parent: grp-visualize
+  props: {name: changeme, oauth_config: {}}
+edges:
+- {from: device, to: vehicle-locations-topic, label: GPS events, step: '1'}
+- {from: vehicle-locations-topic, to: locations-to-bq-job, label: stream, step: '2'}
+- {from: zone-metrics-scheduled-query, to: geo-dataset, label: ST_CONTAINS and ST_DWITHIN joins, step: '6'}
+- {from: geo-looker, to: geo-dataset, label: map visualizations, step: '7'}
+- {from: users, to: geo-looker, label: explore maps, step: '8'}
+steps:
+- {n: '1', text: 'device → vehicle-locations-topic: GPS events'}
+- {n: '2', text: 'vehicle-locations-topic → locations-to-bq-job: stream'}
+- {n: '6', text: 'zone-metrics-scheduled-query → geo-dataset: ST_CONTAINS and ST_DWITHIN joins'}
+- {n: '7', text: 'geo-looker → geo-dataset: map visualizations'}
+- {n: '8', text: 'users → geo-looker: explore maps'}

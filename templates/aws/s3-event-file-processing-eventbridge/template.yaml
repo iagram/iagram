@@ -1,0 +1,40 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/using-dynamic-amazon-s3-event-handling-with-amazon-eventbridge); edit freely.
+title: File processing from S3 events routed through EventBridge
+category: serverless
+tags:
+- s3 event notifications
+- eventbridge
+- lambda
+- file processing
+- content-based routing
+source: https://aws.amazon.com/blogs/compute/using-dynamic-amazon-s3-event-handling-with-amazon-eventbridge
+description: An uploads bucket sends Object Created notifications to EventBridge, where rules match on object key suffix so CSV files go to an import function and JSON manifests start a Step Functions workflow.
+  Processed output is written to a second bucket and metadata to DynamoDB; failed deliveries land in a dead-letter queue.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: client, type: common.client, name: client}
+- {id: uploads, type: aws.s3_bucket, name: uploads, parent: reg-eu-west-1}
+- {id: csv-object-created, type: aws.res.aws_cloudwatch_event_rule, name: csv-object-created, parent: reg-eu-west-1}
+- {id: json-object-created, type: aws.res.aws_cloudwatch_event_rule, name: json-object-created, parent: reg-eu-west-1}
+- {id: import-csv, type: aws.lambda_function, name: import-csv, parent: reg-eu-west-1}
+- {id: manifest-workflow, type: aws.res.aws_sfn_state_machine, name: manifest-workflow, parent: reg-eu-west-1, props: {definition: changeme, role_arn: changeme}}
+- {id: file-metadata, type: aws.dynamodb_table, name: file-metadata, parent: reg-eu-west-1}
+- {id: processed-files, type: aws.s3_bucket, name: processed-files, parent: reg-eu-west-1}
+- {id: event-delivery-dlq, type: aws.sqs_queue, name: event-delivery-dlq, parent: reg-eu-west-1}
+edges:
+- {from: client, to: uploads, label: PutObject, step: '1'}
+- {from: uploads, to: csv-object-created, label: Object Created suffix .csv, step: '2'}
+- {from: uploads, to: json-object-created, label: Object Created suffix .json}
+- {from: csv-object-created, to: import-csv, link: aws_cloudwatch_event_target}
+- {from: json-object-created, to: manifest-workflow, link: aws_cloudwatch_event_target}
+- {from: import-csv, to: uploads, label: GetObject, step: '3'}
+- {from: import-csv, to: file-metadata, label: BatchWriteItem, step: '4'}
+- {from: import-csv, to: processed-files, label: PutObject result, step: '5'}
+- {from: csv-object-created, to: event-delivery-dlq, label: target DLQ}
+steps:
+- {n: '1', text: 'client → uploads: PutObject'}
+- {n: '2', text: 'uploads → csv-object-created: Object Created suffix .csv'}
+- {n: '3', text: 'import-csv → uploads: GetObject'}
+- {n: '4', text: 'import-csv → file-metadata: BatchWriteItem'}
+- {n: '5', text: 'import-csv → processed-files: PutObject result'}

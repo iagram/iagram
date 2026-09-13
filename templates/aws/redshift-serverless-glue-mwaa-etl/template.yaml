@@ -1,0 +1,67 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/orchestrate-an-end-to-end-etl-pipeline-using-amazon-s3-aws-glue-and-amazon-redshift-serverless-with-amazon-mwaa/); edit freely.
+title: End-to-end ETL into Redshift Serverless orchestrated by MWAA
+category: data
+tags:
+- mwaa
+- airflow
+- glue
+- redshift serverless
+- vpc peering
+- cross-account
+source: https://aws.amazon.com/blogs/big-data/orchestrate-an-end-to-end-etl-pipeline-using-amazon-s3-aws-glue-and-amazon-redshift-serverless-with-amazon-mwaa/
+description: An Airflow DAG in MWAA waits for date-partitioned files in a source bucket, runs a Glue crawler and Glue job to stage them, loads a Redshift Serverless workgroup in private subnets, runs stored
+  procedures and unloads the result back to a target bucket in the central account. The MWAA VPC peers with the Redshift VPC and reaches S3 and Secrets Manager through VPC endpoints.
+nodes:
+- {id: acct-central-data, type: aws.account, name: central-data}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-central-data, props: {region: us-east-1}}
+- {id: acct-processing, type: aws.account, name: processing}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-processing, props: {region: us-east-1}}
+- {id: vpc-mwaa, type: aws.vpc, name: mwaa, parent: reg-us-east-1-2, props: {cidr: 10.50.0.0/16}}
+- {id: az-mwaa-a, type: aws.availability_zone, name: a, parent: vpc-mwaa, props: {zone: a}}
+- {id: sub-mwaa-private-a, type: aws.subnet, name: mwaa-private-a, parent: az-mwaa-a, props: {cidr: 10.50.1.0/24, az: a, public: false}}
+- {id: az-mwaa-b, type: aws.availability_zone, name: b, parent: vpc-mwaa, props: {zone: b}}
+- {id: sub-mwaa-private-b, type: aws.subnet, name: mwaa-private-b, parent: az-mwaa-b, props: {cidr: 10.50.2.0/24, az: b, public: false}}
+- {id: vpc-redshift, type: aws.vpc, name: redshift, parent: reg-us-east-1-2, props: {cidr: 10.60.0.0/16}}
+- {id: az-redshift-a, type: aws.availability_zone, name: a, parent: vpc-redshift, props: {zone: a}}
+- {id: sub-rs-private-a, type: aws.subnet, name: rs-private-a, parent: az-redshift-a, props: {cidr: 10.60.1.0/24, az: a, public: false}}
+- {id: az-redshift-b, type: aws.availability_zone, name: b, parent: vpc-redshift, props: {zone: b}}
+- {id: sub-rs-private-b, type: aws.subnet, name: rs-private-b, parent: az-redshift-b, props: {cidr: 10.60.2.0/24, az: b, public: false}}
+- {id: az-redshift-c, type: aws.availability_zone, name: c, parent: vpc-redshift, props: {zone: c}}
+- {id: sub-rs-private-c, type: aws.subnet, name: rs-private-c, parent: az-redshift-c, props: {cidr: 10.60.3.0/24, az: c, public: false}}
+- {id: source-products, type: aws.s3_bucket, name: source-products, parent: reg-us-east-1}
+- {id: target-unload, type: aws.s3_bucket, name: target-unload, parent: reg-us-east-1}
+- id: airflow
+  type: aws.res.aws_mwaa_environment
+  name: airflow
+  parent: sub-mwaa-private-a
+  props: {dag_s3_path: changeme, execution_role_arn: changeme, name: changeme, network_configuration: {}, source_bucket_arn: changeme}
+- {id: products-crawler, type: aws.res.aws_glue_crawler, name: products-crawler, parent: acct-processing, props: {database_name: changeme, name: changeme, role: changeme}}
+- {id: staging-db, type: aws.res.aws_glue_catalog_database, name: staging-db, parent: acct-processing, props: {name: changeme}}
+- id: products-etl
+  type: aws.res.aws_glue_job
+  name: products-etl
+  parent: acct-processing
+  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: dw-namespace, type: aws.res.aws_redshiftserverless_namespace, name: dw-namespace, parent: acct-processing, props: {namespace_name: changeme}}
+- {id: dw-workgroup, type: aws.res.aws_redshiftserverless_workgroup, name: dw-workgroup, parent: sub-rs-private-a, props: {namespace_name: changeme, workgroup_name: changeme}}
+- {id: s3-endpoint, type: aws.res.aws_vpc_endpoint, name: s3-endpoint, parent: vpc-redshift, props: {vpc_id: changeme}}
+edges:
+- {from: airflow, to: vpc-redshift, label: vpc peering connection}
+- {from: airflow, to: source-products, label: S3KeySensor waits for partition, step: '1'}
+- {from: airflow, to: products-crawler, label: start crawler, step: '2'}
+- {from: products-crawler, to: staging-db, label: update catalog, step: '2'}
+- {from: airflow, to: products-etl, label: run Glue job, step: '3'}
+- {from: products-etl, to: staging-db, label: read staged table, step: '3'}
+- {from: products-etl, to: dw-workgroup, label: load into Redshift, step: '4'}
+- {from: dw-workgroup, to: dw-namespace, label: stored procedures, step: '5'}
+- {from: airflow, to: dw-workgroup, label: RedshiftToS3Operator UNLOAD, step: '6'}
+- {from: dw-workgroup, to: s3-endpoint, step: '6'}
+- {from: s3-endpoint, to: target-unload, label: cross-account write, step: '7'}
+steps:
+- {n: '1', text: 'airflow → source-products: S3KeySensor waits for partition'}
+- {n: '2', text: 'airflow → products-crawler: start crawler'}
+- {n: '3', text: 'airflow → products-etl: run Glue job'}
+- {n: '4', text: 'products-etl → dw-workgroup: load into Redshift'}
+- {n: '5', text: 'dw-workgroup → dw-namespace: stored procedures'}
+- {n: '6', text: 'airflow → dw-workgroup: RedshiftToS3Operator UNLOAD'}
+- {n: '7', text: 's3-endpoint → target-unload: cross-account write'}

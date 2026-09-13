@@ -1,0 +1,44 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/architecture/deploying-service-mesh-based-architectures-using-aws-app-mesh-and-amazon-ecs/); edit freely.
+title: Service mesh on ECS with AWS App Mesh and Envoy sidecars
+category: containers
+tags:
+- app mesh
+- envoy
+- service mesh
+- ecs
+- cloud map
+- x-ray
+source: https://aws.amazon.com/blogs/architecture/deploying-service-mesh-based-architectures-using-aws-app-mesh-and-amazon-ecs/
+description: An App Mesh mesh models each ECS service as a virtual node discovered through Cloud Map, and a virtual router with weighted routes fronts the backend as a virtual service that the frontend
+  addresses by name. Every task runs an Envoy sidecar that App Mesh configures, so all service-to-service traffic is intercepted, routed and exported as metrics, logs and traces to CloudWatch and X-Ray
+  without code changes.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-main-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-main}
+- {id: edge-alb, type: aws.alb, name: edge-alb, parent: vpc-main}
+- {id: mesh-cluster, type: aws.res.aws_ecs_cluster, name: mesh-cluster, parent: vpc-main, props: {name: changeme}}
+- {id: frontend-service, type: aws.res.aws_ecs_service, name: frontend-service, parent: mesh-cluster, props: {name: changeme}}
+- {id: backend-v1-service, type: aws.res.aws_ecs_service, name: backend-v1-service, parent: mesh-cluster, props: {name: changeme}}
+- {id: backend-v2-service, type: aws.res.aws_ecs_service, name: backend-v2-service, parent: mesh-cluster, props: {name: changeme}}
+- {id: mesh-namespace, type: aws.res.aws_service_discovery_private_dns_namespace, name: mesh-namespace, parent: vpc-main, props: {name: changeme, vpc: changeme}}
+- {id: app-mesh, type: aws.res.aws_appmesh_mesh, name: app-mesh, parent: reg-us-west-2, props: {name: changeme}}
+- {id: envoy-logs, type: aws.res.aws_cloudwatch_log_group, name: envoy-logs, parent: reg-us-west-2}
+edges:
+- {from: users, to: igw, label: HTTPS, step: '1'}
+- {from: igw, to: edge-alb, step: '2'}
+- {from: edge-alb, to: frontend-service, label: 'HTTP :8080', step: '3'}
+- {from: backend-v1-service, to: mesh-namespace, label: registers tasks}
+- {from: frontend-service, to: envoy-logs, label: Envoy access logs}
+steps:
+- {n: '1', text: 'users → igw: HTTPS'}
+- {n: '2', text: igw → edge-alb}
+- {n: '3', text: 'edge-alb → frontend-service: HTTP :8080'}

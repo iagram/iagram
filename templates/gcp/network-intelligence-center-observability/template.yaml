@@ -1,0 +1,52 @@
+# Generated from the official reference (https://docs.cloud.google.com/network-intelligence-center/docs/overview); edit freely.
+title: Network Intelligence Center for topology and connectivity testing
+category: observability
+tags:
+- network intelligence center
+- connectivity tests
+- network topology
+- firewall insights
+- network analyzer
+- performance dashboard
+source: https://docs.cloud.google.com/network-intelligence-center/docs/overview
+description: Network Intelligence Center provides Network Topology visualization, Connectivity Tests that simulate packets between endpoints across VPCs and hybrid links, Performance Dashboard latency and
+  packet loss metrics, Firewall Insights and Network Analyzer for misconfiguration detection. Connectivity Tests are created as resources that evaluate reachability between a source and destination such
+  as a VM, load balancer IP or on-premises address.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: europe-west1}}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-workload, props: {cidr: 10.200.0.0/16}}
+- {id: sub-app-ew1, type: gcp.subnetwork, name: app-ew1, parent: vpc-app-vpc, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: sub-db-ew1, type: gcp.subnetwork, name: db-ew1, parent: vpc-app-vpc, props: {cidr: 10.200.1.0/24, region: europe-west1}}
+- {id: user, type: common.user, name: user}
+- id: vm-to-db-test
+  type: gcp.res.google_network_management_connectivity_test
+  name: vm-to-db-test
+  parent: prj-workload
+  props: {destination: {}, name: changeme, source: {}}
+- id: vm-to-onprem-test
+  type: gcp.res.google_network_management_connectivity_test
+  name: vm-to-onprem-test
+  parent: prj-workload
+  props: {destination: {}, name: changeme, source: {}}
+- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-app-ew1}
+- {id: db-vm, type: gcp.compute_instance, name: db-vm, parent: sub-db-ew1}
+- {id: app-fw-policy, type: gcp.res.google_compute_network_firewall_policy, name: app-fw-policy, parent: vpc-app-vpc, props: {name: changeme}}
+- {id: ha-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: ha-vpn-gw, parent: vpc-app-vpc, props: {name: changeme, network: changeme}}
+- {id: vpn-router, type: gcp.res.google_compute_router, name: vpn-router, parent: vpc-app-vpc, props: {name: changeme, network: changeme}}
+- {id: vpc-prj-workload, type: gcp.vpc, name: main, parent: prj-workload}
+- {id: sub-prj-workload, type: gcp.subnetwork, name: main, parent: vpc-prj-workload, props: {cidr: 10.201.0.0/24, region: europe-west1}}
+- {id: onprem-peer-gw, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-peer-gw, parent: sub-prj-workload, props: {name: changeme}}
+edges:
+- {from: user, to: vm-to-db-test, label: run connectivity test, step: '1'}
+- {from: vm-to-db-test, to: app-vm, label: source endpoint, step: '2'}
+- {from: vm-to-db-test, to: db-vm, label: destination endpoint evaluated against firewall policy, step: '3'}
+- {from: vm-to-onprem-test, to: ha-vpn-gw, label: trace via VPN tunnel and Cloud Router routes, step: '4'}
+- {from: onprem-peer-gw, to: ha-vpn-gw, label: IPsec}
+- {from: app-fw-policy, to: user, label: Firewall Insights on shadowed and unused rules, step: '5'}
+steps:
+- {n: '1', text: 'user → vm-to-db-test: run connectivity test'}
+- {n: '2', text: 'vm-to-db-test → app-vm: source endpoint'}
+- {n: '3', text: 'vm-to-db-test → db-vm: destination endpoint evaluated against firewall policy'}
+- {n: '4', text: 'vm-to-onprem-test → ha-vpn-gw: trace via VPN tunnel and Cloud Router routes'}
+- {n: '5', text: 'app-fw-policy → user: Firewall Insights on shadowed and unused rules'}

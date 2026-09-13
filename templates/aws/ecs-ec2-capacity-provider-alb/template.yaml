@@ -1,0 +1,49 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html); edit freely.
+title: ECS on EC2 with an Auto Scaling group capacity provider behind an ALB
+category: containers
+tags:
+- ecs
+- ec2 launch type
+- capacity provider
+- cluster auto scaling
+- alb
+source: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html
+description: An ECS cluster registers container instances from an Auto Scaling group that is wrapped in a capacity provider with managed scaling, so ECS publishes a CapacityProviderReservation metric and
+  a target-tracking policy grows or shrinks the group as tasks are placed. An internet-facing ALB in the public subnets forwards to a target group of instance targets in private subnets, and a NAT gateway
+  gives the instances outbound access for image pulls and agent traffic.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-main-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-main}
+- {id: web-alb, type: aws.alb, name: web-alb, parent: vpc-main}
+- {id: web-tg, type: aws.res.aws_lb_target_group, name: web-tg, parent: vpc-main}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: ec2-cluster, type: aws.res.aws_ecs_cluster, name: ec2-cluster, parent: vpc-main, props: {name: changeme}}
+- {id: container-instances-asg, type: aws.res.aws_autoscaling_group, name: container-instances-asg, parent: vpc-main, props: {max_size: 1, min_size: 1}}
+- {id: ecs-optimized-lt, type: aws.res.aws_launch_template, name: ecs-optimized-lt, parent: reg-eu-west-1}
+- {id: web-service, type: aws.res.aws_ecs_service, name: web-service, parent: ec2-cluster, props: {name: changeme}}
+- {id: web-image, type: aws.res.aws_ecr_repository, name: web-image, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: web-logs, type: aws.res.aws_cloudwatch_log_group, name: web-logs, parent: reg-eu-west-1}
+edges:
+- {from: users, to: igw, label: HTTPS, step: '1'}
+- {from: igw, to: web-alb, step: '2'}
+- {from: web-alb, to: web-tg, label: listener forward, step: '3'}
+- {from: web-tg, to: web-service, label: HTTP to bridge-mode host ports, step: '4'}
+- {from: web-service, to: ec2-cluster, label: tasks placed on container instances}
+- {from: ecs-optimized-lt, to: container-instances-asg, label: ECS-optimized AMI + agent config}
+- {from: web-image, to: web-service, label: image pull}
+- {from: container-instances-asg, to: nat-a, label: outbound (ECR}
+- {from: web-service, to: web-logs, label: awslogs driver}
+steps:
+- {n: '1', text: 'users → igw: HTTPS'}
+- {n: '2', text: igw → web-alb}
+- {n: '3', text: 'web-alb → web-tg: listener forward'}
+- {n: '4', text: 'web-tg → web-service: HTTP to bridge-mode host ports'}

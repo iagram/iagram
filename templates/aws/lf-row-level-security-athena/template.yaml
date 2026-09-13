@@ -1,0 +1,34 @@
+# Generated from the official reference (https://docs.aws.amazon.com/lake-formation/latest/dg/cbac-tutorial.html); edit freely.
+title: Row-level access control with Lake Formation data filters
+category: security
+tags:
+- lake formation
+- data filters
+- row-level security
+- athena
+- glue catalog
+source: https://docs.aws.amazon.com/lake-formation/latest/dg/cbac-tutorial.html
+description: A product reviews table in S3 is catalogued in the Glue Data Catalog and governed by Lake Formation, where a data lake administrator creates data filters with row expressions such as marketplace
+  equals US or JP. Each analyst role is granted SELECT through its filter, so the same Athena query returns only the rows the user is allowed to see and access is audited centrally.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-governed-data-lake, type: common.group, name: governed data lake, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: reviews-bucket, type: aws.s3_bucket, name: reviews-bucket, parent: grp-governed-data-lake}
+- {id: reviews-location, type: aws.res.aws_lakeformation_resource, name: reviews-location, parent: grp-governed-data-lake, props: {arn: changeme}}
+- {id: reviews-db, type: aws.res.aws_glue_catalog_database, name: reviews-db, parent: grp-governed-data-lake, props: {name: changeme}}
+- {id: lf-admin, type: aws.res.aws_lakeformation_data_lake_settings, name: lf-admin, parent: grp-governed-data-lake}
+- {id: analyst-us, type: aws.res.aws_iam_role, name: analyst-us, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+- {id: analyst-jp, type: aws.res.aws_iam_role, name: analyst-jp, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+- {id: reviews-athena, type: aws.res.aws_athena_workgroup, name: reviews-athena, parent: reg-us-east-1, props: {name: changeme}}
+edges:
+- {from: reviews-location, to: reviews-bucket, label: register location, step: '1'}
+- {from: lf-admin, to: analyst-us, label: grant SELECT via US filter, step: '3'}
+- {from: lf-admin, to: analyst-jp, label: grant SELECT via JP filter, step: '3'}
+- {from: users, to: reviews-athena, label: analysts query, step: '4'}
+- {from: reviews-athena, to: analyst-us, label: assume role, step: '4'}
+steps:
+- {n: '1', text: 'reviews-location → reviews-bucket: register location'}
+- {n: '3', text: 'lf-admin → analyst-us: grant SELECT via US filter'}
+- {n: '4', text: 'users → reviews-athena: analysts query'}

@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.aws.amazon.com/solutions/latest/streaming-data-solution-for-amazon-msk/architecture-overview.html); edit freely.
+title: Amazon MSK with Lambda consumer and Firehose delivery to S3
+category: data
+tags:
+- msk
+- kafka
+- lambda
+- firehose
+- s3
+- streaming data solution
+source: https://docs.aws.amazon.com/solutions/latest/streaming-data-solution-for-amazon-msk/architecture-overview.html
+description: Option 3 of the Streaming Data Solution for Amazon MSK. An EC2 client produces to an MSK cluster inside a VPC; a Lambda function consumes the Kafka topic through an event source mapping and
+  forwards records to a Firehose delivery stream that buffers and writes them to S3.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-msk-vpc, type: aws.vpc, name: msk-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-msk-vpc-a, type: aws.availability_zone, name: a, parent: vpc-msk-vpc, props: {zone: a}}
+- {id: sub-broker-a, type: aws.subnet, name: broker-a, parent: az-msk-vpc-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: az-msk-vpc-b, type: aws.availability_zone, name: b, parent: vpc-msk-vpc, props: {zone: b}}
+- {id: sub-broker-b, type: aws.subnet, name: broker-b, parent: az-msk-vpc-b, props: {cidr: 10.0.2.0/24, az: b, public: false}}
+- {id: sub-client-subnet, type: aws.subnet, name: client-subnet, parent: az-msk-vpc-a, props: {cidr: 10.0.10.0/24, az: a, public: true}}
+- {id: kafka-client, type: aws.ec2_instance, name: kafka-client, parent: sub-client-subnet}
+- id: msk-cluster
+  type: aws.res.aws_msk_cluster
+  name: msk-cluster
+  parent: vpc-msk-vpc
+  props: {broker_node_group_info: {}, cluster_name: changeme, kafka_version: changeme, number_of_broker_nodes: 1}
+- {id: topic-consumer, type: aws.lambda_function, name: topic-consumer, parent: reg-us-east-1}
+- {id: delivery-stream, type: aws.res.aws_kinesis_firehose_delivery_stream, name: delivery-stream, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
+- {id: output-bucket, type: aws.s3_bucket, name: output-bucket, parent: reg-us-east-1}
+- {id: msk-dashboard, type: aws.res.aws_cloudwatch_dashboard, name: msk-dashboard, parent: reg-us-east-1, props: {dashboard_body: changeme, dashboard_name: changeme}}
+edges:
+- {from: kafka-client, to: msk-cluster, label: Kafka produce, step: '1'}
+- {from: msk-cluster, to: topic-consumer, step: '2', link: aws_lambda_event_source_mapping}
+- {from: topic-consumer, to: delivery-stream, label: PutRecordBatch, step: '3'}
+- {from: delivery-stream, to: output-bucket, label: buffered delivery, step: '4'}
+- {from: msk-cluster, to: msk-dashboard, label: broker metrics, step: '5'}
+steps:
+- {n: '1', text: 'kafka-client → msk-cluster: Kafka produce'}
+- {n: '2', text: msk-cluster → topic-consumer}
+- {n: '3', text: 'topic-consumer → delivery-stream: PutRecordBatch'}
+- {n: '4', text: 'delivery-stream → output-bucket: buffered delivery'}
+- {n: '5', text: 'msk-cluster → msk-dashboard: broker metrics'}

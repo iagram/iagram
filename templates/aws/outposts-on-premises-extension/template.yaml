@@ -1,0 +1,51 @@
+# Generated from the official reference (https://docs.aws.amazon.com/outposts/latest/userguide/how-outposts-works.html); edit freely.
+title: On-premises workloads on AWS Outposts racks
+category: edge
+tags:
+- outposts
+- hybrid
+- local gateway
+- service link
+- data residency
+source: https://docs.aws.amazon.com/outposts/latest/userguide/how-outposts-works.html
+description: An Outpost rack at the customer site is homed to an Availability Zone and extends a regional VPC with Outpost subnets that host EC2, ECS, RDS and S3 on Outposts resources for low-latency and
+  data-residency workloads. The service link carries encrypted VPC and management traffic back to the region, while the local gateway routes traffic between Outpost subnets and the on-premises network.
+nodes:
+- {id: dc-customer-site, type: common.datacenter, name: customer-site}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-hybrid, type: aws.vpc, name: hybrid, parent: reg-eu-west-1, props: {cidr: 10.60.0.0/16}}
+- {id: az-hybrid-outpost, type: aws.availability_zone, name: outpost, parent: vpc-hybrid, props: {zone: a}}
+- {id: sub-outpost-app, type: aws.subnet, name: outpost-app, parent: az-hybrid-outpost, props: {cidr: 10.60.10.0/24, az: a, public: false}}
+- {id: sub-outpost-data, type: aws.subnet, name: outpost-data, parent: az-hybrid-outpost, props: {cidr: 10.60.11.0/24, az: a, public: false}}
+- {id: az-hybrid-a, type: aws.availability_zone, name: a, parent: vpc-hybrid, props: {zone: a}}
+- {id: sub-region-private-a, type: aws.subnet, name: region-private-a, parent: az-hybrid-a, props: {cidr: 10.60.1.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: outpost-app-server, type: aws.ec2_instance, name: outpost-app-server, parent: sub-outpost-app}
+- {id: outpost-ecs, type: aws.res.aws_ecs_cluster, name: outpost-ecs, parent: sub-outpost-app, props: {name: changeme}}
+- {id: outpost-alb, type: aws.alb, name: outpost-alb, parent: az-hybrid-outpost}
+- {id: outpost-rds, type: aws.rds_instance, name: outpost-rds, parent: sub-outpost-data}
+- {id: outpost-s3, type: aws.res.aws_s3control_bucket, name: outpost-s3, parent: sub-outpost-data, props: {bucket: changeme, outpost_id: changeme}}
+- {id: regional-batch-server, type: aws.ec2_instance, name: regional-batch-server, parent: sub-region-private-a}
+- {id: regional-archive, type: aws.s3_bucket, name: regional-archive, parent: reg-eu-west-1}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: factory-mes-server, type: aws.ec2_instance, name: factory-mes-server, parent: sub-reg-eu-west-1-a}
+- {id: az-vpc-hybrid-b, type: aws.availability_zone, name: b, parent: vpc-hybrid, props: {zone: b}}
+- {id: sub-vpc-hybrid-b, type: aws.subnet, name: private-b, parent: az-vpc-hybrid-b, props: {cidr: 10.60.251.0/24, az: b, public: false}}
+edges:
+- {from: outpost-alb, to: outpost-app-server, label: target group, step: '3'}
+- {from: outpost-ecs, to: outpost-app-server, label: container instances}
+- {from: outpost-app-server, to: outpost-rds, label: local database, step: '4'}
+- {from: outpost-app-server, to: outpost-s3, label: local object storage, step: '4'}
+- {from: outpost-app-server, to: regional-batch-server, label: service link VPN to region, step: '5'}
+- {from: outpost-s3, to: regional-archive, label: DataSync replication of cold data, step: '6'}
+- {from: users, to: outpost-alb, label: plant users over LAN}
+steps:
+- {n: '3', text: 'outpost-alb → outpost-app-server: target group'}
+- {n: '4', text: 'outpost-app-server → outpost-rds: local database'}
+- {n: '5', text: 'outpost-app-server → regional-batch-server: service link VPN to region'}
+- {n: '6', text: 'outpost-s3 → regional-archive: DataSync replication of cold data'}

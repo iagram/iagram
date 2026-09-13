@@ -1,0 +1,44 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/big-data/modernize-a-legacy-real-time-analytics-application-with-amazon-managed-service-for-apache-flink/); edit freely.
+title: Real-time KPI dashboard with Flink Studio and OpenSearch
+category: analytics-bi
+tags:
+- managed service for apache flink studio
+- flink sql
+- kinesis data streams
+- opensearch dashboards
+- call center kpis
+source: https://aws.amazon.com/blogs/big-data/modernize-a-legacy-real-time-analytics-application-with-amazon-managed-service-for-apache-flink/
+description: Call center fact events and dimension metadata arrive on two Kinesis data streams, the latter loaded by a Lambda function from files in S3. A Managed Service for Apache Flink Studio notebook
+  joins and aggregates the streams with Flink SQL and writes KPIs to an OpenSearch Service domain visualized in OpenSearch Dashboards.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
+- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1}
+- {id: server, type: common.server, name: server}
+- {id: users, type: common.users, name: users}
+- {id: call-metrics-stream, type: aws.res.aws_kinesis_stream, name: call-metrics-stream, parent: grp-ingestion, props: {name: changeme}}
+- {id: dimension-stream, type: aws.res.aws_kinesis_stream, name: dimension-stream, parent: grp-ingestion, props: {name: changeme}}
+- {id: metadata-bucket, type: aws.s3_bucket, name: metadata-bucket, parent: grp-ingestion}
+- {id: metadata-loader, type: aws.lambda_function, name: metadata-loader, parent: grp-ingestion}
+- {id: kpi-studio-notebook, type: aws.res.aws_kinesisanalyticsv2_application, name: kpi-studio-notebook, parent: grp-analytics, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
+- {id: studio-catalog, type: aws.res.aws_glue_catalog_database, name: studio-catalog, parent: grp-analytics, props: {name: changeme}}
+- {id: kpi-domain, type: aws.res.aws_opensearch_domain, name: kpi-domain, parent: grp-analytics, props: {domain_name: changeme}}
+edges:
+- {from: server, to: call-metrics-stream, label: call center events, step: '1'}
+- {from: metadata-bucket, to: metadata-loader, label: metadata files, step: '2'}
+- {from: metadata-loader, to: dimension-stream, label: dimension records, step: '3'}
+- {from: call-metrics-stream, to: kpi-studio-notebook, label: fact stream, step: '4'}
+- {from: dimension-stream, to: kpi-studio-notebook, label: dimension stream, step: '5'}
+- {from: kpi-studio-notebook, to: studio-catalog, label: Flink table metadata, step: '6'}
+- {from: kpi-studio-notebook, to: kpi-domain, label: OpenSearch sink, step: '7'}
+- {from: users, to: kpi-domain, label: OpenSearch Dashboards, step: '8'}
+steps:
+- {n: '1', text: 'server → call-metrics-stream: call center events'}
+- {n: '2', text: 'metadata-bucket → metadata-loader: metadata files'}
+- {n: '3', text: 'metadata-loader → dimension-stream: dimension records'}
+- {n: '4', text: 'call-metrics-stream → kpi-studio-notebook: fact stream'}
+- {n: '5', text: 'dimension-stream → kpi-studio-notebook: dimension stream'}
+- {n: '6', text: 'kpi-studio-notebook → studio-catalog: Flink table metadata'}
+- {n: '7', text: 'kpi-studio-notebook → kpi-domain: OpenSearch sink'}
+- {n: '8', text: 'users → kpi-domain: OpenSearch Dashboards'}

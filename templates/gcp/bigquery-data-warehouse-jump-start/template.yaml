@@ -1,0 +1,38 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/big-data-analytics/data-warehouse); edit freely.
+title: Data warehouse with BigQuery jump start solution
+category: data
+tags:
+- data warehouse
+- bigquery
+- workflows
+- looker studio
+- bigquery ml
+source: https://docs.cloud.google.com/architecture/big-data-analytics/data-warehouse
+description: Cloud Workflows loads sample data from a Cloud Storage bucket into BigQuery datasets, then runs stored procedures that build views and a BigQuery ML model. Looker Studio dashboards query the
+  curated tables, and Cloud Scheduler triggers periodic refreshes of the warehouse.
+nodes:
+- {id: prj-warehouse, type: gcp.project, name: warehouse, props: {project_id: warehouse-123456, project: changeme, region: us-central1}}
+- {id: grp-ingest, type: common.group, name: ingest, parent: prj-warehouse}
+- {id: grp-warehouse, type: common.group, name: warehouse, parent: prj-warehouse}
+- {id: grp-consume, type: common.group, name: consume, parent: prj-warehouse}
+- {id: users, type: common.users, name: users}
+- {id: staging-bucket, type: gcp.storage_bucket, name: staging-bucket, parent: grp-ingest}
+- {id: dw-load-workflow, type: gcp.res.google_workflows_workflow, name: dw-load-workflow, parent: grp-ingest}
+- {id: dw-refresh-schedule, type: gcp.res.google_cloud_scheduler_job, name: dw-refresh-schedule, parent: grp-ingest, props: {name: changeme}}
+- {id: dw-raw-dataset, type: gcp.bigquery_dataset, name: dw-raw-dataset, parent: grp-warehouse}
+- {id: dw-curated-dataset, type: gcp.bigquery_dataset, name: dw-curated-dataset, parent: grp-warehouse}
+- id: warehouse-looker
+  type: gcp.res.google_looker_instance
+  name: warehouse-looker
+  parent: grp-consume
+  props: {name: changeme, oauth_config: {}}
+edges:
+- {from: dw-refresh-schedule, to: dw-load-workflow, label: cron trigger, step: '1'}
+- {from: dw-load-workflow, to: staging-bucket, label: list source files, step: '2'}
+- {from: dw-load-workflow, to: dw-raw-dataset, label: BigQuery load jobs, step: '3'}
+- {from: users, to: warehouse-looker, label: dashboards, step: '7'}
+steps:
+- {n: '1', text: 'dw-refresh-schedule → dw-load-workflow: cron trigger'}
+- {n: '2', text: 'dw-load-workflow → staging-bucket: list source files'}
+- {n: '3', text: 'dw-load-workflow → dw-raw-dataset: BigQuery load jobs'}
+- {n: '7', text: 'users → warehouse-looker: dashboards'}

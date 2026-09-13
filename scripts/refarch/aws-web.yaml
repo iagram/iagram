@@ -1,0 +1,1002 @@
+- slug: web-app-alb-asg-rds-multi-az
+  title: Classic three-tier web application across two Availability Zones
+  category: web
+  tags: [three tier, alb, auto scaling, rds multi-az, elasticache, cloudfront, waf]
+  source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/web-application-architecture/web-application-architecture.html
+  description: Route 53 and CloudFront front an internet-facing Application Load Balancer that spreads web servers in an Auto Scaling group across two Availability Zones, with AWS WAF filtering requests at the edge. Web instances read a Multi-AZ RDS database through an ElastiCache layer, and NAT gateways in the public subnets give the private tier outbound access.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+      vpcs:
+        - name: web
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: app-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: app-b, cidr: 10.0.11.0/24, az: b, public: false}
+            - {name: data-a, cidr: 10.0.20.0/24, az: a, public: false}
+            - {name: data-b, cidr: 10.0.21.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: app-zone, in: region}
+    - {tf: aws_cloudfront_distribution, name: app-cdn, in: group:global edge}
+    - {tf: aws_wafv2_web_acl, name: app-waf, in: group:global edge}
+    - {tf: aws_s3_bucket, name: static-assets, in: region}
+    - {tf: aws_internet_gateway, name: web-igw, in: vpc:web}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_nat_gateway, name: nat-b, in: subnet:public-b}
+    - {tf: aws_lb, name: web-alb, in: vpc:web}
+    - {tf: aws_autoscaling_group, name: web-asg, in: vpc:web}
+    - {tf: aws_instance, name: web-a, in: subnet:app-a}
+    - {tf: aws_instance, name: web-b, in: subnet:app-b}
+    - {tf: aws_elasticache_cluster, name: session-cache, in: subnet:data-a}
+    - {tf: aws_db_instance, name: app-db, in: subnet:data-a}
+    - {tf: aws_db_instance, name: app-db-standby, in: subnet:data-b}
+  actors: [users]
+  flows:
+    - {from: users, to: app-zone, label: DNS lookup, step: 1}
+    - {from: users, to: app-cdn, label: HTTPS, step: 2}
+    - {from: app-waf, to: app-cdn, label: web ACL}
+    - {from: app-cdn, to: static-assets, label: static origin}
+    - {from: app-cdn, to: web-alb, label: dynamic origin, step: 3}
+    - {from: web-alb, to: web-a, label: HTTP target, step: 4}
+    - {from: web-alb, to: web-b, label: HTTP target}
+    - {from: web-asg, to: web-a, label: scales}
+    - {from: web-asg, to: web-b, label: scales}
+    - {from: web-a, to: session-cache, label: cache read/write, step: 5}
+    - {from: web-a, to: app-db, label: SQL, step: 6}
+    - {from: app-db, to: app-db-standby, label: synchronous replication}
+    - {from: web-a, to: nat-a, label: outbound updates}
+    - {from: nat-a, to: web-igw}
+
+- slug: wordpress-ha-cloudfront-efs-aurora
+  title: Highly available WordPress with CloudFront, EFS, and Aurora
+  category: web
+  tags: [wordpress, cms, efs, aurora mysql, elasticache, cloudfront, auto scaling]
+  source: https://docs.aws.amazon.com/whitepapers/latest/best-practices-wordpress/reference-architecture.html
+  description: CloudFront caches content close to users, pulling static files from an S3 bucket and dynamic pages from an Application Load Balancer in front of an Auto Scaling group of WordPress instances. Every instance mounts a shared EFS file system through a mount target in each Availability Zone, caches queries in ElastiCache, and stores the WordPress database in Aurora MySQL.
+  containers:
+    - region: eu-west-1
+      groups:
+        - {label: global edge}
+      vpcs:
+        - name: wordpress
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: web-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: web-b, cidr: 10.0.11.0/24, az: b, public: false}
+            - {name: data-a, cidr: 10.0.20.0/24, az: a, public: false}
+            - {name: data-b, cidr: 10.0.21.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: blog-zone, in: region}
+    - {tf: aws_acm_certificate, name: blog-cert, in: region}
+    - {tf: aws_cloudfront_distribution, name: blog-cdn, in: group:global edge}
+    - {tf: aws_s3_bucket, name: media-assets, in: region}
+    - {tf: aws_internet_gateway, name: wp-igw, in: vpc:wordpress}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_nat_gateway, name: nat-b, in: subnet:public-b}
+    - {tf: aws_lb, name: wp-alb, in: vpc:wordpress}
+    - {tf: aws_autoscaling_group, name: wp-asg, in: vpc:wordpress}
+    - {tf: aws_instance, name: wp-a, in: subnet:web-a}
+    - {tf: aws_instance, name: wp-b, in: subnet:web-b}
+    - {tf: aws_efs_file_system, name: wp-content, in: vpc:wordpress}
+    - {tf: aws_elasticache_cluster, name: wp-cache, in: subnet:data-a}
+    - {tf: aws_rds_cluster, name: wp-aurora, in: subnet:data-b}
+  actors: [users]
+  flows:
+    - {from: users, to: blog-zone, label: DNS, step: 1}
+    - {from: users, to: blog-cdn, label: HTTPS, step: 2}
+    - {from: blog-cert, to: blog-cdn, label: TLS certificate}
+    - {from: blog-cdn, to: media-assets, label: static content origin, step: 3}
+    - {from: blog-cdn, to: wp-alb, label: dynamic content origin, step: 3}
+    - {from: wp-alb, to: wp-a, step: 4}
+    - {from: wp-alb, to: wp-b}
+    - {from: wp-asg, to: wp-a, label: scales}
+    - {from: wp-a, to: wp-content, label: NFS mount target per AZ, step: 5}
+    - {from: wp-b, to: wp-content, label: NFS mount target per AZ}
+    - {from: wp-a, to: wp-cache, label: object cache, step: 6}
+    - {from: wp-a, to: wp-aurora, label: MySQL, step: 7}
+    - {from: wp-a, to: nat-a, label: plugin updates}
+    - {from: nat-a, to: wp-igw}
+
+- slug: drupal-ha-efs-aurora-cloudfront
+  title: Drupal reference architecture with shared EFS and Aurora
+  category: web
+  tags: [drupal, cms, efs, aurora, elasticache, cloudfront, acm]
+  source: https://aws.amazon.com/efs/resources/aws-refarch-drupal/
+  description: Drupal web servers in an Auto Scaling group behind an Application Load Balancer share the sites/default/files directory over an EFS file system so uploaded content is visible from every instance. CloudFront terminates TLS with an ACM certificate and caches pages, ElastiCache holds the Drupal cache bins, and an Aurora cluster provides the database across two Availability Zones.
+  containers:
+    - region: us-west-2
+      groups:
+        - {label: global edge}
+      vpcs:
+        - name: drupal
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: web-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: web-b, cidr: 10.0.11.0/24, az: b, public: false}
+            - {name: data-a, cidr: 10.0.20.0/24, az: a, public: false}
+            - {name: data-b, cidr: 10.0.21.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: drupal-zone, in: region}
+    - {tf: aws_acm_certificate, name: drupal-cert, in: region}
+    - {tf: aws_cloudfront_distribution, name: drupal-cdn, in: group:global edge}
+    - {tf: aws_internet_gateway, name: drupal-igw, in: vpc:drupal}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_lb, name: drupal-alb, in: vpc:drupal}
+    - {tf: aws_autoscaling_group, name: drupal-asg, in: vpc:drupal}
+    - {tf: aws_instance, name: drupal-a, in: subnet:web-a}
+    - {tf: aws_instance, name: drupal-b, in: subnet:web-b}
+    - {tf: aws_efs_file_system, name: drupal-files, in: vpc:drupal}
+    - {tf: aws_elasticache_cluster, name: drupal-cache, in: subnet:data-a}
+    - {tf: aws_rds_cluster, name: drupal-aurora, in: subnet:data-b}
+  actors: [users]
+  flows:
+    - {from: users, to: drupal-zone, label: DNS, step: 1}
+    - {from: users, to: drupal-cdn, label: HTTPS, step: 2}
+    - {from: drupal-cert, to: drupal-cdn, label: TLS certificate}
+    - {from: drupal-cdn, to: drupal-alb, label: origin, step: 3}
+    - {from: drupal-alb, to: drupal-a, step: 4}
+    - {from: drupal-alb, to: drupal-b}
+    - {from: drupal-asg, to: drupal-a, label: scales}
+    - {from: drupal-a, to: drupal-files, label: sites/default/files over NFS, step: 5}
+    - {from: drupal-b, to: drupal-files, label: NFS}
+    - {from: drupal-a, to: drupal-cache, label: cache bins, step: 6}
+    - {from: drupal-a, to: drupal-aurora, label: MySQL, step: 7}
+    - {from: drupal-a, to: nat-a, label: composer/module updates}
+    - {from: nat-a, to: drupal-igw}
+
+- slug: magento-adobe-commerce-refarch
+  title: Magento Open Source and Adobe Commerce on AWS
+  category: web
+  tags: [magento, adobe commerce, e-commerce, opensearch, elasticache, efs, aurora]
+  source: https://docs.aws.amazon.com/whitepapers/latest/migrating-magento-open-source-adobe-commerce-to-aws/reference-architecture.html
+  description: Magento web and admin nodes run in Auto Scaling groups behind an Application Load Balancer, sharing media and var directories through EFS and caching sessions and full pages in ElastiCache for Redis. Catalog search runs on an OpenSearch domain, the store database on Aurora MySQL, and CloudFront with AWS WAF delivers the storefront and shields it from bots.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+      vpcs:
+        - name: magento
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: app-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: app-b, cidr: 10.0.11.0/24, az: b, public: false}
+            - {name: data-a, cidr: 10.0.20.0/24, az: a, public: false}
+            - {name: data-b, cidr: 10.0.21.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_cloudfront_distribution, name: store-cdn, in: group:global edge}
+    - {tf: aws_wafv2_web_acl, name: store-waf, in: group:global edge}
+    - {tf: aws_s3_bucket, name: store-media, in: region}
+    - {tf: aws_internet_gateway, name: magento-igw, in: vpc:magento}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_lb, name: store-alb, in: vpc:magento}
+    - {tf: aws_autoscaling_group, name: web-asg, in: vpc:magento}
+    - {tf: aws_instance, name: web-a, in: subnet:app-a}
+    - {tf: aws_instance, name: web-b, in: subnet:app-b}
+    - {tf: aws_instance, name: admin-cron, in: subnet:app-a}
+    - {tf: aws_efs_file_system, name: magento-shared, in: vpc:magento}
+    - {tf: aws_elasticache_replication_group, name: redis-cache, in: subnet:data-a}
+    - {tf: aws_opensearch_domain, name: catalog-search, in: subnet:data-b}
+    - {tf: aws_rds_cluster, name: store-aurora, in: subnet:data-b}
+  actors: [users]
+  flows:
+    - {from: users, to: store-cdn, label: HTTPS, step: 1}
+    - {from: store-waf, to: store-cdn, label: bot control and managed rules}
+    - {from: store-cdn, to: store-media, label: static media origin}
+    - {from: store-cdn, to: store-alb, label: storefront origin, step: 2}
+    - {from: store-alb, to: web-a, step: 3}
+    - {from: store-alb, to: web-b}
+    - {from: web-asg, to: web-a, label: scales}
+    - {from: web-a, to: magento-shared, label: pub/media and var over NFS}
+    - {from: admin-cron, to: magento-shared, label: NFS}
+    - {from: web-a, to: redis-cache, label: sessions and full page cache, step: 4}
+    - {from: web-a, to: catalog-search, label: product search, step: 5}
+    - {from: web-a, to: store-aurora, label: MySQL, step: 6}
+    - {from: admin-cron, to: store-aurora, label: indexers and cron}
+    - {from: web-a, to: nat-a}
+    - {from: nat-a, to: magento-igw}
+
+- slug: moodle-lms-ha
+  title: Moodle learning management system for high availability
+  category: web
+  tags: [moodle, lms, education, efs, aurora, elasticache, cloudfront]
+  source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/moodle-for-high-availability-on-aws/moodle-for-high-availability-on-aws.html
+  description: Route 53 directs students to CloudFront, which caches Moodle content and forwards dynamic requests to an Application Load Balancer in front of Moodle application servers in a private-subnet Auto Scaling group across Availability Zones. Moodledata sits on EFS, sessions and the application cache in ElastiCache, and course data in an Aurora cluster, with a bastion host for administration.
+  containers:
+    - region: ap-southeast-2
+      groups:
+        - {label: global edge}
+      vpcs:
+        - name: moodle
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: app-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: app-b, cidr: 10.0.11.0/24, az: b, public: false}
+            - {name: data-a, cidr: 10.0.20.0/24, az: a, public: false}
+            - {name: data-b, cidr: 10.0.21.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: lms-zone, in: region}
+    - {tf: aws_acm_certificate, name: lms-cert, in: region}
+    - {tf: aws_cloudfront_distribution, name: lms-cdn, in: group:global edge}
+    - {tf: aws_internet_gateway, name: moodle-igw, in: vpc:moodle}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_instance, name: bastion, in: subnet:public-b}
+    - {tf: aws_lb, name: lms-alb, in: vpc:moodle}
+    - {tf: aws_autoscaling_group, name: moodle-asg, in: vpc:moodle}
+    - {tf: aws_instance, name: moodle-a, in: subnet:app-a}
+    - {tf: aws_instance, name: moodle-b, in: subnet:app-b}
+    - {tf: aws_efs_file_system, name: moodledata, in: vpc:moodle}
+    - {tf: aws_elasticache_cluster, name: moodle-cache, in: subnet:data-a}
+    - {tf: aws_rds_cluster, name: moodle-aurora, in: subnet:data-b}
+  actors: [users, user]
+  flows:
+    - {from: users, to: lms-zone, label: DNS, step: 1}
+    - {from: users, to: lms-cdn, label: HTTPS, step: 2}
+    - {from: lms-cert, to: lms-cdn, label: TLS certificate}
+    - {from: lms-cdn, to: lms-alb, label: origin, step: 3}
+    - {from: lms-alb, to: moodle-a, step: 4}
+    - {from: lms-alb, to: moodle-b}
+    - {from: moodle-asg, to: moodle-a, label: scales}
+    - {from: moodle-a, to: moodledata, label: moodledata over NFS, step: 5}
+    - {from: moodle-b, to: moodledata, label: NFS}
+    - {from: moodle-a, to: moodle-cache, label: sessions and MUC cache, step: 6}
+    - {from: moodle-a, to: moodle-aurora, label: SQL, step: 7}
+    - {from: user, to: bastion, label: admin SSH}
+    - {from: bastion, to: moodle-a, label: SSH}
+    - {from: moodle-a, to: nat-a}
+    - {from: nat-a, to: moodle-igw}
+
+- slug: serverless-web-app-s3-apigw-cognito
+  title: Serverless web application with S3, Cognito, API Gateway, Lambda, and DynamoDB
+  category: web
+  tags: [jamstack, static frontend, serverless backend, cognito, api gateway, dynamodb]
+  source: https://aws.amazon.com/getting-started/hands-on/build-serverless-web-app-lambda-apigateway-s3-dynamodb-cognito/
+  description: A static single-page frontend is served from S3 through CloudFront while users register and sign in against a Cognito user pool. The browser calls a REST API on API Gateway with the Cognito JWT, and Lambda functions behind the API read and write application state in a DynamoDB table.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: backend}
+  elements:
+    - {tf: aws_route53_zone, name: app-zone, in: region}
+    - {tf: aws_acm_certificate, name: app-cert, in: region}
+    - {tf: aws_cloudfront_distribution, name: app-cdn, in: group:global edge}
+    - {tf: aws_s3_bucket, name: frontend-bucket, in: region}
+    - {tf: aws_cognito_user_pool, name: app-users, in: group:backend}
+    - {tf: aws_api_gateway_rest_api, name: app-api, in: group:backend}
+    - {tf: aws_lambda_function, name: request-handler, in: group:backend}
+    - {tf: aws_dynamodb_table, name: app-table, in: group:backend}
+  actors: [users]
+  flows:
+    - {from: users, to: app-zone, label: DNS, step: 1}
+    - {from: users, to: app-cdn, label: GET static SPA, step: 2}
+    - {from: app-cert, to: app-cdn, label: TLS certificate}
+    - {from: app-cdn, to: frontend-bucket, label: origin via OAC, step: 3}
+    - {from: users, to: app-users, label: sign up / sign in, step: 4}
+    - {from: app-users, to: users, label: JWT id token, step: 5}
+    - {from: users, to: app-api, label: HTTPS with Authorization header, step: 6}
+    - {from: app-api, to: app-users, label: Cognito authorizer validates token, step: 7}
+    - {from: app-api, to: request-handler, label: Lambda proxy integration, step: 8}
+    - {from: request-handler, to: app-table, label: PutItem / Query, step: 9}
+
+- slug: amplify-hosting-nextjs-ssr
+  title: Amplify Hosting for a server-side rendered Next.js site
+  category: web
+  tags: [amplify hosting, next.js, ssr, ssg, ci/cd, cloudfront, custom domain]
+  source: https://docs.aws.amazon.com/amplify/latest/userguide/server-side-rendering-amplify.html
+  description: Amplify Hosting connects to a Git repository, builds the Next.js app on each push, and deploys static pages and assets to an S3-backed CloudFront distribution while SSR routes run on Amplify Hosting compute. A custom domain from Route 53 is attached with an automatically managed certificate, and the rendered pages call a backend API and DynamoDB table.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: amplify}
+        - {label: backend}
+  elements:
+    - {tf: aws_route53_zone, name: site-zone, in: region}
+    - {tf: aws_acm_certificate, name: site-cert, in: region}
+    - {tf: aws_amplify_app, name: nextjs-app, in: group:amplify}
+    - {tf: aws_cloudfront_distribution, name: hosting-cdn, in: group:global edge}
+    - {tf: aws_s3_bucket, name: build-artifacts, in: group:amplify}
+    - {tf: aws_lambda_function, name: ssr-compute, in: group:amplify}
+    - {tf: aws_appsync_graphql_api, name: data-api, in: group:backend}
+    - {tf: aws_dynamodb_table, name: content-table, in: group:backend}
+  actors: [users, saas]
+  flows:
+    - {from: saas, to: nextjs-app, label: Git push webhook, step: 1}
+    - {from: nextjs-app, to: build-artifacts, label: build output, step: 2}
+    - {from: nextjs-app, to: hosting-cdn, label: deploy branch, step: 3}
+    - {from: site-cert, to: hosting-cdn, label: managed TLS certificate}
+    - {from: users, to: site-zone, label: DNS, step: 4}
+    - {from: users, to: hosting-cdn, label: HTTPS, step: 5}
+    - {from: hosting-cdn, to: build-artifacts, label: static pages and assets, step: 6}
+    - {from: hosting-cdn, to: ssr-compute, label: SSR route render, step: 6}
+    - {from: ssr-compute, to: data-api, label: GraphQL query, step: 7}
+    - {from: data-api, to: content-table, label: resolver, step: 8}
+
+- slug: amplify-appsync-mobile-web-backend
+  title: Modern serverless mobile and web backend with Amplify, Cognito, and AppSync
+  category: web
+  tags: [amplify, appsync, graphql, cognito, mobile backend, dynamodb, pinpoint]
+  source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/modern-serverless-mobile-web/modern-serverless-mobile-web.html
+  description: Mobile and web clients built with the Amplify libraries authenticate against a Cognito user pool and exchange the JWT for AWS credentials through an identity pool. Authenticated clients run GraphQL queries, mutations, and subscriptions on AppSync, whose resolvers read DynamoDB directly or invoke Lambda for business logic, while user files land in S3 and Pinpoint records analytics events.
+  containers:
+    - region: us-west-2
+      groups:
+        - {label: identity}
+        - {label: api}
+        - {label: data}
+  elements:
+    - {tf: aws_amplify_app, name: client-app, in: region}
+    - {tf: aws_cognito_user_pool, name: user-pool, in: group:identity}
+    - {tf: aws_cognito_identity_pool, name: identity-pool, in: group:identity}
+    - {tf: aws_appsync_graphql_api, name: graphql-api, in: group:api}
+    - {tf: aws_lambda_function, name: business-logic, in: group:api}
+    - {tf: aws_dynamodb_table, name: app-data, in: group:data}
+    - {tf: aws_s3_bucket, name: user-uploads, in: group:data}
+    - {tf: aws_pinpoint_app, name: analytics, in: group:data}
+  actors: [mobile, users]
+  flows:
+    - {from: mobile, to: user-pool, label: sign in, step: 1}
+    - {from: user-pool, to: mobile, label: JWT tokens, step: 2}
+    - {from: mobile, to: identity-pool, label: exchange JWT for AWS credentials, step: 3}
+    - {from: mobile, to: graphql-api, label: GraphQL query/mutation/subscription, step: 4}
+    - {from: users, to: graphql-api, label: GraphQL from web client}
+    - {from: graphql-api, to: user-pool, label: token authorization}
+    - {from: graphql-api, to: app-data, label: DynamoDB resolver, step: 5}
+    - {from: graphql-api, to: business-logic, label: Lambda resolver, step: 5}
+    - {from: business-logic, to: app-data, label: read/write}
+    - {from: mobile, to: user-uploads, label: Amplify Storage upload with temporary credentials, step: 6}
+    - {from: mobile, to: analytics, label: analytics events}
+    - {from: client-app, to: mobile, label: hosted web build}
+
+- slug: cognito-alb-authentication
+  title: Application Load Balancer built-in authentication with Cognito
+  category: web
+  tags: [cognito, alb authentication, oidc, session cookie, auto scaling]
+  source: https://docs.aws.amazon.com/elasticloadbalancing/latest/application/listener-authenticate-users.html
+  description: An HTTPS listener on the Application Load Balancer redirects unauthenticated users to the Cognito hosted UI, exchanges the returned authorization code for tokens, and sets an encrypted session cookie. Subsequent requests are validated by the load balancer and forwarded to backend instances with the user claims in headers, so the application code carries no login logic.
+  containers:
+    - region: eu-central-1
+      groups:
+        - {label: identity}
+      vpcs:
+        - name: app
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: app-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: app-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: app-zone, in: region}
+    - {tf: aws_acm_certificate, name: alb-cert, in: region}
+    - {tf: aws_cognito_user_pool, name: employee-pool, in: group:identity}
+    - {tf: aws_internet_gateway, name: app-igw, in: vpc:app}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_lb, name: app-alb, in: vpc:app}
+    - {tf: aws_autoscaling_group, name: app-asg, in: vpc:app}
+    - {tf: aws_instance, name: app-a, in: subnet:app-a}
+    - {tf: aws_instance, name: app-b, in: subnet:app-b}
+  actors: [users, idp]
+  flows:
+    - {from: users, to: app-zone, label: DNS, step: 1}
+    - {from: users, to: app-alb, label: HTTPS request without session cookie, step: 2}
+    - {from: alb-cert, to: app-alb, label: TLS certificate}
+    - {from: app-alb, to: employee-pool, label: redirect to hosted UI, step: 3}
+    - {from: employee-pool, to: idp, label: federated SAML/OIDC login, step: 4}
+    - {from: employee-pool, to: app-alb, label: authorization code, step: 5}
+    - {from: app-alb, to: employee-pool, label: token and userinfo endpoints, step: 6}
+    - {from: app-alb, to: users, label: set AWSELBAuthSessionCookie, step: 7}
+    - {from: app-alb, to: app-a, label: forward with x-amzn-oidc-* headers, step: 8}
+    - {from: app-alb, to: app-b, label: forward with x-amzn-oidc-* headers}
+    - {from: app-asg, to: app-a, label: scales}
+    - {from: app-a, to: nat-a}
+    - {from: nat-a, to: app-igw}
+
+- slug: lambda-edge-image-resizing
+  title: On-the-fly image resizing with CloudFront and Lambda@Edge
+  category: edge
+  tags: [lambda@edge, cloudfront, image optimization, s3, viewer request, origin response]
+  source: https://aws.amazon.com/blogs/networking-and-content-delivery/resizing-images-with-amazon-cloudfront-lambdaedge-aws-cdn-blog/
+  description: A viewer-request Lambda@Edge function normalizes the requested dimensions and format into a canonical cache key, and on a cache miss the origin-response function fetches the source image from S3, resizes it, writes the derived image back to the bucket, and returns it. Later requests for the same variant are served from the CloudFront cache or directly from the pre-generated object.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+  elements:
+    - {tf: aws_route53_zone, name: img-zone, in: region}
+    - {tf: aws_acm_certificate, name: img-cert, in: region}
+    - {tf: aws_cloudfront_distribution, name: image-cdn, in: group:global edge}
+    - {tf: aws_lambda_function, name: viewer-request-normalize, in: group:global edge}
+    - {tf: aws_lambda_function, name: origin-response-resize, in: group:global edge}
+    - {tf: aws_s3_bucket, name: image-bucket, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: img-zone, label: DNS, step: 1}
+    - {from: users, to: image-cdn, label: "GET /images/cat.jpg?d=200x200", step: 2}
+    - {from: img-cert, to: image-cdn, label: TLS certificate}
+    - {from: image-cdn, to: viewer-request-normalize, label: viewer request event, step: 3}
+    - {from: viewer-request-normalize, to: image-cdn, label: rewritten URI /images/200x200/webp/cat.jpg, step: 4}
+    - {from: image-cdn, to: image-bucket, label: origin fetch on cache miss, step: 5}
+    - {from: image-cdn, to: origin-response-resize, label: origin response event on 404, step: 6}
+    - {from: origin-response-resize, to: image-bucket, label: "GET source, PUT resized variant", step: 7}
+    - {from: origin-response-resize, to: image-cdn, label: return resized image, step: 8}
+    - {from: image-cdn, to: users, label: cached response, step: 9}
+
+- slug: cloudfront-functions-viewer-request
+  title: Lightweight edge logic with CloudFront Functions
+  category: edge
+  tags: [cloudfront functions, url rewrite, header manipulation, a/b testing, cache key]
+  source: https://aws.amazon.com/blogs/aws/introducing-cloudfront-functions-run-your-code-at-the-edge-with-low-latency-at-any-scale/
+  description: CloudFront Functions run sub-millisecond JavaScript at every edge location on viewer-request and viewer-response events for cache-key normalization, URL rewrites and redirects, header manipulation, and cookie-based A/B routing. Heavier logic such as network calls or origin selection stays in Lambda@Edge, while the origin content comes from S3 and an Application Load Balancer.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+      vpcs:
+        - name: origin
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: app-a, cidr: 10.0.10.0/24, az: a, public: false}
+  elements:
+    - {tf: aws_cloudfront_distribution, name: site-cdn, in: group:global edge}
+    - {tf: aws_cloudfront_function, name: viewer-request-rewrite, in: group:global edge}
+    - {tf: aws_cloudfront_function, name: viewer-response-headers, in: group:global edge}
+    - {tf: aws_lambda_function, name: origin-request-edge, in: group:global edge}
+    - {tf: aws_s3_bucket, name: static-origin, in: region}
+    - {tf: aws_internet_gateway, name: origin-igw, in: vpc:origin}
+    - {tf: aws_lb, name: app-alb, in: vpc:origin}
+    - {tf: aws_instance, name: app-server, in: subnet:app-a}
+  actors: [users]
+  flows:
+    - {from: users, to: site-cdn, label: HTTPS, step: 1}
+    - {from: site-cdn, to: viewer-request-rewrite, label: viewer request, step: 2}
+    - {from: viewer-request-rewrite, to: site-cdn, label: "normalized URI, A/B cookie, redirect", step: 3}
+    - {from: site-cdn, to: origin-request-edge, label: origin request (Lambda@Edge) on miss, step: 4}
+    - {from: site-cdn, to: static-origin, label: static origin, step: 5}
+    - {from: site-cdn, to: app-alb, label: dynamic origin, step: 5}
+    - {from: app-alb, to: app-server}
+    - {from: origin-igw, to: app-alb}
+    - {from: site-cdn, to: viewer-response-headers, label: viewer response adds security headers, step: 6}
+    - {from: site-cdn, to: users, label: response, step: 7}
+
+- slug: cloudfront-lambda-edge-private-content
+  title: Private content delivery with CloudFront signed cookies and Lambda@Edge
+  category: edge
+  tags: [private content, signed cookies, signed urls, lambda@edge, cognito, oac]
+  source: https://aws.amazon.com/blogs/networking-and-content-delivery/serving-private-content-using-amazon-cloudfront-aws-lambdaedge/
+  description: Users authenticate against a Cognito user pool, and a Lambda@Edge viewer-request function validates the JWT before issuing CloudFront signed cookies whose private key is fetched from Secrets Manager. Protected objects stay in a private S3 bucket that only the distribution can read, so unauthenticated or expired requests are rejected at the edge.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: identity}
+  elements:
+    - {tf: aws_route53_zone, name: content-zone, in: region}
+    - {tf: aws_acm_certificate, name: content-cert, in: region}
+    - {tf: aws_cloudfront_distribution, name: private-cdn, in: group:global edge}
+    - {tf: aws_lambda_function, name: auth-check-edge, in: group:global edge}
+    - {tf: aws_cloudfront_public_key, name: signing-key, in: group:global edge}
+    - {tf: aws_cognito_user_pool, name: subscribers, in: group:identity}
+    - {tf: aws_secretsmanager_secret, name: signing-private-key, in: region}
+    - {tf: aws_s3_bucket, name: premium-content, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: subscribers, label: sign in, step: 1}
+    - {from: subscribers, to: users, label: JWT, step: 2}
+    - {from: users, to: content-zone, label: DNS, step: 3}
+    - {from: users, to: private-cdn, label: GET /login with JWT, step: 4}
+    - {from: content-cert, to: private-cdn, label: TLS certificate}
+    - {from: private-cdn, to: auth-check-edge, label: viewer request, step: 5}
+    - {from: auth-check-edge, to: subscribers, label: verify JWT against JWKS, step: 6}
+    - {from: auth-check-edge, to: signing-private-key, label: fetch private key, step: 7}
+    - {from: auth-check-edge, to: users, label: Set-Cookie CloudFront-Policy/Signature/Key-Pair-Id, step: 8}
+    - {from: users, to: private-cdn, label: GET protected object with signed cookies, step: 9}
+    - {from: signing-key, to: private-cdn, label: trusted key group validates signature}
+    - {from: private-cdn, to: premium-content, label: origin fetch via OAC, step: 10}
+
+- slug: shield-advanced-ddos-resilient-web
+  title: DDoS-resilient web application with Shield Advanced, WAF, and CloudFront
+  category: edge
+  tags: [ddos, shield advanced, waf, cloudfront, route 53, rate-based rules]
+  source: https://docs.aws.amazon.com/waf/latest/developerguide/ddos-resiliency-example-web.html
+  description: Route 53 hosted zones, a CloudFront distribution, and an AWS WAF web ACL sit between users and the application so the origin is obscured, requests are answered close to users, and layer 7 floods are detected and mitigated with rate-based rules. Shield Advanced protects the hosted zone, distribution, and the Application Load Balancer, and the load balancer only accepts traffic carrying a secret header set by CloudFront.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+      vpcs:
+        - name: app
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: app-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: app-b, cidr: 10.0.11.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_route53_zone, name: app-zone, in: group:global edge}
+    - {tf: aws_cloudfront_distribution, name: app-cdn, in: group:global edge}
+    - {tf: aws_wafv2_web_acl, name: edge-waf, in: group:global edge}
+    - {tf: aws_shield_protection, name: shield-cdn, in: group:global edge}
+    - {tf: aws_shield_protection, name: shield-zone, in: group:global edge}
+    - {tf: aws_shield_protection, name: shield-alb, in: region}
+    - {tf: aws_internet_gateway, name: app-igw, in: vpc:app}
+    - {tf: aws_lb, name: app-alb, in: vpc:app}
+    - {tf: aws_autoscaling_group, name: app-asg, in: vpc:app}
+    - {tf: aws_instance, name: app-a, in: subnet:app-a}
+    - {tf: aws_instance, name: app-b, in: subnet:app-b}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: app-zone, label: DNS, step: 1}
+    - {from: internet, to: app-cdn, label: attack traffic absorbed at edge}
+    - {from: users, to: app-cdn, label: HTTPS, step: 2}
+    - {from: edge-waf, to: app-cdn, label: rate-based and managed rules}
+    - {from: shield-cdn, to: app-cdn, label: Shield Advanced protection}
+    - {from: shield-zone, to: app-zone, label: Shield Advanced protection}
+    - {from: shield-alb, to: app-alb, label: Shield Advanced protection}
+    - {from: app-cdn, to: app-alb, label: origin request with X-Origin-Verify header, step: 3}
+    - {from: app-igw, to: app-alb, label: security group allows CloudFront prefix list only}
+    - {from: app-alb, to: app-a, step: 4}
+    - {from: app-alb, to: app-b}
+    - {from: app-asg, to: app-a, label: scales}
+
+- slug: apigw-waf-cloudfront-perimeter
+  title: API perimeter protection with CloudFront, WAF, and API Gateway
+  category: edge
+  tags: [api gateway, waf, cloudfront, origin verify, lambda, secrets manager]
+  source: https://aws.amazon.com/blogs/security/protect-apis-with-amazon-api-gateway-and-perimeter-protection-services/
+  description: A CloudFront distribution with a WAF web ACL fronts a regional REST API and injects a secret origin-verify header that a second web ACL on API Gateway requires, so callers cannot bypass the edge. The shared secret lives in Secrets Manager and is rotated by a Lambda function that updates both the distribution and the API-side rule.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: api}
+  elements:
+    - {tf: aws_route53_zone, name: api-zone, in: region}
+    - {tf: aws_acm_certificate, name: api-cert, in: region}
+    - {tf: aws_cloudfront_distribution, name: api-cdn, in: group:global edge}
+    - {tf: aws_wafv2_web_acl, name: edge-waf, in: group:global edge}
+    - {tf: aws_api_gateway_rest_api, name: orders-api, in: group:api}
+    - {tf: aws_wafv2_web_acl, name: regional-waf, in: group:api}
+    - {tf: aws_lambda_function, name: orders-handler, in: group:api}
+    - {tf: aws_dynamodb_table, name: orders, in: group:api}
+    - {tf: aws_secretsmanager_secret, name: origin-verify-secret, in: region}
+    - {tf: aws_lambda_function, name: secret-rotator, in: region}
+  actors: [client]
+  flows:
+    - {from: client, to: api-zone, label: DNS, step: 1}
+    - {from: client, to: api-cdn, label: HTTPS API call, step: 2}
+    - {from: api-cert, to: api-cdn, label: TLS certificate}
+    - {from: edge-waf, to: api-cdn, label: managed rules and rate limits}
+    - {from: api-cdn, to: orders-api, label: origin request with X-Origin-Verify header, step: 3}
+    - {from: regional-waf, to: orders-api, label: allow only matching header, step: 4}
+    - {from: orders-api, to: orders-handler, label: Lambda integration, step: 5}
+    - {from: orders-handler, to: orders, label: read/write, step: 6}
+    - {from: secret-rotator, to: origin-verify-secret, label: rotate}
+    - {from: secret-rotator, to: api-cdn, label: update origin custom header}
+    - {from: secret-rotator, to: regional-waf, label: update rule value}
+
+- slug: apigw-edge-optimized-custom-domain
+  title: Edge-optimized REST API with a custom domain
+  category: web
+  tags: [api gateway, edge-optimized, custom domain, acm, route 53, lambda]
+  source: https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-edge-optimized-custom-domain-name.html
+  description: An edge-optimized REST API is reached through an API Gateway managed CloudFront distribution, so requests enter at the nearest point of presence and travel the AWS backbone to the regional API endpoint. A custom domain name with an ACM certificate issued in us-east-1 is mapped to the API stage and published as a Route 53 alias record, while Lambda functions and DynamoDB implement the resources.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: backend}
+  elements:
+    - {tf: aws_route53_zone, name: api-zone, in: region}
+    - {tf: aws_acm_certificate, name: api-cert, in: region}
+    - {tf: aws_api_gateway_domain_name, name: api-example-com, in: group:global edge}
+    - {tf: aws_api_gateway_rest_api, name: petstore-api, in: group:backend}
+    - {tf: aws_lambda_function, name: get-pets, in: group:backend}
+    - {tf: aws_lambda_function, name: create-pet, in: group:backend}
+    - {tf: aws_dynamodb_table, name: pets, in: group:backend}
+    - {tf: aws_cognito_user_pool, name: api-users, in: group:backend}
+  actors: [client, mobile]
+  flows:
+    - {from: client, to: api-zone, label: DNS lookup api.example.com, step: 1}
+    - {from: api-zone, to: api-example-com, label: alias record to distribution domain, step: 2}
+    - {from: client, to: api-example-com, label: HTTPS at nearest edge POP, step: 3}
+    - {from: mobile, to: api-example-com, label: HTTPS}
+    - {from: api-cert, to: api-example-com, label: TLS certificate}
+    - {from: api-example-com, to: petstore-api, label: base path mapping to stage, step: 4}
+    - {from: petstore-api, to: api-users, label: Cognito authorizer}
+    - {from: petstore-api, to: get-pets, label: GET /pets, step: 5}
+    - {from: petstore-api, to: create-pet, label: POST /pets}
+    - {from: get-pets, to: pets, label: Query, step: 6}
+    - {from: create-pet, to: pets, label: PutItem}
+
+- slug: elastic-beanstalk-ha-php-rds
+  title: High-availability Elastic Beanstalk application with an external RDS database
+  category: web
+  tags: [elastic beanstalk, php, alb, auto scaling, rds multi-az, s3]
+  source: https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/php-ha-tutorial.html
+  description: An Elastic Beanstalk web server environment provisions an Application Load Balancer, an Auto Scaling group across two Availability Zones, and the EC2 instances that run the application, with application versions stored in an S3 bucket. The database is a Multi-AZ RDS instance created outside the environment so it survives environment rebuilds and blue/green swaps, and its endpoint is passed to the application as environment properties.
+  containers:
+    - region: us-west-2
+      vpcs:
+        - name: beanstalk
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: app-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: app-b, cidr: 10.0.11.0/24, az: b, public: false}
+            - {name: db-a, cidr: 10.0.20.0/24, az: a, public: false}
+            - {name: db-b, cidr: 10.0.21.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_elastic_beanstalk_application, name: php-app, in: region}
+    - {tf: aws_elastic_beanstalk_environment, name: php-prod, in: vpc:beanstalk}
+    - {tf: aws_s3_bucket, name: app-versions, in: region}
+    - {tf: aws_internet_gateway, name: eb-igw, in: vpc:beanstalk}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a}
+    - {tf: aws_lb, name: eb-alb, in: vpc:beanstalk}
+    - {tf: aws_autoscaling_group, name: eb-asg, in: vpc:beanstalk}
+    - {tf: aws_instance, name: php-a, in: subnet:app-a}
+    - {tf: aws_instance, name: php-b, in: subnet:app-b}
+    - {tf: aws_db_instance, name: app-db, in: subnet:db-a}
+    - {tf: aws_db_instance, name: app-db-standby, in: subnet:db-b}
+  actors: [users, user]
+  flows:
+    - {from: user, to: php-app, label: eb deploy application version, step: 1}
+    - {from: php-app, to: app-versions, label: store bundle, step: 2}
+    - {from: php-app, to: php-prod, label: deploy to environment, step: 3}
+    - {from: php-prod, to: eb-alb, label: provisions}
+    - {from: php-prod, to: eb-asg, label: provisions}
+    - {from: eb-asg, to: php-a, label: launches}
+    - {from: eb-asg, to: php-b, label: launches}
+    - {from: users, to: eb-alb, label: HTTPS, step: 4}
+    - {from: eb-igw, to: eb-alb}
+    - {from: eb-alb, to: php-a, step: 5}
+    - {from: eb-alb, to: php-b}
+    - {from: php-a, to: app-db, label: RDS_HOSTNAME environment property, step: 6}
+    - {from: app-db, to: app-db-standby, label: Multi-AZ synchronous replica}
+    - {from: php-a, to: nat-a}
+    - {from: nat-a, to: eb-igw}
+
+- slug: lightsail-ha-wordpress-lb
+  title: Highly available WordPress on Amazon Lightsail
+  category: web
+  tags: [lightsail, wordpress, lightsail load balancer, managed database, lightsail bucket, cdn]
+  source: https://aws.amazon.com/blogs/compute/deploying-a-highly-available-wordpress-site-on-amazon-lightsail-part-4-increasing-performance-and-scalability-with-a-lightsail-load-balancer/
+  description: Multiple WordPress instances cloned from a snapshot and spread across Availability Zones sit behind a Lightsail load balancer that terminates TLS with a managed certificate. All instances write to one highly available Lightsail managed MySQL database, and media uploads are offloaded to a Lightsail bucket served through a Lightsail CDN distribution.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: lightsail}
+  elements:
+    - {tf: aws_lightsail_domain, name: site-domain, in: group:lightsail}
+    - {tf: aws_lightsail_certificate, name: lb-cert, in: group:lightsail}
+    - {tf: aws_lightsail_lb, name: wp-lb, in: group:lightsail}
+    - {tf: aws_lightsail_instance, name: wp-1, in: group:lightsail}
+    - {tf: aws_lightsail_instance, name: wp-2, in: group:lightsail}
+    - {tf: aws_lightsail_database, name: wp-db, in: group:lightsail}
+    - {tf: aws_lightsail_bucket, name: wp-media, in: group:lightsail}
+    - {tf: aws_lightsail_distribution, name: media-cdn, in: group:lightsail}
+  actors: [users]
+  flows:
+    - {from: users, to: site-domain, label: DNS, step: 1}
+    - {from: users, to: wp-lb, label: HTTPS, step: 2}
+    - {from: lb-cert, to: wp-lb, label: managed TLS certificate}
+    - {from: wp-lb, to: wp-1, label: HTTP with session persistence, step: 3}
+    - {from: wp-lb, to: wp-2, label: HTTP with session persistence}
+    - {from: wp-1, to: wp-db, label: MySQL, step: 4}
+    - {from: wp-2, to: wp-db, label: MySQL}
+    - {from: wp-1, to: wp-media, label: offload uploads, step: 5}
+    - {from: media-cdn, to: wp-media, label: origin}
+    - {from: users, to: media-cdn, label: media assets, step: 6}
+
+- slug: elasticache-valkey-ecommerce-session-cache
+  title: E-commerce web tier with ElastiCache for Valkey sessions and caching
+  category: web
+  tags: [elasticache, valkey, session store, cache-aside, leaderboards, rds]
+  source: https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/ecommerce-caching-valkey.html
+  description: Stateless web servers behind an Application Load Balancer keep user sessions and shopping carts in an ElastiCache for Valkey replication group with a Multi-AZ replica, so any instance can serve any request and the tier scales horizontally. Product catalog reads use a cache-aside pattern that falls back to the RDS database on a miss, while writes go to the database and invalidate the cached keys.
+  containers:
+    - region: eu-west-1
+      vpcs:
+        - name: shop
+          cidr: 10.0.0.0/16
+          subnets:
+            - {name: public-a, cidr: 10.0.0.0/24, az: a, public: true}
+            - {name: public-b, cidr: 10.0.1.0/24, az: b, public: true}
+            - {name: web-a, cidr: 10.0.10.0/24, az: a, public: false}
+            - {name: web-b, cidr: 10.0.11.0/24, az: b, public: false}
+            - {name: cache-a, cidr: 10.0.20.0/24, az: a, public: false}
+            - {name: cache-b, cidr: 10.0.21.0/24, az: b, public: false}
+  elements:
+    - {tf: aws_internet_gateway, name: shop-igw, in: vpc:shop}
+    - {tf: aws_lb, name: shop-alb, in: vpc:shop}
+    - {tf: aws_autoscaling_group, name: web-asg, in: vpc:shop}
+    - {tf: aws_instance, name: web-a, in: subnet:web-a}
+    - {tf: aws_instance, name: web-b, in: subnet:web-b}
+    - {tf: aws_elasticache_replication_group, name: session-cache, in: subnet:cache-a}
+    - {tf: aws_elasticache_cluster, name: catalog-cache, in: subnet:cache-b}
+    - {tf: aws_db_instance, name: catalog-db, in: subnet:cache-b}
+  actors: [users]
+  flows:
+    - {from: users, to: shop-alb, label: HTTPS, step: 1}
+    - {from: shop-igw, to: shop-alb}
+    - {from: shop-alb, to: web-a, label: no sticky sessions needed, step: 2}
+    - {from: shop-alb, to: web-b}
+    - {from: web-asg, to: web-a, label: scales}
+    - {from: web-a, to: session-cache, label: GET/SET session and cart with TTL, step: 3}
+    - {from: web-b, to: session-cache, label: same session visible from any instance}
+    - {from: web-a, to: catalog-cache, label: cache-aside read, step: 4}
+    - {from: web-a, to: catalog-db, label: on miss read from RDS then populate cache, step: 5}
+    - {from: web-a, to: catalog-db, label: "writes, then invalidate keys"}
+
+- slug: vod-mediaconvert-cloudfront
+  title: Video on demand with S3, MediaConvert, and CloudFront
+  category: media
+  tags: [video on demand, mediaconvert, hls, cloudfront, s3, lambda, sns]
+  source: https://docs.aws.amazon.com/solutions/latest/video-on-demand-on-aws-foundation/architecture-overview.html
+  description: Uploading a source video to an S3 bucket triggers a Lambda function that submits a transcoding job to AWS Elemental MediaConvert using a stored job template. MediaConvert writes HLS adaptive-bitrate renditions to a destination bucket that a CloudFront distribution serves to players, a completion Lambda publishes job status to SNS, and CloudWatch logs and job metadata are kept for tracking.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: ingest}
+        - {label: transcode}
+  elements:
+    - {tf: aws_s3_bucket, name: source-bucket, in: group:ingest}
+    - {tf: aws_lambda_function, name: job-submit, in: group:ingest}
+    - {tf: aws_media_convert_queue, name: vod-queue, in: group:transcode}
+    - {tf: aws_s3_bucket, name: destination-bucket, in: group:transcode}
+    - {tf: aws_lambda_function, name: job-complete, in: group:transcode}
+    - {tf: aws_sns_topic, name: job-notifications, in: group:transcode}
+    - {tf: aws_cloudwatch_event_rule, name: mediaconvert-status, in: group:transcode}
+    - {tf: aws_cloudfront_distribution, name: vod-cdn, in: group:global edge}
+  actors: [user, users]
+  flows:
+    - {from: user, to: source-bucket, label: upload source video, step: 1}
+    - {from: source-bucket, to: job-submit, label: "s3:ObjectCreated event", step: 2}
+    - {from: job-submit, to: vod-queue, label: CreateJob with template, step: 3}
+    - {from: vod-queue, to: source-bucket, label: read source}
+    - {from: vod-queue, to: destination-bucket, label: write HLS renditions and thumbnails, step: 4}
+    - {from: vod-queue, to: mediaconvert-status, label: job state change event, step: 5}
+    - {from: mediaconvert-status, to: job-complete, label: EventBridge target, step: 6}
+    - {from: job-complete, to: job-notifications, label: publish COMPLETE/ERROR, step: 7}
+    - {from: users, to: vod-cdn, label: HLS playback, step: 8}
+    - {from: vod-cdn, to: destination-bucket, label: origin via OAC, step: 9}
+
+- slug: live-streaming-medialive-mediapackage
+  title: Live streaming with MediaLive, MediaPackage, and CloudFront
+  category: media
+  tags: [live streaming, medialive, mediapackage, hls, dash, cloudfront, contributor encoder]
+  source: https://docs.aws.amazon.com/solutions/latest/live-streaming-on-aws/solution-overview.html
+  description: A contribution encoder pushes a live feed to an AWS Elemental MediaLive input, and a MediaLive channel encodes it into an adaptive bitrate ladder that is sent to a MediaPackage channel. MediaPackage packages the stream as HLS, DASH, and CMAF endpoints that a CloudFront distribution delivers to viewers, with an optional demo player hosted on S3.
+  containers:
+    - region: us-west-2
+      groups:
+        - {label: global edge}
+        - {label: ingest}
+        - {label: origin}
+  elements:
+    - {tf: aws_medialive_input, name: rtmp-input, in: group:ingest}
+    - {tf: aws_medialive_channel, name: live-encoder, in: group:ingest}
+    - {tf: aws_media_package_channel, name: live-channel, in: group:origin}
+    - {tf: aws_s3_bucket, name: demo-player, in: group:origin}
+    - {tf: aws_cloudfront_distribution, name: live-cdn, in: group:global edge}
+    - {tf: aws_cloudwatch_dashboard, name: stream-health, in: region}
+  actors: [device, users]
+  flows:
+    - {from: device, to: rtmp-input, label: RTMP/RTP contribution feed, step: 1}
+    - {from: rtmp-input, to: live-encoder, label: attached input, step: 2}
+    - {from: live-encoder, to: live-channel, label: ABR ladder over HLS ingest, step: 3}
+    - {from: live-channel, to: live-cdn, label: HLS/DASH/CMAF origin endpoints, step: 4}
+    - {from: demo-player, to: live-cdn, label: player page origin}
+    - {from: users, to: live-cdn, label: playback, step: 5}
+    - {from: live-encoder, to: stream-health, label: channel metrics}
+    - {from: live-channel, to: stream-health, label: egress metrics}
+
+- slug: headless-web-store-ecommerce
+  title: Headless e-commerce web store on AWS
+  category: web
+  tags: [e-commerce, headless commerce, retail, appsync, opensearch, personalize, cognito]
+  source: https://docs.aws.amazon.com/solutions/web-store-on-aws/
+  description: A React storefront is delivered from S3 through CloudFront with AWS WAF, and the browser calls a GraphQL API on AppSync and REST APIs on API Gateway that Lambda functions serve. Shoppers authenticate with Cognito, catalog search runs on OpenSearch, orders and carts live in DynamoDB, and product recommendations come from Amazon Personalize.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: api}
+        - {label: commerce services}
+  elements:
+    - {tf: aws_route53_zone, name: store-zone, in: region}
+    - {tf: aws_cloudfront_distribution, name: storefront-cdn, in: group:global edge}
+    - {tf: aws_wafv2_web_acl, name: storefront-waf, in: group:global edge}
+    - {tf: aws_s3_bucket, name: storefront-bucket, in: region}
+    - {tf: aws_cognito_user_pool, name: shoppers, in: group:api}
+    - {tf: aws_appsync_graphql_api, name: commerce-graphql, in: group:api}
+    - {tf: aws_api_gateway_rest_api, name: commerce-rest, in: group:api}
+    - {tf: aws_lambda_function, name: cart-service, in: group:commerce services}
+    - {tf: aws_lambda_function, name: order-service, in: group:commerce services}
+    - {tf: aws_dynamodb_table, name: carts-orders, in: group:commerce services}
+    - {tf: aws_opensearch_domain, name: product-search, in: group:commerce services}
+    - {tf: aws_personalize_dataset_group, name: recommendations, in: group:commerce services}
+  actors: [users]
+  flows:
+    - {from: users, to: store-zone, label: DNS, step: 1}
+    - {from: users, to: storefront-cdn, label: HTTPS storefront, step: 2}
+    - {from: storefront-waf, to: storefront-cdn, label: web ACL}
+    - {from: storefront-cdn, to: storefront-bucket, label: static React app, step: 3}
+    - {from: users, to: shoppers, label: sign in, step: 4}
+    - {from: users, to: commerce-graphql, label: GraphQL with Cognito JWT, step: 5}
+    - {from: users, to: commerce-rest, label: REST checkout}
+    - {from: commerce-graphql, to: product-search, label: search resolver, step: 6}
+    - {from: commerce-graphql, to: cart-service, label: Lambda resolver}
+    - {from: commerce-rest, to: order-service, label: Lambda integration, step: 7}
+    - {from: cart-service, to: carts-orders, label: cart items}
+    - {from: order-service, to: carts-orders, label: orders, step: 8}
+    - {from: commerce-graphql, to: recommendations, label: GetRecommendations}
+
+- slug: serverless-microservices-ecommerce
+  title: Highly available serverless microservices e-commerce site
+  category: web
+  tags: [e-commerce, microservices, api gateway, lambda, dynamodb, sqs, step functions, cognito]
+  source: https://aws.amazon.com/blogs/architecture/architecting-a-highly-available-serverless-microservices-based-ecommerce-site/
+  description: A static frontend on S3 and CloudFront talks to independently deployable product, cart, and order microservices exposed through API Gateway and implemented as Lambda functions, each owning its DynamoDB table. Checkout hands off to an SQS queue and a Step Functions workflow that processes payment and fulfilment asynchronously and confirms the order over SES, while Cognito authenticates shoppers.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: product service}
+        - {label: cart service}
+        - {label: order service}
+  elements:
+    - {tf: aws_cloudfront_distribution, name: shop-cdn, in: group:global edge}
+    - {tf: aws_s3_bucket, name: shop-frontend, in: region}
+    - {tf: aws_cognito_user_pool, name: shoppers, in: region}
+    - {tf: aws_api_gateway_rest_api, name: shop-api, in: region}
+    - {tf: aws_lambda_function, name: product-fn, in: group:product service}
+    - {tf: aws_dynamodb_table, name: products, in: group:product service}
+    - {tf: aws_lambda_function, name: cart-fn, in: group:cart service}
+    - {tf: aws_dynamodb_table, name: carts, in: group:cart service}
+    - {tf: aws_lambda_function, name: order-fn, in: group:order service}
+    - {tf: aws_sqs_queue, name: order-queue, in: group:order service}
+    - {tf: aws_sfn_state_machine, name: checkout-workflow, in: group:order service}
+    - {tf: aws_dynamodb_table, name: orders, in: group:order service}
+    - {tf: aws_ses_domain_identity, name: shop-mail, in: region}
+  actors: [users]
+  flows:
+    - {from: users, to: shop-cdn, label: HTTPS, step: 1}
+    - {from: shop-cdn, to: shop-frontend, label: static origin}
+    - {from: users, to: shoppers, label: sign in, step: 2}
+    - {from: users, to: shop-api, label: REST with JWT, step: 3}
+    - {from: shop-api, to: shoppers, label: Cognito authorizer}
+    - {from: shop-api, to: product-fn, label: GET /products, step: 4}
+    - {from: product-fn, to: products}
+    - {from: shop-api, to: cart-fn, label: PUT /cart}
+    - {from: cart-fn, to: carts}
+    - {from: shop-api, to: order-fn, label: POST /checkout, step: 5}
+    - {from: order-fn, to: order-queue, label: enqueue order, step: 6}
+    - {from: order-queue, to: checkout-workflow, label: start execution, step: 7}
+    - {from: checkout-workflow, to: orders, label: persist order state, step: 8}
+    - {from: checkout-workflow, to: shop-mail, label: order confirmation email, step: 9}
+
+- slug: saas-serverless-multi-tenant
+  title: Serverless multi-tenant SaaS with pooled and siloed tiers
+  category: web
+  tags: [saas, multi-tenant, cognito, api gateway, lambda authorizer, dynamodb, tenant isolation]
+  source: https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/serverless-saas.html
+  description: A shared web application on S3 and CloudFront signs tenants in through Cognito user pools whose JWTs carry tenant ID and tier as custom claims. API Gateway calls a Lambda authorizer that maps the claims to scoped IAM credentials, so pooled tenants share Lambda functions and DynamoDB tables partitioned by tenant while premium tenants get dedicated siloed stacks, and an onboarding service provisions each new tenant.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: shared services}
+        - {label: pooled tier}
+        - {label: siloed tenant}
+  elements:
+    - {tf: aws_cloudfront_distribution, name: saas-cdn, in: group:global edge}
+    - {tf: aws_s3_bucket, name: saas-web, in: region}
+    - {tf: aws_cognito_user_pool, name: tenant-users, in: group:shared services}
+    - {tf: aws_lambda_function, name: tenant-onboarding, in: group:shared services}
+    - {tf: aws_dynamodb_table, name: tenant-registry, in: group:shared services}
+    - {tf: aws_api_gateway_rest_api, name: pooled-api, in: group:pooled tier}
+    - {tf: aws_lambda_function, name: tenant-authorizer, in: group:pooled tier}
+    - {tf: aws_lambda_function, name: product-service, in: group:pooled tier}
+    - {tf: aws_dynamodb_table, name: pooled-products, in: group:pooled tier}
+    - {tf: aws_api_gateway_rest_api, name: silo-api, in: group:siloed tenant}
+    - {tf: aws_lambda_function, name: silo-product-service, in: group:siloed tenant}
+    - {tf: aws_dynamodb_table, name: silo-products, in: group:siloed tenant}
+  actors: [users, user]
+  flows:
+    - {from: user, to: tenant-onboarding, label: tenant sign-up, step: 1}
+    - {from: tenant-onboarding, to: tenant-users, label: create user pool group / pool, step: 2}
+    - {from: tenant-onboarding, to: tenant-registry, label: register tenant and tier}
+    - {from: users, to: saas-cdn, label: HTTPS web app, step: 3}
+    - {from: saas-cdn, to: saas-web, label: static origin}
+    - {from: users, to: tenant-users, label: "sign in, JWT with tenantId and tier claims", step: 4}
+    - {from: users, to: pooled-api, label: API call with JWT, step: 5}
+    - {from: pooled-api, to: tenant-authorizer, label: Lambda authorizer, step: 6}
+    - {from: tenant-authorizer, to: tenant-registry, label: look up tenant}
+    - {from: tenant-authorizer, to: pooled-api, label: policy plus scoped STS credentials, step: 7}
+    - {from: pooled-api, to: product-service, step: 8}
+    - {from: product-service, to: pooled-products, label: leading-key condition on tenantId, step: 9}
+    - {from: users, to: silo-api, label: premium tenant traffic}
+    - {from: silo-api, to: silo-product-service}
+    - {from: silo-product-service, to: silo-products, label: dedicated table}
+
+- slug: multi-region-active-active-cloudfront-s3
+  title: Multi-Region active-active static content with CloudFront and S3
+  category: resilience
+  tags: [multi-region, active-active, cloudfront, origin group, s3 replication, lambda@edge, route 53]
+  source: https://aws.amazon.com/blogs/networking-and-content-delivery/using-amazon-cloudfront-and-amazon-s3-to-build-multi-region-active-active-geo-proximity-applications/
+  description: Content is written to an S3 bucket in each Region and kept in sync with two-way replication, and a single CloudFront distribution uses an origin-request Lambda@Edge function to route each cache miss to the bucket nearest the requesting edge location. A CloudFront origin group retries against the other Region when the primary returns an error, so a regional S3 impairment does not take the site down.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+    - region: eu-west-1
+  elements:
+    - {tf: aws_route53_zone, name: site-zone, in: region:us-east-1}
+    - {tf: aws_acm_certificate, name: site-cert, in: region:us-east-1}
+    - {tf: aws_cloudfront_distribution, name: site-cdn, in: group:global edge}
+    - {tf: aws_lambda_function, name: origin-router-edge, in: group:global edge}
+    - {tf: aws_s3_bucket, name: content-us, in: region:us-east-1}
+    - {tf: aws_s3_bucket, name: content-eu, in: region:eu-west-1}
+    - {tf: aws_s3_bucket_replication_configuration, name: us-to-eu, in: region:us-east-1}
+    - {tf: aws_s3_bucket_replication_configuration, name: eu-to-us, in: region:eu-west-1}
+  actors: [users]
+  flows:
+    - {from: users, to: site-zone, label: DNS, step: 1}
+    - {from: users, to: site-cdn, label: HTTPS at nearest edge, step: 2}
+    - {from: site-cert, to: site-cdn, label: TLS certificate}
+    - {from: site-cdn, to: origin-router-edge, label: origin request on cache miss, step: 3}
+    - {from: origin-router-edge, to: site-cdn, label: set origin to closest bucket, step: 4}
+    - {from: site-cdn, to: content-us, label: primary origin for Americas, step: 5}
+    - {from: site-cdn, to: content-eu, label: primary origin for Europe, step: 5}
+    - {from: site-cdn, to: content-eu, label: origin group failover on 5xx from us-east-1}
+    - {from: us-to-eu, to: content-eu, label: replicate new objects}
+    - {from: eu-to-us, to: content-us, label: replicate new objects}
+    - {from: content-us, to: us-to-eu, label: source}
+    - {from: content-eu, to: eu-to-us, label: source}
+
+- slug: s3-static-contact-form-ses
+  title: Dynamic contact form for an S3 static website with Lambda and SES
+  category: web
+  tags: [static website, contact form, api gateway, lambda, ses, cors]
+  source: https://aws.amazon.com/blogs/architecture/create-dynamic-contact-forms-for-s3-static-websites-using-aws-lambda-amazon-api-gateway-and-amazon-ses/
+  description: A static marketing site hosted on S3 and served through CloudFront embeds a contact form whose JavaScript posts the fields to an API Gateway endpoint with CORS enabled. A Lambda function validates the payload, stores the enquiry in DynamoDB, and sends an email to the site owner through a verified SES domain identity.
+  containers:
+    - region: us-east-1
+      groups:
+        - {label: global edge}
+        - {label: form backend}
+  elements:
+    - {tf: aws_route53_zone, name: site-zone, in: region}
+    - {tf: aws_acm_certificate, name: site-cert, in: region}
+    - {tf: aws_cloudfront_distribution, name: site-cdn, in: group:global edge}
+    - {tf: aws_s3_bucket, name: site-bucket, in: region}
+    - {tf: aws_api_gateway_rest_api, name: contact-api, in: group:form backend}
+    - {tf: aws_lambda_function, name: contact-handler, in: group:form backend}
+    - {tf: aws_dynamodb_table, name: enquiries, in: group:form backend}
+    - {tf: aws_ses_domain_identity, name: mail-domain, in: group:form backend}
+  actors: [users, user]
+  flows:
+    - {from: users, to: site-zone, label: DNS, step: 1}
+    - {from: users, to: site-cdn, label: HTTPS page load, step: 2}
+    - {from: site-cert, to: site-cdn, label: TLS certificate}
+    - {from: site-cdn, to: site-bucket, label: static origin via OAC, step: 3}
+    - {from: users, to: contact-api, label: POST /contact (CORS), step: 4}
+    - {from: contact-api, to: contact-handler, label: Lambda proxy integration, step: 5}
+    - {from: contact-handler, to: enquiries, label: PutItem, step: 6}
+    - {from: contact-handler, to: mail-domain, label: SendEmail, step: 7}
+    - {from: mail-domain, to: user, label: notification email to site owner, step: 8}

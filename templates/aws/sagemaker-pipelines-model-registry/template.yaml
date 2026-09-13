@@ -1,0 +1,62 @@
+# Generated from the official reference (https://docs.aws.amazon.com/sagemaker/latest/dg/pipelines.html); edit freely.
+title: SageMaker Pipelines training workflow with Feature Store and Model Registry
+category: ml
+tags:
+- sagemaker pipelines
+- model registry
+- feature store
+- training
+- model evaluation
+source: https://docs.aws.amazon.com/sagemaker/latest/dg/pipelines.html
+description: A SageMaker pipeline chains processing, training, evaluation and a condition step that registers approved models in a Model Registry package group. Features come from a Feature Store group,
+  artifacts land in S3, and an approved model version is deployed as a real-time endpoint; the pipeline is authored from a SageMaker Studio domain and can run on an EventBridge schedule.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: user, type: common.user, name: user}
+- id: studio-domain
+  type: aws.res.aws_sagemaker_domain
+  name: studio-domain
+  parent: reg-us-east-1
+  props:
+    auth_mode: changeme
+    default_user_settings: {}
+    domain_name: changeme
+    subnet_ids: []
+    vpc_id: changeme
+- {id: raw-data, type: aws.s3_bucket, name: raw-data, parent: reg-us-east-1}
+- id: customer-features
+  type: aws.res.aws_sagemaker_feature_group
+  name: customer-features
+  parent: reg-us-east-1
+  props:
+    event_time_feature_name: changeme
+    feature_definition: []
+    feature_group_name: changeme
+    record_identifier_feature_name: changeme
+    role_arn: changeme
+- {id: train-evaluate-register, type: aws.res.aws_sagemaker_pipeline, name: train-evaluate-register, parent: reg-us-east-1, props: {pipeline_display_name: changeme, pipeline_name: changeme}}
+- {id: training-image, type: aws.res.aws_ecr_repository, name: training-image, parent: reg-us-east-1, props: {name: changeme}}
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: reg-us-east-1}
+- {id: churn-models, type: aws.res.aws_sagemaker_model_package_group, name: churn-models, parent: reg-us-east-1, props: {model_package_group_name: changeme}}
+- {id: churn-model, type: aws.res.aws_sagemaker_model, name: churn-model, parent: reg-us-east-1, props: {execution_role_arn: changeme}}
+- {id: churn-endpoint, type: aws.res.aws_sagemaker_endpoint, name: churn-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}}
+- {id: nightly-retrain, type: aws.res.aws_cloudwatch_event_rule, name: nightly-retrain, parent: reg-us-east-1}
+edges:
+- {from: user, to: studio-domain, label: author pipeline definition}
+- {from: studio-domain, to: train-evaluate-register, label: upsert and start}
+- {from: nightly-retrain, to: train-evaluate-register, link: aws_cloudwatch_event_target}
+- {from: raw-data, to: train-evaluate-register, label: ProcessingStep input, step: '1'}
+- {from: train-evaluate-register, to: customer-features, label: ingest features, step: '2'}
+- {from: training-image, to: train-evaluate-register, label: TrainingStep container}
+- {from: train-evaluate-register, to: pipeline-artifacts, label: model and evaluation.json, step: '3'}
+- {from: train-evaluate-register, to: churn-models, label: RegisterModel when accuracy above threshold, step: '4'}
+- {from: churn-models, to: churn-model, label: approved package, step: '5'}
+- {from: churn-model, to: churn-endpoint, label: deploy, step: '6'}
+steps:
+- {n: '1', text: 'raw-data → train-evaluate-register: ProcessingStep input'}
+- {n: '2', text: 'train-evaluate-register → customer-features: ingest features'}
+- {n: '3', text: 'train-evaluate-register → pipeline-artifacts: model and evaluation.json'}
+- {n: '4', text: 'train-evaluate-register → churn-models: RegisterModel when accuracy above threshold'}
+- {n: '5', text: 'churn-models → churn-model: approved package'}
+- {n: '6', text: 'churn-model → churn-endpoint: deploy'}

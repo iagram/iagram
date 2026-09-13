@@ -1,0 +1,54 @@
+# Generated from the official reference (https://docs.aws.amazon.com/transfer/latest/userguide/what-is-aws-transfer-family.html); edit freely.
+title: Managed SFTP with Transfer Family into S3
+category: migration
+tags:
+- transfer family
+- sftp
+- managed file transfer
+- s3
+- custom identity provider
+- managed workflows
+source: https://docs.aws.amazon.com/transfer/latest/userguide/what-is-aws-transfer-family.html
+description: A Transfer Family SFTP server endpoint replaces the on-premises file transfer host so partners keep their existing clients, hostnames and credentials. A Lambda-backed custom identity provider
+  authenticates users against the corporate directory, files land in an S3 bucket, and a managed workflow copies, tags and decrypts each upload before downstream processing.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-transfer-vpc, type: aws.vpc, name: transfer-vpc, parent: reg-eu-west-1, props: {cidr: 10.180.0.0/16}}
+- {id: az-transfer-vpc-a, type: aws.availability_zone, name: a, parent: vpc-transfer-vpc, props: {zone: a}}
+- {id: sub-tf-public-a, type: aws.subnet, name: tf-public-a, parent: az-transfer-vpc-a, props: {cidr: 10.180.0.0/24, az: a, public: true}}
+- {id: az-transfer-vpc-b, type: aws.availability_zone, name: b, parent: vpc-transfer-vpc, props: {zone: b}}
+- {id: sub-tf-public-b, type: aws.subnet, name: tf-public-b, parent: az-transfer-vpc-b, props: {cidr: 10.180.1.0/24, az: b, public: true}}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: sftp-zone, type: aws.route53_zone, name: sftp-zone, parent: reg-eu-west-1, props: {domain: example.com}}
+- {id: partner-sftp, type: aws.res.aws_transfer_server, name: partner-sftp, parent: vpc-transfer-vpc}
+- {id: custom-idp, type: aws.lambda_function, name: custom-idp, parent: reg-eu-west-1}
+- {id: partner-credentials, type: aws.res.aws_secretsmanager_secret, name: partner-credentials, parent: reg-eu-west-1}
+- id: post-upload-workflow
+  type: aws.res.aws_transfer_workflow
+  name: post-upload-workflow
+  parent: reg-eu-west-1
+  props:
+    steps: []
+- {id: inbound-files, type: aws.s3_bucket, name: inbound-files, parent: reg-eu-west-1}
+- {id: file-processor, type: aws.lambda_function, name: file-processor, parent: reg-eu-west-1}
+- {id: processing-queue, type: aws.sqs_queue, name: processing-queue, parent: reg-eu-west-1}
+edges:
+- {from: saas, to: sftp-zone, label: sftp.example.com, step: '1'}
+- {from: sftp-zone, to: partner-sftp, label: CNAME to server endpoint, step: '2'}
+- {from: partner-sftp, to: custom-idp, label: authenticate user, step: '3'}
+- {from: custom-idp, to: partner-credentials, label: lookup password / SSH key}
+- {from: partner-sftp, to: inbound-files, label: upload written to S3, step: '4'}
+- {from: partner-sftp, to: post-upload-workflow, label: on upload complete, step: '5'}
+- {from: post-upload-workflow, to: inbound-files, label: copy}
+- {from: post-upload-workflow, to: file-processor, label: custom step}
+- {from: file-processor, to: processing-queue, step: '6'}
+- {from: users, to: inbound-files, label: internal consumers}
+steps:
+- {n: '1', text: 'saas → sftp-zone: sftp.example.com'}
+- {n: '2', text: 'sftp-zone → partner-sftp: CNAME to server endpoint'}
+- {n: '3', text: 'partner-sftp → custom-idp: authenticate user'}
+- {n: '4', text: 'partner-sftp → inbound-files: upload written to S3'}
+- {n: '5', text: 'partner-sftp → post-upload-workflow: on upload complete'}
+- {n: '6', text: file-processor → processing-queue}

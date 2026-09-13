@@ -1,0 +1,43 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-the-edge.html); edit freely.
+title: Request customization at the edge with Lambda@Edge
+category: edge
+tags:
+- lambda@edge
+- cloudfront
+- authorization
+- a/b testing
+- origin selection
+source: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-the-edge.html
+description: Lambda@Edge functions replicated from us-east-1 run at CloudFront edge locations on viewer-request and origin-request events. The viewer-request function validates a JWT and redirects unauthenticated
+  users; the origin-request function selects the S3 or ALB origin based on a cookie, enabling A/B tests and geo-based routing without touching the origin servers.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.40.0.0/16}}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
+- {id: sub-app-public-a, type: aws.subnet, name: app-public-a, parent: az-app-a, props: {cidr: 10.40.0.0/24, az: a, public: true}}
+- {id: az-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-app-public-b, type: aws.subnet, name: app-public-b, parent: az-app-b, props: {cidr: 10.40.1.0/24, az: b, public: true}}
+- {id: users, type: common.users, name: users}
+- {id: site-cdn, type: aws.cloudfront_distribution, name: site-cdn, parent: reg-us-east-1}
+- {id: viewer-request-auth, type: aws.lambda_function, name: viewer-request-auth, parent: reg-us-east-1}
+- {id: origin-request-router, type: aws.lambda_function, name: origin-request-router, parent: reg-us-east-1}
+- {id: static-origin, type: aws.s3_bucket, name: static-origin, parent: reg-us-east-1}
+- {id: dynamic-origin-alb, type: aws.alb, name: dynamic-origin-alb, parent: vpc-app}
+- id: edge-waf
+  type: aws.res.aws_wafv2_web_acl
+  name: edge-waf
+  parent: reg-us-east-1
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+edges:
+- {from: users, to: site-cdn, label: HTTPS request, step: '1'}
+- {from: site-cdn, to: edge-waf, label: WAF inspection}
+- {from: site-cdn, to: viewer-request-auth, label: viewer-request trigger validates JWT, step: '2'}
+- {from: site-cdn, to: origin-request-router, label: origin-request trigger on cache miss, step: '3'}
+- {from: origin-request-router, to: static-origin, label: variant A cookie, step: '4'}
+- {from: origin-request-router, to: dynamic-origin-alb, label: variant B cookie}
+steps:
+- {n: '1', text: 'users → site-cdn: HTTPS request'}
+- {n: '2', text: 'site-cdn → viewer-request-auth: viewer-request trigger validates JWT'}
+- {n: '3', text: 'site-cdn → origin-request-router: origin-request trigger on cache miss'}
+- {n: '4', text: 'origin-request-router → static-origin: variant A cookie'}

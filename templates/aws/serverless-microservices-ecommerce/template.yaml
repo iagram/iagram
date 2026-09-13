@@ -1,0 +1,61 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/architecture/architecting-a-highly-available-serverless-microservices-based-ecommerce-site/); edit freely.
+title: Highly available serverless microservices e-commerce site
+category: web
+tags:
+- e-commerce
+- microservices
+- api gateway
+- lambda
+- dynamodb
+- sqs
+- step functions
+- cognito
+source: https://aws.amazon.com/blogs/architecture/architecting-a-highly-available-serverless-microservices-based-ecommerce-site/
+description: A static frontend on S3 and CloudFront talks to independently deployable product, cart, and order microservices exposed through API Gateway and implemented as Lambda functions, each owning
+  its DynamoDB table. Checkout hands off to an SQS queue and a Step Functions workflow that processes payment and fulfilment asynchronously and confirms the order over SES, while Cognito authenticates shoppers.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1}
+- {id: grp-product-service, type: common.group, name: product service, parent: reg-us-east-1}
+- {id: grp-cart-service, type: common.group, name: cart service, parent: reg-us-east-1}
+- {id: grp-order-service, type: common.group, name: order service, parent: reg-us-east-1}
+- {id: users, type: common.users, name: users}
+- {id: shop-cdn, type: aws.cloudfront_distribution, name: shop-cdn, parent: grp-global-edge}
+- {id: shop-frontend, type: aws.s3_bucket, name: shop-frontend, parent: reg-us-east-1}
+- {id: shoppers, type: aws.res.aws_cognito_user_pool, name: shoppers, parent: reg-us-east-1, props: {name: changeme}}
+- {id: shop-api, type: aws.res.aws_api_gateway_rest_api, name: shop-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: product-fn, type: aws.lambda_function, name: product-fn, parent: grp-product-service}
+- {id: products, type: aws.dynamodb_table, name: products, parent: grp-product-service}
+- {id: cart-fn, type: aws.lambda_function, name: cart-fn, parent: grp-cart-service}
+- {id: carts, type: aws.dynamodb_table, name: carts, parent: grp-cart-service}
+- {id: order-fn, type: aws.lambda_function, name: order-fn, parent: grp-order-service}
+- {id: order-queue, type: aws.sqs_queue, name: order-queue, parent: grp-order-service}
+- {id: checkout-workflow, type: aws.res.aws_sfn_state_machine, name: checkout-workflow, parent: grp-order-service, props: {definition: changeme, role_arn: changeme}}
+- {id: orders, type: aws.dynamodb_table, name: orders, parent: grp-order-service}
+- {id: shop-mail, type: aws.res.aws_ses_domain_identity, name: shop-mail, parent: reg-us-east-1, props: {domain: example.com}}
+edges:
+- {from: users, to: shop-cdn, label: HTTPS, step: '1'}
+- {from: shop-cdn, to: shop-frontend, label: static origin}
+- {from: users, to: shoppers, label: sign in, step: '2'}
+- {from: users, to: shop-api, label: REST with JWT, step: '3'}
+- {from: shop-api, to: shoppers, label: Cognito authorizer}
+- {from: shop-api, to: product-fn, label: GET /products, step: '4'}
+- {from: product-fn, to: products}
+- {from: shop-api, to: cart-fn, label: PUT /cart}
+- {from: cart-fn, to: carts}
+- {from: shop-api, to: order-fn, label: POST /checkout, step: '5'}
+- {from: order-fn, to: order-queue, label: enqueue order, step: '6'}
+- {from: order-queue, to: checkout-workflow, label: start execution, step: '7'}
+- {from: checkout-workflow, to: orders, label: persist order state, step: '8'}
+- {from: checkout-workflow, to: shop-mail, label: order confirmation email, step: '9'}
+steps:
+- {n: '1', text: 'users → shop-cdn: HTTPS'}
+- {n: '2', text: 'users → shoppers: sign in'}
+- {n: '3', text: 'users → shop-api: REST with JWT'}
+- {n: '4', text: 'shop-api → product-fn: GET /products'}
+- {n: '5', text: 'shop-api → order-fn: POST /checkout'}
+- {n: '6', text: 'order-fn → order-queue: enqueue order'}
+- {n: '7', text: 'order-queue → checkout-workflow: start execution'}
+- {n: '8', text: 'checkout-workflow → orders: persist order state'}
+- {n: '9', text: 'checkout-workflow → shop-mail: order confirmation email'}

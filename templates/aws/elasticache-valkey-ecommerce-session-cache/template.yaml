@@ -1,0 +1,51 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/ecommerce-caching-valkey.html); edit freely.
+title: E-commerce web tier with ElastiCache for Valkey sessions and caching
+category: web
+tags:
+- elasticache
+- valkey
+- session store
+- cache-aside
+- leaderboards
+- rds
+source: https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/ecommerce-caching-valkey.html
+description: Stateless web servers behind an Application Load Balancer keep user sessions and shopping carts in an ElastiCache for Valkey replication group with a Multi-AZ replica, so any instance can serve
+  any request and the tier scales horizontally. Product catalog reads use a cache-aside pattern that falls back to the RDS database on a miss, while writes go to the database and invalidate the cached keys.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-shop, type: aws.vpc, name: shop, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-shop-a, type: aws.availability_zone, name: a, parent: vpc-shop, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-shop-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-shop-b, type: aws.availability_zone, name: b, parent: vpc-shop, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-shop-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-web-a, type: aws.subnet, name: web-a, parent: az-shop-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-web-b, type: aws.subnet, name: web-b, parent: az-shop-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: sub-cache-a, type: aws.subnet, name: cache-a, parent: az-shop-a, props: {cidr: 10.0.20.0/24, az: a, public: false}}
+- {id: sub-cache-b, type: aws.subnet, name: cache-b, parent: az-shop-b, props: {cidr: 10.0.21.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: shop-igw, type: aws.res.aws_internet_gateway, name: shop-igw, parent: vpc-shop}
+- {id: shop-alb, type: aws.alb, name: shop-alb, parent: vpc-shop}
+- {id: web-asg, type: aws.res.aws_autoscaling_group, name: web-asg, parent: vpc-shop, props: {max_size: 1, min_size: 1}}
+- {id: web-a, type: aws.ec2_instance, name: web-a, parent: sub-web-a}
+- {id: web-b, type: aws.ec2_instance, name: web-b, parent: sub-web-b}
+- {id: session-cache, type: aws.res.aws_elasticache_replication_group, name: session-cache, parent: sub-cache-a, props: {description: changeme, replication_group_id: changeme}}
+- {id: catalog-cache, type: aws.res.aws_elasticache_cluster, name: catalog-cache, parent: sub-cache-b, props: {cluster_id: changeme}}
+- {id: catalog-db, type: aws.rds_instance, name: catalog-db, parent: sub-cache-b}
+edges:
+- {from: users, to: shop-alb, label: HTTPS, step: '1'}
+- {from: shop-igw, to: shop-alb}
+- {from: shop-alb, to: web-a, label: no sticky sessions needed, step: '2'}
+- {from: shop-alb, to: web-b}
+- {from: web-asg, to: web-a, label: scales}
+- {from: web-a, to: session-cache, label: GET/SET session and cart with TTL, step: '3'}
+- {from: web-b, to: session-cache, label: same session visible from any instance}
+- {from: web-a, to: catalog-cache, label: cache-aside read, step: '4'}
+- {from: web-a, to: catalog-db, label: on miss read from RDS then populate cache, step: '5'}
+- {from: web-a, to: catalog-db, label: 'writes, then invalidate keys'}
+steps:
+- {n: '1', text: 'users → shop-alb: HTTPS'}
+- {n: '2', text: 'shop-alb → web-a: no sticky sessions needed'}
+- {n: '3', text: 'web-a → session-cache: GET/SET session and cart with TTL'}
+- {n: '4', text: 'web-a → catalog-cache: cache-aside read'}
+- {n: '5', text: 'web-a → catalog-db: on miss read from RDS then populate cache'}

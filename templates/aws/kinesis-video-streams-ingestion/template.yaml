@@ -1,0 +1,47 @@
+# Generated from the official reference (https://docs.aws.amazon.com/kinesisvideostreams/latest/dg/how-it-works.html); edit freely.
+title: Video ingestion and analytics with Kinesis Video Streams
+category: media
+tags:
+- kinesis video streams
+- cameras
+- video analytics
+- sagemaker
+- computer vision
+source: https://docs.aws.amazon.com/kinesisvideostreams/latest/dg/how-it-works.html
+description: Cameras and other producers push time-encoded media into Kinesis video streams with the producer SDK; the service durably stores and time-indexes fragments for the configured retention. Consumer
+  applications on EC2 read fragments with the parser library and call a SageMaker endpoint for frame-level inference, publishing detections to a Kinesis data stream that a Lambda function writes to DynamoDB
+  and, for alerts, to SNS.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
+- {id: vpc-analytics, type: aws.vpc, name: analytics, parent: reg-us-west-2, props: {cidr: 10.30.0.0/16}}
+- {id: az-analytics-a, type: aws.availability_zone, name: a, parent: vpc-analytics, props: {zone: a}}
+- {id: sub-consumers-a, type: aws.subnet, name: consumers-a, parent: az-analytics-a, props: {cidr: 10.30.1.0/24, az: a, public: false}}
+- {id: device, type: common.device, name: device}
+- {id: users, type: common.users, name: users}
+- {id: camera-stream, type: aws.res.aws_kinesis_video_stream, name: camera-stream, parent: reg-us-west-2, props: {name: changeme}}
+- {id: kvs-consumer-app, type: aws.ec2_instance, name: kvs-consumer-app, parent: sub-consumers-a}
+- {id: object-detection-endpoint, type: aws.res.aws_sagemaker_endpoint, name: object-detection-endpoint, parent: reg-us-west-2, props: {endpoint_config_name: changeme}}
+- {id: detections-stream, type: aws.res.aws_kinesis_stream, name: detections-stream, parent: reg-us-west-2, props: {name: changeme}}
+- {id: detections-writer, type: aws.lambda_function, name: detections-writer, parent: reg-us-west-2}
+- {id: detections-table, type: aws.dynamodb_table, name: detections-table, parent: reg-us-west-2}
+- {id: security-alerts, type: aws.res.aws_sns_topic, name: security-alerts, parent: reg-us-west-2}
+- {id: clip-archive, type: aws.s3_bucket, name: clip-archive, parent: reg-us-west-2}
+- {id: az-vpc-analytics-b, type: aws.availability_zone, name: b, parent: vpc-analytics, props: {zone: b}}
+- {id: sub-vpc-analytics-b, type: aws.subnet, name: private-b, parent: az-vpc-analytics-b, props: {cidr: 10.30.251.0/24, az: b, public: false}}
+edges:
+- {from: device, to: camera-stream, label: PutMedia via producer SDK, step: '1'}
+- {from: camera-stream, to: kvs-consumer-app, label: GetMedia fragments, step: '2'}
+- {from: kvs-consumer-app, to: object-detection-endpoint, label: frame inference, step: '3'}
+- {from: kvs-consumer-app, to: detections-stream, label: detection events, step: '4'}
+- {from: detections-stream, to: detections-writer, link: aws_lambda_event_source_mapping}
+- {from: detections-writer, to: detections-table, label: persist detections, step: '5'}
+- {from: detections-writer, to: security-alerts, label: high-severity alert, step: '5'}
+- {from: kvs-consumer-app, to: clip-archive, label: export clips of interest}
+- {from: users, to: camera-stream, label: HLS/DASH playback of live or archived video}
+steps:
+- {n: '1', text: 'device → camera-stream: PutMedia via producer SDK'}
+- {n: '2', text: 'camera-stream → kvs-consumer-app: GetMedia fragments'}
+- {n: '3', text: 'kvs-consumer-app → object-detection-endpoint: frame inference'}
+- {n: '4', text: 'kvs-consumer-app → detections-stream: detection events'}
+- {n: '5', text: 'detections-writer → detections-table: persist detections'}

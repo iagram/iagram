@@ -1,0 +1,59 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/ContainerInsights.html); edit freely.
+title: Container observability with CloudWatch Container Insights on ECS and EKS
+category: observability
+tags:
+- cloudwatch
+- container insights
+- enhanced observability
+- fluent bit
+- cloudwatch agent
+- ecs
+- eks
+source: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/ContainerInsights.html
+description: Container Insights with enhanced observability collects CPU, memory, disk and network metrics down to the container level from an ECS cluster (via the ECS agent) and from an EKS cluster (via
+  the Amazon CloudWatch Observability add-on, which installs the CloudWatch agent and Fluent Bit). Metrics land in the ContainerInsights namespace, container logs and performance log events go to CloudWatch
+  Logs, and curated dashboards plus alarms that notify an SNS topic give operators cluster-to-container drill-down.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: web-ecs-cluster, type: aws.res.aws_ecs_cluster, name: web-ecs-cluster, parent: vpc-main, props: {name: changeme}}
+- {id: web-service, type: aws.res.aws_ecs_service, name: web-service, parent: web-ecs-cluster, props: {name: changeme}}
+- {id: api-eks-cluster, type: aws.eks_cluster, name: api-eks-cluster, parent: vpc-main}
+- id: api-nodes
+  type: aws.res.aws_eks_node_group
+  name: api-nodes
+  parent: api-eks-cluster
+  props:
+    cluster_name: changeme
+    node_role_arn: changeme
+    scaling_config: {}
+    subnet_ids: []
+- {id: ecs-performance-logs, type: aws.res.aws_cloudwatch_log_group, name: ecs-performance-logs, parent: reg-eu-west-1}
+- {id: eks-application-logs, type: aws.res.aws_cloudwatch_log_group, name: eks-application-logs, parent: reg-eu-west-1}
+- {id: container-insights-dashboard, type: aws.res.aws_cloudwatch_dashboard, name: container-insights-dashboard, parent: reg-eu-west-1, props: {dashboard_body: changeme, dashboard_name: changeme}}
+- {id: pod-restart-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: pod-restart-alarm, parent: reg-eu-west-1, props: {alarm_name: changeme}}
+- {id: ops-alerts, type: aws.res.aws_sns_topic, name: ops-alerts, parent: reg-eu-west-1}
+- {id: cloudwatch-agent-role, type: aws.res.aws_iam_role, name: cloudwatch-agent-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}}
+edges:
+- {from: web-ecs-cluster, to: ecs-performance-logs, label: ECS agent performance log events (containerInsights enhanced), step: '1'}
+- {from: web-service, to: web-ecs-cluster, label: task and container metrics}
+- {from: api-nodes, to: eks-application-logs, label: Fluent Bit container logs, step: '2'}
+- {from: api-nodes, to: ecs-performance-logs, label: CloudWatch agent node/pod/container metrics, step: '2'}
+- {from: cloudwatch-agent-role, to: api-nodes, label: IRSA / node role for PutLogEvents}
+- {from: ecs-performance-logs, to: container-insights-dashboard, label: metrics extracted to ContainerInsights namespace, step: '3'}
+- {from: eks-application-logs, to: container-insights-dashboard, label: Logs Insights queries}
+- {from: pod-restart-alarm, to: ops-alerts, label: ALARM notification, step: '4'}
+- {from: user, to: container-insights-dashboard, label: cluster to container drill-down, step: '5'}
+steps:
+- {n: '1', text: 'web-ecs-cluster → ecs-performance-logs: ECS agent performance log events (containerInsights enhanced)'}
+- {n: '2', text: 'api-nodes → eks-application-logs: Fluent Bit container logs'}
+- {n: '3', text: 'ecs-performance-logs → container-insights-dashboard: metrics extracted to ContainerInsights namespace'}
+- {n: '4', text: 'pod-restart-alarm → ops-alerts: ALARM notification'}
+- {n: '5', text: 'user → container-insights-dashboard: cluster to container drill-down'}

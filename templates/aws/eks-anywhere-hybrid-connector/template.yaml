@@ -1,0 +1,56 @@
+# Generated from the official reference (https://anywhere.eks.amazonaws.com/docs/overview/); edit freely.
+title: EKS Anywhere on-premises clusters connected to the EKS console
+category: containers
+tags:
+- eks anywhere
+- hybrid
+- eks connector
+- on-premises
+- vsphere
+- adot
+source: https://anywhere.eks.amazonaws.com/docs/overview/
+description: EKS Anywhere runs the EKS Distro Kubernetes on customer hardware (vSphere, bare metal, Nutanix or Snow) with a management cluster that provisions workload clusters through Cluster API. When
+  connected to a Region, the EKS Connector agent registers each cluster in the EKS console over Systems Manager, IAM identities authenticate to the cluster, and optional integrations pull images from ECR
+  and ship metrics and logs to Amazon Managed Service for Prometheus and CloudWatch over Direct Connect or VPN.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-hybrid, type: aws.vpc, name: hybrid, parent: reg-us-east-1, props: {cidr: 10.100.0.0/16}}
+- {id: az-hybrid-a, type: aws.availability_zone, name: a, parent: vpc-hybrid, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-hybrid-a, props: {cidr: 10.100.1.0/24, az: a, public: false}}
+- {id: user, type: common.user, name: user}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
+- {id: onprem-router, type: aws.res.aws_customer_gateway, name: onprem-router, parent: sub-reg-us-east-1-a, props: {type: changeme}}
+- {id: eksa-management-cluster, type: aws.ec2_instance, name: eksa-management-cluster, parent: sub-reg-us-east-1-a}
+- {id: eksa-workload-cluster, type: aws.ec2_instance, name: eksa-workload-cluster, parent: sub-reg-us-east-1-a}
+- {id: dx-1g, type: aws.res.aws_dx_connection, name: dx-1g, parent: reg-us-east-1, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: dxgw, type: aws.res.aws_dx_gateway, name: dxgw, parent: reg-us-east-1, props: {amazon_side_asn: changeme, name: changeme}}
+- {id: vgw, type: aws.res.aws_vpn_gateway, name: vgw, parent: vpc-hybrid}
+- {id: eks-connector-activation, type: aws.res.aws_ssm_activation, name: eks-connector-activation, parent: reg-us-east-1, props: {iam_role: changeme}}
+- {id: eks-connector-role, type: aws.res.aws_iam_role, name: eks-connector-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+- {id: workload-images, type: aws.res.aws_ecr_repository, name: workload-images, parent: reg-us-east-1, props: {name: changeme}}
+- {id: eksa-metrics, type: aws.res.aws_prometheus_workspace, name: eksa-metrics, parent: reg-us-east-1}
+- {id: eksa-logs, type: aws.res.aws_cloudwatch_log_group, name: eksa-logs, parent: reg-us-east-1}
+- {id: az-vpc-hybrid-b, type: aws.availability_zone, name: b, parent: vpc-hybrid, props: {zone: b}}
+- {id: sub-vpc-hybrid-b, type: aws.subnet, name: private-b, parent: az-vpc-hybrid-b, props: {cidr: 10.100.251.0/24, az: b, public: false}}
+edges:
+- {from: eksa-management-cluster, to: eksa-workload-cluster, label: Cluster API provisions workload cluster, step: '1'}
+- {from: onprem-router, to: dx-1g, label: private connectivity, step: '2'}
+- {from: dx-1g, to: dxgw, label: private VIF}
+- {from: dxgw, to: vgw, link: aws_dx_gateway_association}
+- {from: eksa-workload-cluster, to: eks-connector-activation, label: EKS Connector agent registers via SSM, step: '3'}
+- {from: eks-connector-role, to: eks-connector-activation, label: connector IAM role}
+- {from: user, to: eksa-workload-cluster, label: view cluster and workloads in EKS console, step: '4'}
+- {from: eksa-workload-cluster, to: workload-images, label: image pull with IRSA}
+- {from: eksa-workload-cluster, to: eksa-metrics, label: ADOT remote write}
+- {from: eksa-workload-cluster, to: eksa-logs, label: Fluent Bit logs}
+steps:
+- {n: '1', text: 'eksa-management-cluster → eksa-workload-cluster: Cluster API provisions workload cluster'}
+- {n: '2', text: 'onprem-router → dx-1g: private connectivity'}
+- {n: '3', text: 'eksa-workload-cluster → eks-connector-activation: EKS Connector agent registers via SSM'}
+- {n: '4', text: 'user → eksa-workload-cluster: view cluster and workloads in EKS console'}

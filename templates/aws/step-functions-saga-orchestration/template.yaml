@@ -1,0 +1,45 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/building-a-serverless-distributed-application-using-a-saga-orchestration-pattern); edit freely.
+title: Saga orchestration with Step Functions
+category: serverless
+tags:
+- step functions
+- saga
+- compensating transactions
+- distributed transaction
+- lambda
+source: https://aws.amazon.com/blogs/compute/building-a-serverless-distributed-application-using-a-saga-orchestration-pattern
+description: A booking request starts a Step Functions standard workflow that calls flight, hotel and payment Lambda functions in sequence, each writing to its own DynamoDB table. Catch blocks route any
+  failure to compensating functions that cancel earlier steps in reverse order so the distributed transaction ends consistent.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: client, type: common.client, name: client}
+- {id: booking-api, type: aws.res.aws_api_gateway_rest_api, name: booking-api, parent: reg-us-east-1, props: {name: changeme}}
+- {id: booking-saga, type: aws.res.aws_sfn_state_machine, name: booking-saga, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
+- {id: reserve-flight, type: aws.lambda_function, name: reserve-flight, parent: reg-us-east-1}
+- {id: reserve-hotel, type: aws.lambda_function, name: reserve-hotel, parent: reg-us-east-1}
+- {id: charge-payment, type: aws.lambda_function, name: charge-payment, parent: reg-us-east-1}
+- {id: cancel-flight, type: aws.lambda_function, name: cancel-flight, parent: reg-us-east-1}
+- {id: cancel-hotel, type: aws.lambda_function, name: cancel-hotel, parent: reg-us-east-1}
+- {id: refund-payment, type: aws.lambda_function, name: refund-payment, parent: reg-us-east-1}
+- {id: flights, type: aws.dynamodb_table, name: flights, parent: reg-us-east-1}
+- {id: hotels, type: aws.dynamodb_table, name: hotels, parent: reg-us-east-1}
+- {id: payments, type: aws.dynamodb_table, name: payments, parent: reg-us-east-1}
+edges:
+- {from: client, to: booking-api, label: POST /bookings, step: '1'}
+- {from: booking-api, to: booking-saga, label: StartExecution, step: '2'}
+- {from: booking-saga, to: reserve-flight, step: '3'}
+- {from: reserve-flight, to: flights, label: PutItem}
+- {from: booking-saga, to: reserve-hotel, step: '4'}
+- {from: reserve-hotel, to: hotels, label: PutItem}
+- {from: booking-saga, to: charge-payment, step: '5'}
+- {from: charge-payment, to: payments, label: PutItem}
+- {from: booking-saga, to: refund-payment, label: Catch compensate}
+- {from: booking-saga, to: cancel-hotel, label: Catch compensate}
+- {from: booking-saga, to: cancel-flight, label: Catch compensate}
+steps:
+- {n: '1', text: 'client → booking-api: POST /bookings'}
+- {n: '2', text: 'booking-api → booking-saga: StartExecution'}
+- {n: '3', text: booking-saga → reserve-flight}
+- {n: '4', text: booking-saga → reserve-hotel}
+- {n: '5', text: booking-saga → charge-payment}

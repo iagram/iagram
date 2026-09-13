@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-discovery.html); edit freely.
+title: ECS service discovery with an AWS Cloud Map private DNS namespace
+category: containers
+tags:
+- ecs
+- cloud map
+- service discovery
+- private dns
+- route 53
+- fargate
+source: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-discovery.html
+description: Each ECS service registers its task IP addresses as instances of an AWS Cloud Map service inside a private DNS namespace, which is backed by a Route 53 private hosted zone that only the VPC
+  can resolve. The frontend calls backend.internal by name; ECS keeps the A and SRV records current as tasks start, stop or fail health checks, so no internal load balancer is needed.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-main-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-main}
+- {id: frontend-alb, type: aws.alb, name: frontend-alb, parent: vpc-main}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
+- {id: app-cluster, type: aws.res.aws_ecs_cluster, name: app-cluster, parent: vpc-main, props: {name: changeme}}
+- {id: frontend-service, type: aws.res.aws_ecs_service, name: frontend-service, parent: app-cluster, props: {name: changeme}}
+- {id: backend-service, type: aws.res.aws_ecs_service, name: backend-service, parent: app-cluster, props: {name: changeme}}
+- {id: internal-namespace, type: aws.res.aws_service_discovery_private_dns_namespace, name: internal-namespace, parent: vpc-main, props: {name: changeme, vpc: changeme}}
+- {id: backend-discovery, type: aws.res.aws_service_discovery_service, name: backend-discovery, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: internal-zone, type: aws.route53_zone, name: internal-zone, parent: reg-eu-west-1, props: {domain: example.com}}
+- {id: frontend-image, type: aws.res.aws_ecr_repository, name: frontend-image, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: backend-image, type: aws.res.aws_ecr_repository, name: backend-image, parent: reg-eu-west-1, props: {name: changeme}}
+edges:
+- {from: users, to: igw, label: HTTPS, step: '1'}
+- {from: igw, to: frontend-alb, step: '2'}
+- {from: frontend-alb, to: frontend-service, label: 'HTTP :3000', step: '3'}
+- {from: frontend-service, to: internal-zone, label: resolve backend.internal, step: '4'}
+- {from: frontend-service, to: backend-service, label: 'HTTP :8080 to task IPs', step: '5'}
+- {from: backend-service, to: backend-discovery, label: register / deregister task IPs}
+- {from: backend-discovery, to: internal-namespace, label: service in namespace}
+- {from: internal-namespace, to: internal-zone, label: creates private hosted zone}
+- {from: frontend-image, to: frontend-service, label: image pull}
+- {from: backend-image, to: backend-service, label: image pull}
+- {from: backend-service, to: nat-a, label: outbound}
+steps:
+- {n: '1', text: 'users → igw: HTTPS'}
+- {n: '2', text: igw → frontend-alb}
+- {n: '3', text: 'frontend-alb → frontend-service: HTTP :3000'}
+- {n: '4', text: 'frontend-service → internal-zone: resolve backend.internal'}
+- {n: '5', text: 'frontend-service → backend-service: HTTP :8080 to task IPs'}

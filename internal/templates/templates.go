@@ -234,6 +234,14 @@ func Render(c *catalog.Catalog, slug string, spec *Spec) (*document.Document, er
 				return nil, fmt.Errorf("edge %d: %s cannot connect to %s", i, src.Type, dst.Type)
 			}
 			ed.Kind = rule.Kind
+			// The arrow's preconditions become facts of the drawing (a DNS record
+			// pointing at a VM means the VM has a public address).
+			for k, v := range rule.RequiresFrom {
+				src.Props[k] = v
+			}
+			for k, v := range rule.RequiresTo {
+				dst.Props[k] = v
+			}
 			if rule.Kind == catalog.ReferencesKind {
 				ed.Attr, ed.Output = se.Attr, "id"
 				if ed.Attr == "" {

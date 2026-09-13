@@ -1,0 +1,72 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architecture-on-aws-part-ii-backup-and-restore-with-rapid-recovery/); edit freely.
+title: Backup and restore with event-driven rapid recovery
+category: resilience
+tags:
+- disaster recovery
+- backup and restore
+- aws backup
+- eventbridge
+- cloudformation
+- golden ami
+source: https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architecture-on-aws-part-ii-backup-and-restore-with-rapid-recovery/
+description: AWS Backup takes point-in-time recovery points of EBS, RDS, EFS and DynamoDB in the primary Region and copies them to a vault in the recovery Region. An EventBridge rule on CloudWatch alarms
+  and AWS Health events triggers a Lambda function that redeploys the stack from CloudFormation and golden AMIs, then restores data from the copied recovery points.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: primary}
+- {id: vpc-prod-primary, type: aws.vpc, name: prod-primary, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-prod-primary-a, type: aws.availability_zone, name: a, parent: vpc-prod-primary, props: {zone: a}}
+- {id: sub-bp-app-a, type: aws.subnet, name: bp-app-a, parent: az-prod-primary-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: sub-bp-db-a, type: aws.subnet, name: bp-db-a, parent: az-prod-primary-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: secondary}
+- {id: vpc-prod-recovery, type: aws.vpc, name: prod-recovery, parent: reg-us-west-2, props: {cidr: 10.1.0.0/16}}
+- {id: az-prod-recovery-a, type: aws.availability_zone, name: a, parent: vpc-prod-recovery, props: {zone: a}}
+- {id: sub-bp-rec-app-a, type: aws.subnet, name: bp-rec-app-a, parent: az-prod-recovery-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
+- {id: sub-bp-rec-db-a, type: aws.subnet, name: bp-rec-db-a, parent: az-prod-recovery-a, props: {cidr: 10.1.10.0/24, az: a, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-bp-app-a}
+- {id: app-db, type: aws.rds_instance, name: app-db, parent: sub-bp-db-a}
+- {id: app-files, type: aws.res.aws_efs_file_system, name: app-files, parent: vpc-prod-primary}
+- {id: sessions, type: aws.dynamodb_table, name: sessions, parent: reg-us-east-1}
+- id: daily-plan
+  type: aws.res.aws_backup_plan
+  name: daily-plan
+  parent: reg-us-east-1
+  props:
+    name: changeme
+    rule: []
+- {id: primary-vault, type: aws.res.aws_backup_vault, name: primary-vault, parent: reg-us-east-1, props: {name: changeme}}
+- {id: recovery-vault, type: aws.res.aws_backup_vault, name: recovery-vault, parent: reg-us-west-2, props: {name: changeme}}
+- {id: disaster-detected, type: aws.res.aws_cloudwatch_event_rule, name: disaster-detected, parent: reg-us-west-2}
+- {id: recovery-orchestrator, type: aws.lambda_function, name: recovery-orchestrator, parent: reg-us-west-2}
+- {id: workload-stack, type: aws.res.aws_cloudformation_stack, name: workload-stack, parent: reg-us-west-2, props: {name: changeme}}
+- {id: golden-ami, type: aws.res.aws_ami, name: golden-ami, parent: reg-us-west-2, props: {name: changeme}}
+- {id: restored-app-server, type: aws.ec2_instance, name: restored-app-server, parent: sub-bp-rec-app-a}
+- {id: restored-db, type: aws.rds_instance, name: restored-db, parent: sub-bp-rec-db-a}
+- {id: az-vpc-prod-primary-b, type: aws.availability_zone, name: b, parent: vpc-prod-primary, props: {zone: b}}
+- {id: sub-vpc-prod-primary-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-primary-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
+- {id: az-vpc-prod-recovery-b, type: aws.availability_zone, name: b, parent: vpc-prod-recovery, props: {zone: b}}
+- {id: sub-vpc-prod-recovery-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-recovery-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+edges:
+- {from: daily-plan, to: app-server, label: EBS snapshot, step: '1'}
+- {from: daily-plan, to: app-db, label: RDS snapshot}
+- {from: daily-plan, to: app-files, label: EFS backup}
+- {from: daily-plan, to: sessions, label: DynamoDB backup}
+- {from: daily-plan, to: primary-vault, label: recovery points, step: '2'}
+- {from: primary-vault, to: recovery-vault, label: cross-Region copy job, step: '3'}
+- {from: disaster-detected, to: recovery-orchestrator, label: CloudWatch alarm / AWS Health event, step: '4'}
+- {from: recovery-orchestrator, to: workload-stack, label: deploy IaC, step: '5'}
+- {from: workload-stack, to: golden-ami, label: launch from pre-baked AMI}
+- {from: workload-stack, to: restored-app-server, step: '6'}
+- {from: recovery-vault, to: restored-db, label: restore recovery point, step: '7'}
+- {from: recovery-vault, to: restored-app-server, label: attach restored EBS volume}
+- {from: users, to: restored-app-server, label: traffic after DNS update, step: '8'}
+steps:
+- {n: '1', text: 'daily-plan → app-server: EBS snapshot'}
+- {n: '2', text: 'daily-plan → primary-vault: recovery points'}
+- {n: '3', text: 'primary-vault → recovery-vault: cross-Region copy job'}
+- {n: '4', text: 'disaster-detected → recovery-orchestrator: CloudWatch alarm / AWS Health event'}
+- {n: '5', text: 'recovery-orchestrator → workload-stack: deploy IaC'}
+- {n: '6', text: workload-stack → restored-app-server}
+- {n: '7', text: 'recovery-vault → restored-db: restore recovery point'}
+- {n: '8', text: 'users → restored-app-server: traffic after DNS update'}

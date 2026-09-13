@@ -1,0 +1,53 @@
+# Generated from the official reference (https://docs.aws.amazon.com/aws-backup/latest/devguide/create-cross-account-backup.html); edit freely.
+title: AWS Backup cross-account and cross-Region vault copies
+category: resilience
+tags:
+- aws backup
+- backup vault
+- cross-account
+- cross-region
+- organizations
+- ransomware
+source: https://docs.aws.amazon.com/aws-backup/latest/devguide/create-cross-account-backup.html
+description: A backup plan in the production account stores recovery points in a local vault and copies them to a vault owned by a separate backup account in the same AWS Organization, and to a vault in
+  a second Region. The destination vault carries a resource policy allowing backup:CopyIntoBackupVault and its own KMS key, so a compromised production account cannot delete the copies.
+nodes:
+- {id: acct-production, type: aws.account, name: production}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-production, props: {region: eu-west-1}, caption: primary}
+- {id: vpc-prod-workload, type: aws.vpc, name: prod-workload, parent: reg-eu-west-1, props: {cidr: 10.20.0.0/16}}
+- {id: az-prod-workload-a, type: aws.availability_zone, name: a, parent: vpc-prod-workload, props: {zone: a}}
+- {id: sub-cab-app-a, type: aws.subnet, name: cab-app-a, parent: az-prod-workload-a, props: {cidr: 10.20.1.0/24, az: a, public: false}}
+- {id: sub-cab-db-a, type: aws.subnet, name: cab-db-a, parent: az-prod-workload-a, props: {cidr: 10.20.10.0/24, az: a, public: false}}
+- {id: acct-backup, type: aws.account, name: backup}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-backup, props: {region: eu-central-1}, caption: secondary}
+- {id: erp-server, type: aws.ec2_instance, name: erp-server, parent: sub-cab-app-a}
+- {id: erp-db, type: aws.rds_instance, name: erp-db, parent: sub-cab-db-a}
+- {id: erp-files, type: aws.res.aws_efs_file_system, name: erp-files, parent: vpc-prod-workload}
+- id: prod-backup-plan
+  type: aws.res.aws_backup_plan
+  name: prod-backup-plan
+  parent: reg-eu-west-1
+  props:
+    name: changeme
+    rule: []
+- {id: prod-vault, type: aws.res.aws_backup_vault, name: prod-vault, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: prod-backup-key, type: aws.res.aws_kms_key, name: prod-backup-key, parent: reg-eu-west-1}
+- {id: central-vault, type: aws.res.aws_backup_vault, name: central-vault, parent: reg-eu-central-1, props: {name: changeme}}
+- {id: central-vault-key, type: aws.res.aws_kms_key, name: central-vault-key, parent: reg-eu-central-1}
+- {id: copy-job-events, type: aws.res.aws_sns_topic, name: copy-job-events, parent: reg-eu-central-1}
+- {id: az-vpc-prod-workload-b, type: aws.availability_zone, name: b, parent: vpc-prod-workload, props: {zone: b}}
+- {id: sub-vpc-prod-workload-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-workload-b, props: {cidr: 10.20.251.0/24, az: b, public: false}}
+edges:
+- {from: prod-backup-plan, to: erp-server, label: EC2 backup selection, step: '1'}
+- {from: prod-backup-plan, to: erp-db, label: RDS backup selection}
+- {from: prod-backup-plan, to: erp-files, label: EFS backup selection}
+- {from: prod-backup-plan, to: prod-vault, label: recovery points, step: '2'}
+- {from: prod-backup-key, to: prod-vault, label: encrypts source vault}
+- {from: prod-vault, to: central-vault, label: copy job to external vault ARN (cross-account + cross-Region), step: '3'}
+- {from: central-vault-key, to: central-vault, label: re-encrypts copies}
+- {from: central-vault, to: copy-job-events, label: copy job completed / failed, step: '4'}
+steps:
+- {n: '1', text: 'prod-backup-plan → erp-server: EC2 backup selection'}
+- {n: '2', text: 'prod-backup-plan → prod-vault: recovery points'}
+- {n: '3', text: 'prod-vault → central-vault: copy job to external vault ARN (cross-account + cross-Region)'}
+- {n: '4', text: 'central-vault → copy-job-events: copy job completed / failed'}

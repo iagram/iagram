@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.cloud.google.com/vpc/docs/vpc-peering); edit freely.
+title: Hub-and-spoke with VPC Network Peering
+category: networking
+tags:
+- vpc peering
+- hub and spoke
+- custom route export
+- non-transitive
+source: https://docs.cloud.google.com/vpc/docs/vpc-peering
+description: Each spoke VPC is peered with a central hub VPC that hosts shared services and the hybrid connectivity to on-premises; the hub exports custom dynamic routes so spokes learn on-premises prefixes.
+  Peering is non-transitive, so spokes cannot talk to each other through the hub unless a network virtual appliance or NCC is added.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-central1}}
+- {id: vpc-hub-vpc, type: gcp.vpc, name: hub-vpc, parent: prj-net-hub, props: {cidr: 10.10.0.0/16}}
+- {id: sub-hub-shared-svc, type: gcp.subnetwork, name: hub-shared-svc, parent: vpc-hub-vpc, props: {cidr: 10.10.0.0/24, region: us-central1}}
+- {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: us-central1}}
+- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-workload-a, props: {cidr: 10.11.0.0/16}}
+- {id: sub-spoke-a-usc1, type: gcp.subnetwork, name: spoke-a-usc1, parent: vpc-spoke-a, props: {cidr: 10.11.0.0/24, region: us-central1}}
+- {id: prj-workload-b, type: gcp.project, name: workload-b, props: {project_id: workload-b-123456, project: changeme, region: us-central1}}
+- {id: vpc-spoke-b, type: gcp.vpc, name: spoke-b, parent: prj-workload-b, props: {cidr: 10.12.0.0/16}}
+- {id: sub-spoke-b-usc1, type: gcp.subnetwork, name: spoke-b-usc1, parent: vpc-spoke-b, props: {cidr: 10.12.0.0/24, region: us-central1}}
+- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}}
+- {id: hub-vlan-attachment, type: gcp.res.google_compute_interconnect_attachment, name: hub-vlan-attachment, parent: vpc-hub-vpc, props: {name: changeme, router: changeme}}
+- {id: shared-services-vm, type: gcp.compute_instance, name: shared-services-vm, parent: sub-hub-shared-svc}
+- {id: hub-private-zone, type: gcp.cloud_dns_zone, name: hub-private-zone, parent: prj-net-hub, props: {domain: example.com}}
+- {id: allow-spoke-ingress, type: gcp.firewall_rule, name: allow-spoke-ingress, parent: vpc-hub-vpc}
+- {id: app-a, type: gcp.compute_instance, name: app-a, parent: sub-spoke-a-usc1}
+- {id: app-b, type: gcp.compute_instance, name: app-b, parent: sub-spoke-b-usc1}
+- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub}
+- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: onprem-router, type: gcp.res.google_compute_router, name: onprem-router, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}}
+edges:
+- {from: vpc-hub-vpc, to: vpc-spoke-a, link: google_compute_network_peering}
+- {from: vpc-hub-vpc, to: vpc-spoke-b, link: google_compute_network_peering}
+- {from: onprem-router, to: hub-vlan-attachment, label: Cloud Interconnect, step: '1'}
+- {from: hub-router, to: onprem-router, label: BGP, step: '2'}
+- {from: app-a, to: shared-services-vm, label: shared services over peering, step: '3'}
+- {from: app-b, to: onprem-router, label: on-premises via exported custom routes, step: '4'}
+steps:
+- {n: '1', text: 'onprem-router → hub-vlan-attachment: Cloud Interconnect'}
+- {n: '2', text: 'hub-router → onprem-router: BGP'}
+- {n: '3', text: 'app-a → shared-services-vm: shared services over peering'}
+- {n: '4', text: 'app-b → onprem-router: on-premises via exported custom routes'}

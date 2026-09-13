@@ -1,0 +1,33 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/compute/new-for-aws-lambda-sqs-fifo-as-an-event-source/); edit freely.
+title: Ordered processing with SQS FIFO and Lambda
+category: serverless
+tags:
+- sqs fifo
+- ordering
+- message group id
+- lambda
+- http api
+source: https://aws.amazon.com/blogs/compute/new-for-aws-lambda-sqs-fifo-as-an-event-source/
+description: An HTTP API integrates directly with an SQS FIFO queue using the customer ID as the message group ID, so events for one customer are delivered in order and deduplicated. Lambda processes one
+  batch per message group at a time while scaling across groups, and failed messages redrive to a FIFO dead-letter queue.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
+- {id: client, type: common.client, name: client}
+- {id: orders-http-api, type: aws.res.aws_apigatewayv2_api, name: orders-http-api, parent: reg-eu-west-1, props: {name: changeme, protocol_type: changeme}}
+- {id: orders-fifo, type: aws.sqs_queue, name: orders-fifo, parent: reg-eu-west-1}
+- {id: orders-fifo-dlq, type: aws.sqs_queue, name: orders-fifo-dlq, parent: reg-eu-west-1}
+- {id: order-state-processor, type: aws.lambda_function, name: order-state-processor, parent: reg-eu-west-1}
+- {id: order-ledger, type: aws.dynamodb_table, name: order-ledger, parent: reg-eu-west-1}
+- {id: fifo-dlq-depth, type: aws.res.aws_cloudwatch_metric_alarm, name: fifo-dlq-depth, parent: reg-eu-west-1, props: {alarm_name: changeme}}
+edges:
+- {from: client, to: orders-http-api, label: POST /orders, step: '1'}
+- {from: orders-http-api, to: orders-fifo, label: SendMessage MessageGroupId=customerId, step: '2'}
+- {from: orders-fifo, to: order-state-processor, link: aws_lambda_event_source_mapping}
+- {from: order-state-processor, to: order-ledger, label: TransactWriteItems, step: '3'}
+- {from: orders-fifo, to: orders-fifo-dlq, label: redrive policy}
+- {from: orders-fifo-dlq, to: fifo-dlq-depth, label: ApproximateNumberOfMessagesVisible}
+steps:
+- {n: '1', text: 'client → orders-http-api: POST /orders'}
+- {n: '2', text: 'orders-http-api → orders-fifo: SendMessage MessageGroupId=customerId'}
+- {n: '3', text: 'order-state-processor → order-ledger: TransactWriteItems'}

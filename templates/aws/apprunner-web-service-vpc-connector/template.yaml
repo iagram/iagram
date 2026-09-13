@@ -1,0 +1,59 @@
+# Generated from the official reference (https://aws.amazon.com/blogs/containers/deploy-and-scale-django-applications-on-aws-app-runner/); edit freely.
+title: App Runner web service reaching a private RDS database through a VPC connector
+category: containers
+tags:
+- app runner
+- vpc connector
+- rds
+- secrets manager
+- ecr
+- serverless containers
+source: https://aws.amazon.com/blogs/containers/deploy-and-scale-django-applications-on-aws-app-runner/
+description: App Runner builds and runs the web application in an AWS-managed VPC, terminating TLS, load balancing and scaling instances on concurrent requests. A VPC connector creates Hyperplane ENIs in
+  the customer's private subnets so outbound calls reach an RDS for PostgreSQL instance that has no public endpoint, and the service's instance role reads the database credentials from Secrets Manager.
+nodes:
+- {id: acct-prod, type: aws.account, name: prod}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
+- {id: vpc-data, type: aws.vpc, name: data, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
+- {id: az-data-a, type: aws.availability_zone, name: a, parent: vpc-data, props: {zone: a}}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-data-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
+- {id: az-data-b, type: aws.availability_zone, name: b, parent: vpc-data, props: {zone: b}}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-data-b, props: {cidr: 10.0.2.0/24, az: b, public: false}}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- id: web-app
+  type: aws.res.aws_apprunner_service
+  name: web-app
+  parent: reg-us-east-1
+  props: {service_name: changeme, source_configuration: {}}
+- id: data-vpc-connector
+  type: aws.res.aws_apprunner_vpc_connector
+  name: data-vpc-connector
+  parent: vpc-data
+  props:
+    security_groups: []
+    subnets: []
+    vpc_connector_name: changeme
+- {id: web-app-image, type: aws.res.aws_ecr_repository, name: web-app-image, parent: reg-us-east-1, props: {name: changeme}}
+- {id: app-postgres, type: aws.rds_instance, name: app-postgres, parent: sub-private-a}
+- {id: db-credentials, type: aws.res.aws_secretsmanager_secret, name: db-credentials, parent: reg-us-east-1}
+- {id: apprunner-instance-role, type: aws.res.aws_iam_role, name: apprunner-instance-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
+- {id: static-assets, type: aws.s3_bucket, name: static-assets, parent: reg-us-east-1}
+- {id: apprunner-logs, type: aws.res.aws_cloudwatch_log_group, name: apprunner-logs, parent: reg-us-east-1}
+edges:
+- {from: user, to: web-app-image, label: push image (or connect source repo), step: '1'}
+- {from: web-app-image, to: web-app, label: auto deploy on new image, step: '2'}
+- {from: users, to: web-app, label: HTTPS to App Runner domain, step: '3'}
+- {from: web-app, to: db-credentials, label: GetSecretValue, step: '4'}
+- {from: apprunner-instance-role, to: web-app, label: instance role}
+- {from: web-app, to: data-vpc-connector, label: outbound VPC traffic, step: '5'}
+- {from: data-vpc-connector, to: app-postgres, label: 'PostgreSQL :5432 via Hyperplane ENI', step: '6'}
+- {from: web-app, to: static-assets, label: static files}
+- {from: web-app, to: apprunner-logs, label: application and service logs}
+steps:
+- {n: '1', text: 'user → web-app-image: push image (or connect source repo)'}
+- {n: '2', text: 'web-app-image → web-app: auto deploy on new image'}
+- {n: '3', text: 'users → web-app: HTTPS to App Runner domain'}
+- {n: '4', text: 'web-app → db-credentials: GetSecretValue'}
+- {n: '5', text: 'web-app → data-vpc-connector: outbound VPC traffic'}
+- {n: '6', text: 'data-vpc-connector → app-postgres: PostgreSQL :5432 via Hyperplane ENI'}
