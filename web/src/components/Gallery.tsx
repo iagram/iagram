@@ -26,6 +26,15 @@ export function Gallery() {
   const loadTemplates = useStore((s) => s.loadTemplates)
   const useTemplate = useStore((s) => s.useTemplate)
   const hasNodes = useStore((s) => s.nodes.length > 0)
+  const nodeCount = useStore((s) => s.nodes.length)
+  const docName = useStore((s) => s.docName)
+  const dirty = useStore((s) => s.dirty)
+  const newDiagram = useStore((s) => s.newDiagram)
+  const newIad = () => {
+    if (hasNodes && dirty && !confirm('Start a new IaD? The current canvas is discarded (the file on disk is not touched until you save).')) return
+    if (hasNodes) newDiagram()
+    setShow(false)
+  }
   const [provider, setProvider] = useState<string>('all')
   const [category, setCategory] = useState<string>('all')
   const [q, setQ] = useState('')
@@ -55,16 +64,17 @@ export function Gallery() {
     <div className="gallery" role="dialog" aria-label="Reference architectures">
       <header className="gallery-head">
         <div>
-          <h1>Reference architectures</h1>
-          <p className="muted">Official reference diagrams from AWS, Google Cloud and Azure, redrawn as editable, deployable diagrams. Pick one to open it in the editor, then adapt it and plan.</p>
+          <h1>iagram</h1>
+          <p className="muted">Infrastructure as diagram. Start a new IaD, or open one of the official reference architectures from AWS, Google Cloud and Azure, redrawn as editable, deployable diagrams. A card always opens a copy: the references stay pristine.</p>
         </div>
         <div className="gallery-actions">
-          <button
-            onClick={() => {
-              setShow(false)
-            }}
-          >
-            {hasNodes ? 'Open my diagram' : 'Start from a blank canvas'}
+          {hasNodes && (
+            <button onClick={() => setShow(false)} title={`Continue editing ${docName || 'the current diagram'}`}>
+              Continue {docName || 'my diagram'} <span className="muted">({nodeCount} elements)</span>
+            </button>
+          )}
+          <button className="primary" onClick={newIad}>
+            + New IaD
           </button>
         </div>
       </header>
@@ -91,8 +101,17 @@ export function Gallery() {
       {!templates && <p className="muted gallery-empty">Loading…</p>}
       {templates && list.length === 0 && <p className="muted gallery-empty">No architecture matches.</p>}
       <div className="gallery-grid">
+        {!q && category === 'all' && (
+          <article className="card new" onClick={newIad} title="Start from a blank canvas">
+            <div className="preview plus">+</div>
+            <div className="card-body">
+              <h3>New IaD</h3>
+              <p>Start from a blank canvas: pick a cloud tab, drag elements from the palette, connect them, plan.</p>
+            </div>
+          </article>
+        )}
         {list.map((t) => (
-          <article key={t.id} className="card" onClick={() => void useTemplate(t)} title="Open in the editor">
+          <article key={t.id} className="card" onClick={() => void useTemplate(t)} title="Open a copy in the editor (the reference architecture itself is never modified)">
             <Preview doc={t.document} provider={t.provider} types={t.types} />
             <div className="card-body">
               <div className="card-top">

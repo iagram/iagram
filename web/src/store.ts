@@ -875,17 +875,20 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async useTemplate(t) {
-    if (get().nodes.length > 0 && !confirm(`Replace the current canvas with "${t.title}"? Your file is not touched until you save.`)) return
+    if (get().nodes.length > 0 && get().dirty && !confirm(`Open a copy of "${t.title}"? The current canvas is discarded (your file is not touched until you save).`)) return
     // Generated element types need their schemas before the canvas can draw them.
     const missing = [...new Set(t.document.nodes.map((n) => n.type).filter((x) => !get().rules?.entry(x)))]
     if (missing.length && get().rules) {
       const r = await api.resolve(missing).catch(() => ({ entries: {} }))
       for (const e of Object.values(r.entries)) get().rules!.register(e)
     }
-    get().loadDocument(t.document)
+    // Always a fork: the reference architecture ships read-only inside the
+    // binary; the copy becomes this folder's diagram once saved.
+    const copy: Document = JSON.parse(JSON.stringify(t.document))
+    get().loadDocument(copy)
     set({ showGallery: false, activeProvider: t.provider, docName: get().docName || t.title })
     void get().refreshProjection()
-    get().showToast(`Opened "${t.title}". Adapt it, then Save.`)
+    get().showToast(`Opened a copy of "${t.title}". Edit freely; Save writes it to your .iad file, the reference stays untouched.`)
   },
 
   setShowLegend(v) {

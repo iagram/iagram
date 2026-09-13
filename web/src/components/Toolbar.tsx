@@ -2,6 +2,7 @@ import { useStore } from '../store'
 import { MenuBar } from './MenuBar'
 
 export function Toolbar() {
+  const setShowGallery = useStore((s) => s.setShowGallery)
   const dirty = useStore((s) => s.dirty)
   const saving = useStore((s) => s.saving)
   const save = useStore((s) => s.save)
@@ -26,7 +27,9 @@ export function Toolbar() {
 
   return (
     <header className="toolbar">
-      <span className="brand">iagram</span>
+      <button className="brand" title="Home: reference architectures" onClick={() => setShowGallery(true)}>
+        iagram
+      </button>
       <MenuBar />
       <span className="doc">
         {docName || 'iagram.iad'}
