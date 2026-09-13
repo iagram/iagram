@@ -258,7 +258,7 @@ export const useStore = create<State>((set, get) => ({
       const used = [...new Set(res.document.nodes.map((n) => n.type.split('.')[0]))].filter((p) => p !== COMMON)
       const current = get().activeProvider
       const activeProvider = providers.includes(current) ? current : used.find((p) => providers.includes(p)) ?? providers[0] ?? ''
-      set({ catalog, rules, nodes, edges, steps: res.document.steps ?? [], showGallery: nodes.length === 0 && new URLSearchParams(location.search).get('gallery') !== '0', docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
+      set({ catalog, rules, nodes, edges, steps: res.document.steps ?? [], showGallery: !get().catalog && new URLSearchParams(location.search).get('gallery') !== '0', docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
       void get().refreshProjection()
       api.latestPlan().then((r) => set({ ...(r.plan ? { plan: r.plan, planStale: false } : {}), drift: r.drift })).catch(() => undefined)
       api.health().then((h) => set({ version: h.version })).catch(() => undefined)

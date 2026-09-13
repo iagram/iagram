@@ -104,7 +104,7 @@ iagram.json ──validate──▶ generate ──▶ .iagram/tf/main.tf.json +
 
 ## Reference architectures
 
-The front page of the editor is a gallery of official reference architectures from AWS, Google Cloud and Azure (hub and spoke, three-tier web, fan-out, data lake, RAG, multi-region DR, landing zones, CI/CD...), redrawn as `.iad` diagrams that validate and generate Terraform. Filter by cloud, category or text, read the source page, and open one in the editor with everything pre-configured; then adapt the names, ids and sizes and plan. The gallery opens automatically when the diagram is empty and from File > Reference architectures.
+The front page of the editor is a gallery of official reference architectures from AWS, Google Cloud and Azure (hub and spoke, three-tier web, fan-out, data lake, RAG, multi-region DR, landing zones, CI/CD...), redrawn as `.iad` diagrams that validate and generate Terraform. Filter by cloud, category or text, read the source page, and open one in the editor with everything pre-configured; then adapt the names, ids and sizes and plan. The gallery is the entry page: it opens on every launch (`?gallery=0` skips it) and from File > Reference architectures; "Open my diagram" takes you to the current file.
 
 Each template is a compact spec under `templates/<provider>/<slug>/template.yaml` (see `docs/spec/templates.md`). `iagram templates list` prints them, `iagram templates build DIR` writes their `.iad` files, and `iagram init --template aws/tgw-hub-and-spoke` starts a project from one. Placeholders such as `changeme`, the all-zero subscription id or `my-project-123456` mark the values you must set.
 

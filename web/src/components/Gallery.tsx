@@ -64,7 +64,7 @@ export function Gallery() {
               setShow(false)
             }}
           >
-            {hasNodes ? 'Back to my diagram' : 'Start from a blank canvas'}
+            {hasNodes ? 'Open my diagram' : 'Start from a blank canvas'}
           </button>
         </div>
       </header>
