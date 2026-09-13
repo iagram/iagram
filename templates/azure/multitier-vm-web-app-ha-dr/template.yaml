@@ -1,0 +1,104 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/infrastructure/multi-tier-app-disaster-recovery); edit freely.
+title: Multitier VM web application built for high availability and disaster recovery
+category: web
+tags:
+- virtual machines
+- load balancer
+- traffic manager
+- site recovery
+- sql server always on
+- availability zones
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/infrastructure/multi-tier-app-disaster-recovery
+description: Traffic Manager sends users to a public load balancer in the primary region that fronts web tier VMs, which call business tier VMs through an internal load balancer and then a SQL Server Always
+  On availability group through a second internal load balancer, with each tier in its own subnet and VMs spread across availability zones. Site Recovery or SQL Always On asynchronous replication keeps
+  a mirrored deployment in a secondary region, and Traffic Manager fails over to that region's public IP when the primary region is unavailable.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-app-primary, type: azure.resource_group, name: rg-app-primary, parent: sub-workload, props: {location: eastus}}
+- {id: vpc-vnet-primary, type: azure.vnet, name: vnet-primary, parent: rg-rg-app-primary, props: {cidr: 10.10.0.0/16}}
+- {id: sub-snet-web-primary, type: azure.subnet, name: snet-web-primary, parent: vpc-vnet-primary, props: {cidr: 10.10.1.0/24}}
+- {id: sub-snet-business-primary, type: azure.subnet, name: snet-business-primary, parent: vpc-vnet-primary, props: {cidr: 10.10.2.0/24}}
+- {id: sub-snet-data-primary, type: azure.subnet, name: snet-data-primary, parent: vpc-vnet-primary, props: {cidr: 10.10.3.0/24}}
+- {id: rg-rg-app-dr, type: azure.resource_group, name: rg-app-dr, parent: sub-workload, props: {location: westus}}
+- {id: vpc-vnet-dr, type: azure.vnet, name: vnet-dr, parent: rg-rg-app-dr, props: {cidr: 10.20.0.0/16}}
+- {id: sub-snet-web-dr, type: azure.subnet, name: snet-web-dr, parent: vpc-vnet-dr, props: {cidr: 10.20.1.0/24}}
+- {id: sub-snet-business-dr, type: azure.subnet, name: snet-business-dr, parent: vpc-vnet-dr, props: {cidr: 10.20.2.0/24}}
+- {id: sub-snet-data-dr, type: azure.subnet, name: snet-data-dr, parent: vpc-vnet-dr, props: {cidr: 10.20.3.0/24}}
+- {id: users, type: common.users, name: users}
+- id: tm-app
+  type: azure.res.azurerm_traffic_manager_profile
+  name: tm-app
+  parent: rg-rg-app-primary
+  props: {dns_config: {}, monitor_config: {}, name: changeme, resource_group_name: changeme, traffic_routing_method: changeme}
+- {id: lb-web-public, type: azure.res.azurerm_lb, name: lb-web-public, parent: sub-snet-web-primary, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: vm-web-1
+  type: azure.res.azurerm_windows_virtual_machine
+  name: vm-web-1
+  parent: sub-snet-web-primary
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- {id: lb-business-internal, type: azure.res.azurerm_lb, name: lb-business-internal, parent: sub-snet-business-primary, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: vm-business-1
+  type: azure.res.azurerm_windows_virtual_machine
+  name: vm-business-1
+  parent: sub-snet-business-primary
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- {id: lb-sql-internal, type: azure.res.azurerm_lb, name: lb-sql-internal, parent: sub-snet-data-primary, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: sqlvm-primary, type: azure.res.azurerm_mssql_virtual_machine, name: sqlvm-primary, parent: sub-snet-data-primary, props: {virtual_machine_id: changeme}}
+- {id: rsv-site-recovery, type: azure.res.azurerm_recovery_services_vault, name: rsv-site-recovery, parent: rg-rg-app-dr, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: lb-web-public-dr, type: azure.res.azurerm_lb, name: lb-web-public-dr, parent: sub-snet-web-dr, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: vm-web-dr
+  type: azure.res.azurerm_windows_virtual_machine
+  name: vm-web-dr
+  parent: sub-snet-web-dr
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- id: vm-business-dr
+  type: azure.res.azurerm_windows_virtual_machine
+  name: vm-business-dr
+  parent: sub-snet-business-dr
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- {id: sqlvm-dr, type: azure.res.azurerm_mssql_virtual_machine, name: sqlvm-dr, parent: sub-snet-data-dr, props: {virtual_machine_id: changeme}}
+edges:
+- {from: users, to: tm-app, label: DNS resolution, step: '1'}
+- {from: tm-app, to: lb-web-public, label: primary endpoint, step: '2'}
+- {from: lb-web-public, to: vm-web-1, label: HTTPS, step: '3'}
+- {from: vm-web-1, to: lb-business-internal, label: HTTP, step: '4'}
+- {from: lb-business-internal, to: vm-business-1, label: HTTP, step: '5'}
+- {from: vm-business-1, to: lb-sql-internal, label: TDS 1433, step: '6'}
+- {from: lb-sql-internal, to: sqlvm-primary, label: availability group listener, step: '7'}
+- {from: sqlvm-primary, to: sqlvm-dr, label: Always On async replication}
+- {from: vm-web-1, to: rsv-site-recovery, label: Site Recovery replication}
+- {from: vm-business-1, to: rsv-site-recovery, label: Site Recovery replication}
+- {from: tm-app, to: lb-web-public-dr, label: failover endpoint}
+- {from: lb-web-public-dr, to: vm-web-dr, label: HTTPS after failover}
+steps:
+- {n: '1', text: 'users → tm-app: DNS resolution'}
+- {n: '2', text: 'tm-app → lb-web-public: primary endpoint'}
+- {n: '3', text: 'lb-web-public → vm-web-1: HTTPS'}
+- {n: '4', text: 'vm-web-1 → lb-business-internal: HTTP'}
+- {n: '5', text: 'lb-business-internal → vm-business-1: HTTP'}
+- {n: '6', text: 'vm-business-1 → lb-sql-internal: TDS 1433'}
+- {n: '7', text: 'lb-sql-internal → sqlvm-primary: availability group listener'}

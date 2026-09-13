@@ -1,0 +1,43 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside); edit freely.
+title: Web app with Azure Cache for Redis using the Cache-Aside pattern
+category: web
+tags:
+- redis
+- cache-aside
+- app service
+- sql database
+- distributed cache
+- performance
+source: https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside
+description: App Service web app instances read frequently accessed items from a shared Redis cache first and, on a cache miss, load the item from the SQL data store, add it to the cache with an expiration
+  and return it. On updates the app writes to the data store first and then invalidates the cached key, so a subsequent read repopulates the cache with fresh data.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-web-cache, type: azure.resource_group, name: rg-web-cache, parent: sub-workload, props: {location: westeurope}}
+- {id: users, type: common.users, name: users}
+- {id: asp-web, type: azure.res.azurerm_service_plan, name: asp-web, parent: rg-rg-web-cache, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: web-catalog
+  type: azure.res.azurerm_linux_web_app
+  name: web-catalog
+  parent: rg-rg-web-cache
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: redis-catalog, type: azure.res.azurerm_redis_cache, name: redis-catalog, parent: rg-rg-web-cache, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: sql-catalog, type: azure.res.azurerm_mssql_server, name: sql-catalog, parent: rg-rg-web-cache, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: sqldb-catalog, type: azure.res.azurerm_mssql_database, name: sqldb-catalog, parent: rg-rg-web-cache, props: {name: changeme, server_id: changeme}}
+- {id: appi-web-cache, type: azure.res.azurerm_application_insights, name: appi-web-cache, parent: rg-rg-web-cache, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: web-catalog, label: HTTPS, step: '1'}
+- {from: web-catalog, to: redis-catalog, label: GET key (cache hit), step: '2'}
+- {from: web-catalog, to: sqldb-catalog, label: read on cache miss, step: '3'}
+- {from: web-catalog, to: redis-catalog, label: SET key with expiration, step: '4'}
+- {from: web-catalog, to: sqldb-catalog, label: write update, step: '5'}
+- {from: web-catalog, to: redis-catalog, label: DELETE key (invalidate), step: '6'}
+- {from: web-catalog, to: appi-web-cache, label: telemetry}
+steps:
+- {n: '1', text: 'users → web-catalog: HTTPS'}
+- {n: '2', text: 'web-catalog → redis-catalog: GET key (cache hit)'}
+- {n: '3', text: 'web-catalog → sqldb-catalog: read on cache miss'}
+- {n: '4', text: 'web-catalog → redis-catalog: SET key with expiration'}
+- {n: '5', text: 'web-catalog → sqldb-catalog: write update'}
+- {n: '6', text: 'web-catalog → redis-catalog: DELETE key (invalidate)'}

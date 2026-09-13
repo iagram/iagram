@@ -1,0 +1,71 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-vmware/architecture-networking); edit freely.
+title: Azure VMware Solution networking with ExpressRoute and Global Reach
+category: networking
+tags:
+- azure vmware solution
+- expressroute
+- global reach
+- nsx-t
+- private cloud
+- hybrid
+source: https://learn.microsoft.com/en-us/azure/azure-vmware/architecture-networking
+description: The Azure VMware Solution private cloud reaches an Azure virtual network through its Microsoft-managed ExpressRoute circuit, which is attached with an authorization key to an ExpressRoute gateway
+  using the Ultra Performance SKU with FastPath for 10 Gbps. Because ExpressRoute gateways do not transit between circuits, ExpressRoute Global Reach links the private cloud circuit to the customer's on-premises
+  circuit so vMotion and management traffic flow directly at the Microsoft edge.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-avs, type: azure.subscription, name: avs, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-avs, type: azure.resource_group, name: rg-avs, parent: sub-avs, props: {location: westeurope}}
+- {id: vpc-vnet-avs-hub, type: azure.vnet, name: vnet-avs-hub, parent: rg-rg-avs, props: {cidr: 10.0.0.0/16}}
+- {id: sub-avs-gatewaysubnet, type: azure.subnet, name: avs-GatewaySubnet, parent: vpc-vnet-avs-hub, props: {cidr: 10.0.0.0/27}}
+- {id: sub-snet-jumpbox, type: azure.subnet, name: snet-jumpbox, parent: vpc-vnet-avs-hub, props: {cidr: 10.0.1.0/24}}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-avs-hub, props: {cidr: 10.0.2.0/26}}
+- {id: user, type: common.user, name: user}
+- {id: internet, type: common.internet, name: internet}
+- id: avs-private-cloud
+  type: azure.res.azurerm_vmware_private_cloud
+  name: avs-private-cloud
+  parent: rg-rg-avs
+  props: {location: westeurope, management_cluster: {}, name: changeme, network_subnet_cidr: changeme, resource_group_name: changeme, sku_name: changeme}
+- id: er-circuit-onprem
+  type: azure.res.azurerm_express_route_circuit
+  name: er-circuit-onprem
+  parent: rg-rg-avs
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: ergw-avs
+  type: azure.res.azurerm_virtual_network_gateway
+  name: ergw-avs
+  parent: sub-avs-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- id: vm-jumpbox
+  type: azure.res.azurerm_windows_virtual_machine
+  name: vm-jumpbox
+  parent: sub-snet-jumpbox
+  props:
+    location: westeurope
+    name: changeme
+    network_interface_ids: []
+    os_disk: {}
+    resource_group_name: changeme
+    size: changeme
+- {id: bastion-avs, type: azure.res.azurerm_bastion_host, name: bastion-avs, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-avs, type: azure.res.azurerm_log_analytics_workspace, name: law-avs, parent: rg-rg-avs, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: vm-jumpbox, to: avs-private-cloud, label: vCenter Server / NSX Manager on management segment, step: '2'}
+- {from: dc-on-premises, to: er-circuit-onprem, label: ExpressRoute private peering, step: '3'}
+- {from: er-circuit-onprem, to: ergw-avs, label: ExpressRoute connection}
+- {from: er-circuit-onprem, to: avs-private-cloud, label: 'Global Reach between circuits at MSEE (vMotion, management)', step: '4'}
+- {from: avs-private-cloud, to: internet, label: public IP on NSX edge (disabled by default)}
+- {from: user, to: bastion-avs, label: RDP over TLS}
+- {from: bastion-avs, to: vm-jumpbox, label: private IP}
+- {from: avs-private-cloud, to: law-avs, label: diagnostics}
+steps:
+- {n: '2', text: 'vm-jumpbox → avs-private-cloud: vCenter Server / NSX Manager on management segment'}
+- {n: '3', text: 'datacenter → er-circuit-onprem: ExpressRoute private peering'}
+- {n: '4', text: 'er-circuit-onprem → avs-private-cloud: Global Reach between circuits at MSEE (vMotion, management)'}

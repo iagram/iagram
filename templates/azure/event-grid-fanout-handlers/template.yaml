@@ -1,0 +1,43 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/event-grid/event-handlers); edit freely.
+title: Event Grid custom topic fan-out to Functions, Service Bus, Event Hubs and Storage queues
+category: serverless
+tags:
+- event grid
+- fan-out
+- publish-subscribe
+- functions
+- service bus
+- event hubs
+- storage queue
+- logic apps
+source: https://learn.microsoft.com/en-us/azure/event-grid/event-handlers
+description: A publisher application posts events to an Event Grid custom topic, and one event subscription per destination pushes filtered copies of each event to an Azure Function, a Service Bus queue,
+  an Event Hubs instance, a Storage queue and a Logic Apps webhook. Push delivery retries for 24 hours with exponential backoff, and each handler processes its copy of the event independently.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-eventgrid-fanout, type: azure.resource_group, name: rg-eventgrid-fanout, parent: sub-workload, props: {location: westeurope}}
+- {id: client, type: common.client, name: client}
+- {id: egt-orders, type: azure.res.azurerm_eventgrid_topic, name: egt-orders, parent: rg-rg-eventgrid-fanout, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: asp-consumption, type: azure.res.azurerm_service_plan, name: asp-consumption, parent: rg-rg-eventgrid-fanout, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: func-order-handler
+  type: azure.res.azurerm_linux_function_app
+  name: func-order-handler
+  parent: rg-rg-eventgrid-fanout
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: sb-orders, type: azure.res.azurerm_servicebus_namespace, name: sb-orders, parent: rg-rg-eventgrid-fanout, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: sbq-fulfilment, type: azure.res.azurerm_servicebus_queue, name: sbq-fulfilment, parent: rg-rg-eventgrid-fanout, props: {name: changeme, namespace_id: changeme}}
+- {id: evhns-analytics, type: azure.res.azurerm_eventhub_namespace, name: evhns-analytics, parent: rg-rg-eventgrid-fanout, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-order-events, type: azure.res.azurerm_eventhub, name: evh-order-events, parent: rg-rg-eventgrid-fanout, props: {name: changeme, partition_count: 1}}
+- {id: st-audit-queue, type: azure.storage_account, name: st-audit-queue, parent: rg-rg-eventgrid-fanout}
+- {id: logic-notify, type: azure.res.azurerm_logic_app_workflow, name: logic-notify, parent: rg-rg-eventgrid-fanout, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: client, to: egt-orders, label: publish CloudEvents over HTTPS, step: '1'}
+- {from: egt-orders, to: func-order-handler, label: Event Grid trigger, step: '2'}
+- {from: egt-orders, to: sbq-fulfilment, label: Service Bus queue handler, step: '2'}
+- {from: egt-orders, to: evh-order-events, label: Event Hubs handler, step: '2'}
+- {from: egt-orders, to: st-audit-queue, label: Storage queue handler, step: '2'}
+- {from: egt-orders, to: logic-notify, label: webhook handler, step: '2'}
+steps:
+- {n: '1', text: 'client → egt-orders: publish CloudEvents over HTTPS'}
+- {n: '2', text: 'egt-orders → func-order-handler: Event Grid trigger'}

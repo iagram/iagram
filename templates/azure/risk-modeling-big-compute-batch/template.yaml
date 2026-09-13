@@ -23,6 +23,11 @@ nodes:
 - {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-hpc, props: {cidr: 10.90.255.0/27}}
 - {id: user, type: common.user, name: user}
 - {id: batch-risk, type: azure.res.azurerm_batch_account, name: batch-risk, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: pool-hb-rdma
+  type: azure.res.azurerm_batch_pool
+  name: pool-hb-rdma
+  parent: sub-snet-batch-pool
+  props: {account_name: changeme, name: changeme, node_agent_sku_id: changeme, resource_group_name: changeme, storage_image_reference: {}, vm_size: changeme}
 - {id: striskdata, type: azure.storage_account, name: striskdata, parent: rg-rg-risk-grid}
 - {id: kv-batch, type: azure.key_vault, name: kv-batch, parent: rg-rg-risk-grid}
 - id: vpngw-hpc
@@ -43,9 +48,14 @@ nodes:
 edges:
 - {from: user, to: striskdata, label: upload market data and application packages, step: '1'}
 - {from: user, to: batch-risk, label: submit job with Monte Carlo tasks, step: '2'}
+- {from: batch-risk, to: pool-hb-rdma, label: provision VMs, step: '3'}
+- {from: pool-hb-rdma, to: striskdata, label: read inputs, step: '4'}
 - {from: batch-risk, to: kv-batch, label: customer-managed keys}
 - {from: dc-on-premises-hpc, to: vpngw-hpc, label: ExpressRoute / VPN}
+- {from: vm-hpc-head-node, to: pool-hb-rdma, label: HPC Pack burst to Azure nodes}
 - {from: batch-risk, to: law-batch, label: job and pool metrics}
 steps:
 - {n: '1', text: 'user → striskdata: upload market data and application packages'}
 - {n: '2', text: 'user → batch-risk: submit job with Monte Carlo tasks'}
+- {n: '3', text: 'batch-risk → pool-hb-rdma: provision VMs'}
+- {n: '4', text: 'pool-hb-rdma → striskdata: read inputs'}

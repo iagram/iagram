@@ -1,0 +1,81 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/guide/aks/aks-firewall); edit freely.
+title: Private AKS cluster protected by Azure Firewall in a hub-spoke topology
+category: containers
+tags:
+- aks
+- private cluster
+- azure firewall
+- hub-spoke
+- agic
+- bastion
+- jump box
+- user defined routing
+source: https://learn.microsoft.com/en-us/azure/architecture/guide/aks/aks-firewall
+description: A private AKS cluster with outbound type userDefinedRouting runs in a spoke virtual network with dedicated subnets for the cluster, a jump box and private endpoints, Application Gateway WAF
+  v2 and Azure Bastion, and all egress is routed to Azure Firewall Premium in the hub. The firewall allows outbound traffic with network and application rules using the AzureKubernetesService FQDN tag and
+  publishes inbound workloads with DNAT rules, while Container Registry and Key Vault are reached through private endpoints.
+nodes:
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-hub-firewall, type: azure.resource_group, name: rg-hub-firewall, parent: sub-connectivity, props: {location: westeurope}}
+- {id: vpc-vnet-hub, type: azure.vnet, name: vnet-hub, parent: rg-rg-hub-firewall, props: {cidr: 10.1.0.0/16}}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-hub, props: {cidr: 10.1.0.0/26}}
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-aks-private, type: azure.resource_group, name: rg-aks-private, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-aks-spoke, type: azure.vnet, name: vnet-aks-spoke, parent: rg-rg-aks-private, props: {cidr: 10.0.0.0/16}}
+- {id: sub-akssubnet, type: azure.subnet, name: AksSubnet, parent: vpc-vnet-aks-spoke, props: {cidr: 10.0.0.0/20}}
+- {id: sub-vmsubnet, type: azure.subnet, name: VmSubnet, parent: vpc-vnet-aks-spoke, props: {cidr: 10.0.16.0/24}}
+- {id: sub-appgatewaysubnet, type: azure.subnet, name: AppGatewaySubnet, parent: vpc-vnet-aks-spoke, props: {cidr: 10.0.17.0/24}}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-aks-spoke, props: {cidr: 10.0.18.0/26}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: user, type: common.user, name: user}
+- {id: fw-premium, type: azure.res.azurerm_firewall, name: fw-premium, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: aks-private, type: azure.aks_cluster, name: aks-private, parent: sub-akssubnet}
+- id: appgw-agic
+  type: azure.res.azurerm_application_gateway
+  name: appgw-agic
+  parent: sub-appgatewaysubnet
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: bastion-spoke, type: azure.res.azurerm_bastion_host, name: bastion-spoke, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vm-jumpbox, type: azure.virtual_machine, name: vm-jumpbox, parent: sub-vmsubnet}
+- id: pe-acr
+  type: azure.res.azurerm_private_endpoint
+  name: pe-acr
+  parent: sub-vmsubnet
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-keyvault
+  type: azure.res.azurerm_private_endpoint
+  name: pe-keyvault
+  parent: sub-vmsubnet
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: acr-private, type: azure.container_registry, name: acr-private, parent: rg-rg-aks-private}
+- {id: kv-aks-private, type: azure.key_vault, name: kv-aks-private, parent: rg-rg-aks-private}
+- {id: law-aks-private, type: azure.res.azurerm_log_analytics_workspace, name: law-aks-private, parent: rg-rg-aks-private, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: vpc-vnet-hub, to: vpc-vnet-aks-spoke, label: peering, link: azurerm_virtual_network_peering}
+- {from: users, to: appgw-agic, label: HTTPS (WAF v2), step: '1'}
+- {from: appgw-agic, to: aks-private, label: AGIC routes to pod IPs, step: '2'}
+- {from: aks-private, to: fw-premium, label: egress via UDR (userDefinedRouting), step: '3'}
+- {from: fw-premium, to: internet, label: SNAT egress (AzureKubernetesService FQDN tag), step: '4'}
+- {from: internet, to: fw-premium, label: DNAT inbound}
+- {from: aks-private, to: pe-acr, label: image pull}
+- {from: pe-acr, to: acr-private, label: private link}
+- {from: aks-private, to: pe-keyvault, label: workload identity secrets}
+- {from: pe-keyvault, to: kv-aks-private, label: private link}
+- {from: user, to: bastion-spoke, label: SSH over TLS}
+- {from: bastion-spoke, to: vm-jumpbox, label: SSH}
+- {from: vm-jumpbox, to: aks-private, label: kubectl to private API server}
+- {from: fw-premium, to: law-aks-private, label: diagnostics}
+steps:
+- {n: '1', text: 'users → appgw-agic: HTTPS (WAF v2)'}
+- {n: '2', text: 'appgw-agic → aks-private: AGIC routes to pod IPs'}
+- {n: '3', text: 'aks-private → fw-premium: egress via UDR (userDefinedRouting)'}
+- {n: '4', text: 'fw-premium → internet: SNAT egress (AzureKubernetesService FQDN tag)'}

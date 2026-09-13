@@ -1,0 +1,96 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/web-apps/app-service-environment/architectures/app-service-environment-high-availability-deployment); edit freely.
+title: High availability enterprise deployment that uses App Service Environment
+category: web
+tags:
+- app service environment
+- ase v3
+- zone redundancy
+- application gateway
+- azure firewall
+- private endpoint
+- redis
+source: https://learn.microsoft.com/en-us/azure/architecture/web-apps/app-service-environment/architectures/app-service-environment-high-availability-deployment
+description: Application Gateway WAF v2 in its own subnet forwards internet traffic to an internal-load-balancer App Service Environment v3 whose zone-redundant plans host a web app, a private API and a
+  function app. Outbound traffic leaves through Azure Firewall, dependencies such as Azure Managed Redis, Service Bus, Cosmos DB, SQL Database and Key Vault are reached over private endpoints with private
+  DNS zones, and GitHub Actions deploys through a jump box VM inside the network.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-ase-ha, type: azure.resource_group, name: rg-ase-ha, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-ase, type: azure.vnet, name: vnet-ase, parent: rg-rg-ase-ha, props: {cidr: 10.0.0.0/16}}
+- {id: sub-snet-appgw, type: azure.subnet, name: snet-appgw, parent: vpc-vnet-ase, props: {cidr: 10.0.1.0/24}}
+- {id: sub-snet-ase, type: azure.subnet, name: snet-ase, parent: vpc-vnet-ase, props: {cidr: 10.0.2.0/24}}
+- {id: sub-snet-redis, type: azure.subnet, name: snet-redis, parent: vpc-vnet-ase, props: {cidr: 10.0.3.0/24}}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-ase, props: {cidr: 10.0.4.0/26}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateendpoints, parent: vpc-vnet-ase, props: {cidr: 10.0.5.0/24}}
+- {id: sub-snet-jumpbox, type: azure.subnet, name: snet-jumpbox, parent: vpc-vnet-ase, props: {cidr: 10.0.6.0/27}}
+- {id: internet, type: common.internet, name: internet}
+- {id: saas, type: common.saas, name: saas}
+- id: appgw-waf-v2
+  type: azure.res.azurerm_application_gateway
+  name: appgw-waf-v2
+  parent: sub-snet-appgw
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: asp-isolated-v2-zr, type: azure.res.azurerm_service_plan, name: asp-isolated-v2-zr, parent: sub-snet-ase, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-app
+  type: azure.res.azurerm_linux_web_app
+  name: web-app
+  parent: sub-snet-ase
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: api-private
+  type: azure.res.azurerm_linux_web_app
+  name: api-private
+  parent: sub-snet-ase
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: func-app
+  type: azure.res.azurerm_linux_function_app
+  name: func-app
+  parent: sub-snet-ase
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: redis-zr, type: azure.res.azurerm_redis_cache, name: redis-zr, parent: sub-snet-redis, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: fw-egress, type: azure.res.azurerm_firewall, name: fw-egress, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- id: pe-sql
+  type: azure.res.azurerm_private_endpoint
+  name: pe-sql
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-cosmos
+  type: azure.res.azurerm_private_endpoint
+  name: pe-cosmos
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-servicebus
+  type: azure.res.azurerm_private_endpoint
+  name: pe-servicebus
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-keyvault
+  type: azure.res.azurerm_private_endpoint
+  name: pe-keyvault
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: vm-jumpbox, type: azure.virtual_machine, name: vm-jumpbox, parent: sub-snet-jumpbox}
+- {id: sql-ase, type: azure.res.azurerm_mssql_server, name: sql-ase, parent: rg-rg-ase-ha, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+edges:
+- {from: internet, to: appgw-waf-v2, label: HTTPS (WAF), step: '1'}
+- {from: web-app, to: api-private, label: private API call, step: '4'}
+- {from: web-app, to: redis-zr, label: cache-aside}
+- {from: api-private, to: pe-sql, label: TDS via private endpoint}
+- {from: pe-sql, to: sql-ase, label: private link}
+- {from: func-app, to: pe-servicebus, label: Service Bus trigger}
+- {from: api-private, to: pe-cosmos, label: Cosmos DB}
+- {from: web-app, to: pe-keyvault, label: secrets}
+- {from: web-app, to: fw-egress, label: outbound traffic}
+- {from: saas, to: vm-jumpbox, label: GitHub Actions deployment}
+steps:
+- {n: '1', text: 'internet → appgw-waf-v2: HTTPS (WAF)'}
+- {n: '4', text: 'web-app → api-private: private API call'}

@@ -1,0 +1,53 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/azure-signalr/signalr-concept-serverless-development-config); edit freely.
+title: Serverless real-time web app with Azure SignalR Service and Functions
+category: web
+tags:
+- signalr
+- real-time
+- websockets
+- functions
+- serverless mode
+- negotiate
+- api management
+source: https://learn.microsoft.com/en-us/azure/azure-signalr/signalr-concept-serverless-development-config
+description: Browser clients call an HTTP-triggered negotiate function to obtain a SignalR Service access token and endpoint, then connect to the SignalR Service instance configured in Serverless mode.
+  Client messages are delivered to functions through the SignalR trigger and an upstream endpoint, and functions broadcast messages to all, grouped or specific users through the SignalR output binding,
+  with API Management optionally adding CORS in front of the function app.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-signalr-serverless, type: azure.resource_group, name: rg-signalr-serverless, parent: sub-workload, props: {location: westeurope}}
+- {id: users, type: common.users, name: users}
+- id: signalr-serverless
+  type: azure.res.azurerm_signalr_service
+  name: signalr-serverless
+  parent: rg-rg-signalr-serverless
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: asp-functions, type: azure.res.azurerm_service_plan, name: asp-functions, parent: rg-rg-signalr-serverless, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: func-signalr-hub
+  type: azure.res.azurerm_linux_function_app
+  name: func-signalr-hub
+  parent: rg-rg-signalr-serverless
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: st-func-host, type: azure.storage_account, name: st-func-host, parent: rg-rg-signalr-serverless}
+- {id: apim-cors, type: azure.res.azurerm_api_management, name: apim-cors, parent: rg-rg-signalr-serverless, props: {location: westeurope, name: changeme, publisher_email: changeme, publisher_name: changeme,
+    resource_group_name: changeme, sku_name: changeme}}
+- {id: kv-signalr-keys, type: azure.key_vault, name: kv-signalr-keys, parent: rg-rg-signalr-serverless}
+- {id: appi-signalr, type: azure.res.azurerm_application_insights, name: appi-signalr, parent: rg-rg-signalr-serverless, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: apim-cors, label: POST /api/negotiate, step: '1'}
+- {from: apim-cors, to: func-signalr-hub, label: negotiate function (SignalRConnectionInfo), step: '2'}
+- {from: users, to: signalr-serverless, label: WebSocket connection with access token, step: '3'}
+- {from: signalr-serverless, to: func-signalr-hub, label: upstream endpoint (SignalR trigger), step: '4'}
+- {from: func-signalr-hub, to: signalr-serverless, label: SignalR output binding broadcast, step: '5'}
+- {from: signalr-serverless, to: users, label: real-time messages, step: '6'}
+- {from: func-signalr-hub, to: kv-signalr-keys, label: connection string / key rotation}
+- {from: func-signalr-hub, to: st-func-host, label: host storage}
+- {from: func-signalr-hub, to: appi-signalr, label: telemetry}
+steps:
+- {n: '1', text: 'users → apim-cors: POST /api/negotiate'}
+- {n: '2', text: 'apim-cors → func-signalr-hub: negotiate function (SignalRConnectionInfo)'}
+- {n: '3', text: 'users → signalr-serverless: WebSocket connection with access token'}
+- {n: '4', text: 'signalr-serverless → func-signalr-hub: upstream endpoint (SignalR trigger)'}
+- {n: '5', text: 'func-signalr-hub → signalr-serverless: SignalR output binding broadcast'}
+- {n: '6', text: 'signalr-serverless → users: real-time messages'}

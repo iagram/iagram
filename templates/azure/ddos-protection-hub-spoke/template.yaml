@@ -1,0 +1,45 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-reference-architectures); edit freely.
+title: DDoS Network Protection on a hub-spoke with Azure Firewall and Bastion
+category: networking
+tags:
+- ddos protection
+- network protection
+- hub-spoke
+- azure firewall
+- bastion
+- public ip
+source: https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-reference-architectures
+description: A DDoS protection plan is enabled on the hub virtual network so every public IP in it, including the Azure Firewall and Azure Bastion frontends, receives Layer 3 and 4 mitigation with adaptive
+  tuning and telemetry. Spokes are peered to the hub with no direct spoke-to-spoke path, the firewall controls ingress from the internet, and Bastion provides administrative access without public IPs on
+  the workload VMs.
+nodes:
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-ddos-hub, type: azure.resource_group, name: rg-ddos-hub, parent: sub-connectivity, props: {location: westeurope}}
+- {id: vpc-hub-ddos, type: azure.vnet, name: hub-ddos, parent: rg-rg-ddos-hub, props: {cidr: 10.0.0.0/16}}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub-ddos, props: {cidr: 10.0.0.0/26}}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-hub-ddos, props: {cidr: 10.0.1.0/26}}
+- {id: sub-landing-zone, type: azure.subscription, name: landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-ddos-spokes, type: azure.resource_group, name: rg-ddos-spokes, parent: sub-landing-zone, props: {location: westeurope}}
+- {id: vpc-spoke-web, type: azure.vnet, name: spoke-web, parent: rg-rg-ddos-spokes, props: {cidr: 10.1.0.0/16}}
+- {id: sub-snet-web, type: azure.subnet, name: snet-web, parent: vpc-spoke-web, props: {cidr: 10.1.0.0/24}}
+- {id: vpc-spoke-data, type: azure.vnet, name: spoke-data, parent: rg-rg-ddos-spokes, props: {cidr: 10.2.0.0/16}}
+- {id: sub-snet-data, type: azure.subnet, name: snet-data, parent: vpc-spoke-data, props: {cidr: 10.2.0.0/24}}
+- {id: internet, type: common.internet, name: internet}
+- {id: user, type: common.user, name: user}
+- {id: ddos-plan, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-plan, parent: rg-rg-ddos-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: fw-hub, type: azure.res.azurerm_firewall, name: fw-hub, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: bastion-hub, type: azure.res.azurerm_bastion_host, name: bastion-hub, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-ddos, type: azure.res.azurerm_log_analytics_workspace, name: law-ddos, parent: rg-rg-ddos-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vm-web, type: azure.virtual_machine, name: vm-web, parent: sub-snet-web}
+- {id: vm-data, type: azure.virtual_machine, name: vm-data, parent: sub-snet-data}
+edges:
+- {from: ddos-plan, to: vpc-hub-ddos, label: DDoS Network Protection on hub VNet (all public IPs)}
+- {from: vpc-hub-ddos, to: vpc-spoke-web, link: azurerm_virtual_network_peering}
+- {from: vpc-hub-ddos, to: vpc-spoke-data, link: azurerm_virtual_network_peering}
+- {from: fw-hub, to: vm-web, label: DNAT to web tier, step: '2'}
+- {from: vm-web, to: vm-data, label: spoke-to-spoke via firewall route, step: '3'}
+- {from: bastion-hub, to: vm-web, label: private IP}
+- {from: ddos-plan, to: law-ddos, label: mitigation metrics and alerts}
+steps:
+- {n: '2', text: 'fw-hub → vm-web: DNAT to web tier'}
+- {n: '3', text: 'vm-web → vm-data: spoke-to-spoke via firewall route'}

@@ -1,0 +1,53 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/web-apps/guides/multi-region-app-service/multi-region-app-service); edit freely.
+title: Multi-region active-active App Service web app behind Azure Front Door
+category: web
+tags:
+- app service
+- front door
+- multi-region
+- active-active
+- disaster recovery
+- waf
+source: https://learn.microsoft.com/en-us/azure/architecture/web-apps/guides/multi-region-app-service/multi-region-app-service
+description: Identical App Service plans and web apps are deployed in two regions and Azure Front Door routes traffic to both origins with equal priority, while direct public access to the apps is restricted
+  to the Front Door instance. Front Door health probes detect a failed region and send all traffic to the surviving region, and back-end services such as databases and storage are configured for geo-redundancy
+  separately.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-web-global, type: azure.resource_group, name: rg-web-global, parent: sub-workload, props: {location: westeurope}}
+- {id: rg-rg-web-region1, type: azure.resource_group, name: rg-web-region1, parent: sub-workload, props: {location: westeurope}}
+- {id: rg-rg-web-region2, type: azure.resource_group, name: rg-web-region2, parent: sub-workload, props: {location: northeurope}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: afd-web, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-web, parent: rg-rg-web-global, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: appi-web-availability, type: azure.res.azurerm_application_insights, name: appi-web-availability, parent: rg-rg-web-global, props: {application_type: changeme, location: westeurope, name: changeme,
+    resource_group_name: changeme}}
+- {id: asp-region1, type: azure.res.azurerm_service_plan, name: asp-region1, parent: rg-rg-web-region1, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: web-region1
+  type: azure.res.azurerm_linux_web_app
+  name: web-region1
+  parent: rg-rg-web-region1
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: sql-region1, type: azure.res.azurerm_mssql_server, name: sql-region1, parent: rg-rg-web-region1, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: st-content-gzrs, type: azure.storage_account, name: st-content-gzrs, parent: rg-rg-web-region1}
+- {id: asp-region2, type: azure.res.azurerm_service_plan, name: asp-region2, parent: rg-rg-web-region2, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: web-region2
+  type: azure.res.azurerm_linux_web_app
+  name: web-region2
+  parent: rg-rg-web-region2
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: sql-region2, type: azure.res.azurerm_mssql_server, name: sql-region2, parent: rg-rg-web-region2, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+edges:
+- {from: users, to: afd-web, label: HTTPS (WAF), step: '1'}
+- {from: afd-web, to: web-region1, label: origin priority 1, step: '2'}
+- {from: afd-web, to: web-region2, label: origin priority 1, step: '2'}
+- {from: web-region1, to: sql-region1, label: TDS, step: '3'}
+- {from: web-region2, to: sql-region2, label: TDS, step: '3'}
+- {from: sql-region1, to: sql-region2, label: failover group replication}
+- {from: web-region1, to: st-content-gzrs, label: mounted share (GZRS)}
+- {from: web-region2, to: st-content-gzrs, label: mounted share (GZRS)}
+- {from: appi-web-availability, to: afd-web, label: availability tests}
+steps:
+- {n: '1', text: 'users → afd-web: HTTPS (WAF)'}
+- {n: '2', text: 'afd-web → web-region1: origin priority 1'}
+- {n: '3', text: 'web-region1 → sql-region1: TDS'}

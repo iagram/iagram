@@ -1,0 +1,25 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/openshift/create-cluster); edit freely.
+title: Azure Red Hat OpenShift 4 cluster in a virtual network with master and worker subnets
+category: containers
+tags:
+- azure red hat openshift
+- openshift
+- control plane
+- worker nodes
+- custom domain
+- managed identity
+source: https://learn.microsoft.com/en-us/azure/openshift/create-cluster
+description: An Azure Red Hat OpenShift 4 cluster is created in a virtual network that has two empty subnets, one for the control plane (master) nodes and one for the worker nodes, and the cluster VMs are
+  placed in a managed resource group. The API server and the ingress controller each receive an IP address, and when a custom domain is used, DNS A records for api and *.apps point at those addresses.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-aro-rg, type: azure.resource_group, name: aro-rg, parent: sub-workload, props: {location: eastus}}
+- {id: vpc-aro-vnet, type: azure.vnet, name: aro-vnet, parent: rg-aro-rg, props: {cidr: 10.0.0.0/22}}
+- {id: sub-master-subnet, type: azure.subnet, name: master-subnet, parent: vpc-aro-vnet, props: {cidr: 10.0.0.0/23}}
+- {id: sub-worker-subnet, type: azure.subnet, name: worker-subnet, parent: vpc-aro-vnet, props: {cidr: 10.0.2.0/23}}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: id-aro-cluster, type: azure.res.azurerm_user_assigned_identity, name: id-aro-cluster, parent: rg-aro-rg, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: dns-aro-example-com, type: azure.dns_zone, name: dns-aro-example-com, parent: rg-aro-rg, props: {domain: example.com}}
+- {id: law-aro, type: azure.res.azurerm_log_analytics_workspace, name: law-aro, parent: rg-aro-rg, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges: []

@@ -1,0 +1,38 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/hybrid/azure-local-baseline); edit freely.
+title: Azure Local (Azure Stack HCI) baseline connected to Azure through Arc
+category: compute
+tags:
+- azure local
+- azure stack hci
+- azure arc
+- hybrid
+- storage spaces direct
+- cloud witness
+- aks
+- edge
+source: https://learn.microsoft.com/en-us/azure/architecture/hybrid/azure-local-baseline
+description: A multi-node Azure Local instance on certified hardware uses a storage switched network design with dual top-of-rack switches for north-south connectivity and Storage Spaces Direct for resilient
+  storage. The nodes are Arc-enabled so the cluster is deployed and managed from Azure, with Key Vault holding deployment secrets, an Azure Storage cloud witness for quorum, Azure Monitor and Update Manager
+  for operations, and Arc VMs or AKS as the workload platforms.
+nodes:
+- {id: dc-edge-site, type: common.datacenter, name: edge-site}
+- {id: sub-hybrid-management, type: azure.subscription, name: hybrid-management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-azure-local, type: azure.resource_group, name: rg-azure-local, parent: sub-hybrid-management, props: {location: westeurope}}
+- {id: user, type: common.user, name: user}
+- {id: vpc-rg-rg-azure-local, type: azure.vnet, name: main, parent: rg-rg-azure-local, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-azure-local, type: azure.subnet, name: main, parent: vpc-rg-rg-azure-local, props: {cidr: 10.200.0.0/24}}
+- {id: node-01, type: azure.res.azurerm_arc_machine, name: node-01, parent: sub-rg-rg-azure-local, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: node-02, type: azure.res.azurerm_arc_machine, name: node-02, parent: sub-rg-rg-azure-local, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: aks-azure-local
+  type: azure.res.azurerm_arc_kubernetes_cluster
+  name: aks-azure-local
+  parent: sub-rg-rg-azure-local
+  props: {agent_public_key_certificate: changeme, identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+- {id: kv-azure-local, type: azure.key_vault, name: kv-azure-local, parent: rg-rg-azure-local}
+- {id: st-cloud-witness, type: azure.storage_account, name: st-cloud-witness, parent: rg-rg-azure-local}
+- {id: law-azure-local, type: azure.res.azurerm_log_analytics_workspace, name: law-azure-local, parent: rg-rg-azure-local, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: rsv-azure-local, type: azure.res.azurerm_recovery_services_vault, name: rsv-azure-local, parent: rg-rg-azure-local, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+edges:
+- {from: node-01, to: law-azure-local, label: 'Arc agent (Monitor Insights, Update Manager)', step: '3'}
+steps:
+- {n: '3', text: 'node-01 → law-azure-local: Arc agent (Monitor Insights, Update Manager)'}

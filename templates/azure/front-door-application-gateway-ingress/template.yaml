@@ -1,0 +1,140 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/guide/networking/global-web-applications/mission-critical-global-http-ingress); edit freely.
+title: Mission-critical global HTTP ingress with Front Door and Application Gateway
+category: networking
+tags:
+- front door
+- application gateway
+- traffic manager
+- waf
+- private link origin
+- global ingress
+- nested profiles
+source: https://learn.microsoft.com/en-us/azure/architecture/guide/networking/global-web-applications/mission-critical-global-http-ingress
+description: A weighted Traffic Manager profile normally resolves clients to Azure Front Door Premium, which applies WAF and reaches regional origins over Private Link. If Front Door is unavailable the
+  endpoint is disabled and a nested performance-routing Traffic Manager profile sends clients to a WAF-enabled Application Gateway in each region, so both paths are protected and terminate on the same origin
+  servers.
+nodes:
+- {id: sub-global-ingress, type: azure.subscription, name: global-ingress, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-global-ingress, type: azure.resource_group, name: rg-global-ingress, parent: sub-global-ingress, props: {location: westeurope}}
+- {id: sub-app-prod, type: azure.subscription, name: app-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-app-weu, type: azure.resource_group, name: rg-app-weu, parent: sub-app-prod, props: {location: westeurope}}
+- {id: vpc-vnet-weu, type: azure.vnet, name: vnet-weu, parent: rg-rg-app-weu, props: {cidr: 10.1.0.0/16}}
+- {id: sub-snet-agw-weu, type: azure.subnet, name: snet-agw-weu, parent: vpc-vnet-weu, props: {cidr: 10.1.0.0/24}}
+- {id: sub-snet-app-weu, type: azure.subnet, name: snet-app-weu, parent: vpc-vnet-weu, props: {cidr: 10.1.1.0/24}}
+- {id: sub-snet-pls-weu, type: azure.subnet, name: snet-pls-weu, parent: vpc-vnet-weu, props: {cidr: 10.1.2.0/24}}
+- {id: rg-rg-app-eus, type: azure.resource_group, name: rg-app-eus, parent: sub-app-prod, props: {location: eastus}}
+- {id: vpc-vnet-eus, type: azure.vnet, name: vnet-eus, parent: rg-rg-app-eus, props: {cidr: 10.2.0.0/16}}
+- {id: sub-snet-agw-eus, type: azure.subnet, name: snet-agw-eus, parent: vpc-vnet-eus, props: {cidr: 10.2.0.0/24}}
+- {id: sub-snet-app-eus, type: azure.subnet, name: snet-app-eus, parent: vpc-vnet-eus, props: {cidr: 10.2.1.0/24}}
+- {id: sub-snet-pls-eus, type: azure.subnet, name: snet-pls-eus, parent: vpc-vnet-eus, props: {cidr: 10.2.2.0/24}}
+- {id: users, type: common.users, name: users}
+- id: tm-weighted
+  type: azure.res.azurerm_traffic_manager_profile
+  name: tm-weighted
+  parent: rg-rg-global-ingress
+  props: {dns_config: {}, monitor_config: {}, name: changeme, resource_group_name: changeme, traffic_routing_method: changeme}
+- id: tm-performance
+  type: azure.res.azurerm_traffic_manager_profile
+  name: tm-performance
+  parent: rg-rg-global-ingress
+  props: {dns_config: {}, monitor_config: {}, name: changeme, resource_group_name: changeme, traffic_routing_method: changeme}
+- {id: afd-premium, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-premium, parent: rg-rg-global-ingress, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: afd-waf, type: azure.res.azurerm_cdn_frontdoor_firewall_policy, name: afd-waf, parent: rg-rg-global-ingress, props: {mode: changeme, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: agw-weu
+  type: azure.res.azurerm_application_gateway
+  name: agw-weu
+  parent: sub-snet-agw-weu
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- id: agw-eus
+  type: azure.res.azurerm_application_gateway
+  name: agw-eus
+  parent: sub-snet-agw-eus
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- id: waf-agw
+  type: azure.res.azurerm_web_application_firewall_policy
+  name: waf-agw
+  parent: rg-rg-app-weu
+  props: {location: westeurope, managed_rules: {}, name: changeme, resource_group_name: changeme}
+- {id: ilb-weu, type: azure.res.azurerm_lb, name: ilb-weu, parent: sub-snet-app-weu, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: ilb-eus, type: azure.res.azurerm_lb, name: ilb-eus, parent: sub-snet-app-eus, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: pls-weu
+  type: azure.res.azurerm_private_link_service
+  name: pls-weu
+  parent: sub-snet-pls-weu
+  props:
+    location: westeurope
+    name: changeme
+    nat_ip_configuration: []
+    resource_group_name: changeme
+- id: pls-eus
+  type: azure.res.azurerm_private_link_service
+  name: pls-eus
+  parent: sub-snet-pls-eus
+  props:
+    location: westeurope
+    name: changeme
+    nat_ip_configuration: []
+    resource_group_name: changeme
+- id: vmss-weu
+  type: azure.res.azurerm_linux_virtual_machine_scale_set
+  name: vmss-weu
+  parent: sub-snet-app-weu
+  props:
+    admin_username: changeme
+    location: westeurope
+    name: changeme
+    network_interface: []
+    os_disk: {}
+    resource_group_name: changeme
+    sku: changeme
+- id: vmss-eus
+  type: azure.res.azurerm_linux_virtual_machine_scale_set
+  name: vmss-eus
+  parent: sub-snet-app-eus
+  props:
+    admin_username: changeme
+    location: westeurope
+    name: changeme
+    network_interface: []
+    os_disk: {}
+    resource_group_name: changeme
+    sku: changeme
+edges:
+- {from: users, to: tm-weighted, label: DNS query (always serve), step: '1'}
+- {from: tm-weighted, to: afd-premium, label: weighted endpoint (normal operation)}
+- {from: tm-weighted, to: tm-performance, label: nested profile (Front Door unavailable)}
+- {from: users, to: afd-premium, label: HTTPS to nearest PoP, step: '2'}
+- {from: afd-waf, to: afd-premium, label: WAF policy}
+- {from: afd-premium, to: pls-weu, label: Private Link origin, step: '3'}
+- {from: pls-weu, to: ilb-weu, label: NAT to ILB frontend, step: '4'}
+- {from: ilb-weu, to: vmss-weu, label: origin servers, step: '5'}
+- {from: afd-premium, to: pls-eus, label: Private Link origin}
+- {from: pls-eus, to: ilb-eus}
+- {from: ilb-eus, to: vmss-eus}
+- {from: tm-performance, to: agw-weu, label: performance routing (alternate path)}
+- {from: tm-performance, to: agw-eus, label: performance routing (alternate path)}
+- {from: waf-agw, to: agw-weu, label: WAF policy (prevention)}
+- {from: agw-weu, to: vmss-weu, label: same origins}
+- {from: agw-eus, to: vmss-eus, label: same origins}
+steps:
+- {n: '1', text: 'users → tm-weighted: DNS query (always serve)'}
+- {n: '2', text: 'users → afd-premium: HTTPS to nearest PoP'}
+- {n: '3', text: 'afd-premium → pls-weu: Private Link origin'}
+- {n: '4', text: 'pls-weu → ilb-weu: NAT to ILB frontend'}
+- {n: '5', text: 'ilb-weu → vmss-weu: origin servers'}

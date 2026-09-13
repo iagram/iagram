@@ -1,0 +1,72 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/expressroute/expressroute-global-reach); edit freely.
+title: ExpressRoute Global Reach linking on-premises sites
+category: networking
+tags:
+- expressroute
+- global reach
+- branch-to-branch
+- private wan
+- msee
+source: https://learn.microsoft.com/en-us/azure/expressroute/expressroute-global-reach
+description: Two on-premises sites each have an ExpressRoute circuit at a different peering location that connects them to Azure virtual networks in their local region. ExpressRoute Global Reach links the
+  two circuits so the sites exchange traffic directly across the Microsoft global network, bypassing the virtual network gateways.
+nodes:
+- {id: dc-san-francisco, type: common.datacenter, name: san-francisco}
+- {id: dc-london, type: common.datacenter, name: london}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-er-westus, type: azure.resource_group, name: rg-er-westus, parent: sub-connectivity, props: {location: westus}}
+- {id: vpc-vnet-westus, type: azure.vnet, name: vnet-westus, parent: rg-rg-er-westus, props: {cidr: 10.0.3.0/24}}
+- {id: sub-westus-gatewaysubnet, type: azure.subnet, name: westus-GatewaySubnet, parent: vpc-vnet-westus, props: {cidr: 10.0.3.0/27}}
+- {id: sub-snet-westus, type: azure.subnet, name: snet-westus, parent: vpc-vnet-westus, props: {cidr: 10.0.3.128/25}}
+- {id: rg-rg-er-uksouth, type: azure.resource_group, name: rg-er-uksouth, parent: sub-connectivity, props: {location: uksouth}}
+- {id: vpc-vnet-uksouth, type: azure.vnet, name: vnet-uksouth, parent: rg-rg-er-uksouth, props: {cidr: 10.0.4.0/24}}
+- {id: sub-uksouth-gatewaysubnet, type: azure.subnet, name: uksouth-GatewaySubnet, parent: vpc-vnet-uksouth, props: {cidr: 10.0.4.0/27}}
+- {id: sub-snet-uksouth, type: azure.subnet, name: snet-uksouth, parent: vpc-vnet-uksouth, props: {cidr: 10.0.4.128/25}}
+- id: er-silicon-valley
+  type: azure.res.azurerm_express_route_circuit
+  name: er-silicon-valley
+  parent: rg-rg-er-westus
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: er-london
+  type: azure.res.azurerm_express_route_circuit
+  name: er-london
+  parent: rg-rg-er-uksouth
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: ergw-westus
+  type: azure.res.azurerm_virtual_network_gateway
+  name: ergw-westus
+  parent: sub-westus-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- id: ergw-uksouth
+  type: azure.res.azurerm_virtual_network_gateway
+  name: ergw-uksouth
+  parent: sub-uksouth-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- {id: vm-westus, type: azure.virtual_machine, name: vm-westus, parent: sub-snet-westus}
+- {id: vm-uksouth, type: azure.virtual_machine, name: vm-uksouth, parent: sub-snet-uksouth}
+- {id: law-er-global, type: azure.res.azurerm_log_analytics_workspace, name: law-er-global, parent: rg-rg-er-westus, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: dc-san-francisco, to: er-silicon-valley, label: 10.0.1.0/24 to Silicon Valley peering location, step: '1'}
+- {from: er-silicon-valley, to: ergw-westus, label: ExpressRoute connection}
+- {from: dc-london, to: er-london, label: 10.0.2.0/24 to London peering location, step: '2'}
+- {from: er-london, to: ergw-uksouth, label: ExpressRoute connection}
+- {from: er-silicon-valley, to: er-london, label: Global Reach over Microsoft global network, step: '3'}
+- {from: ergw-westus, to: vm-westus, label: site to Azure}
+- {from: ergw-uksouth, to: vm-uksouth, label: site to Azure}
+- {from: er-silicon-valley, to: law-er-global, label: circuit metrics}
+steps:
+- {n: '1', text: 'datacenter:san-francisco → er-silicon-valley: 10.0.1.0/24 to Silicon Valley peering location'}
+- {n: '2', text: 'datacenter:london → er-london: 10.0.2.0/24 to London peering location'}
+- {n: '3', text: 'er-silicon-valley → er-london: Global Reach over Microsoft global network'}

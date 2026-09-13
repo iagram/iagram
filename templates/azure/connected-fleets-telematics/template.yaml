@@ -25,6 +25,11 @@ nodes:
 - {id: users, type: common.users, name: users}
 - {id: saas, type: common.saas, name: saas}
 - {id: egns-vehicle-mqtt, type: azure.res.azurerm_eventgrid_namespace, name: egns-vehicle-mqtt, parent: grp-telematics, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: dps-vehicles
+  type: azure.res.azurerm_iothub_dps
+  name: dps-vehicles
+  parent: grp-telematics
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
 - id: func-message-processing
   type: azure.res.azurerm_linux_function_app
   name: func-message-processing
@@ -61,6 +66,7 @@ nodes:
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
 - {id: maps-fleet, type: azure.res.azurerm_maps_account, name: maps-fleet, parent: grp-fleet-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}}
 edges:
+- {from: device, to: dps-vehicles, label: zero-touch provisioning}
 - {from: device, to: egns-vehicle-mqtt, label: MQTT telemetry (protobuf / JSON, step: '1'}
 - {from: egns-vehicle-mqtt, to: func-message-processing, label: validate, step: '2'}
 - {from: func-message-processing, to: cosmos-vehicles-config, label: message types, step: '3'}

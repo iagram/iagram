@@ -1,0 +1,54 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-about); edit freely.
+title: Event Hubs streaming ingestion with Functions, Stream Analytics and Capture
+category: serverless
+tags:
+- event hubs
+- kafka
+- functions
+- stream analytics
+- capture
+- consumer groups
+source: https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-about
+description: Producers send events over AMQP, Kafka or HTTPS to a partitioned event hub in an Event Hubs namespace, where they are retained for a configurable period. Separate consumer groups let an Azure
+  Functions app and a Stream Analytics job read the same stream independently with checkpointing, while Capture writes the raw events to Blob Storage or Data Lake Storage for long-term retention.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-streaming, type: azure.resource_group, name: rg-streaming, parent: sub-workload, props: {location: westeurope}}
+- {id: device, type: common.device, name: device}
+- {id: client, type: common.client, name: client}
+- {id: evhns-telemetry, type: azure.res.azurerm_eventhub_namespace, name: evhns-telemetry, parent: rg-rg-streaming, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: evh-telemetry, type: azure.res.azurerm_eventhub, name: evh-telemetry, parent: rg-rg-streaming, props: {name: changeme, partition_count: 1}}
+- {id: st-capture, type: azure.storage_account, name: st-capture, parent: rg-rg-streaming}
+- {id: asp-functions, type: azure.res.azurerm_service_plan, name: asp-functions, parent: rg-rg-streaming, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: func-stream-processor
+  type: azure.res.azurerm_linux_function_app
+  name: func-stream-processor
+  parent: rg-rg-streaming
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: asa-realtime, type: azure.res.azurerm_stream_analytics_job, name: asa-realtime, parent: rg-rg-streaming, props: {location: westeurope, name: changeme, resource_group_name: changeme, transformation_query: changeme}}
+- id: cosmos-hot-path
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-hot-path
+  parent: rg-rg-streaming
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: appi-stream, type: azure.res.azurerm_application_insights, name: appi-stream, parent: rg-rg-streaming, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: device, to: evh-telemetry, label: AMQP / Kafka produce, step: '1'}
+- {from: client, to: evh-telemetry, label: HTTPS produce, step: '1'}
+- {from: evh-telemetry, to: func-stream-processor, label: Event Hubs trigger (consumer group A), step: '2'}
+- {from: evh-telemetry, to: asa-realtime, label: consumer group B, step: '2'}
+- {from: evh-telemetry, to: st-capture, label: Capture (Avro), step: '2'}
+- {from: func-stream-processor, to: cosmos-hot-path, label: write processed events, step: '3'}
+- {from: func-stream-processor, to: st-capture, label: checkpoints}
+- {from: func-stream-processor, to: appi-stream, label: telemetry}
+steps:
+- {n: '1', text: 'device → evh-telemetry: AMQP / Kafka produce'}
+- {n: '2', text: 'evh-telemetry → func-stream-processor: Event Hubs trigger (consumer group A)'}
+- {n: '3', text: 'func-stream-processor → cosmos-hot-path: write processed events'}

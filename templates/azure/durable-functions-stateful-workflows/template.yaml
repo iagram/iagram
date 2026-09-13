@@ -1,0 +1,40 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/durable-task/durable-functions/durable-functions-overview); edit freely.
+title: Durable Functions stateful serverless workflows
+category: serverless
+tags:
+- durable functions
+- orchestrator
+- fan-out fan-in
+- function chaining
+- task hub
+- storage provider
+source: https://learn.microsoft.com/en-us/azure/durable-task/durable-functions/durable-functions-overview
+description: Durable Functions extends Azure Functions with orchestrator, activity and entity functions so that function chaining, fan-out/fan-in, monitor and human-interaction workflows run reliably over
+  long periods. The runtime checkpoints orchestration state, retries and recovery into a task hub in the configured storage provider, and HTTP APIs start and query orchestration instances.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-durable, type: azure.resource_group, name: rg-durable, parent: sub-workload, props: {location: westeurope}}
+- {id: client, type: common.client, name: client}
+- {id: asp-durable, type: azure.res.azurerm_service_plan, name: asp-durable, parent: rg-rg-durable, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme, sku_name: changeme}}
+- id: func-orchestrations
+  type: azure.res.azurerm_linux_function_app
+  name: func-orchestrations
+  parent: rg-rg-durable
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: st-task-hub, type: azure.storage_account, name: st-task-hub, parent: rg-rg-durable}
+- {id: kv-durable, type: azure.key_vault, name: kv-durable, parent: rg-rg-durable}
+- {id: appi-durable, type: azure.res.azurerm_application_insights, name: appi-durable, parent: rg-rg-durable, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-durable, type: azure.res.azurerm_log_analytics_workspace, name: law-durable, parent: rg-rg-durable, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: client, to: func-orchestrations, label: HTTP start orchestration, step: '1'}
+- {from: func-orchestrations, to: st-task-hub, label: orchestration state and checkpoints, step: '2'}
+- {from: st-task-hub, to: func-orchestrations, label: schedule activity functions, step: '3'}
+- {from: client, to: func-orchestrations, label: HTTP status query / raise event, step: '4'}
+- {from: func-orchestrations, to: kv-durable, label: secrets}
+- {from: func-orchestrations, to: appi-durable, label: telemetry}
+- {from: appi-durable, to: law-durable, label: logs}
+steps:
+- {n: '1', text: 'client → func-orchestrations: HTTP start orchestration'}
+- {n: '2', text: 'func-orchestrations → st-task-hub: orchestration state and checkpoints'}
+- {n: '3', text: 'st-task-hub → func-orchestrations: schedule activity functions'}
+- {n: '4', text: 'client → func-orchestrations: HTTP status query / raise event'}

@@ -1,0 +1,69 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/networking/guide/network-virtual-appliance-high-availability); edit freely.
+title: Hub-spoke with highly available NVAs behind Standard Load Balancer
+category: networking
+tags:
+- hub-spoke
+- nva
+- load balancer
+- ha ports
+- snat
+- nat gateway
+- udr
+source: https://learn.microsoft.com/en-us/azure/architecture/networking/guide/network-virtual-appliance-high-availability
+description: A cluster of third-party firewall NVAs in the hub is fronted by an internal Standard Load Balancer with HA-ports rules for east-west and on-premises traffic and by a public Standard Load Balancer
+  for internet ingress. Spoke subnets carry a 0.0.0.0/0 user-defined route to the internal load balancer, the NVAs SNAT inbound flows to keep traffic symmetric, and a NAT gateway on the NVA subnet provides
+  scalable egress.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-hub-nva, type: azure.resource_group, name: rg-hub-nva, parent: sub-connectivity, props: {location: westeurope}}
+- {id: vpc-hub-nva, type: azure.vnet, name: hub-nva, parent: rg-rg-hub-nva, props: {cidr: 10.0.0.0/16}}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-hub-nva, props: {cidr: 10.0.0.0/27}}
+- {id: sub-snet-nva, type: azure.subnet, name: snet-nva, parent: vpc-hub-nva, props: {cidr: 10.0.1.0/24}}
+- {id: sub-landing-zone, type: azure.subscription, name: landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-spokes-nva, type: azure.resource_group, name: rg-spokes-nva, parent: sub-landing-zone, props: {location: westeurope}}
+- {id: vpc-spoke-1, type: azure.vnet, name: spoke-1, parent: rg-rg-spokes-nva, props: {cidr: 10.1.0.0/16}}
+- {id: sub-snet-app-1, type: azure.subnet, name: snet-app-1, parent: vpc-spoke-1, props: {cidr: 10.1.1.0/24}}
+- {id: vpc-spoke-2, type: azure.vnet, name: spoke-2, parent: rg-rg-spokes-nva, props: {cidr: 10.2.0.0/16}}
+- {id: sub-snet-app-2, type: azure.subnet, name: snet-app-2, parent: vpc-spoke-2, props: {cidr: 10.2.1.0/24}}
+- {id: internet, type: common.internet, name: internet}
+- id: hub-gw
+  type: azure.res.azurerm_virtual_network_gateway
+  name: hub-gw
+  parent: sub-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- {id: nva-ilb, type: azure.res.azurerm_lb, name: nva-ilb, parent: sub-snet-nva, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: nva-plb, type: azure.res.azurerm_lb, name: nva-plb, parent: sub-snet-nva, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: nva-1, type: azure.virtual_machine, name: nva-1, parent: sub-snet-nva}
+- {id: nva-2, type: azure.virtual_machine, name: nva-2, parent: sub-snet-nva}
+- {id: nva-natgw, type: azure.res.azurerm_nat_gateway, name: nva-natgw, parent: sub-snet-nva, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: app-1, type: azure.virtual_machine, name: app-1, parent: sub-snet-app-1}
+- {id: app-2, type: azure.virtual_machine, name: app-2, parent: sub-snet-app-2}
+- {id: law-nva, type: azure.res.azurerm_log_analytics_workspace, name: law-nva, parent: rg-rg-hub-nva, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: vpc-hub-nva, to: vpc-spoke-1, label: peering (gateway transit), link: azurerm_virtual_network_peering}
+- {from: vpc-hub-nva, to: vpc-spoke-2, label: peering (gateway transit), link: azurerm_virtual_network_peering}
+- {from: internet, to: nva-plb, label: inbound (per-port LB rules), step: '1'}
+- {from: nva-plb, to: nva-1, label: health-probed backend, step: '2'}
+- {from: nva-1, to: app-2, label: SNAT for symmetry, step: '3'}
+- {from: app-1, to: nva-ilb, label: UDR 0.0.0.0/0 next hop ILB, step: '4'}
+- {from: nva-ilb, to: nva-2, label: HA ports rule, step: '5'}
+- {from: nva-2, to: nva-natgw, label: egress, step: '6'}
+- {from: nva-natgw, to: internet, label: SNAT public IP, step: '7'}
+- {from: dc-on-premises, to: hub-gw, label: VPN / ExpressRoute}
+- {from: hub-gw, to: nva-ilb, label: on-prem to Azure via NVA}
+- {from: nva-1, to: law-nva, label: diagnostics}
+steps:
+- {n: '1', text: 'internet → nva-plb: inbound (per-port LB rules)'}
+- {n: '2', text: 'nva-plb → nva-1: health-probed backend'}
+- {n: '3', text: 'nva-1 → app-2: SNAT for symmetry'}
+- {n: '4', text: 'app-1 → nva-ilb: UDR 0.0.0.0/0 next hop ILB'}
+- {n: '5', text: 'nva-ilb → nva-2: HA ports rule'}
+- {n: '6', text: 'nva-2 → nva-natgw: egress'}
+- {n: '7', text: 'nva-natgw → internet: SNAT public IP'}

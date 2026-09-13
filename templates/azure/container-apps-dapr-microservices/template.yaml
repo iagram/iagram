@@ -1,0 +1,89 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/serverless/microservices-with-container-apps-dapr); edit freely.
+title: Microservices on Azure Container Apps with Dapr and KEDA
+category: containers
+tags:
+- container apps
+- dapr
+- keda
+- service bus
+- cosmos db
+- redis
+- microservices
+- order management
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/serverless/microservices-with-container-apps-dapr
+description: Ten .NET microservices of an order management system run in a single Container Apps environment whose managed Envoy ingress exposes only the UI, while internal services use Dapr service invocation
+  and Dapr publish-subscribe over a Service Bus topic. Dapr state and binding components map the Makeline service to Azure Managed Redis, the loyalty service to Cosmos DB, the receipt service to Blob Storage
+  and the accounting service to SQL Database, and KEDA scale rules scale consumers on Service Bus topic length down to zero.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-reddog-aca, type: azure.resource_group, name: rg-reddog-aca, parent: sub-workload, props: {location: westeurope}}
+- {id: users, type: common.users, name: users}
+- {id: cae-reddog, type: azure.res.azurerm_container_app_environment, name: cae-reddog, parent: rg-rg-reddog-aca, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: ca-ui
+  type: azure.res.azurerm_container_app
+  name: ca-ui
+  parent: rg-rg-reddog-aca
+  props: {container_app_environment_id: changeme, name: changeme, resource_group_name: changeme, revision_mode: changeme, template: {}}
+- id: ca-order-service
+  type: azure.res.azurerm_container_app
+  name: ca-order-service
+  parent: rg-rg-reddog-aca
+  props: {container_app_environment_id: changeme, name: changeme, resource_group_name: changeme, revision_mode: changeme, template: {}}
+- id: ca-accounting-service
+  type: azure.res.azurerm_container_app
+  name: ca-accounting-service
+  parent: rg-rg-reddog-aca
+  props: {container_app_environment_id: changeme, name: changeme, resource_group_name: changeme, revision_mode: changeme, template: {}}
+- id: ca-makeline-service
+  type: azure.res.azurerm_container_app
+  name: ca-makeline-service
+  parent: rg-rg-reddog-aca
+  props: {container_app_environment_id: changeme, name: changeme, resource_group_name: changeme, revision_mode: changeme, template: {}}
+- id: ca-loyalty-service
+  type: azure.res.azurerm_container_app
+  name: ca-loyalty-service
+  parent: rg-rg-reddog-aca
+  props: {container_app_environment_id: changeme, name: changeme, resource_group_name: changeme, revision_mode: changeme, template: {}}
+- id: ca-receipt-service
+  type: azure.res.azurerm_container_app
+  name: ca-receipt-service
+  parent: rg-rg-reddog-aca
+  props: {container_app_environment_id: changeme, name: changeme, resource_group_name: changeme, revision_mode: changeme, template: {}}
+- {id: sb-reddog, type: azure.res.azurerm_servicebus_namespace, name: sb-reddog, parent: rg-rg-reddog-aca, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: sbt-orders, type: azure.res.azurerm_servicebus_topic, name: sbt-orders, parent: rg-rg-reddog-aca, props: {name: changeme, namespace_id: changeme}}
+- {id: sql-accounting, type: azure.res.azurerm_mssql_server, name: sql-accounting, parent: rg-rg-reddog-aca, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- id: cosmos-loyalty
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-loyalty
+  parent: rg-rg-reddog-aca
+  props:
+    consistency_policy: {}
+    geo_location: []
+    location: westeurope
+    name: changeme
+    offer_type: changeme
+    resource_group_name: changeme
+- {id: redis-makeline, type: azure.res.azurerm_redis_cache, name: redis-makeline, parent: rg-rg-reddog-aca, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- {id: st-receipts, type: azure.storage_account, name: st-receipts, parent: rg-rg-reddog-aca}
+- {id: law-reddog, type: azure.res.azurerm_log_analytics_workspace, name: law-reddog, parent: rg-rg-reddog-aca, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: ca-ui, label: HTTPS via managed ingress, step: '1'}
+- {from: ca-ui, to: ca-makeline-service, label: Dapr service invocation, step: '2'}
+- {from: ca-ui, to: ca-accounting-service, label: Dapr service invocation, step: '2'}
+- {from: ca-order-service, to: sbt-orders, label: Dapr pub/sub publish, step: '3'}
+- {from: sbt-orders, to: ca-accounting-service, label: subscription (KEDA topic length), step: '4'}
+- {from: sbt-orders, to: ca-makeline-service, label: subscription (KEDA topic length), step: '4'}
+- {from: sbt-orders, to: ca-loyalty-service, label: subscription (KEDA topic length), step: '4'}
+- {from: sbt-orders, to: ca-receipt-service, label: subscription (KEDA topic length), step: '4'}
+- {from: ca-accounting-service, to: sql-accounting, label: Entity Framework Core, step: '5'}
+- {from: ca-makeline-service, to: redis-makeline, label: Dapr state store, step: '5'}
+- {from: ca-loyalty-service, to: cosmos-loyalty, label: Dapr state store, step: '5'}
+- {from: ca-receipt-service, to: st-receipts, label: Dapr blob output binding, step: '5'}
+- {from: cae-reddog, to: law-reddog, label: container logs}
+steps:
+- {n: '1', text: 'users → ca-ui: HTTPS via managed ingress'}
+- {n: '2', text: 'ca-ui → ca-makeline-service: Dapr service invocation'}
+- {n: '3', text: 'ca-order-service → sbt-orders: Dapr pub/sub publish'}
+- {n: '4', text: 'sbt-orders → ca-accounting-service: subscription (KEDA topic length)'}
+- {n: '5', text: 'ca-accounting-service → sql-accounting: Entity Framework Core'}

@@ -1,0 +1,39 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/static-web-apps/apis-functions); edit freely.
+title: Static Web Apps front end with Azure Functions API back end
+category: web
+tags:
+- static web apps
+- functions
+- jamstack
+- api
+- bring your own functions
+source: https://learn.microsoft.com/en-us/azure/static-web-apps/apis-functions
+description: Azure Static Web Apps hosts the static front end and exposes a serverless API on the fixed /api route, either as managed HTTP-only functions deployed with the site or as a linked, self-managed
+  Azure Functions app that supports all triggers, bindings, managed identity and Key Vault references. Requests to /api are proxied by Static Web Apps to the linked function app without custom CORS rules,
+  and Application Insights on the function app collects logs.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-swa-api, type: azure.resource_group, name: rg-swa-api, parent: sub-workload, props: {location: westeurope}}
+- {id: users, type: common.users, name: users}
+- {id: swa-frontend, type: azure.res.azurerm_static_web_app, name: swa-frontend, parent: rg-rg-swa-api, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: asp-functions-flex, type: azure.res.azurerm_service_plan, name: asp-functions-flex, parent: rg-rg-swa-api, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: func-api
+  type: azure.res.azurerm_linux_function_app
+  name: func-api
+  parent: rg-rg-swa-api
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: st-func-host, type: azure.storage_account, name: st-func-host, parent: rg-rg-swa-api}
+- {id: kv-api-secrets, type: azure.key_vault, name: kv-api-secrets, parent: rg-rg-swa-api}
+- {id: appi-api, type: azure.res.azurerm_application_insights, name: appi-api, parent: rg-rg-swa-api, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: swa-frontend, label: HTTPS static content, step: '1'}
+- {from: users, to: swa-frontend, label: GET /api/*, step: '2'}
+- {from: swa-frontend, to: func-api, label: linked backend proxy, step: '3'}
+- {from: func-api, to: kv-api-secrets, label: Key Vault references}
+- {from: func-api, to: st-func-host, label: host storage}
+- {from: func-api, to: appi-api, label: logs}
+steps:
+- {n: '1', text: 'users → swa-frontend: HTTPS static content'}
+- {n: '2', text: 'users → swa-frontend: GET /api/*'}
+- {n: '3', text: 'swa-frontend → func-api: linked backend proxy'}

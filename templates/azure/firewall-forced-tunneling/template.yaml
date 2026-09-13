@@ -1,0 +1,58 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/firewall/forced-tunneling); edit freely.
+title: Azure Firewall forced tunneling to an on-premises edge
+category: networking
+tags:
+- azure firewall
+- forced tunneling
+- management nic
+- default route
+- vpn gateway
+- bgp
+- egress
+source: https://learn.microsoft.com/en-us/azure/firewall/forced-tunneling
+description: Azure Firewall is deployed with the management network interface enabled, so its own operational traffic uses a dedicated public IP while the tenant data path carries a 0.0.0.0/0 route toward
+  the VPN or ExpressRoute gateway, either learned over BGP or set as a user-defined route on AzureFirewallSubnet. Internet-bound traffic from spokes is inspected by the firewall and then sent to the on-premises
+  edge firewall before it reaches the internet, and DNAT inbound is not supported in this mode.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-fw-forced, type: azure.resource_group, name: rg-fw-forced, parent: sub-connectivity, props: {location: westeurope}}
+- {id: vpc-hub-forced, type: azure.vnet, name: hub-forced, parent: rg-rg-fw-forced, props: {cidr: 10.0.0.0/16}}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub-forced, props: {cidr: 10.0.0.0/26}}
+- {id: sub-azurefirewallmanagementsubnet, type: azure.subnet, name: AzureFirewallManagementSubnet, parent: vpc-hub-forced, props: {cidr: 10.0.1.0/26}}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-hub-forced, props: {cidr: 10.0.2.0/27}}
+- {id: sub-landing-zone, type: azure.subscription, name: landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-spoke-forced, type: azure.resource_group, name: rg-spoke-forced, parent: sub-landing-zone, props: {location: westeurope}}
+- {id: vpc-spoke-forced, type: azure.vnet, name: spoke-forced, parent: rg-rg-spoke-forced, props: {cidr: 10.1.0.0/16}}
+- {id: sub-snet-app-forced, type: azure.subnet, name: snet-app-forced, parent: vpc-spoke-forced, props: {cidr: 10.1.0.0/24}}
+- {id: internet, type: common.internet, name: internet}
+- {id: fw-forced, type: azure.res.azurerm_firewall, name: fw-forced, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: fwpol-forced, type: azure.res.azurerm_firewall_policy, name: fwpol-forced, parent: rg-rg-fw-forced, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: vpngw-forced
+  type: azure.res.azurerm_virtual_network_gateway
+  name: vpngw-forced
+  parent: sub-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- {id: lng-edge, type: azure.res.azurerm_local_network_gateway, name: lng-edge, parent: rg-rg-fw-forced, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-forced, type: azure.res.azurerm_log_analytics_workspace, name: law-forced, parent: rg-rg-fw-forced, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vm-app-forced, type: azure.virtual_machine, name: vm-app-forced, parent: sub-snet-app-forced}
+edges:
+- {from: vpc-hub-forced, to: vpc-spoke-forced, link: azurerm_virtual_network_peering}
+- {from: vm-app-forced, to: fw-forced, label: UDR 0.0.0.0/0 to firewall, step: '1'}
+- {from: fw-forced, to: vpngw-forced, label: 0.0.0.0/0 via BGP or UDR on AzureFirewallSubnet, step: '2'}
+- {from: vpngw-forced, to: lng-edge, label: IPsec / ExpressRoute}
+- {from: lng-edge, to: dc-on-premises, label: on-prem edge firewall inspects, step: '3'}
+- {from: dc-on-premises, to: internet, label: egress from on-premises, step: '4'}
+- {from: fwpol-forced, to: fw-forced, label: policy (SNAT private range 0.0.0.0/0)}
+- {from: fw-forced, to: law-forced, label: firewall logs}
+steps:
+- {n: '1', text: 'vm-app-forced → fw-forced: UDR 0.0.0.0/0 to firewall'}
+- {n: '2', text: 'fw-forced → vpngw-forced: 0.0.0.0/0 via BGP or UDR on AzureFirewallSubnet'}
+- {n: '3', text: 'lng-edge → datacenter: on-prem edge firewall inspects'}
+- {n: '4', text: 'datacenter → internet: egress from on-premises'}

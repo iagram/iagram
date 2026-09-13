@@ -1,0 +1,59 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/infrastructure/wordpress-app-service); edit freely.
+title: WordPress on App Service with Azure Front Door and Azure Database for MySQL
+category: web
+tags:
+- wordpress
+- app service
+- front door
+- waf
+- mysql flexible server
+- blob storage
+- private endpoint
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/infrastructure/wordpress-app-service
+description: Users reach WordPress through Azure Front Door with Web Application Firewall, which caches static content and distributes requests to App Service web apps that run WordPress. The app connects
+  to an Azure Database for MySQL flexible server with a zone-redundant standby through a private endpoint, static content is hosted in Blob Storage, and private DNS zones linked to the virtual network resolve
+  the private endpoints.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-wordpress, type: azure.resource_group, name: rg-wordpress, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-wordpress, type: azure.vnet, name: vnet-wordpress, parent: rg-rg-wordpress, props: {cidr: 10.0.0.0/16}}
+- {id: sub-snet-appservice-integration, type: azure.subnet, name: snet-appservice-integration, parent: vpc-vnet-wordpress, props: {cidr: 10.0.1.0/24}}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateendpoints, parent: vpc-vnet-wordpress, props: {cidr: 10.0.2.0/24}}
+- {id: internet, type: common.internet, name: internet}
+- {id: afd-wordpress-waf, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-wordpress-waf, parent: rg-rg-wordpress, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: asp-wordpress, type: azure.res.azurerm_service_plan, name: asp-wordpress, parent: sub-snet-appservice-integration, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-wordpress
+  type: azure.res.azurerm_linux_web_app
+  name: web-wordpress
+  parent: sub-snet-appservice-integration
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: pe-mysql
+  type: azure.res.azurerm_private_endpoint
+  name: pe-mysql
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-blob
+  type: azure.res.azurerm_private_endpoint
+  name: pe-blob
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: mysql-wordpress-ha, type: azure.res.azurerm_mysql_flexible_server, name: mysql-wordpress-ha, parent: rg-rg-wordpress, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: st-wordpress-static, type: azure.storage_account, name: st-wordpress-static, parent: rg-rg-wordpress}
+- {id: pdns-mysql, type: azure.res.azurerm_private_dns_zone, name: pdns-mysql, parent: rg-rg-wordpress, props: {name: changeme, resource_group_name: changeme}}
+- {id: appi-wordpress, type: azure.res.azurerm_application_insights, name: appi-wordpress, parent: rg-rg-wordpress, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: internet, to: afd-wordpress-waf, label: HTTPS (WAF), step: '1'}
+- {from: afd-wordpress-waf, to: web-wordpress, label: origin request on cache miss, step: '2'}
+- {from: web-wordpress, to: pe-mysql, label: MySQL via vnet integration, step: '3'}
+- {from: pe-mysql, to: mysql-wordpress-ha, label: private link (primary + standby)}
+- {from: web-wordpress, to: pe-blob, label: media uploads, step: '4'}
+- {from: pe-blob, to: st-wordpress-static, label: private link}
+- {from: st-wordpress-static, to: afd-wordpress-waf, label: static web content origin}
+- {from: pdns-mysql, to: vpc-vnet-wordpress, label: linked private DNS zone}
+- {from: web-wordpress, to: appi-wordpress, label: telemetry}
+steps:
+- {n: '1', text: 'internet → afd-wordpress-waf: HTTPS (WAF)'}
+- {n: '2', text: 'afd-wordpress-waf → web-wordpress: origin request on cache miss'}
+- {n: '3', text: 'web-wordpress → pe-mysql: MySQL via vnet integration'}
+- {n: '4', text: 'web-wordpress → pe-blob: media uploads'}

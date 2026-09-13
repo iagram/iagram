@@ -55,6 +55,7 @@ nodes:
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
 - {id: nhns-game, type: azure.res.azurerm_notification_hub_namespace, name: nhns-game, parent: grp-data-and-events, props: {location: westeurope, name: changeme, namespace_type: changeme, resource_group_name: changeme,
     sku_name: changeme}}
+- {id: nh-player-push, type: azure.res.azurerm_notification_hub, name: nh-player-push, parent: grp-data-and-events, props: {location: westeurope, name: changeme, namespace_name: changeme, resource_group_name: changeme}}
 - {id: stgameassets, type: azure.storage_account, name: stgameassets, parent: grp-data-and-events}
 edges:
 - {from: mobile, to: tm-game-api, label: nearest region, step: '1'}
@@ -65,6 +66,8 @@ edges:
 - {from: evh-match-events, to: func-event-processor, label: Event Hubs trigger, step: '5'}
 - {from: func-event-processor, to: cosmos-players, label: update stats / high scores}
 - {from: cosmos-players, to: func-event-processor, label: change feed}
+- {from: func-event-processor, to: nh-player-push, label: achievements, step: '6'}
+- {from: nh-player-push, to: mobile, label: push notifications}
 - {from: users, to: stgameassets, label: static game content}
 steps:
 - {n: '1', text: 'mobile → tm-game-api: nearest region'}
@@ -72,3 +75,4 @@ steps:
 - {n: '3', text: 'app-game-api → cosmos-players: profiles'}
 - {n: '4', text: 'app-game-api → evh-match-events: in-game events'}
 - {n: '5', text: 'evh-match-events → func-event-processor: Event Hubs trigger'}
+- {n: '6', text: 'func-event-processor → nh-player-push: achievements'}

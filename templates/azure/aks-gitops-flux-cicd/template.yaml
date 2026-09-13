@@ -1,0 +1,38 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/gitops-aks/gitops-blueprint-aks); edit freely.
+title: GitOps for AKS with Flux v2 and GitHub Actions CI/CD
+category: containers
+tags:
+- aks
+- gitops
+- flux
+- github actions
+- container registry
+- cluster extension
+- pull-based deployment
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/gitops-aks/gitops-blueprint-aks
+description: GitHub Actions builds a container image from committed application code, pushes it to Container Registry and updates the image tag in the Kubernetes manifests stored in the Git repository.
+  The Flux v2 cluster extension on each AKS cluster polls the repository, detects drift and reconciles manifests, Helm charts or Kustomizations into the cluster without exposing cluster endpoints to build
+  agents, so the same repository keeps primary and disaster-recovery clusters in a consistent state.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-aks-gitops, type: azure.resource_group, name: rg-aks-gitops, parent: sub-workload, props: {location: westeurope}}
+- {id: user, type: common.user, name: user}
+- {id: saas, type: common.saas, name: saas}
+- {id: acr-apps, type: azure.container_registry, name: acr-apps, parent: rg-rg-aks-gitops}
+- {id: vpc-rg-rg-aks-gitops, type: azure.vnet, name: main, parent: rg-rg-aks-gitops, props: {cidr: 10.200.0.0/16}}
+- {id: sub-rg-rg-aks-gitops, type: azure.subnet, name: main, parent: vpc-rg-rg-aks-gitops, props: {cidr: 10.200.0.0/24}}
+- {id: aks-primary, type: azure.aks_cluster, name: aks-primary, parent: sub-rg-rg-aks-gitops}
+- {id: aks-dr, type: azure.aks_cluster, name: aks-dr, parent: sub-rg-rg-aks-gitops}
+- {id: law-gitops, type: azure.res.azurerm_log_analytics_workspace, name: law-gitops, parent: rg-rg-aks-gitops, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: user, to: saas, label: commit code and manifests to GitHub, step: '1'}
+- {from: saas, to: acr-apps, label: GitHub Actions builds and pushes image, step: '2'}
+- {from: saas, to: saas, label: GitHub Actions updates manifest image tag, step: '3'}
+- {from: aks-primary, to: acr-apps, label: pull image, step: '6'}
+- {from: aks-dr, to: acr-apps, label: pull image, step: '6'}
+- {from: aks-primary, to: law-gitops, label: container insights}
+steps:
+- {n: '1', text: 'user → saas: commit code and manifests to GitHub'}
+- {n: '2', text: 'saas → acr-apps: GitHub Actions builds and pushes image'}
+- {n: '3', text: 'saas → saas: GitHub Actions updates manifest image tag'}
+- {n: '6', text: 'aks-primary → acr-apps: pull image'}

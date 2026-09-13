@@ -1,0 +1,50 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/nat-gateway/tutorial-hub-spoke-nat-firewall); edit freely.
+title: NAT gateway with Azure Firewall for scalable outbound in hub-spoke
+category: networking
+tags:
+- nat gateway
+- azure firewall
+- snat
+- egress
+- hub-spoke
+- udr
+- bastion
+source: https://learn.microsoft.com/en-us/azure/nat-gateway/tutorial-hub-spoke-nat-firewall
+description: A NAT gateway is associated with the AzureFirewallSubnet in the hub so all internet-bound traffic that spokes send to Azure Firewall through a 0.0.0.0/0 route egresses through the NAT gateway,
+  which provides 64,512 SNAT ports per public IP instead of the firewall's 2,496. Spoke workloads have no public IP and are reached for administration through Azure Bastion in the hub.
+nodes:
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-nat-hub, type: azure.resource_group, name: rg-nat-hub, parent: sub-connectivity, props: {location: westus}}
+- {id: vpc-vnet-hub, type: azure.vnet, name: vnet-hub, parent: rg-rg-nat-hub, props: {cidr: 10.0.0.0/16}}
+- {id: sub-subnet-1, type: azure.subnet, name: subnet-1, parent: vpc-vnet-hub, props: {cidr: 10.0.0.0/24}}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-hub, props: {cidr: 10.0.1.0/26}}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-hub, props: {cidr: 10.0.1.64/26}}
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-nat-spoke, type: azure.resource_group, name: rg-nat-spoke, parent: sub-workload, props: {location: westus}}
+- {id: vpc-vnet-spoke, type: azure.vnet, name: vnet-spoke, parent: rg-rg-nat-spoke, props: {cidr: 10.1.0.0/16}}
+- {id: sub-subnet-private, type: azure.subnet, name: subnet-private, parent: vpc-vnet-spoke, props: {cidr: 10.1.0.0/24}}
+- {id: internet, type: common.internet, name: internet}
+- {id: user, type: common.user, name: user}
+- {id: firewall, type: azure.res.azurerm_firewall, name: firewall, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: firewall-policy, type: azure.res.azurerm_firewall_policy, name: firewall-policy, parent: rg-rg-nat-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: nat-gateway, type: azure.res.azurerm_nat_gateway, name: nat-gateway, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: bastion, type: azure.res.azurerm_bastion_host, name: bastion, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-hub, type: azure.res.azurerm_log_analytics_workspace, name: law-hub, parent: rg-rg-nat-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vm-spoke, type: azure.virtual_machine, name: vm-spoke, parent: sub-subnet-private}
+- {id: vpc-rg-rg-nat-spoke, type: azure.vnet, name: main, parent: rg-rg-nat-spoke, props: {cidr: 10.200.0.0/16}}
+- {id: nsg-1, type: azure.network_security_group, name: nsg-1, parent: vpc-rg-rg-nat-spoke}
+edges:
+- {from: vpc-vnet-hub, to: vpc-vnet-spoke, label: allow forwarded traffic, link: azurerm_virtual_network_peering}
+- {from: vm-spoke, to: firewall, label: route 0.0.0.0/0 next hop 10.0.1.68, step: '1'}
+- {from: firewall, to: nat-gateway, label: network rule allow TCP 80/443, step: '2'}
+- {from: nat-gateway, to: sub-azurefirewallsubnet, label: NAT on firewall subnet}
+- {from: nat-gateway, to: internet, label: 'SNAT 64,512 ports per IP', step: '3'}
+- {from: firewall-policy, to: firewall, label: spoke-to-internet rule collection}
+- {from: user, to: bastion, label: SSH via Bastion}
+- {from: bastion, to: vm-spoke, label: private IP}
+- {from: nsg-1, to: sub-subnet-private, label: subnet network security group association}
+- {from: firewall, to: law-hub, label: firewall logs}
+steps:
+- {n: '1', text: 'vm-spoke → firewall: route 0.0.0.0/0 next hop 10.0.1.68'}
+- {n: '2', text: 'firewall → nat-gateway: network rule allow TCP 80/443'}
+- {n: '3', text: 'nat-gateway → internet: SNAT 64,512 ports per IP'}

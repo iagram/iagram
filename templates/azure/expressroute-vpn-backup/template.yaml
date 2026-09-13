@@ -1,0 +1,67 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/hybrid-networking/expressroute-vpn-failover); edit freely.
+title: Site-to-site VPN as failover for ExpressRoute
+category: networking
+tags:
+- expressroute
+- vpn gateway
+- failover
+- coexistence
+- bgp
+- hybrid
+source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/hybrid-networking/expressroute-vpn-failover
+description: ExpressRoute private peering is the primary path from the on-premises network to the virtual network, and an IPsec site-to-site VPN over the internet terminates on a route-based VPN gateway
+  that coexists with the ExpressRoute gateway in the same GatewaySubnet. The on-premises edge prefers ExpressRoute routes through BGP local preference, so traffic converges onto the VPN tunnel only when
+  the circuit or peering location fails.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-hybrid, type: azure.resource_group, name: rg-hybrid, parent: sub-connectivity, props: {location: westeurope}}
+- {id: vpc-vnet-hybrid, type: azure.vnet, name: vnet-hybrid, parent: rg-rg-hybrid, props: {cidr: 10.0.0.0/16}}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-hybrid, props: {cidr: 10.0.255.0/27}}
+- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-vnet-hybrid, props: {cidr: 10.0.1.0/24}}
+- {id: internet, type: common.internet, name: internet}
+- id: er-circuit
+  type: azure.res.azurerm_express_route_circuit
+  name: er-circuit
+  parent: rg-rg-hybrid
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- id: er-gateway
+  type: azure.res.azurerm_virtual_network_gateway
+  name: er-gateway
+  parent: sub-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- id: vpn-gateway
+  type: azure.res.azurerm_virtual_network_gateway
+  name: vpn-gateway
+  parent: sub-gatewaysubnet
+  props:
+    ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: changeme
+    type: changeme
+- {id: lng-onprem, type: azure.res.azurerm_local_network_gateway, name: lng-onprem, parent: rg-rg-hybrid, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vm-app, type: azure.virtual_machine, name: vm-app, parent: sub-snet-app}
+- {id: law-hybrid, type: azure.res.azurerm_log_analytics_workspace, name: law-hybrid, parent: rg-rg-hybrid, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: nw-hybrid, type: azure.res.azurerm_network_watcher, name: nw-hybrid, parent: rg-rg-hybrid, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: dc-on-premises, to: er-circuit, label: ExpressRoute private peering (primary), step: '1'}
+- {from: er-circuit, to: er-gateway, label: ExpressRoute connection}
+- {from: dc-on-premises, to: lng-onprem, label: IPsec S2S over internet (backup), step: '2'}
+- {from: lng-onprem, to: vpn-gateway, label: VPN connection (BGP)}
+- {from: er-gateway, to: vm-app, label: normal path, step: '3'}
+- {from: vpn-gateway, to: vm-app, label: failover path, step: '4'}
+- {from: nw-hybrid, to: vpn-gateway, label: monitor tunnel and BGP state}
+- {from: er-gateway, to: law-hybrid, label: circuit and gateway metrics}
+steps:
+- {n: '1', text: 'datacenter → er-circuit: ExpressRoute private peering (primary)'}
+- {n: '2', text: 'datacenter → lng-onprem: IPsec S2S over internet (backup)'}
+- {n: '3', text: 'er-gateway → vm-app: normal path'}
+- {n: '4', text: 'vpn-gateway → vm-app: failover path'}

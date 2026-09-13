@@ -1,0 +1,50 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/apps/apim-api-scenario); edit freely.
+title: Migrate an e-commerce web app by using Azure API Management
+category: web
+tags:
+- api management
+- app service
+- e-commerce
+- strangler fig
+- hybrid
+- legacy migration
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/apps/apim-api-scenario
+description: A travel e-commerce company hosts a new browser-based UI and new HTTP APIs on App Service while API Management acts as a facade over both the new APIs and the existing on-premises SOAP services,
+  which only accept calls from the API Management IP address over TLS with client certificates. Users can be directed to the new UI or the legacy UI side by side, and functionality moves gradually behind
+  the API Management configuration without changing the front end.
+nodes:
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-ecommerce-apim, type: azure.resource_group, name: rg-ecommerce-apim, parent: sub-workload, props: {location: westeurope}}
+- {id: users, type: common.users, name: users}
+- {id: server, type: common.server, name: server}
+- {id: apim-ecommerce, type: azure.res.azurerm_api_management, name: apim-ecommerce, parent: rg-rg-ecommerce-apim, props: {location: westeurope, name: changeme, publisher_email: changeme, publisher_name: changeme,
+    resource_group_name: changeme, sku_name: changeme}}
+- {id: asp-ecommerce, type: azure.res.azurerm_service_plan, name: asp-ecommerce, parent: rg-rg-ecommerce-apim, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-new-ui
+  type: azure.res.azurerm_linux_web_app
+  name: web-new-ui
+  parent: rg-rg-ecommerce-apim
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: api-new-backend
+  type: azure.res.azurerm_linux_web_app
+  name: api-new-backend
+  parent: rg-rg-ecommerce-apim
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- {id: appi-apim, type: azure.res.azurerm_application_insights, name: appi-apim, parent: rg-rg-ecommerce-apim, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-ecommerce, type: azure.res.azurerm_log_analytics_workspace, name: law-ecommerce, parent: rg-rg-ecommerce-apim, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: web-new-ui, label: HTTPS new UI, step: '1'}
+- {from: web-new-ui, to: apim-ecommerce, label: HTTPS API calls, step: '2'}
+- {from: apim-ecommerce, to: api-new-backend, label: HTTPS (APIM VIP only), step: '3'}
+- {from: apim-ecommerce, to: dc-on-premises, label: HTTPS + client certificate to legacy SOAP services, step: '4'}
+- {from: users, to: server, label: HTTPS legacy UI}
+- {from: server, to: dc-on-premises, label: internal calls to existing services}
+- {from: apim-ecommerce, to: appi-apim, label: telemetry}
+- {from: appi-apim, to: law-ecommerce, label: logs}
+steps:
+- {n: '1', text: 'users → web-new-ui: HTTPS new UI'}
+- {n: '2', text: 'web-new-ui → apim-ecommerce: HTTPS API calls'}
+- {n: '3', text: 'apim-ecommerce → api-new-backend: HTTPS (APIM VIP only)'}
+- {n: '4', text: 'apim-ecommerce → datacenter: HTTPS + client certificate to legacy SOAP services'}

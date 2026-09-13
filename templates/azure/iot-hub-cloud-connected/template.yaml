@@ -19,6 +19,11 @@ nodes:
 - {id: grp-data-and-insights, type: common.group, name: Data and insights, parent: rg-rg-iot-cloud}
 - {id: device, type: common.device, name: device}
 - {id: user, type: common.user, name: user}
+- id: dps-fleet
+  type: azure.res.azurerm_iothub_dps
+  name: dps-fleet
+  parent: grp-device-connectivity
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
 - id: iothub-fleet
   type: azure.res.azurerm_iothub
   name: iothub-fleet
@@ -40,6 +45,8 @@ nodes:
   parent: grp-data-and-insights
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
 edges:
+- {from: device, to: dps-fleet, label: enrollment (X.509 / TPM), step: '1'}
+- {from: dps-fleet, to: iothub-fleet, label: assign device to hub, step: '2'}
 - {from: device, to: iothub-fleet, label: MQTT / AMQP telemetry, step: '3'}
 - {from: iothub-fleet, to: device, label: cloud-to-device commands}
 - {from: iothub-fleet, to: evh-telemetry, label: message routing, step: '4'}
@@ -50,6 +57,8 @@ edges:
 - {from: asa-hot-path, to: adx-iot, label: analytics store}
 - {from: user, to: adx-iot, label: KQL dashboards}
 steps:
+- {n: '1', text: 'device → dps-fleet: enrollment (X.509 / TPM)'}
+- {n: '2', text: 'dps-fleet → iothub-fleet: assign device to hub'}
 - {n: '3', text: 'device → iothub-fleet: MQTT / AMQP telemetry'}
 - {n: '4', text: 'iothub-fleet → evh-telemetry: message routing'}
 - {n: '5', text: 'evh-telemetry → asa-hot-path: hot path'}

@@ -1,0 +1,50 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/example-scenario/aks-agic/aks-agc); edit freely.
+title: Multitenant AKS cluster with Application Gateway for Containers ingress
+category: containers
+tags:
+- aks
+- application gateway for containers
+- gateway api
+- waf
+- multitenant
+- private cluster
+- bastion
+source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/aks-agic/aks-agc
+description: A private AKS cluster shares a single Application Gateway for Containers instance, deployed in a delegated /24 subnet with a public IP and a WAF security policy, as the layer-7 ingress for
+  tenant namespaces that define their own Kubernetes Gateway API routes. Azure Bastion connects operators directly to the private API server, and the cluster reaches Container Registry and Key Vault over
+  private endpoints with private DNS zones linked to the virtual network.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-aks-agc, type: azure.resource_group, name: rg-aks-agc, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-aks-agc, type: azure.vnet, name: vnet-aks-agc, parent: rg-rg-aks-agc, props: {cidr: 10.0.0.0/16}}
+- {id: sub-akssubnet, type: azure.subnet, name: AksSubnet, parent: vpc-vnet-aks-agc, props: {cidr: 10.0.0.0/20}}
+- {id: sub-vmsubnet, type: azure.subnet, name: VmSubnet, parent: vpc-vnet-aks-agc, props: {cidr: 10.0.16.0/24}}
+- {id: sub-appgatewaysubnet, type: azure.subnet, name: AppGatewaySubnet, parent: vpc-vnet-aks-agc, props: {cidr: 10.0.17.0/24}}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-aks-agc, props: {cidr: 10.0.18.0/26}}
+- {id: users, type: common.users, name: users}
+- {id: user, type: common.user, name: user}
+- {id: aks-multitenant, type: azure.aks_cluster, name: aks-multitenant, parent: sub-akssubnet}
+- {id: bastion-aks, type: azure.res.azurerm_bastion_host, name: bastion-aks, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vm-operator, type: azure.virtual_machine, name: vm-operator, parent: sub-vmsubnet}
+- id: pe-acr
+  type: azure.res.azurerm_private_endpoint
+  name: pe-acr
+  parent: sub-vmsubnet
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-keyvault
+  type: azure.res.azurerm_private_endpoint
+  name: pe-keyvault
+  parent: sub-vmsubnet
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: acr-tenants, type: azure.container_registry, name: acr-tenants, parent: rg-rg-aks-agc}
+- {id: kv-tenants, type: azure.key_vault, name: kv-tenants, parent: rg-rg-aks-agc}
+- {id: law-aks-agc, type: azure.res.azurerm_log_analytics_workspace, name: law-aks-agc, parent: rg-rg-aks-agc, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: aks-multitenant, to: pe-acr, label: image pull}
+- {from: pe-acr, to: acr-tenants, label: private link}
+- {from: aks-multitenant, to: pe-keyvault, label: Secrets Store CSI driver}
+- {from: pe-keyvault, to: kv-tenants, label: private link}
+- {from: user, to: bastion-aks, label: operator access}
+- {from: bastion-aks, to: aks-multitenant, label: private API server tunnel}
+- {from: bastion-aks, to: vm-operator, label: SSH}
+- {from: aks-multitenant, to: law-aks-agc, label: container insights}

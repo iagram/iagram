@@ -1,0 +1,31 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/spring-apps/basic-standard/how-to-deploy-in-azure-virtual-network); edit freely.
+title: Azure Spring Apps deployed in a virtual network (VNet injection)
+category: web
+tags:
+- spring apps
+- spring boot
+- vnet injection
+- service runtime subnet
+- apps subnet
+- route table
+- private dns
+source: https://learn.microsoft.com/en-us/azure/spring-apps/basic-standard/how-to-deploy-in-azure-virtual-network
+description: An Azure Spring Apps Standard instance is injected into a customer virtual network with two dedicated subnets, one for the service runtime and one for the Spring applications, so that apps
+  are isolated from the internet and can reach on-premises systems and services in other virtual networks. Azure Spring Apps manages network resources in two managed resource groups, supports bring-your-own
+  route tables for egress control and resolves app endpoints through the private.azuremicroservices.io private DNS zone; the Basic, Standard and Enterprise plans entered retirement on 17 March 2025.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-spring-apps, type: azure.resource_group, name: rg-spring-apps, parent: sub-workload, props: {location: eastus}}
+- {id: vpc-azure-spring-apps-vnet, type: azure.vnet, name: azure-spring-apps-vnet, parent: rg-rg-spring-apps, props: {cidr: 10.1.0.0/16}}
+- {id: sub-service-runtime-subnet, type: azure.subnet, name: service-runtime-subnet, parent: vpc-azure-spring-apps-vnet, props: {cidr: 10.1.0.0/24}}
+- {id: sub-apps-subnet, type: azure.subnet, name: apps-subnet, parent: vpc-azure-spring-apps-vnet, props: {cidr: 10.1.1.0/24}}
+- {id: users, type: common.users, name: users}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises}
+- {id: asa-standard, type: azure.res.azurerm_spring_cloud_service, name: asa-standard, parent: sub-service-runtime-subnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: rt-service-runtime, type: azure.res.azurerm_route_table, name: rt-service-runtime, parent: sub-service-runtime-subnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: rt-apps, type: azure.res.azurerm_route_table, name: rt-apps, parent: sub-apps-subnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: pdns-private-azuremicroservices-io, type: azure.res.azurerm_private_dns_zone, name: pdns-private-azuremicroservices-io, parent: rg-rg-spring-apps, props: {name: changeme, resource_group_name: changeme}}
+- {id: appi-spring-java-agent, type: azure.res.azurerm_application_insights, name: appi-spring-java-agent, parent: rg-rg-spring-apps, props: {application_type: changeme, location: westeurope, name: changeme,
+    resource_group_name: changeme}}
+edges:
+- {from: rt-apps, to: dc-on-premises, label: 0.0.0.0/0 to egress gateway}

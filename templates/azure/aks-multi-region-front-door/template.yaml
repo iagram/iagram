@@ -1,0 +1,90 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/containers/aks-multi-region/aks-multi-cluster); edit freely.
+title: AKS baseline for multiregion clusters
+category: containers
+tags:
+- aks
+- multi-region
+- front door
+- application gateway
+- azure firewall
+- container registry geo-replication
+- deployment stamps
+source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/containers/aks-multi-region/aks-multi-cluster
+description: Azure Front Door load balances across regional stamps, each consisting of a hub-spoke network with Azure Firewall for egress, an Application Gateway entry point and an AKS cluster, plus a regional
+  Key Vault and Log Analytics workspace. A single geo-replicated Container Registry serves images to every cluster, and when a region fails Front Door health probes route all traffic to the remaining healthy
+  regions.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-aks-global, type: azure.resource_group, name: rg-aks-global, parent: sub-workload, props: {location: eastus2}}
+- {id: rg-rg-aks-region-a, type: azure.resource_group, name: rg-aks-region-a, parent: sub-workload, props: {location: eastus2}}
+- {id: vpc-vnet-hub-a, type: azure.vnet, name: vnet-hub-a, parent: rg-rg-aks-region-a, props: {cidr: 10.200.0.0/24}}
+- {id: sub-azurefirewallsubnet-a, type: azure.subnet, name: AzureFirewallSubnet-a, parent: vpc-vnet-hub-a, props: {cidr: 10.200.0.0/26}}
+- {id: vpc-vnet-spoke-a, type: azure.vnet, name: vnet-spoke-a, parent: rg-rg-aks-region-a, props: {cidr: 10.240.0.0/16}}
+- {id: sub-snet-appgw-a, type: azure.subnet, name: snet-appgw-a, parent: vpc-vnet-spoke-a, props: {cidr: 10.240.4.16/28}}
+- {id: sub-snet-clusternodes-a, type: azure.subnet, name: snet-clusternodes-a, parent: vpc-vnet-spoke-a, props: {cidr: 10.240.0.0/22}}
+- {id: rg-rg-aks-region-b, type: azure.resource_group, name: rg-aks-region-b, parent: sub-workload, props: {location: westus3}}
+- {id: vpc-vnet-hub-b, type: azure.vnet, name: vnet-hub-b, parent: rg-rg-aks-region-b, props: {cidr: 10.201.0.0/24}}
+- {id: sub-azurefirewallsubnet-b, type: azure.subnet, name: AzureFirewallSubnet-b, parent: vpc-vnet-hub-b, props: {cidr: 10.201.0.0/26}}
+- {id: vpc-vnet-spoke-b, type: azure.vnet, name: vnet-spoke-b, parent: rg-rg-aks-region-b, props: {cidr: 10.241.0.0/16}}
+- {id: sub-snet-appgw-b, type: azure.subnet, name: snet-appgw-b, parent: vpc-vnet-spoke-b, props: {cidr: 10.241.4.16/28}}
+- {id: sub-snet-clusternodes-b, type: azure.subnet, name: snet-clusternodes-b, parent: vpc-vnet-spoke-b, props: {cidr: 10.241.0.0/22}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: afd-global, type: azure.res.azurerm_cdn_frontdoor_profile, name: afd-global, parent: rg-rg-aks-global, props: {name: changeme, resource_group_name: changeme, sku_name: changeme}}
+- {id: acr-geo-replicated, type: azure.container_registry, name: acr-geo-replicated, parent: rg-rg-aks-global}
+- {id: law-shared, type: azure.res.azurerm_log_analytics_workspace, name: law-shared, parent: rg-rg-aks-global, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: fw-region-a, type: azure.res.azurerm_firewall, name: fw-region-a, parent: sub-azurefirewallsubnet-a, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme,
+    sku_tier: changeme}}
+- id: appgw-region-a
+  type: azure.res.azurerm_application_gateway
+  name: appgw-region-a
+  parent: sub-snet-appgw-a
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: aks-region-a, type: azure.aks_cluster, name: aks-region-a, parent: sub-snet-clusternodes-a}
+- {id: kv-region-a, type: azure.key_vault, name: kv-region-a, parent: rg-rg-aks-region-a}
+- {id: fw-region-b, type: azure.res.azurerm_firewall, name: fw-region-b, parent: sub-azurefirewallsubnet-b, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme,
+    sku_tier: changeme}}
+- id: appgw-region-b
+  type: azure.res.azurerm_application_gateway
+  name: appgw-region-b
+  parent: sub-snet-appgw-b
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: aks-region-b, type: azure.aks_cluster, name: aks-region-b, parent: sub-snet-clusternodes-b}
+- {id: kv-region-b, type: azure.key_vault, name: kv-region-b, parent: rg-rg-aks-region-b}
+edges:
+- {from: vpc-vnet-hub-a, to: vpc-vnet-spoke-a, label: peering, link: azurerm_virtual_network_peering}
+- {from: vpc-vnet-hub-b, to: vpc-vnet-spoke-b, label: peering, link: azurerm_virtual_network_peering}
+- {from: users, to: afd-global, label: HTTPS (*.azurefd.net), step: '1'}
+- {from: afd-global, to: appgw-region-a, label: origin region A, step: '2'}
+- {from: afd-global, to: appgw-region-b, label: origin region B, step: '2'}
+- {from: appgw-region-a, to: aks-region-a, label: ingress, step: '3'}
+- {from: appgw-region-b, to: aks-region-b, label: ingress, step: '3'}
+- {from: aks-region-a, to: acr-geo-replicated, label: pull from regional replica}
+- {from: aks-region-b, to: acr-geo-replicated, label: pull from regional replica}
+- {from: aks-region-a, to: fw-region-a, label: egress via UDR}
+- {from: aks-region-b, to: fw-region-b, label: egress via UDR}
+- {from: fw-region-a, to: internet, label: filtered egress}
+- {from: aks-region-a, to: kv-region-a, label: regional secrets}
+- {from: aks-region-b, to: kv-region-b, label: regional secrets}
+- {from: aks-region-a, to: law-shared, label: container insights}
+- {from: aks-region-b, to: law-shared, label: container insights}
+steps:
+- {n: '1', text: 'users → afd-global: HTTPS (*.azurefd.net)'}
+- {n: '2', text: 'afd-global → appgw-region-a: origin region A'}
+- {n: '3', text: 'appgw-region-a → aks-region-a: ingress'}

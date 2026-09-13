@@ -1,0 +1,83 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/architecture/web-apps/app-service/architectures/baseline-zone-redundant); edit freely.
+title: Baseline highly available zone-redundant App Service web application
+category: web
+tags:
+- app service
+- application gateway
+- waf
+- private endpoint
+- zone redundancy
+- sql database
+source: https://learn.microsoft.com/en-us/azure/architecture/web-apps/app-service/architectures/baseline-zone-redundant
+description: Application Gateway with Web Application Firewall is the single public entry point and forwards requests over a private endpoint to a zone-redundant App Service plan whose public network access
+  is disabled. App Service uses virtual network integration to reach SQL Database, Key Vault and Storage through private endpoints in a dedicated subnet, and self-hosted deployment agents inside the network
+  upload release packages to the private storage account.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-webapp-baseline, type: azure.resource_group, name: rg-webapp-baseline, parent: sub-workload, props: {location: westeurope}}
+- {id: vpc-vnet-webapp, type: azure.vnet, name: vnet-webapp, parent: rg-rg-webapp-baseline, props: {cidr: 10.0.0.0/16}}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-webapp, props: {cidr: 10.0.1.0/24}}
+- {id: sub-appservicesubnet, type: azure.subnet, name: AppServiceSubnet, parent: vpc-vnet-webapp, props: {cidr: 10.0.0.0/24}}
+- {id: sub-privateendpointssubnet, type: azure.subnet, name: PrivateEndpointsSubnet, parent: vpc-vnet-webapp, props: {cidr: 10.0.2.0/27}}
+- {id: sub-agentssubnet, type: azure.subnet, name: AgentsSubnet, parent: vpc-vnet-webapp, props: {cidr: 10.0.2.32/27}}
+- {id: users, type: common.users, name: users}
+- id: appgw-waf
+  type: azure.res.azurerm_application_gateway
+  name: appgw-waf
+  parent: sub-gatewaysubnet
+  props:
+    backend_address_pool: []
+    frontend_ip_configuration: []
+    frontend_port: []
+    gateway_ip_configuration: []
+    location: westeurope
+    name: changeme
+    resource_group_name: changeme
+    sku: {}
+- {id: asp-premium-zr, type: azure.res.azurerm_service_plan, name: asp-premium-zr, parent: sub-appservicesubnet, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}}
+- id: web-app
+  type: azure.res.azurerm_linux_web_app
+  name: web-app
+  parent: sub-appservicesubnet
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
+- id: pe-webapp
+  type: azure.res.azurerm_private_endpoint
+  name: pe-webapp
+  parent: sub-privateendpointssubnet
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-sql
+  type: azure.res.azurerm_private_endpoint
+  name: pe-sql
+  parent: sub-privateendpointssubnet
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- id: pe-keyvault
+  type: azure.res.azurerm_private_endpoint
+  name: pe-keyvault
+  parent: sub-privateendpointssubnet
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: vm-deploy-agent, type: azure.virtual_machine, name: vm-deploy-agent, parent: sub-agentssubnet}
+- {id: sql-webapp, type: azure.res.azurerm_mssql_server, name: sql-webapp, parent: rg-rg-webapp-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: kv-webapp, type: azure.key_vault, name: kv-webapp, parent: rg-rg-webapp-baseline}
+- {id: st-deploy-packages, type: azure.storage_account, name: st-deploy-packages, parent: rg-rg-webapp-baseline}
+- {id: appi-webapp, type: azure.res.azurerm_application_insights, name: appi-webapp, parent: rg-rg-webapp-baseline, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-webapp, type: azure.res.azurerm_log_analytics_workspace, name: law-webapp, parent: rg-rg-webapp-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: users, to: appgw-waf, label: HTTPS, step: '1'}
+- {from: appgw-waf, to: kv-webapp, label: TLS certificate, step: '2'}
+- {from: appgw-waf, to: pe-webapp, label: HTTPS via private endpoint, step: '3'}
+- {from: pe-webapp, to: web-app, label: private link, step: '4'}
+- {from: web-app, to: pe-sql, label: TDS via vnet integration, step: '5'}
+- {from: pe-sql, to: sql-webapp, label: private link}
+- {from: web-app, to: pe-keyvault, label: secrets}
+- {from: pe-keyvault, to: kv-webapp, label: private link}
+- {from: vm-deploy-agent, to: st-deploy-packages, label: upload publish zip}
+- {from: web-app, to: st-deploy-packages, label: run from package}
+- {from: web-app, to: appi-webapp, label: telemetry}
+- {from: appi-webapp, to: law-webapp, label: logs}
+steps:
+- {n: '1', text: 'users → appgw-waf: HTTPS'}
+- {n: '2', text: 'appgw-waf → kv-webapp: TLS certificate'}
+- {n: '3', text: 'appgw-waf → pe-webapp: HTTPS via private endpoint'}
+- {n: '4', text: 'pe-webapp → web-app: private link'}
+- {n: '5', text: 'web-app → pe-sql: TDS via vnet integration'}

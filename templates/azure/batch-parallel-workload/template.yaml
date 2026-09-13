@@ -1,0 +1,42 @@
+# Generated from the official reference (https://learn.microsoft.com/en-us/azure/batch/batch-technical-overview); edit freely.
+title: Azure Batch pool running an intrinsically parallel workload
+category: compute
+tags:
+- batch
+- hpc
+- parallel
+- pool
+- job
+- tasks
+- storage
+- data factory
+source: https://learn.microsoft.com/en-us/azure/batch/batch-technical-overview
+description: A client application uploads input files and application packages to a storage account, then creates a pool of compute nodes, a job and tasks in a Batch account, and Batch schedules the tasks
+  onto the nodes. Each task downloads its inputs from storage, runs the application and uploads results back to storage, where the client downloads them; the same job can also be orchestrated from Azure
+  Data Factory as a custom activity.
+nodes:
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
+- {id: rg-rg-batch, type: azure.resource_group, name: rg-batch, parent: sub-workload, props: {location: westeurope}}
+- {id: client, type: common.client, name: client}
+- {id: st-batch-io, type: azure.storage_account, name: st-batch-io, parent: rg-rg-batch}
+- {id: batch-render, type: azure.res.azurerm_batch_account, name: batch-render, parent: rg-rg-batch, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- id: pool-linux-spot
+  type: azure.res.azurerm_batch_pool
+  name: pool-linux-spot
+  parent: rg-rg-batch
+  props: {account_name: changeme, name: changeme, node_agent_sku_id: changeme, resource_group_name: changeme, storage_image_reference: {}, vm_size: changeme}
+- {id: adf-pipeline, type: azure.res.azurerm_data_factory, name: adf-pipeline, parent: rg-rg-batch, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+edges:
+- {from: client, to: st-batch-io, label: upload input files and application, step: '1'}
+- {from: client, to: batch-render, label: create pool, step: '2'}
+- {from: batch-render, to: pool-linux-spot, label: provision compute nodes}
+- {from: pool-linux-spot, to: st-batch-io, label: download inputs, step: '4'}
+- {from: client, to: batch-render, label: monitor task execution, step: '5'}
+- {from: client, to: st-batch-io, label: download output files, step: '6'}
+- {from: adf-pipeline, to: batch-render, label: custom activity (optional orchestration)}
+steps:
+- {n: '1', text: 'client → st-batch-io: upload input files and application'}
+- {n: '2', text: 'client → batch-render: create pool'}
+- {n: '4', text: 'pool-linux-spot → st-batch-io: download inputs'}
+- {n: '5', text: 'client → batch-render: monitor task execution'}
+- {n: '6', text: 'client → st-batch-io: download output files'}
