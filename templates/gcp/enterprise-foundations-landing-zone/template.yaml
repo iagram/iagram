@@ -1,0 +1,57 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/security-foundations); edit freely.
+title: Enterprise foundations blueprint landing zone
+category: security
+tags:
+- landing zone
+- folders
+- shared vpc
+- org policy
+- resource hierarchy
+- enterprise foundations
+source: https://docs.cloud.google.com/architecture/security-foundations
+description: The enterprise foundations blueprint organizes the organization into bootstrap, common, networking and per-environment folders, with centralized projects for Terraform state, logging, secrets,
+  KMS and Security Command Center under the common folder. Shared VPC host projects in the networking folder serve workload projects in each environment, while organization policies and aggregated log sinks
+  are attached at the organization and folder level.
+nodes:
+- {id: grp-fldr-bootstrap, type: common.group, name: fldr-bootstrap}
+- {id: grp-fldr-common, type: common.group, name: fldr-common}
+- {id: grp-fldr-network, type: common.group, name: fldr-network}
+- {id: grp-fldr-production, type: common.group, name: fldr-production}
+- {id: prj-prj-b-seed, type: gcp.project, name: prj-b-seed, props: {project_id: prj-b-seed-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-c-logging, type: gcp.project, name: prj-c-logging, props: {project_id: prj-c-logging-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-c-kms, type: gcp.project, name: prj-c-kms, props: {project_id: prj-c-kms-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-c-secrets, type: gcp.project, name: prj-c-secrets, props: {project_id: prj-c-secrets-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-net-prod-svpc, type: gcp.project, name: prj-net-prod-svpc, props: {project_id: prj-net-prod-svpc-123456, project: changeme, region: us-central1}}
+- {id: vpc-vpc-p-shared-base, type: gcp.vpc, name: vpc-p-shared-base, parent: prj-prj-net-prod-svpc}
+- {id: sub-sb-p-shared-base-us-central1, type: gcp.subnetwork, name: sb-p-shared-base-us-central1, parent: vpc-vpc-p-shared-base, props: {cidr: 10.8.0.0/18, region: us-central1}}
+- {id: sub-sb-p-shared-base-us-west1, type: gcp.subnetwork, name: sb-p-shared-base-us-west1, parent: vpc-vpc-p-shared-base, props: {cidr: 10.8.64.0/18, region: us-west1}}
+- {id: prj-prj-p-workload, type: gcp.project, name: prj-p-workload, props: {project_id: prj-p-workload-123456, project: changeme, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: vpc-prj-prj-b-seed, type: gcp.vpc, name: main, parent: prj-prj-b-seed}
+- {id: sub-prj-prj-b-seed, type: gcp.subnetwork, name: main, parent: vpc-prj-prj-b-seed, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: bootstrap-folder, type: gcp.res.google_folder, name: bootstrap-folder, parent: sub-prj-prj-b-seed, props: {display_name: changeme, parent: changeme}}
+- {id: common-folder, type: gcp.res.google_folder, name: common-folder, parent: sub-prj-prj-b-seed, props: {display_name: changeme, parent: changeme}}
+- {id: network-folder, type: gcp.res.google_folder, name: network-folder, parent: sub-prj-prj-b-seed, props: {display_name: changeme, parent: changeme}}
+- {id: production-folder, type: gcp.res.google_folder, name: production-folder, parent: sub-prj-prj-b-seed, props: {display_name: changeme, parent: changeme}}
+- {id: tf-state-bucket, type: gcp.storage_bucket, name: tf-state-bucket, parent: prj-prj-b-seed}
+- {id: sk-c-logging-la, type: gcp.res.google_logging_organization_sink, name: sk-c-logging-la, parent: prj-prj-c-logging, props: {destination: changeme, name: changeme, org_id: changeme}}
+- {id: org-key-ring, type: gcp.res.google_kms_key_ring, name: org-key-ring, parent: prj-prj-c-kms, props: {location: westeurope, name: changeme}}
+- id: org-shared-secret
+  type: gcp.res.google_secret_manager_secret
+  name: org-shared-secret
+  parent: prj-prj-c-secrets
+  props: {replication: {}, secret_id: changeme}
+- {id: shared-vpc-host, type: gcp.res.google_compute_shared_vpc_host_project, name: shared-vpc-host, parent: prj-prj-net-prod-svpc, props: {project: changeme}}
+- {id: prod-nat, type: gcp.res.google_compute_router_nat, name: prod-nat, parent: vpc-vpc-p-shared-base, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+- {id: workload-vm, type: gcp.compute_instance, name: workload-vm, parent: sub-sb-p-shared-base-us-central1}
+edges:
+- {from: users, to: tf-state-bucket, label: foundation pipeline applies Terraform, step: '1'}
+- {from: shared-vpc-host, to: prj-prj-p-workload, label: compute shared vpc service project}
+- {from: workload-vm, to: sk-c-logging-la, label: audit and flow logs, step: '3'}
+- {from: workload-vm, to: org-key-ring, label: CMEK encrypt/decrypt, step: '4'}
+- {from: workload-vm, to: org-shared-secret, label: secret access, step: '5'}
+steps:
+- {n: '1', text: 'users → tf-state-bucket: foundation pipeline applies Terraform'}
+- {n: '3', text: 'workload-vm → sk-c-logging-la: audit and flow logs'}
+- {n: '4', text: 'workload-vm → org-key-ring: CMEK encrypt/decrypt'}
+- {n: '5', text: 'workload-vm → org-shared-secret: secret access'}

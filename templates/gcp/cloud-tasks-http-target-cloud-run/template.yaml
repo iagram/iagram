@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.cloud.google.com/tasks/docs/creating-http-target-tasks); edit freely.
+title: Cloud Tasks queue dispatching authenticated HTTP tasks to a Cloud Run worker
+category: serverless
+tags:
+- cloud tasks
+- cloud run
+- http target
+- oidc
+- asynchronous
+- rate limiting
+source: https://docs.cloud.google.com/tasks/docs/creating-http-target-tasks
+description: A front-end Cloud Run service enqueues HTTP target tasks into a Cloud Tasks queue that controls dispatch rate, concurrency and retries; each task carries an OIDC token minted for a service
+  account in the same project. The queue dispatches the task over HTTPS to a private Cloud Run worker, which validates the token before processing the payload and persisting the result to Cloud SQL.
+nodes:
+- {id: prj-tasks-prj, type: gcp.project, name: tasks-prj, props: {project_id: tasks-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: web-frontend, type: gcp.cloud_run_service, name: web-frontend, parent: prj-tasks-prj}
+- {id: work-queue, type: gcp.res.google_cloud_tasks_queue, name: work-queue, parent: prj-tasks-prj, props: {location: westeurope, name: changeme}}
+- {id: tasks-dispatcher-sa, type: gcp.res.google_service_account, name: tasks-dispatcher-sa, parent: prj-tasks-prj, props: {account_id: changeme}}
+- {id: task-worker, type: gcp.cloud_run_service, name: task-worker, parent: prj-tasks-prj}
+- {id: vpc-prj-tasks-prj, type: gcp.vpc, name: main, parent: prj-tasks-prj}
+- {id: results-db, type: gcp.cloud_sql_instance, name: results-db, parent: vpc-prj-tasks-prj}
+- id: results-db-password
+  type: gcp.res.google_secret_manager_secret
+  name: results-db-password
+  parent: prj-tasks-prj
+  props: {replication: {}, secret_id: changeme}
+edges:
+- {from: users, to: web-frontend, label: HTTPS request, step: '1'}
+- {from: web-frontend, to: work-queue, label: CreateTask with HTTP request, step: '2'}
+- {from: tasks-dispatcher-sa, to: work-queue, label: OIDC token identity}
+- {from: work-queue, to: task-worker, label: 'HTTPS dispatch, Authorization: Bearer OIDC', step: '3'}
+- {from: task-worker, to: results-db, label: persist result, step: '4'}
+- {from: task-worker, to: results-db-password, label: credentials}
+steps:
+- {n: '1', text: 'users → web-frontend: HTTPS request'}
+- {n: '2', text: 'web-frontend → work-queue: CreateTask with HTTP request'}
+- {n: '3', text: 'work-queue → task-worker: HTTPS dispatch, Authorization: Bearer OIDC'}
+- {n: '4', text: 'task-worker → results-db: persist result'}

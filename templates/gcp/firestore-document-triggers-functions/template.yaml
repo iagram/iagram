@@ -1,0 +1,45 @@
+# Generated from the official reference (https://firebase.google.com/docs/functions/firestore-events); edit freely.
+title: Firestore document triggers running Cloud Functions for Firebase via Eventarc
+category: serverless
+tags:
+- firestore
+- cloud functions for firebase
+- eventarc
+- document triggers
+- pub/sub
+- firebase
+source: https://firebase.google.com/docs/functions/firestore-events
+description: Second-generation Cloud Functions for Firebase register onDocumentCreated, onDocumentUpdated, onDocumentDeleted or onDocumentWritten handlers on a document path such as users/{userId}; Eventarc
+  delivers each Firestore change as a CloudEvent carrying before and after snapshots. The handlers fan out side effects, for example publishing to a Pub/Sub topic and sending notifications, and must avoid
+  writing back to the triggering document to prevent loops.
+nodes:
+- {id: prj-firestore-fn-prj, type: gcp.project, name: firestore-fn-prj, props: {project_id: firestore-fn-prj-123456, project: changeme, region: europe-west1}}
+- {id: mobile, type: common.mobile, name: mobile}
+- {id: users, type: common.users, name: users}
+- {id: default-firestore, type: gcp.res.google_firestore_database, name: default-firestore, parent: prj-firestore-fn-prj, props: {location_id: changeme, name: changeme, type: changeme}}
+- id: user-written-trigger
+  type: gcp.res.google_eventarc_trigger
+  name: user-written-trigger
+  parent: prj-firestore-fn-prj
+  props:
+    destination: {}
+    location: westeurope
+    matching_criteria: []
+    name: changeme
+- {id: on-user-written, type: gcp.res.google_cloudfunctions2_function, name: on-user-written, parent: prj-firestore-fn-prj, props: {location: westeurope, name: changeme}}
+- {id: on-order-created, type: gcp.res.google_cloudfunctions2_function, name: on-order-created, parent: prj-firestore-fn-prj, props: {location: westeurope, name: changeme}}
+- {id: notifications-topic, type: gcp.pubsub_topic, name: notifications-topic, parent: prj-firestore-fn-prj}
+- {id: fn-source, type: gcp.storage_bucket, name: fn-source, parent: prj-firestore-fn-prj}
+edges:
+- {from: mobile, to: default-firestore, label: Firebase SDK writes, step: '1'}
+- {from: users, to: default-firestore, label: web SDK writes}
+- {from: default-firestore, to: user-written-trigger, label: 'document written on users/{userId}', step: '2'}
+- {from: user-written-trigger, to: on-user-written, label: CloudEvent with before/after snapshots, step: '3'}
+- {from: default-firestore, to: on-order-created, label: 'onDocumentCreated orders/{orderId}'}
+- {from: on-user-written, to: notifications-topic, label: publish side effect, step: '4'}
+- {from: fn-source, to: on-user-written, label: deployed source}
+steps:
+- {n: '1', text: 'mobile → default-firestore: Firebase SDK writes'}
+- {n: '2', text: 'default-firestore → user-written-trigger: document written on users/{userId}'}
+- {n: '3', text: 'user-written-trigger → on-user-written: CloudEvent with before/after snapshots'}
+- {n: '4', text: 'on-user-written → notifications-topic: publish side effect'}

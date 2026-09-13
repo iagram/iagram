@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.cloud.google.com/scheduler/docs/tut-gcf-pub-sub); edit freely.
+title: Scheduled Pub/Sub messages triggering an event-driven Cloud Run function
+category: serverless
+tags:
+- cloud scheduler
+- pub/sub
+- cloud run functions
+- cron
+- event-driven
+source: https://docs.cloud.google.com/scheduler/docs/tut-gcf-pub-sub
+description: A Cloud Scheduler job publishes a message with a fixed payload to a Pub/Sub topic on a cron schedule, and a Cloud Run function subscribed to that topic through an Eventarc trigger runs each
+  time a message arrives. The pattern decouples the schedule from the code so the same topic can trigger multiple functions, and invocations are visible in the function's logs and metrics.
+nodes:
+- {id: prj-sched-fn-prj, type: gcp.project, name: sched-fn-prj, props: {project_id: sched-fn-prj-123456, project: changeme, region: europe-west1}}
+- {id: weekly-cleanup-cron, type: gcp.res.google_cloud_scheduler_job, name: weekly-cleanup-cron, parent: prj-sched-fn-prj, props: {name: changeme}}
+- {id: cleanup-topic, type: gcp.pubsub_topic, name: cleanup-topic, parent: prj-sched-fn-prj}
+- id: cleanup-trigger
+  type: gcp.res.google_eventarc_trigger
+  name: cleanup-trigger
+  parent: prj-sched-fn-prj
+  props:
+    destination: {}
+    location: westeurope
+    matching_criteria: []
+    name: changeme
+- {id: cleanup-fn, type: gcp.res.google_cloudfunctions2_function, name: cleanup-fn, parent: prj-sched-fn-prj, props: {location: westeurope, name: changeme}}
+- {id: fn-source, type: gcp.storage_bucket, name: fn-source, parent: prj-sched-fn-prj}
+- {id: temp-files, type: gcp.storage_bucket, name: temp-files, parent: prj-sched-fn-prj}
+edges:
+- {from: weekly-cleanup-cron, to: cleanup-topic, label: 'publish, 30 16 * * 7', step: '1'}
+- {from: cleanup-topic, to: cleanup-trigger, label: messagePublished, step: '2'}
+- {from: cleanup-trigger, to: cleanup-fn, label: HTTP CloudEvent, step: '3'}
+- {from: cleanup-fn, to: temp-files, label: delete expired objects, step: '4'}
+- {from: fn-source, to: cleanup-fn, label: source}
+steps:
+- {n: '1', text: 'weekly-cleanup-cron → cleanup-topic: publish, 30 16 * * 7'}
+- {n: '2', text: 'cleanup-topic → cleanup-trigger: messagePublished'}
+- {n: '3', text: 'cleanup-trigger → cleanup-fn: HTTP CloudEvent'}
+- {n: '4', text: 'cleanup-fn → temp-files: delete expired objects'}

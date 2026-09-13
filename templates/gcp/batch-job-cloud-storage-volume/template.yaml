@@ -1,0 +1,37 @@
+# Generated from the official reference (https://docs.cloud.google.com/batch/docs/create-run-job-storage); edit freely.
+title: Batch job on Compute Engine VMs mounting a Cloud Storage bucket
+category: compute
+tags:
+- batch
+- cloud storage fuse
+- compute engine
+- hpc
+- service account
+- job tasks
+source: https://docs.cloud.google.com/batch/docs/create-run-job-storage
+description: A Batch job specification declares a Cloud Storage bucket as a volume, so Batch provisions Compute Engine VMs from an instance template, mounts the bucket with Cloud Storage FUSE under /mnt/disks
+  and runs each indexed task's script against that path. The job runs as a service account with Storage Object Viewer or Admin on the bucket, task logs stream to Cloud Logging, and a Cloud NAT gateway lets
+  VMs without external IPs fetch packages.
+nodes:
+- {id: prj-batch-prj, type: gcp.project, name: batch-prj, props: {project_id: batch-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-batch-vpc, type: gcp.vpc, name: batch-vpc, parent: prj-batch-prj, props: {cidr: 10.130.0.0/16}}
+- {id: sub-batch-sub, type: gcp.subnetwork, name: batch-sub, parent: vpc-batch-vpc, props: {cidr: 10.130.0.0/20, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: batch-task-vm-0, type: gcp.compute_instance, name: batch-task-vm-0, parent: sub-batch-sub}
+- {id: batch-task-vm-1, type: gcp.compute_instance, name: batch-task-vm-1, parent: sub-batch-sub}
+- {id: batch-job-sa, type: gcp.res.google_service_account, name: batch-job-sa, parent: prj-batch-prj, props: {account_id: changeme}}
+- {id: batch-io-bucket, type: gcp.storage_bucket, name: batch-io-bucket, parent: prj-batch-prj}
+- {id: batch-router, type: gcp.res.google_compute_router, name: batch-router, parent: vpc-batch-vpc, props: {name: changeme, network: changeme}}
+- {id: batch-nat, type: gcp.res.google_compute_router_nat, name: batch-nat, parent: vpc-batch-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+- {id: batch-logs, type: gcp.res.google_logging_project_sink, name: batch-logs, parent: prj-batch-prj, props: {destination: changeme, name: changeme}}
+edges:
+- {from: batch-job-sa, to: batch-task-vm-0, label: VM service account}
+- {from: batch-task-vm-0, to: batch-io-bucket, label: Cloud Storage FUSE mount /mnt/disks, step: '3'}
+- {from: batch-task-vm-1, to: batch-io-bucket, label: write task output}
+- {from: batch-task-vm-0, to: batch-nat, label: package downloads}
+- {from: batch-router, to: batch-nat}
+- {from: batch-nat, to: internet}
+- {from: batch-task-vm-0, to: batch-logs, label: task stdout/stderr}
+steps:
+- {n: '3', text: 'batch-task-vm-0 → batch-io-bucket: Cloud Storage FUSE mount /mnt/disks'}

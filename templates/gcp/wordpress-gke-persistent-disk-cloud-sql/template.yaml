@@ -1,0 +1,35 @@
+# Generated from the official reference (https://docs.cloud.google.com/kubernetes-engine/docs/tutorials/persistent-disk); edit freely.
+title: WordPress on GKE with a Persistent Disk volume and Cloud SQL for MySQL
+category: containers
+tags:
+- wordpress
+- gke
+- persistent disk
+- persistentvolumeclaim
+- cloud sql
+- cloud sql auth proxy
+- loadbalancer service
+source: https://docs.cloud.google.com/kubernetes-engine/docs/tutorials/persistent-disk
+description: A single-replica WordPress Deployment on a GKE cluster claims a 200 GB Persistent Disk through a PersistentVolumeClaim for wp-content, and a Cloud SQL Auth Proxy sidecar in the same pod tunnels
+  database traffic to a Cloud SQL for MySQL instance using a service account key stored in a Kubernetes Secret. A Service of type LoadBalancer exposes the blog on an external IP over HTTP.
+nodes:
+- {id: prj-wp-prj, type: gcp.project, name: wp-prj, props: {project_id: wp-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-wp-vpc, type: gcp.vpc, name: wp-vpc, parent: prj-wp-prj, props: {cidr: 10.150.0.0/16}}
+- {id: sub-wp-gke-sub, type: gcp.subnetwork, name: wp-gke-sub, parent: vpc-wp-vpc, props: {cidr: 10.150.0.0/20, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: wp-cluster, type: gcp.gke_cluster, name: wp-cluster, parent: sub-wp-gke-sub}
+- {id: vpc-prj-wp-prj, type: gcp.vpc, name: main, parent: prj-wp-prj}
+- {id: wp-mysql, type: gcp.cloud_sql_instance, name: wp-mysql, parent: vpc-prj-wp-prj}
+- {id: cloudsql-proxy-sa, type: gcp.res.google_service_account, name: cloudsql-proxy-sa, parent: prj-wp-prj, props: {account_id: changeme}}
+- {id: wp-lb, type: gcp.res.google_compute_forwarding_rule, name: wp-lb, parent: prj-wp-prj, props: {name: changeme}}
+- {id: wp-lb-ip, type: gcp.res.google_compute_address, name: wp-lb-ip, parent: prj-wp-prj, props: {name: changeme}}
+edges:
+- {from: users, to: wp-lb, label: HTTP to external IP, step: '1'}
+- {from: wp-lb-ip, to: wp-lb}
+- {from: wp-lb, to: wp-cluster, label: LoadBalancer Service to WordPress pod, step: '2'}
+- {from: wp-cluster, to: wp-mysql, label: Cloud SQL Auth Proxy sidecar on localhost 3306, step: '4'}
+- {from: cloudsql-proxy-sa, to: wp-cluster, label: key in Kubernetes Secret}
+steps:
+- {n: '1', text: 'users → wp-lb: HTTP to external IP'}
+- {n: '2', text: 'wp-lb → wp-cluster: LoadBalancer Service to WordPress pod'}
+- {n: '4', text: 'wp-cluster → wp-mysql: Cloud SQL Auth Proxy sidecar on localhost 3306'}

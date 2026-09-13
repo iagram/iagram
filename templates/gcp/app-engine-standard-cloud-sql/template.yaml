@@ -1,0 +1,47 @@
+# Generated from the official reference (https://docs.cloud.google.com/sql/docs/mysql/connect-app-engine-standard); edit freely.
+title: App Engine standard web app connecting to Cloud SQL over Unix socket or private IP
+category: web
+tags:
+- app engine standard
+- cloud sql
+- unix socket
+- serverless vpc access
+- secret manager
+- mysql
+source: https://docs.cloud.google.com/sql/docs/mysql/connect-app-engine-standard
+description: An App Engine standard service in the same region as a Cloud SQL for MySQL instance connects through the /cloudsql Unix socket that App Engine provides, authorized by the app's service account
+  holding Cloud SQL Client. For private IP the app uses a Serverless VPC Access connector into the instance's VPC, and database credentials are read from Secret Manager rather than environment variables;
+  static assets are served from a Cloud Storage bucket.
+nodes:
+- {id: prj-gae-prj, type: gcp.project, name: gae-prj, props: {project_id: gae-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-gae-vpc, type: gcp.vpc, name: gae-vpc, parent: prj-gae-prj, props: {cidr: 10.140.0.0/16}}
+- {id: sub-connector-sub, type: gcp.subnetwork, name: connector-sub, parent: vpc-gae-vpc, props: {cidr: 10.140.8.0/28, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: gae-app, type: gcp.res.google_app_engine_application, name: gae-app, parent: prj-gae-prj, props: {location_id: changeme}}
+- id: default-v1
+  type: gcp.res.google_app_engine_standard_app_version
+  name: default-v1
+  parent: prj-gae-prj
+  props: {deployment: {}, entrypoint: {}, runtime: changeme, service: changeme}
+- {id: gae-sa, type: gcp.res.google_service_account, name: gae-sa, parent: prj-gae-prj, props: {account_id: changeme}}
+- {id: gae-mysql, type: gcp.cloud_sql_instance, name: gae-mysql, parent: vpc-gae-vpc}
+- {id: gae-connector, type: gcp.res.google_vpc_access_connector, name: gae-connector, parent: sub-connector-sub, props: {name: changeme}}
+- id: mysql-password
+  type: gcp.res.google_secret_manager_secret
+  name: mysql-password
+  parent: prj-gae-prj
+  props: {replication: {}, secret_id: changeme}
+- {id: gae-static, type: gcp.storage_bucket, name: gae-static, parent: prj-gae-prj}
+edges:
+- {from: users, to: gae-app, label: HTTPS appspot.com, step: '1'}
+- {from: gae-app, to: default-v1, label: default service traffic split}
+- {from: gae-sa, to: default-v1, label: Cloud SQL Client identity}
+- {from: default-v1, to: mysql-password, label: read credentials, step: '2'}
+- {from: default-v1, to: gae-mysql, label: /cloudsql Unix socket (public IP), step: '3'}
+- {from: default-v1, to: gae-connector, label: private IP alternative}
+- {from: gae-connector, to: gae-mysql, label: TCP 3306}
+- {from: default-v1, to: gae-static, label: static assets}
+steps:
+- {n: '1', text: 'users → gae-app: HTTPS appspot.com'}
+- {n: '2', text: 'default-v1 → mysql-password: read credentials'}
+- {n: '3', text: 'default-v1 → gae-mysql: /cloudsql Unix socket (public IP)'}

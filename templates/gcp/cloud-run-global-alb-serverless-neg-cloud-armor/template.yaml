@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-serverless); edit freely.
+title: Cloud Run behind a global external Application Load Balancer with a serverless NEG and Cloud Armor
+category: web
+tags:
+- cloud run
+- serverless neg
+- global external application load balancer
+- cloud armor
+- cloud cdn
+- multi-region
+source: https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-serverless
+description: Cloud Run services in two regions are registered in regional serverless network endpoint groups that are the backends of one global backend service, so a single anycast IP with a Google-managed
+  certificate routes users to the nearest healthy region. A Cloud Armor security policy attached to the backend service filters traffic at the edge and Cloud CDN caches cacheable responses; ingress on the
+  services is restricted to internal-and-load-balancer traffic.
+nodes:
+- {id: prj-run-web-prj, type: gcp.project, name: run-web-prj, props: {project_id: run-web-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: app-ip, type: gcp.res.google_compute_global_address, name: app-ip, parent: prj-run-web-prj, props: {name: changeme}}
+- {id: app-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: app-https-rule, parent: prj-run-web-prj, props: {name: changeme, target: changeme}}
+- {id: app-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: app-https-proxy, parent: prj-run-web-prj, props: {name: changeme, url_map: changeme}}
+- {id: app-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: app-cert, parent: prj-run-web-prj}
+- {id: app-url-map, type: gcp.res.google_compute_url_map, name: app-url-map, parent: prj-run-web-prj, props: {name: changeme}}
+- {id: app-backend, type: gcp.res.google_compute_backend_service, name: app-backend, parent: prj-run-web-prj, props: {name: changeme}}
+- {id: app-edge-policy, type: gcp.res.google_compute_security_policy, name: app-edge-policy, parent: prj-run-web-prj, props: {name: changeme}}
+- {id: app-neg-ew1, type: gcp.res.google_compute_region_network_endpoint_group, name: app-neg-ew1, parent: prj-run-web-prj, props: {name: changeme, region: eu-west-1}}
+- {id: app-neg-ew4, type: gcp.res.google_compute_region_network_endpoint_group, name: app-neg-ew4, parent: prj-run-web-prj, props: {name: changeme, region: eu-west-1}}
+- {id: app-ew1, type: gcp.cloud_run_service, name: app-ew1, parent: prj-run-web-prj}
+- {id: app-ew4, type: gcp.cloud_run_service, name: app-ew4, parent: prj-run-web-prj}
+edges:
+- {from: users, to: app-https-rule, label: HTTPS, step: '1'}
+- {from: app-https-rule, to: app-https-proxy, step: '2'}
+- {from: app-cert, to: app-https-proxy}
+- {from: app-https-proxy, to: app-url-map, step: '3'}
+- {from: app-url-map, to: app-backend, label: Cloud CDN enabled, step: '4'}
+- {from: app-edge-policy, to: app-backend, label: Cloud Armor rules}
+- {from: app-backend, to: app-neg-ew1, label: nearest region, step: '5'}
+- {from: app-backend, to: app-neg-ew4, label: failover region}
+- {from: app-neg-ew1, to: app-ew1, step: '6'}
+- {from: app-neg-ew4, to: app-ew4}
+steps:
+- {n: '1', text: 'users → app-https-rule: HTTPS'}
+- {n: '2', text: app-https-rule → app-https-proxy}
+- {n: '3', text: app-https-proxy → app-url-map}
+- {n: '4', text: 'app-url-map → app-backend: Cloud CDN enabled'}
+- {n: '5', text: 'app-backend → app-neg-ew1: nearest region'}
+- {n: '6', text: app-neg-ew1 → app-ew1}

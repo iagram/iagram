@@ -1,0 +1,40 @@
+# Generated from the official reference (https://docs.cloud.google.com/assured-workloads/docs/overview); edit freely.
+title: Assured Workloads regulated folder with data residency and CMEK
+category: security
+tags:
+- assured workloads
+- compliance regime
+- data residency
+- resource locations
+- cmek
+- access transparency
+source: https://docs.cloud.google.com/assured-workloads/docs/overview
+description: An Assured Workloads folder created for a compliance regime such as the EU Data Boundary applies a control package of organization policies, including gcp.resourceLocations restricted to EU
+  regions and restricted service usage, to every project beneath it. A separate key management project in the same boundary provides CMEK keys for Cloud Storage and Cloud SQL, Access Transparency logs Google
+  personnel actions, and violation monitoring raises alerts when a policy or resource drifts out of compliance.
+nodes:
+- {id: grp-fldr-eu-regulated, type: common.group, name: fldr-eu-regulated}
+- {id: prj-prj-eu-kms, type: gcp.project, name: prj-eu-kms, props: {project_id: prj-eu-kms-123456, project: changeme, region: europe-west3}}
+- {id: prj-prj-eu-workload, type: gcp.project, name: prj-eu-workload, props: {project_id: prj-eu-workload-123456, project: changeme, region: europe-west3}}
+- {id: vpc-eu-vpc, type: gcp.vpc, name: eu-vpc, parent: prj-prj-eu-workload}
+- {id: sub-eu-app-sub, type: gcp.subnetwork, name: eu-app-sub, parent: vpc-eu-vpc, props: {cidr: 10.110.0.0/24, region: europe-west3}}
+- {id: users, type: common.users, name: users}
+- {id: vpc-prj-prj-eu-kms, type: gcp.vpc, name: main, parent: prj-prj-eu-kms}
+- {id: sub-prj-prj-eu-kms, type: gcp.subnetwork, name: main, parent: vpc-prj-prj-eu-kms, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: eu-regulated-folder, type: gcp.res.google_folder, name: eu-regulated-folder, parent: sub-prj-prj-eu-kms, props: {display_name: changeme, parent: changeme}}
+- {id: eu-key-ring, type: gcp.res.google_kms_key_ring, name: eu-key-ring, parent: prj-prj-eu-kms, props: {location: westeurope, name: changeme}}
+- {id: eu-records-bucket, type: gcp.storage_bucket, name: eu-records-bucket, parent: prj-prj-eu-workload}
+- {id: eu-postgres, type: gcp.cloud_sql_instance, name: eu-postgres, parent: vpc-eu-vpc}
+- {id: eu-app-vm, type: gcp.compute_instance, name: eu-app-vm, parent: sub-eu-app-sub}
+- id: compliance-violation-alert
+  type: gcp.res.google_monitoring_alert_policy
+  name: compliance-violation-alert
+  parent: prj-prj-eu-workload
+  props:
+    combiner: changeme
+    conditions: []
+    display_name: changeme
+edges:
+- {from: eu-app-vm, to: eu-postgres, label: SQL, step: '5'}
+steps:
+- {n: '5', text: 'eu-app-vm → eu-postgres: SQL'}

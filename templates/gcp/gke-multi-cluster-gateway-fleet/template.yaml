@@ -1,0 +1,41 @@
+# Generated from the official reference (https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-multi-cluster-gateways); edit freely.
+title: External multi-cluster Gateway distributing traffic across GKE clusters in two regions
+category: containers
+tags:
+- gke
+- multi-cluster gateway
+- fleet
+- config cluster
+- multi-cluster services
+- global external application load balancer
+source: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-multi-cluster-gateways
+description: Two GKE clusters in different regions are registered to a fleet with Multi-cluster Services and the multi-cluster Gateway controller enabled, and one of them acts as the config cluster where
+  the Gateway and HTTPRoutes are applied. A Gateway of class gke-l7-global-external-managed-mc provisions a global external Application Load Balancer whose backends are ServiceImports spanning both clusters,
+  so paths can pin to a region or balance across both by health and capacity.
+nodes:
+- {id: prj-gke-fleet-prj, type: gcp.project, name: gke-fleet-prj, props: {project_id: gke-fleet-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-fleet-vpc, type: gcp.vpc, name: fleet-vpc, parent: prj-gke-fleet-prj, props: {cidr: 10.70.0.0/16}}
+- {id: sub-west-sub, type: gcp.subnetwork, name: west-sub, parent: vpc-fleet-vpc, props: {cidr: 10.70.0.0/20, region: europe-west1}}
+- {id: sub-east-sub, type: gcp.subnetwork, name: east-sub, parent: vpc-fleet-vpc, props: {cidr: 10.70.16.0/20, region: europe-west4}}
+- {id: users, type: common.users, name: users}
+- {id: multi-cluster-services, type: gcp.res.google_gke_hub_feature, name: multi-cluster-services, parent: prj-gke-fleet-prj, props: {location: westeurope}}
+- {id: multi-cluster-ingress, type: gcp.res.google_gke_hub_feature, name: multi-cluster-ingress, parent: prj-gke-fleet-prj, props: {location: westeurope}}
+- {id: gke-west-1, type: gcp.gke_cluster, name: gke-west-1, parent: sub-west-sub}
+- {id: gke-east-1, type: gcp.gke_cluster, name: gke-east-1, parent: sub-east-sub}
+- {id: store-external-http, type: gcp.res.google_compute_global_forwarding_rule, name: store-external-http, parent: prj-gke-fleet-prj, props: {name: changeme, target: changeme}}
+- {id: store-serviceimport-backend, type: gcp.res.google_compute_backend_service, name: store-serviceimport-backend, parent: prj-gke-fleet-prj, props: {name: changeme}}
+- {id: store-hc, type: gcp.res.google_compute_health_check, name: store-hc, parent: prj-gke-fleet-prj, props: {name: changeme}}
+edges:
+- {from: multi-cluster-services, to: gke-west-1, label: gke hub membership}
+- {from: multi-cluster-services, to: gke-east-1, label: gke hub membership}
+- {from: multi-cluster-ingress, to: gke-west-1, label: config cluster hosts Gateway and HTTPRoute}
+- {from: users, to: store-external-http, label: HTTP to public IP, step: '1'}
+- {from: store-external-http, to: store-serviceimport-backend, label: Gateway-managed URL map, step: '2'}
+- {from: store-serviceimport-backend, to: gke-west-1, label: /west and default, step: '3'}
+- {from: store-serviceimport-backend, to: gke-east-1, label: /east and default, step: '4'}
+- {from: store-hc, to: store-serviceimport-backend, label: health checks}
+steps:
+- {n: '1', text: 'users → store-external-http: HTTP to public IP'}
+- {n: '2', text: 'store-external-http → store-serviceimport-backend: Gateway-managed URL map'}
+- {n: '3', text: 'store-serviceimport-backend → gke-west-1: /west and default'}
+- {n: '4', text: 'store-serviceimport-backend → gke-east-1: /east and default'}

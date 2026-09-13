@@ -1,0 +1,54 @@
+# Generated from the official reference (https://docs.cloud.google.com/secret-manager/docs/overview); edit freely.
+title: Application secrets with Secret Manager and rotation notifications
+category: security
+tags:
+- secret manager
+- secret versions
+- rotation
+- cmek
+- workload identity
+- cloud run
+- gke
+source: https://docs.cloud.google.com/secret-manager/docs/overview
+description: Application credentials are stored as versioned Secret Manager secrets with user-managed replication to the serving regions and encrypted with a Cloud KMS CMEK key, and access is granted per
+  secret to the workload service accounts of a Cloud Run service and a GKE cluster. A rotation schedule publishes to a Pub/Sub topic that triggers a Cloud Run function to generate a new database password,
+  add a new secret version and update the Cloud SQL user.
+nodes:
+- {id: prj-prj-c-secrets, type: gcp.project, name: prj-c-secrets, props: {project_id: prj-c-secrets-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-p-app, type: gcp.project, name: prj-p-app, props: {project_id: prj-p-app-123456, project: changeme, region: us-central1}}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-prj-p-app}
+- {id: sub-gke-sub, type: gcp.subnetwork, name: gke-sub, parent: vpc-app-vpc, props: {cidr: 10.60.0.0/20, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- id: db-password-secret
+  type: gcp.res.google_secret_manager_secret
+  name: db-password-secret
+  parent: prj-prj-c-secrets
+  props: {replication: {}, secret_id: changeme}
+- id: api-key-secret
+  type: gcp.res.google_secret_manager_secret
+  name: api-key-secret
+  parent: prj-prj-c-secrets
+  props: {replication: {}, secret_id: changeme}
+- {id: secret-rotation-topic, type: gcp.pubsub_topic, name: secret-rotation-topic, parent: prj-prj-c-secrets}
+- {id: rotate-db-password-fn, type: gcp.res.google_cloudfunctions2_function, name: rotate-db-password-fn, parent: prj-prj-c-secrets, props: {location: westeurope, name: changeme}}
+- {id: app-runtime-sa, type: gcp.res.google_service_account, name: app-runtime-sa, parent: prj-prj-p-app, props: {account_id: changeme}}
+- {id: api-service, type: gcp.cloud_run_service, name: api-service, parent: prj-prj-p-app}
+- {id: app-gke, type: gcp.gke_cluster, name: app-gke, parent: sub-gke-sub}
+- {id: app-postgres, type: gcp.cloud_sql_instance, name: app-postgres, parent: vpc-app-vpc}
+edges:
+- {from: api-service, to: db-password-secret, label: accessVersion as app-runtime-sa, step: '2'}
+- {from: app-gke, to: api-key-secret, label: mounted via Secret Manager add-on, step: '3'}
+- {from: api-service, to: app-postgres, label: SQL with fetched password, step: '4'}
+- {from: db-password-secret, to: secret-rotation-topic, label: rotation schedule event, step: '5'}
+- {from: secret-rotation-topic, to: rotate-db-password-fn, label: cloudfunctions2 function}
+- {from: rotate-db-password-fn, to: app-postgres, label: ALTER USER password, step: '6'}
+- {from: rotate-db-password-fn, to: db-password-secret, label: add new version, step: '7'}
+- {from: users, to: db-password-secret, label: secret admin IAM, step: '8'}
+steps:
+- {n: '2', text: 'api-service → db-password-secret: accessVersion as app-runtime-sa'}
+- {n: '3', text: 'app-gke → api-key-secret: mounted via Secret Manager add-on'}
+- {n: '4', text: 'api-service → app-postgres: SQL with fetched password'}
+- {n: '5', text: 'db-password-secret → secret-rotation-topic: rotation schedule event'}
+- {n: '6', text: 'rotate-db-password-fn → app-postgres: ALTER USER password'}
+- {n: '7', text: 'rotate-db-password-fn → db-password-secret: add new version'}
+- {n: '8', text: 'users → db-password-secret: secret admin IAM'}

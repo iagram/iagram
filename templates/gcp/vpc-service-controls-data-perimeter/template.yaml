@@ -1,0 +1,48 @@
+# Generated from the official reference (https://docs.cloud.google.com/vpc-service-controls/docs/overview); edit freely.
+title: VPC Service Controls perimeter for data exfiltration protection
+category: security
+tags:
+- vpc service controls
+- service perimeter
+- restricted googleapis
+- access level
+- data exfiltration
+source: https://docs.cloud.google.com/vpc-service-controls/docs/overview
+description: A service perimeter encloses the projects holding BigQuery datasets and Cloud Storage buckets so those APIs can only be called from inside the perimeter, blocking copies to outside projects
+  even with stolen credentials. Workloads reach the APIs privately through the restricted.googleapis.com VIP via a Cloud DNS private zone and static route, while ingress rules with an access level admit
+  on-premises analysts from corporate IP ranges.
+nodes:
+- {id: dc-corp-dc, type: common.datacenter, name: corp-dc}
+- {id: prj-prj-p-data-restricted, type: gcp.project, name: prj-p-data-restricted, props: {project_id: prj-p-data-restricted-123456, project: changeme, region: us-central1}}
+- {id: vpc-restricted-vpc, type: gcp.vpc, name: restricted-vpc, parent: prj-prj-p-data-restricted}
+- {id: sub-restricted-sub, type: gcp.subnetwork, name: restricted-sub, parent: vpc-restricted-vpc, props: {cidr: 10.40.0.0/24, region: us-central1}}
+- {id: prj-prj-p-analytics-restricted, type: gcp.project, name: prj-p-analytics-restricted, props: {project_id: prj-p-analytics-restricted-123456, project: changeme, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: org-access-policy, type: gcp.res.google_access_context_manager_access_policy, name: org-access-policy, parent: prj-prj-p-data-restricted, props: {parent: changeme, title: changeme}}
+- {id: data-perimeter, type: gcp.res.google_access_context_manager_service_perimeter, name: data-perimeter, parent: prj-prj-p-data-restricted, props: {name: changeme, parent: changeme, title: changeme}}
+- {id: corp-ip-access-level, type: gcp.res.google_access_context_manager_access_level, name: corp-ip-access-level, parent: prj-prj-p-data-restricted, props: {name: changeme, parent: changeme, title: changeme}}
+- {id: restricted-googleapis-zone, type: gcp.cloud_dns_zone, name: restricted-googleapis-zone, parent: prj-prj-p-data-restricted, props: {domain: example.com}}
+- {id: restricted-vip-route, type: gcp.res.google_compute_route, name: restricted-vip-route, parent: vpc-restricted-vpc, props: {dest_range: changeme, name: changeme, network: changeme}}
+- {id: etl-worker, type: gcp.compute_instance, name: etl-worker, parent: sub-restricted-sub}
+- {id: raw-data-bucket, type: gcp.storage_bucket, name: raw-data-bucket, parent: prj-prj-p-data-restricted}
+- {id: analytics-dataset, type: gcp.bigquery_dataset, name: analytics-dataset, parent: prj-prj-p-analytics-restricted}
+- {id: corp-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: corp-vpn-gw, parent: vpc-restricted-vpc, props: {name: changeme, network: changeme}}
+edges:
+- {from: etl-worker, to: restricted-googleapis-zone, label: resolve *.googleapis.com, step: '1'}
+- {from: restricted-vip-route, to: raw-data-bucket, label: 199.36.153.4/30 private path, step: '2'}
+- {from: etl-worker, to: analytics-dataset, label: load inside perimeter, step: '3'}
+- {from: data-perimeter, to: prj-prj-p-analytics-restricted, label: perimeter member, step: '4'}
+- {from: dc-corp-dc, to: corp-vpn-gw, label: HA VPN, step: '5'}
+- {from: corp-ip-access-level, to: data-perimeter, label: ingress rule, step: '6'}
+- {from: users, to: analytics-dataset, label: query from corp IP only, step: '7'}
+- {from: internet, to: data-perimeter, label: denied, step: '8'}
+steps:
+- {n: '1', text: 'etl-worker → restricted-googleapis-zone: resolve *.googleapis.com'}
+- {n: '2', text: 'restricted-vip-route → raw-data-bucket: 199.36.153.4/30 private path'}
+- {n: '3', text: 'etl-worker → analytics-dataset: load inside perimeter'}
+- {n: '4', text: 'data-perimeter → project:prj-p-analytics-restricted: perimeter member'}
+- {n: '5', text: 'datacenter → corp-vpn-gw: HA VPN'}
+- {n: '6', text: 'corp-ip-access-level → data-perimeter: ingress rule'}
+- {n: '7', text: 'users → analytics-dataset: query from corp IP only'}
+- {n: '8', text: 'internet → data-perimeter: denied'}

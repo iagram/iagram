@@ -1,0 +1,43 @@
+# Generated from the official reference (https://docs.cloud.google.com/eventarc/docs/run/quickstart-storage); edit freely.
+title: Cloud Storage object events delivered to Cloud Run through Eventarc
+category: serverless
+tags:
+- eventarc
+- cloud storage
+- cloud run
+- pub/sub
+- cloudevents
+- event-driven
+source: https://docs.cloud.google.com/eventarc/docs/run/quickstart-storage
+description: An Eventarc trigger subscribes to google.cloud.storage.object.v1.finalized events from one bucket in the same region; Cloud Storage publishes each event to a Pub/Sub topic that Eventarc creates
+  as the transport and a push subscription delivers the CloudEvent as an HTTP request to a Cloud Run service. The trigger runs as a service account with Eventarc Event Receiver and Cloud Run Invoker roles,
+  and the Cloud Storage service agent needs Pub/Sub Publisher.
+nodes:
+- {id: prj-events-run-prj, type: gcp.project, name: events-run-prj, props: {project_id: events-run-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: uploads, type: gcp.storage_bucket, name: uploads, parent: prj-events-run-prj}
+- id: object-finalized-trigger
+  type: gcp.res.google_eventarc_trigger
+  name: object-finalized-trigger
+  parent: prj-events-run-prj
+  props:
+    destination: {}
+    location: westeurope
+    matching_criteria: []
+    name: changeme
+- {id: eventarc-transport-topic, type: gcp.pubsub_topic, name: eventarc-transport-topic, parent: prj-events-run-prj}
+- {id: eventarc-push-sub, type: gcp.res.google_pubsub_subscription, name: eventarc-push-sub, parent: prj-events-run-prj, props: {name: changeme, topic: changeme}}
+- {id: helloworld-events, type: gcp.cloud_run_service, name: helloworld-events, parent: prj-events-run-prj}
+- {id: trigger-sa, type: gcp.res.google_service_account, name: trigger-sa, parent: prj-events-run-prj, props: {account_id: changeme}}
+edges:
+- {from: users, to: uploads, label: upload object, step: '1'}
+- {from: uploads, to: eventarc-transport-topic, label: object.finalized notification, step: '2'}
+- {from: eventarc-transport-topic, to: eventarc-push-sub, step: '3'}
+- {from: object-finalized-trigger, to: eventarc-push-sub, label: filter and route}
+- {from: eventarc-push-sub, to: helloworld-events, label: HTTP POST CloudEvent, step: '4'}
+- {from: trigger-sa, to: object-finalized-trigger, label: Event Receiver + Run Invoker}
+steps:
+- {n: '1', text: 'users → uploads: upload object'}
+- {n: '2', text: 'uploads → eventarc-transport-topic: object.finalized notification'}
+- {n: '3', text: eventarc-transport-topic → eventarc-push-sub}
+- {n: '4', text: 'eventarc-push-sub → helloworld-events: HTTP POST CloudEvent'}

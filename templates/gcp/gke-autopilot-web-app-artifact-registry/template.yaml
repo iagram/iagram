@@ -1,0 +1,36 @@
+# Generated from the official reference (https://docs.cloud.google.com/kubernetes-engine/docs/learn/cymbal-books/lp1/deploy); edit freely.
+title: Containerized web app on GKE Autopilot deployed from Artifact Registry
+category: containers
+tags:
+- gke autopilot
+- artifact registry
+- cloud build
+- loadbalancer service
+- deployment
+source: https://docs.cloud.google.com/kubernetes-engine/docs/learn/cymbal-books/lp1/deploy
+description: Application modules are built into container images, pushed to a regional Artifact Registry Docker repository and referenced from Kubernetes Deployment manifests applied to a GKE Autopilot
+  cluster, where Google manages nodes and the node service account holds Artifact Registry Reader. A Kubernetes Service of type LoadBalancer provisions a passthrough Network Load Balancer with an external
+  IP that fronts the pods.
+nodes:
+- {id: prj-gke-web-prj, type: gcp.project, name: gke-web-prj, props: {project_id: gke-web-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-gke-vpc, type: gcp.vpc, name: gke-vpc, parent: prj-gke-web-prj, props: {cidr: 10.50.0.0/16}}
+- {id: sub-gke-sub, type: gcp.subnetwork, name: gke-sub, parent: vpc-gke-vpc, props: {cidr: 10.50.0.0/20, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: cymbal-images, type: gcp.res.google_artifact_registry_repository, name: cymbal-images, parent: prj-gke-web-prj, props: {format: changeme, repository_id: changeme}}
+- {id: cymbal-build, type: gcp.res.google_cloudbuild_trigger, name: cymbal-build, parent: prj-gke-web-prj}
+- {id: autopilot-cluster, type: gcp.gke_cluster, name: autopilot-cluster, parent: sub-gke-sub}
+- {id: gke-node-sa, type: gcp.res.google_service_account, name: gke-node-sa, parent: prj-gke-web-prj, props: {account_id: changeme}}
+- {id: web-lb, type: gcp.res.google_compute_forwarding_rule, name: web-lb, parent: prj-gke-web-prj, props: {name: changeme}}
+- {id: web-lb-ip, type: gcp.res.google_compute_address, name: web-lb-ip, parent: prj-gke-web-prj, props: {name: changeme}}
+edges:
+- {from: cymbal-build, to: cymbal-images, label: docker build and push, step: '1'}
+- {from: cymbal-images, to: autopilot-cluster, label: image pull with Artifact Registry Reader, step: '2'}
+- {from: gke-node-sa, to: autopilot-cluster, label: node identity}
+- {from: users, to: web-lb, label: HTTP to external IP, step: '3'}
+- {from: web-lb-ip, to: web-lb}
+- {from: web-lb, to: autopilot-cluster, label: LoadBalancer Service to pods, step: '4'}
+steps:
+- {n: '1', text: 'cymbal-build → cymbal-images: docker build and push'}
+- {n: '2', text: 'cymbal-images → autopilot-cluster: image pull with Artifact Registry Reader'}
+- {n: '3', text: 'users → web-lb: HTTP to external IP'}
+- {n: '4', text: 'web-lb → autopilot-cluster: LoadBalancer Service to pods'}

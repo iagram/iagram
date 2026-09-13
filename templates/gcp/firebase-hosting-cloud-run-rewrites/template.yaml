@@ -1,0 +1,26 @@
+# Generated from the official reference (https://firebase.google.com/docs/hosting/cloud-run); edit freely.
+title: Firebase Hosting serving static assets with rewrites to a Cloud Run backend
+category: serverless
+tags:
+- firebase hosting
+- cloud run
+- rewrites
+- cdn
+- dynamic content
+- firestore
+source: https://firebase.google.com/docs/hosting/cloud-run
+description: Firebase Hosting serves the static site from its global CDN and a rewrite rule in firebase.json forwards requests that match a path pattern to a Cloud Run service in a named region, which must
+  allow unauthenticated invocations because Hosting calls it directly. The dynamic service reads and writes application data in a Firestore database and its container image comes from Artifact Registry.
+nodes:
+- {id: prj-firebase-web-prj, type: gcp.project, name: firebase-web-prj, props: {project_id: firebase-web-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: dynamic-api, type: gcp.cloud_run_service, name: dynamic-api, parent: prj-firebase-web-prj}
+- {id: app-firestore, type: gcp.res.google_firestore_database, name: app-firestore, parent: prj-firebase-web-prj, props: {location_id: changeme, name: changeme, type: changeme}}
+- {id: api-images, type: gcp.res.google_artifact_registry_repository, name: api-images, parent: prj-firebase-web-prj, props: {format: changeme, repository_id: changeme}}
+- {id: hosting-uploads, type: gcp.storage_bucket, name: hosting-uploads, parent: prj-firebase-web-prj}
+edges:
+- {from: dynamic-api, to: app-firestore, label: document reads and writes, step: '3'}
+- {from: dynamic-api, to: hosting-uploads, label: user files}
+- {from: api-images, to: dynamic-api, label: image pull}
+steps:
+- {n: '3', text: 'dynamic-api → app-firestore: document reads and writes'}

@@ -1,0 +1,51 @@
+# Generated from the official reference (https://docs.cloud.google.com/logging/docs/central-log-storage); edit freely.
+title: Centralized log storage with organization aggregated sinks
+category: observability
+tags:
+- cloud logging
+- aggregated sink
+- log bucket
+- log analytics
+- bigquery
+- siem export
+source: https://docs.cloud.google.com/logging/docs/central-log-storage
+description: Organization-level aggregated sinks with include-children route Admin Activity, System Event, Policy Denied, VPC Flow and firewall logs from every project into a central logging project. One
+  sink lands in a Cloud Logging bucket with Log Analytics and a linked BigQuery dataset, a second archives to a Cloud Storage bucket for compliance retention, and a third publishes to Pub/Sub for SIEM consumption.
+nodes:
+- {id: grp-fldr-production, type: common.group, name: fldr-production}
+- {id: prj-prj-c-logging, type: gcp.project, name: prj-c-logging, props: {project_id: prj-c-logging-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-p-app-a, type: gcp.project, name: prj-p-app-a, props: {project_id: prj-p-app-a-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-p-app-b, type: gcp.project, name: prj-p-app-b, props: {project_id: prj-p-app-b-123456, project: changeme, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: vpc-prj-prj-c-logging, type: gcp.vpc, name: main, parent: prj-prj-c-logging}
+- {id: sub-prj-prj-c-logging, type: gcp.subnetwork, name: main, parent: vpc-prj-prj-c-logging, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: production-folder, type: gcp.res.google_folder, name: production-folder, parent: sub-prj-prj-c-logging, props: {display_name: changeme, parent: changeme}}
+- {id: sk-c-logging-la, type: gcp.res.google_logging_organization_sink, name: sk-c-logging-la, parent: prj-prj-c-logging, props: {destination: changeme, name: changeme, org_id: changeme}}
+- {id: sk-c-logging-bkt, type: gcp.res.google_logging_organization_sink, name: sk-c-logging-bkt, parent: prj-prj-c-logging, props: {destination: changeme, name: changeme, org_id: changeme}}
+- {id: sk-c-logging-pub, type: gcp.res.google_logging_organization_sink, name: sk-c-logging-pub, parent: prj-prj-c-logging, props: {destination: changeme, name: changeme, org_id: changeme}}
+- {id: central-log-bucket, type: gcp.res.google_logging_project_bucket_config, name: central-log-bucket, parent: prj-prj-c-logging, props: {bucket_id: changeme, location: westeurope, project: changeme}}
+- {id: log-analytics-linked-dataset, type: gcp.bigquery_dataset, name: log-analytics-linked-dataset, parent: prj-prj-c-logging}
+- {id: log-archive-bucket, type: gcp.storage_bucket, name: log-archive-bucket, parent: prj-prj-c-logging}
+- {id: siem-export-topic, type: gcp.pubsub_topic, name: siem-export-topic, parent: prj-prj-c-logging}
+- {id: vpc-prj-prj-p-app-a, type: gcp.vpc, name: main, parent: prj-prj-p-app-a}
+- {id: sub-prj-prj-p-app-a, type: gcp.subnetwork, name: main, parent: vpc-prj-prj-p-app-a, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: app-a-vm, type: gcp.compute_instance, name: app-a-vm, parent: sub-prj-prj-p-app-a}
+- {id: app-b-service, type: gcp.cloud_run_service, name: app-b-service, parent: prj-prj-p-app-b}
+edges:
+- {from: app-a-vm, to: sk-c-logging-la, label: audit and VPC flow logs, step: '1'}
+- {from: app-b-service, to: sk-c-logging-la, label: request and audit logs, step: '1'}
+- {from: sk-c-logging-la, to: central-log-bucket, label: Log Analytics bucket, step: '2'}
+- {from: central-log-bucket, to: log-analytics-linked-dataset, label: linked dataset, step: '3'}
+- {from: sk-c-logging-bkt, to: log-archive-bucket, label: long-term retention, step: '4'}
+- {from: sk-c-logging-pub, to: siem-export-topic, label: stream, step: '5'}
+- {from: siem-export-topic, to: saas, label: SIEM pull, step: '6'}
+- {from: users, to: log-analytics-linked-dataset, label: SQL over logs, step: '7'}
+steps:
+- {n: '1', text: 'app-a-vm → sk-c-logging-la: audit and VPC flow logs'}
+- {n: '2', text: 'sk-c-logging-la → central-log-bucket: Log Analytics bucket'}
+- {n: '3', text: 'central-log-bucket → log-analytics-linked-dataset: linked dataset'}
+- {n: '4', text: 'sk-c-logging-bkt → log-archive-bucket: long-term retention'}
+- {n: '5', text: 'sk-c-logging-pub → siem-export-topic: stream'}
+- {n: '6', text: 'siem-export-topic → saas: SIEM pull'}
+- {n: '7', text: 'users → log-analytics-linked-dataset: SQL over logs'}

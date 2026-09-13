@@ -1,0 +1,748 @@
+# Google Cloud reference architectures: security, identity, governance, resilience and DR
+# Format: see FORMAT.md. 20 distinct official architectures.
+
+- slug: enterprise-foundations-landing-zone
+  title: Enterprise foundations blueprint landing zone
+  category: security
+  tags: [landing zone, folders, shared vpc, org policy, resource hierarchy, enterprise foundations]
+  source: https://docs.cloud.google.com/architecture/security-foundations
+  description: The enterprise foundations blueprint organizes the organization into bootstrap, common, networking and per-environment folders, with centralized projects for Terraform state, logging, secrets, KMS and Security Command Center under the common folder. Shared VPC host projects in the networking folder serve workload projects in each environment, while organization policies and aggregated log sinks are attached at the organization and folder level.
+  containers:
+    - group: fldr-bootstrap
+    - group: fldr-common
+    - group: fldr-network
+    - group: fldr-production
+    - project: prj-b-seed
+      region: us-central1
+    - project: prj-c-logging
+      region: us-central1
+    - project: prj-c-kms
+      region: us-central1
+    - project: prj-c-secrets
+      region: us-central1
+    - project: prj-net-prod-svpc
+      region: us-central1
+      vpcs:
+        - name: vpc-p-shared-base
+          subnets:
+            - {name: sb-p-shared-base-us-central1, cidr: 10.8.0.0/18, region: us-central1}
+            - {name: sb-p-shared-base-us-west1, cidr: 10.8.64.0/18, region: us-west1}
+    - project: prj-p-workload
+      region: us-central1
+  elements:
+    - {tf: google_folder, name: bootstrap-folder, in: group:fldr-bootstrap}
+    - {tf: google_folder, name: common-folder, in: group:fldr-common}
+    - {tf: google_folder, name: network-folder, in: group:fldr-network}
+    - {tf: google_folder, name: production-folder, in: group:fldr-production}
+    - {tf: google_org_policy_policy, name: restrict-external-ip-policy, in: group:fldr-production}
+    - {tf: google_org_policy_policy, name: allowed-member-domains-policy, in: group:fldr-common}
+    - {tf: google_storage_bucket, name: tf-state-bucket, in: project:prj-b-seed}
+    - {tf: google_logging_organization_sink, name: sk-c-logging-la, in: project:prj-c-logging}
+    - {tf: google_kms_key_ring, name: org-key-ring, in: project:prj-c-kms}
+    - {tf: google_secret_manager_secret, name: org-shared-secret, in: project:prj-c-secrets}
+    - {tf: google_compute_shared_vpc_host_project, name: shared-vpc-host, in: project:prj-net-prod-svpc}
+    - {tf: google_compute_router_nat, name: prod-nat, in: vpc:vpc-p-shared-base}
+    - {tf: google_compute_instance, name: workload-vm, in: subnet:sb-p-shared-base-us-central1}
+  actors: [users]
+  flows:
+    - {from: users, to: tf-state-bucket, label: foundation pipeline applies Terraform, step: 1}
+    - {from: shared-vpc-host, to: project:prj-p-workload, link: google_compute_shared_vpc_service_project}
+    - {from: restrict-external-ip-policy, to: workload-vm, label: org policy inherited, step: 2}
+    - {from: workload-vm, to: sk-c-logging-la, label: audit and flow logs, step: 3}
+    - {from: workload-vm, to: org-key-ring, label: CMEK encrypt/decrypt, step: 4}
+    - {from: workload-vm, to: org-shared-secret, label: secret access, step: 5}
+
+- slug: centralized-logging-aggregated-sinks
+  title: Centralized log storage with organization aggregated sinks
+  category: observability
+  tags: [cloud logging, aggregated sink, log bucket, log analytics, bigquery, siem export]
+  source: https://docs.cloud.google.com/logging/docs/central-log-storage
+  description: Organization-level aggregated sinks with include-children route Admin Activity, System Event, Policy Denied, VPC Flow and firewall logs from every project into a central logging project. One sink lands in a Cloud Logging bucket with Log Analytics and a linked BigQuery dataset, a second archives to a Cloud Storage bucket for compliance retention, and a third publishes to Pub/Sub for SIEM consumption.
+  containers:
+    - group: fldr-production
+    - project: prj-c-logging
+      region: us-central1
+    - project: prj-p-app-a
+      region: us-central1
+    - project: prj-p-app-b
+      region: us-central1
+  elements:
+    - {tf: google_folder, name: production-folder, in: group:fldr-production}
+    - {tf: google_logging_organization_sink, name: sk-c-logging-la, in: project:prj-c-logging}
+    - {tf: google_logging_organization_sink, name: sk-c-logging-bkt, in: project:prj-c-logging}
+    - {tf: google_logging_organization_sink, name: sk-c-logging-pub, in: project:prj-c-logging}
+    - {tf: google_logging_project_bucket_config, name: central-log-bucket, in: project:prj-c-logging}
+    - {tf: google_bigquery_dataset, name: log-analytics-linked-dataset, in: project:prj-c-logging}
+    - {tf: google_storage_bucket, name: log-archive-bucket, in: project:prj-c-logging}
+    - {tf: google_pubsub_topic, name: siem-export-topic, in: project:prj-c-logging}
+    - {tf: google_compute_instance, name: app-a-vm, in: project:prj-p-app-a}
+    - {tf: google_cloud_run_v2_service, name: app-b-service, in: project:prj-p-app-b}
+  actors: [users, saas]
+  flows:
+    - {from: app-a-vm, to: sk-c-logging-la, label: audit and VPC flow logs, step: 1}
+    - {from: app-b-service, to: sk-c-logging-la, label: request and audit logs, step: 1}
+    - {from: sk-c-logging-la, to: central-log-bucket, label: Log Analytics bucket, step: 2}
+    - {from: central-log-bucket, to: log-analytics-linked-dataset, label: linked dataset, step: 3}
+    - {from: sk-c-logging-bkt, to: log-archive-bucket, label: long-term retention, step: 4}
+    - {from: sk-c-logging-pub, to: siem-export-topic, label: stream, step: 5}
+    - {from: siem-export-topic, to: saas, label: SIEM pull, step: 6}
+    - {from: users, to: log-analytics-linked-dataset, label: SQL over logs, step: 7}
+
+- slug: cloud-identity-federation-external-idp
+  title: Cloud Identity federation with an external identity provider
+  category: identity
+  tags: [cloud identity, gcds, saml sso, active directory, workforce identity federation, iam]
+  source: https://docs.cloud.google.com/architecture/identity/reference-architectures
+  description: An on-premises Active Directory stays the authoritative source while Google Cloud Directory Sync provisions users and groups one-way into Cloud Identity and AD FS handles SAML single sign-on, so MFA and password policies are inherited from the corporate IdP. Alternatively Workforce Identity Federation exchanges OIDC or SAML tokens from Entra ID or Okta for short-lived Google Cloud credentials without synchronizing accounts, and IAM bindings target Cloud Identity groups or workforce pool principal sets.
+  containers:
+    - datacenter: corp-dc
+    - project: prj-c-identity
+      region: us-central1
+    - project: prj-p-workload
+      region: us-central1
+  elements:
+    - {tf: google_compute_instance, name: active-directory-dc, in: datacenter:corp-dc}
+    - {tf: google_compute_instance, name: gcds-sync-server, in: datacenter:corp-dc}
+    - {tf: google_compute_instance, name: adfs-sso-server, in: datacenter:corp-dc}
+    - {tf: google_cloud_identity_group, name: gcp-platform-admins, in: project:prj-c-identity}
+    - {tf: google_iam_workforce_pool, name: employees-pool, in: project:prj-c-identity}
+    - {tf: google_iam_workforce_pool_provider, name: entra-id-oidc-provider, in: project:prj-c-identity}
+    - {tf: google_project_iam_custom_role, name: platform-operator-role, in: project:prj-p-workload}
+    - {tf: google_storage_bucket, name: workload-data-bucket, in: project:prj-p-workload}
+  actors: [users, idp]
+  flows:
+    - {from: active-directory-dc, to: gcds-sync-server, label: LDAP read, step: 1}
+    - {from: gcds-sync-server, to: gcp-platform-admins, label: one-way user and group sync, step: 2}
+    - {from: users, to: adfs-sso-server, label: SAML sign-in, step: 3}
+    - {from: adfs-sso-server, to: gcp-platform-admins, label: SAML assertion to Cloud Identity, step: 4}
+    - {from: idp, to: entra-id-oidc-provider, label: OIDC token exchange RFC 8693, step: 5}
+    - {from: entra-id-oidc-provider, to: employees-pool, label: attribute mapping, step: 6}
+    - {from: employees-pool, to: platform-operator-role, label: principalSet IAM binding, step: 7}
+    - {from: gcp-platform-admins, to: workload-data-bucket, label: group-based IAM access, step: 8}
+
+- slug: iap-zero-trust-context-aware-access
+  title: Zero trust application access with Identity-Aware Proxy
+  category: identity
+  tags: [iap, beyondcorp, zero trust, access context manager, context-aware access, chrome enterprise premium]
+  source: https://docs.cloud.google.com/iap/docs/cloud-iap-context-aware-access-howto
+  description: Identity-Aware Proxy sits in front of a global external Application Load Balancer backend and authenticates every request with Google or federated identities, then authorizes it against the IAP-secured Web App User role. Access levels defined in Access Context Manager, based on corporate IP ranges and device posture from Chrome Enterprise Premium, are attached as IAM conditions so only trusted users on healthy devices reach the internal application without a VPN.
+  containers:
+    - project: prj-p-intranet
+      region: us-central1
+      vpcs:
+        - name: intranet-vpc
+          subnets:
+            - {name: app-sub, cidr: 10.30.0.0/24, region: us-central1}
+  elements:
+    - {tf: google_compute_global_forwarding_rule, name: intranet-https-rule, in: project:prj-p-intranet}
+    - {tf: google_compute_backend_service, name: intranet-backend, in: vpc:intranet-vpc}
+    - {tf: google_compute_region_instance_group_manager, name: intranet-mig, in: subnet:app-sub}
+    - {tf: google_iap_client, name: intranet-oauth-client, in: project:prj-p-intranet}
+    - {tf: google_access_context_manager_access_policy, name: corp-access-policy, in: project:prj-p-intranet}
+    - {tf: google_access_context_manager_access_level, name: trusted-device-corp-ip, in: project:prj-p-intranet}
+    - {tf: google_compute_firewall, name: allow-iap-only, in: vpc:intranet-vpc}
+  actors: [users, device, idp]
+  flows:
+    - {from: users, to: intranet-https-rule, label: HTTPS, step: 1}
+    - {from: intranet-https-rule, to: intranet-oauth-client, label: IAP sign-in redirect, step: 2}
+    - {from: intranet-oauth-client, to: idp, label: Google or federated authentication, step: 3}
+    - {from: device, to: trusted-device-corp-ip, label: device posture and IP, step: 4}
+    - {from: trusted-device-corp-ip, to: intranet-backend, label: IAM condition on IAP role, step: 5}
+    - {from: intranet-backend, to: intranet-mig, label: signed JWT header, step: 6}
+    - {from: allow-iap-only, to: intranet-mig, label: allow only 35.235.240.0/20, step: 7}
+
+- slug: vpc-service-controls-data-perimeter
+  title: VPC Service Controls perimeter for data exfiltration protection
+  category: security
+  tags: [vpc service controls, service perimeter, restricted googleapis, access level, data exfiltration]
+  source: https://docs.cloud.google.com/vpc-service-controls/docs/overview
+  description: A service perimeter encloses the projects holding BigQuery datasets and Cloud Storage buckets so those APIs can only be called from inside the perimeter, blocking copies to outside projects even with stolen credentials. Workloads reach the APIs privately through the restricted.googleapis.com VIP via a Cloud DNS private zone and static route, while ingress rules with an access level admit on-premises analysts from corporate IP ranges.
+  containers:
+    - datacenter: corp-dc
+    - project: prj-p-data-restricted
+      region: us-central1
+      vpcs:
+        - name: restricted-vpc
+          subnets:
+            - {name: restricted-sub, cidr: 10.40.0.0/24, region: us-central1}
+    - project: prj-p-analytics-restricted
+      region: us-central1
+  elements:
+    - {tf: google_access_context_manager_access_policy, name: org-access-policy, in: project:prj-p-data-restricted}
+    - {tf: google_access_context_manager_service_perimeter, name: data-perimeter, in: project:prj-p-data-restricted}
+    - {tf: google_access_context_manager_access_level, name: corp-ip-access-level, in: project:prj-p-data-restricted}
+    - {tf: google_dns_managed_zone, name: restricted-googleapis-zone, in: vpc:restricted-vpc}
+    - {tf: google_compute_route, name: restricted-vip-route, in: vpc:restricted-vpc}
+    - {tf: google_compute_instance, name: etl-worker, in: subnet:restricted-sub}
+    - {tf: google_storage_bucket, name: raw-data-bucket, in: project:prj-p-data-restricted}
+    - {tf: google_bigquery_dataset, name: analytics-dataset, in: project:prj-p-analytics-restricted}
+    - {tf: google_compute_ha_vpn_gateway, name: corp-vpn-gw, in: vpc:restricted-vpc}
+  actors: [datacenter, users, internet]
+  flows:
+    - {from: etl-worker, to: restricted-googleapis-zone, label: "resolve *.googleapis.com", step: 1}
+    - {from: restricted-vip-route, to: raw-data-bucket, label: 199.36.153.4/30 private path, step: 2}
+    - {from: etl-worker, to: analytics-dataset, label: load inside perimeter, step: 3}
+    - {from: data-perimeter, to: project:prj-p-analytics-restricted, label: perimeter member, step: 4}
+    - {from: datacenter, to: corp-vpn-gw, label: HA VPN, step: 5}
+    - {from: corp-ip-access-level, to: data-perimeter, label: ingress rule, step: 6}
+    - {from: users, to: analytics-dataset, label: query from corp IP only, step: 7}
+    - {from: internet, to: data-perimeter, label: denied, step: 8}
+
+- slug: cmek-cloud-kms-hsm-key-project
+  title: Customer-managed encryption keys with Cloud KMS and Cloud HSM
+  category: security
+  tags: [cmek, cloud kms, cloud hsm, key ring, separation of duties, encryption at rest]
+  source: https://docs.cloud.google.com/kms/docs/cmek
+  description: A dedicated key project owned by the security team hosts key rings whose crypto keys use SOFTWARE or FIPS 140-2 Level 3 HSM protection levels, kept separate from the workload projects that consume them. Cloud Storage buckets, Cloud SQL instances, Compute Engine disks and BigQuery datasets in the workload project reference those keys as CMEK, and per-service agents are granted only the encrypter/decrypter role so key administrators and data owners are different principals.
+  containers:
+    - project: prj-c-kms
+      region: us-central1
+    - project: prj-p-workload
+      region: us-central1
+      vpcs:
+        - name: workload-vpc
+          subnets:
+            - {name: app-sub, cidr: 10.50.0.0/24, region: us-central1}
+  elements:
+    - {tf: google_kms_key_ring, name: us-central1-key-ring, in: project:prj-c-kms}
+    - {tf: google_kms_crypto_key, name: storage-hsm-key, in: project:prj-c-kms}
+    - {tf: google_kms_crypto_key, name: database-hsm-key, in: project:prj-c-kms}
+    - {tf: google_kms_crypto_key, name: disk-software-key, in: project:prj-c-kms}
+    - {tf: google_storage_bucket, name: cmek-bucket, in: project:prj-p-workload}
+    - {tf: google_sql_database_instance, name: cmek-postgres, in: vpc:workload-vpc}
+    - {tf: google_compute_disk, name: cmek-data-disk, in: subnet:app-sub}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:app-sub}
+    - {tf: google_bigquery_dataset, name: cmek-dataset, in: project:prj-p-workload}
+  actors: [users]
+  flows:
+    - {from: users, to: us-central1-key-ring, label: key admin rotates keys, step: 1}
+    - {from: cmek-bucket, to: storage-hsm-key, label: CMEK wrap/unwrap, step: 2}
+    - {from: cmek-postgres, to: database-hsm-key, label: CMEK, step: 3}
+    - {from: cmek-data-disk, to: disk-software-key, label: CMEK, step: 4}
+    - {from: cmek-dataset, to: storage-hsm-key, label: CMEK, step: 5}
+    - {from: app-vm, to: cmek-bucket, label: read/write objects, step: 6}
+    - {from: app-vm, to: cmek-postgres, label: SQL, step: 7}
+
+- slug: secret-manager-workload-secrets
+  title: Application secrets with Secret Manager and rotation notifications
+  category: security
+  tags: [secret manager, secret versions, rotation, cmek, workload identity, cloud run, gke]
+  source: https://docs.cloud.google.com/secret-manager/docs/overview
+  description: Application credentials are stored as versioned Secret Manager secrets with user-managed replication to the serving regions and encrypted with a Cloud KMS CMEK key, and access is granted per secret to the workload service accounts of a Cloud Run service and a GKE cluster. A rotation schedule publishes to a Pub/Sub topic that triggers a Cloud Run function to generate a new database password, add a new secret version and update the Cloud SQL user.
+  containers:
+    - project: prj-c-secrets
+      region: us-central1
+    - project: prj-p-app
+      region: us-central1
+      vpcs:
+        - name: app-vpc
+          subnets:
+            - {name: gke-sub, cidr: 10.60.0.0/20, region: us-central1}
+  elements:
+    - {tf: google_secret_manager_secret, name: db-password-secret, in: project:prj-c-secrets}
+    - {tf: google_secret_manager_secret, name: api-key-secret, in: project:prj-c-secrets}
+    - {tf: google_kms_crypto_key, name: secrets-cmek-key, in: project:prj-c-secrets}
+    - {tf: google_pubsub_topic, name: secret-rotation-topic, in: project:prj-c-secrets}
+    - {tf: google_cloudfunctions2_function, name: rotate-db-password-fn, in: project:prj-c-secrets}
+    - {tf: google_service_account, name: app-runtime-sa, in: project:prj-p-app}
+    - {tf: google_cloud_run_v2_service, name: api-service, in: project:prj-p-app}
+    - {tf: google_container_cluster, name: app-gke, in: subnet:gke-sub}
+    - {tf: google_sql_database_instance, name: app-postgres, in: vpc:app-vpc}
+  actors: [users]
+  flows:
+    - {from: db-password-secret, to: secrets-cmek-key, label: CMEK, step: 1}
+    - {from: api-service, to: db-password-secret, label: accessVersion as app-runtime-sa, step: 2}
+    - {from: app-gke, to: api-key-secret, label: mounted via Secret Manager add-on, step: 3}
+    - {from: api-service, to: app-postgres, label: SQL with fetched password, step: 4}
+    - {from: db-password-secret, to: secret-rotation-topic, label: rotation schedule event, step: 5}
+    - {from: secret-rotation-topic, to: rotate-db-password-fn, link: google_cloudfunctions2_function}
+    - {from: rotate-db-password-fn, to: app-postgres, label: ALTER USER password, step: 6}
+    - {from: rotate-db-password-fn, to: db-password-secret, label: add new version, step: 7}
+    - {from: users, to: db-password-secret, label: secret admin IAM, step: 8}
+
+- slug: scc-findings-pubsub-remediation
+  title: Security Command Center findings to Pub/Sub with automated remediation
+  category: security
+  tags: [security command center, notification config, pub/sub, cloud run functions, auto remediation, bigquery]
+  source: https://docs.cloud.google.com/security-command-center/docs/how-to-notifications
+  description: An organization-level Security Command Center NotificationConfig with a findings filter publishes new high and critical findings to a Pub/Sub topic in near real time. A Cloud Run function subscribed to the topic enriches and remediates findings such as public buckets or open firewall rules, forwards the event to a chat webhook, and a BigQuery export sink keeps findings history for dashboards.
+  containers:
+    - project: prj-c-scc
+      region: us-central1
+    - project: prj-p-workload
+      region: us-central1
+      vpcs:
+        - name: workload-vpc
+          cidr: 10.70.0.0/16
+  elements:
+    - {tf: google_scc_notification_config, name: high-critical-findings-notification, in: project:prj-c-scc}
+    - {tf: google_pubsub_topic, name: scc-findings-topic, in: project:prj-c-scc}
+    - {tf: google_pubsub_subscription, name: scc-findings-sub, in: project:prj-c-scc}
+    - {tf: google_cloudfunctions2_function, name: remediate-findings-fn, in: project:prj-c-scc}
+    - {tf: google_bigquery_dataset, name: scc-findings-dataset, in: project:prj-c-scc}
+    - {tf: google_monitoring_notification_channel, name: security-oncall-channel, in: project:prj-c-scc}
+    - {tf: google_storage_bucket, name: exposed-bucket, in: project:prj-p-workload}
+    - {tf: google_compute_firewall, name: open-ssh-rule, in: vpc:workload-vpc}
+  actors: [users, saas]
+  flows:
+    - {from: exposed-bucket, to: high-critical-findings-notification, label: PUBLIC_BUCKET_ACL finding, step: 1}
+    - {from: open-ssh-rule, to: high-critical-findings-notification, label: OPEN_SSH_PORT finding, step: 1}
+    - {from: high-critical-findings-notification, to: scc-findings-topic, label: filtered findings, step: 2}
+    - {from: scc-findings-topic, to: scc-findings-sub, link: google_pubsub_subscription}
+    - {from: scc-findings-sub, to: remediate-findings-fn, label: push trigger, step: 3}
+    - {from: remediate-findings-fn, to: exposed-bucket, label: remove allUsers binding, step: 4}
+    - {from: remediate-findings-fn, to: open-ssh-rule, label: disable rule, step: 4}
+    - {from: remediate-findings-fn, to: saas, label: chat webhook, step: 5}
+    - {from: high-critical-findings-notification, to: scc-findings-dataset, label: BigQuery export, step: 6}
+    - {from: security-oncall-channel, to: users, label: page on-call, step: 7}
+
+- slug: cloud-armor-waf-ddos-edge
+  title: Cloud Armor WAF and DDoS protection at the edge
+  category: security
+  tags: [cloud armor, waf, owasp, ddos, rate limiting, adaptive protection, global load balancer]
+  source: https://docs.cloud.google.com/armor/docs/cloud-armor-overview
+  description: A Cloud Armor security policy attached to the backend service of a global external Application Load Balancer evaluates preconfigured OWASP Core Rule Set WAF rules, rate-limiting and geo-based rules at Google's edge before traffic enters the VPC. Always-on Layer 3/4 DDoS mitigation protects the anycast frontend, Adaptive Protection suggests Layer 7 mitigation rules, and Cloud CDN serves cacheable content while regional managed instance groups run the application.
+  containers:
+    - project: prj-p-web
+      region: us-central1
+      vpcs:
+        - name: web-vpc
+          subnets:
+            - {name: web-sub-usc1, cidr: 10.80.0.0/24, region: us-central1}
+            - {name: web-sub-euw1, cidr: 10.80.1.0/24, region: europe-west1}
+  elements:
+    - {tf: google_compute_global_forwarding_rule, name: web-https-rule, in: project:prj-p-web}
+    - {tf: google_compute_security_policy, name: web-waf-policy, in: project:prj-p-web}
+    - {tf: google_compute_backend_service, name: web-backend, in: vpc:web-vpc}
+    - {tf: google_compute_backend_bucket, name: static-assets-backend, in: project:prj-p-web}
+    - {tf: google_storage_bucket, name: static-assets-bucket, in: project:prj-p-web}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-usc1, in: subnet:web-sub-usc1}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-euw1, in: subnet:web-sub-euw1}
+    - {tf: google_compute_health_check, name: web-health-check, in: project:prj-p-web}
+    - {tf: google_logging_project_sink, name: armor-logs-sink, in: project:prj-p-web}
+  actors: [users, internet]
+  flows:
+    - {from: users, to: web-https-rule, label: HTTPS anycast, step: 1}
+    - {from: internet, to: web-https-rule, label: volumetric DDoS absorbed at edge, step: 1}
+    - {from: web-https-rule, to: web-waf-policy, label: WAF and rate-limit evaluation, step: 2}
+    - {from: web-waf-policy, to: web-backend, label: allowed requests, step: 3}
+    - {from: web-backend, to: web-mig-usc1, label: nearest healthy region, step: 4}
+    - {from: web-backend, to: web-mig-euw1, label: failover / proximity, step: 4}
+    - {from: web-health-check, to: web-mig-usc1, label: health probes, step: 5}
+    - {from: web-https-rule, to: static-assets-backend, label: Cloud CDN cache, step: 6}
+    - {from: static-assets-backend, to: static-assets-bucket, label: origin fill, step: 7}
+    - {from: web-waf-policy, to: armor-logs-sink, label: request logs with rule outcome, step: 8}
+
+- slug: google-secops-siem-log-ingestion
+  title: SIEM export of Google Cloud logs and findings to Google Security Operations
+  category: security
+  tags: [google secops, chronicle, siem, log export, pub/sub feed, scc findings, asset inventory]
+  source: https://docs.cloud.google.com/chronicle/docs/ingestion/cloud/ingest-gcp-logs
+  description: Cloud Audit, VPC Flow, Cloud DNS and firewall logs are exported to Google Security Operations either directly through organization-level ingestion settings or through an aggregated organization sink into a Pub/Sub topic consumed by a SecOps feed. Security Command Center findings and Cloud Asset Inventory metadata are exported alongside the logs so detections can be enriched with resource context and posture data.
+  containers:
+    - project: prj-c-logging
+      region: us-central1
+    - project: prj-c-scc
+      region: us-central1
+    - project: prj-p-workload
+      region: us-central1
+      vpcs:
+        - name: workload-vpc
+          subnets:
+            - {name: app-sub, cidr: 10.90.0.0/24, region: us-central1}
+  elements:
+    - {tf: google_logging_organization_sink, name: secops-audit-sink, in: project:prj-c-logging}
+    - {tf: google_pubsub_topic, name: secops-logs-topic, in: project:prj-c-logging}
+    - {tf: google_pubsub_subscription, name: secops-feed-sub, in: project:prj-c-logging}
+    - {tf: google_scc_notification_config, name: secops-findings-export, in: project:prj-c-scc}
+    - {tf: google_pubsub_topic, name: secops-findings-topic, in: project:prj-c-scc}
+    - {tf: google_cloud_asset_organization_feed, name: asset-metadata-feed, in: project:prj-c-scc}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:app-sub}
+    - {tf: google_dns_policy, name: dns-logging-policy, in: vpc:workload-vpc}
+  actors: [saas, users]
+  flows:
+    - {from: app-vm, to: secops-audit-sink, label: Cloud Audit and VPC Flow logs, step: 1}
+    - {from: dns-logging-policy, to: secops-audit-sink, label: Cloud DNS query logs, step: 1}
+    - {from: secops-audit-sink, to: secops-logs-topic, label: aggregated export, step: 2}
+    - {from: secops-logs-topic, to: secops-feed-sub, link: google_pubsub_subscription}
+    - {from: secops-feed-sub, to: saas, label: Google SecOps feed pull, step: 3}
+    - {from: secops-findings-export, to: secops-findings-topic, label: SCC findings, step: 4}
+    - {from: secops-findings-topic, to: saas, label: findings feed, step: 5}
+    - {from: asset-metadata-feed, to: saas, label: asset context, step: 6}
+    - {from: users, to: saas, label: threat hunting and detections, step: 7}
+
+- slug: binary-authorization-gke-supply-chain
+  title: Binary Authorization software supply chain for GKE
+  category: containers
+  tags: [binary authorization, attestor, attestation, cloud build, artifact registry, gke, cloud kms, slsa]
+  source: https://docs.cloud.google.com/binary-authorization/docs/overview
+  description: Cloud Build builds and scans a container image, pushes it to Artifact Registry and signs an attestation with a Cloud KMS asymmetric key that a Binary Authorization attestor trusts. The project Binary Authorization policy requires that attestation for deployment, so the GKE cluster admission controller blocks unsigned or unscanned images, logs violations to Cloud Audit Logs, and continuous validation flags running pods that drift from the policy.
+  containers:
+    - project: prj-p-platform
+      region: us-central1
+      vpcs:
+        - name: platform-vpc
+          subnets:
+            - {name: gke-sub, cidr: 10.100.0.0/20, region: us-central1}
+  elements:
+    - {tf: google_sourcerepo_repository, name: app-source-repo, in: project:prj-p-platform}
+    - {tf: google_cloudbuild_trigger, name: build-sign-trigger, in: project:prj-p-platform}
+    - {tf: google_artifact_registry_repository, name: app-images, in: project:prj-p-platform}
+    - {tf: google_kms_key_ring, name: binauthz-key-ring, in: project:prj-p-platform}
+    - {tf: google_kms_crypto_key, name: attestor-signing-key, in: project:prj-p-platform}
+    - {tf: google_container_analysis_note, name: build-verified-note, in: project:prj-p-platform}
+    - {tf: google_binary_authorization_attestor, name: build-verified-attestor, in: project:prj-p-platform}
+    - {tf: google_binary_authorization_policy, name: require-attestation-policy, in: project:prj-p-platform}
+    - {tf: google_container_cluster, name: prod-gke, in: subnet:gke-sub}
+    - {tf: google_logging_project_sink, name: binauthz-audit-sink, in: project:prj-p-platform}
+  actors: [users]
+  flows:
+    - {from: users, to: app-source-repo, label: git push, step: 1}
+    - {from: app-source-repo, to: build-sign-trigger, label: trigger build, step: 2}
+    - {from: build-sign-trigger, to: app-images, label: push image and vulnerability scan, step: 3}
+    - {from: build-sign-trigger, to: attestor-signing-key, label: sign digest, step: 4}
+    - {from: build-sign-trigger, to: build-verified-note, label: create attestation occurrence, step: 5}
+    - {from: build-verified-attestor, to: build-verified-note, label: trusts note and public key, step: 6}
+    - {from: require-attestation-policy, to: build-verified-attestor, label: required attestor, step: 7}
+    - {from: require-attestation-policy, to: prod-gke, label: admission enforcement, step: 8}
+    - {from: prod-gke, to: app-images, label: pull attested image only, step: 9}
+    - {from: prod-gke, to: binauthz-audit-sink, label: denied deployments audit log, step: 10}
+
+- slug: assured-workloads-sovereign-folder
+  title: Assured Workloads regulated folder with data residency and CMEK
+  category: security
+  tags: [assured workloads, compliance regime, data residency, resource locations, cmek, access transparency]
+  source: https://docs.cloud.google.com/assured-workloads/docs/overview
+  description: An Assured Workloads folder created for a compliance regime such as the EU Data Boundary applies a control package of organization policies, including gcp.resourceLocations restricted to EU regions and restricted service usage, to every project beneath it. A separate key management project in the same boundary provides CMEK keys for Cloud Storage and Cloud SQL, Access Transparency logs Google personnel actions, and violation monitoring raises alerts when a policy or resource drifts out of compliance.
+  containers:
+    - group: fldr-eu-regulated
+    - project: prj-eu-kms
+      region: europe-west3
+    - project: prj-eu-workload
+      region: europe-west3
+      vpcs:
+        - name: eu-vpc
+          subnets:
+            - {name: eu-app-sub, cidr: 10.110.0.0/24, region: europe-west3}
+  elements:
+    - {tf: google_assured_workloads_workload, name: eu-data-boundary-workload, in: group:fldr-eu-regulated}
+    - {tf: google_folder, name: eu-regulated-folder, in: group:fldr-eu-regulated}
+    - {tf: google_org_policy_policy, name: eu-resource-locations-policy, in: group:fldr-eu-regulated}
+    - {tf: google_org_policy_policy, name: restrict-service-usage-policy, in: group:fldr-eu-regulated}
+    - {tf: google_kms_key_ring, name: eu-key-ring, in: project:prj-eu-kms}
+    - {tf: google_kms_crypto_key, name: eu-hsm-key, in: project:prj-eu-kms}
+    - {tf: google_storage_bucket, name: eu-records-bucket, in: project:prj-eu-workload}
+    - {tf: google_sql_database_instance, name: eu-postgres, in: vpc:eu-vpc}
+    - {tf: google_compute_instance, name: eu-app-vm, in: subnet:eu-app-sub}
+    - {tf: google_monitoring_alert_policy, name: compliance-violation-alert, in: project:prj-eu-workload}
+  actors: [users]
+  flows:
+    - {from: users, to: eu-data-boundary-workload, label: create workload with control package, step: 1}
+    - {from: eu-data-boundary-workload, to: eu-regulated-folder, label: provisions folder, step: 2}
+    - {from: eu-resource-locations-policy, to: eu-app-vm, label: EU regions only, step: 3}
+    - {from: restrict-service-usage-policy, to: project:prj-eu-workload, label: allowed services only, step: 3}
+    - {from: eu-records-bucket, to: eu-hsm-key, label: CMEK, step: 4}
+    - {from: eu-postgres, to: eu-hsm-key, label: CMEK, step: 4}
+    - {from: eu-app-vm, to: eu-postgres, label: SQL, step: 5}
+    - {from: eu-data-boundary-workload, to: compliance-violation-alert, label: violation monitoring, step: 6}
+
+- slug: multi-region-active-active-spanner
+  title: Multi-region active/active application on Spanner
+  category: resilience
+  tags: [active-active, multi-region, spanner, global load balancer, managed instance groups, 99.999]
+  source: https://docs.cloud.google.com/architecture/multiregional-vms
+  description: A global external Application Load Balancer sends users to the closest healthy region, where regional managed instance groups spread across three zones run the web and application tiers in isolated stacks. A Spanner multi-region instance in the nam3 configuration keeps read-write replicas in us-east4 and us-east1 with a witness in us-central1, giving both regions strongly consistent access to one database and a 99.999% availability SLA.
+  containers:
+    - project: prj-p-global-app
+      region: us-east4
+      vpcs:
+        - name: global-app-vpc
+          subnets:
+            - {name: app-sub-use4, cidr: 10.120.0.0/22, region: us-east4}
+            - {name: app-sub-use1, cidr: 10.120.4.0/22, region: us-east1}
+  elements:
+    - {tf: google_compute_global_forwarding_rule, name: global-https-rule, in: project:prj-p-global-app}
+    - {tf: google_compute_backend_service, name: app-global-backend, in: vpc:global-app-vpc}
+    - {tf: google_compute_security_policy, name: app-armor-policy, in: project:prj-p-global-app}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-use4, in: subnet:app-sub-use4}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-use1, in: subnet:app-sub-use1}
+    - {tf: google_compute_health_check, name: app-health-check, in: project:prj-p-global-app}
+    - {tf: google_spanner_instance, name: orders-spanner-nam3, in: project:prj-p-global-app}
+    - {tf: google_spanner_database, name: orders-db, in: project:prj-p-global-app}
+    - {tf: google_storage_bucket, name: assets-dual-region, in: project:prj-p-global-app}
+  actors: [users]
+  flows:
+    - {from: users, to: global-https-rule, label: HTTPS anycast, step: 1}
+    - {from: global-https-rule, to: app-armor-policy, label: WAF, step: 2}
+    - {from: app-armor-policy, to: app-global-backend, label: allowed, step: 3}
+    - {from: app-global-backend, to: web-mig-use4, label: nearest region, step: 4}
+    - {from: app-global-backend, to: web-mig-use1, label: nearest region / failover, step: 4}
+    - {from: app-health-check, to: web-mig-use4, label: health, step: 5}
+    - {from: web-mig-use4, to: orders-db, label: strongly consistent reads and writes, step: 6}
+    - {from: web-mig-use1, to: orders-db, label: strongly consistent reads and writes, step: 6}
+    - {from: orders-spanner-nam3, to: orders-db, label: nam3 read-write replicas plus witness, step: 7}
+    - {from: web-mig-use1, to: assets-dual-region, label: static assets, step: 8}
+
+- slug: cloud-sql-ha-cross-region-replica-dr
+  title: Cloud SQL regional HA with cross-region replica for DR
+  category: database
+  tags: [cloud sql, high availability, standby, cross-region replica, promotion, rpo, rto]
+  source: https://docs.cloud.google.com/sql/docs/postgres/intro-to-cloud-sql-disaster-recovery
+  description: The primary Cloud SQL instance runs as a regional HA pair with a synchronous standby in a second zone of us-central1, and a cross-region read replica in us-east1 receives asynchronous replication. On a regional outage the replica is promoted to a standalone primary, the application tier in the secondary region is scaled up and a Cloud DNS record is repointed, accepting a small RPO from replication lag; after recovery a new standby and replica are rebuilt to restore the topology.
+  containers:
+    - project: prj-p-orders
+      region: us-central1
+      vpcs:
+        - name: orders-vpc
+          subnets:
+            - {name: app-sub-usc1, cidr: 10.130.0.0/24, region: us-central1}
+            - {name: app-sub-use1, cidr: 10.130.1.0/24, region: us-east1}
+  elements:
+    - {tf: google_sql_database_instance, name: orders-pg-primary-ha, in: vpc:orders-vpc}
+    - {tf: google_sql_database_instance, name: orders-pg-replica-use1, in: vpc:orders-vpc}
+    - {tf: google_compute_region_instance_group_manager, name: app-mig-usc1, in: subnet:app-sub-usc1}
+    - {tf: google_compute_region_instance_group_manager, name: app-mig-use1, in: subnet:app-sub-use1}
+    - {tf: google_compute_global_forwarding_rule, name: orders-https-rule, in: project:prj-p-orders}
+    - {tf: google_dns_managed_zone, name: orders-private-zone, in: vpc:orders-vpc}
+    - {tf: google_dns_record_set, name: db-cname-record, in: vpc:orders-vpc}
+    - {tf: google_storage_bucket, name: pg-backups-bucket, in: project:prj-p-orders}
+    - {tf: google_monitoring_alert_policy, name: replica-lag-alert, in: project:prj-p-orders}
+  actors: [users]
+  flows:
+    - {from: users, to: orders-https-rule, label: HTTPS, step: 1}
+    - {from: orders-https-rule, to: app-mig-usc1, label: primary region, step: 2}
+    - {from: app-mig-usc1, to: db-cname-record, label: resolve db endpoint, step: 3}
+    - {from: db-cname-record, to: orders-pg-primary-ha, label: primary with zonal standby, step: 4}
+    - {from: orders-pg-primary-ha, to: orders-pg-replica-use1, label: async cross-region replication, step: 5}
+    - {from: orders-pg-primary-ha, to: pg-backups-bucket, label: automated backups export, step: 6}
+    - {from: replica-lag-alert, to: orders-pg-replica-use1, label: monitor lag, step: 7}
+    - {from: orders-https-rule, to: app-mig-use1, label: failover traffic, step: 8}
+    - {from: app-mig-use1, to: orders-pg-replica-use1, label: after promotion to primary, step: 9}
+
+- slug: backup-dr-service-vault
+  title: Centralized backups with Backup and DR Service and immutable vaults
+  category: resilience
+  tags: [backup and dr, backup vault, backup plan, immutability, compute engine, cloud sql, vmware]
+  source: https://docs.cloud.google.com/backup-disaster-recovery/docs/concepts/backup-dr
+  description: A Backup and DR management server orchestrates backup plans that capture Compute Engine VMs, Persistent Disks and Cloud SQL instances into a Google-managed backup vault whose WORM immutability and minimum enforced retention protect copies from deletion, including by project owners. A backup/recovery appliance in the on-premises data center protects VMware VMs and self-managed databases into the same console, and restores can target a different project or region for DR.
+  containers:
+    - datacenter: corp-dc
+    - project: prj-c-backup
+      region: us-central1
+    - project: prj-p-workload
+      region: us-central1
+      vpcs:
+        - name: workload-vpc
+          subnets:
+            - {name: app-sub, cidr: 10.140.0.0/24, region: us-central1}
+  elements:
+    - {tf: google_backup_dr_management_server, name: backup-mgmt-server, in: project:prj-c-backup}
+    - {tf: google_backup_dr_backup_vault, name: prod-backup-vault, in: project:prj-c-backup}
+    - {tf: google_backup_dr_backup_plan, name: daily-vm-plan, in: project:prj-c-backup}
+    - {tf: google_backup_dr_backup_plan_association, name: app-vm-plan-association, in: project:prj-p-workload}
+    - {tf: google_compute_instance, name: app-vm, in: subnet:app-sub}
+    - {tf: google_compute_disk, name: app-data-disk, in: subnet:app-sub}
+    - {tf: google_sql_database_instance, name: app-mysql, in: vpc:workload-vpc}
+    - {tf: google_compute_instance, name: backup-recovery-appliance, in: datacenter:corp-dc}
+    - {tf: google_compute_instance, name: vmware-db-vm, in: datacenter:corp-dc}
+  actors: [users, datacenter]
+  flows:
+    - {from: users, to: backup-mgmt-server, label: define plans and restores, step: 1}
+    - {from: daily-vm-plan, to: app-vm-plan-association, link: google_backup_dr_backup_plan_association}
+    - {from: app-vm-plan-association, to: app-vm, label: protected resource, step: 2}
+    - {from: app-vm, to: prod-backup-vault, label: incremental-forever backups, step: 3}
+    - {from: app-data-disk, to: prod-backup-vault, label: disk backups, step: 3}
+    - {from: app-mysql, to: prod-backup-vault, label: Cloud SQL backups, step: 4}
+    - {from: vmware-db-vm, to: backup-recovery-appliance, label: VMware snapshot capture, step: 5}
+    - {from: backup-recovery-appliance, to: prod-backup-vault, label: OnVault to Google Cloud, step: 6}
+    - {from: prod-backup-vault, to: app-vm, label: restore to project or region, step: 7}
+
+- slug: storage-dual-region-turbo-replication
+  title: Cloud Storage dual-region bucket with turbo replication
+  category: storage
+  tags: [cloud storage, dual-region, turbo replication, geo-redundancy, rto zero, storage transfer]
+  source: https://docs.cloud.google.com/storage/docs/locations
+  description: A dual-region bucket in the EUR4 pair replicates every object between europe-north1 and europe-west4 so a regional outage causes no path change and an RTO of zero, and turbo replication bounds the replication window to 15 minutes for a predictable RPO. Cloud Run services in both regions read and write the same bucket behind a global load balancer, and a Storage Transfer Service job feeds on-premises backups into the bucket.
+  containers:
+    - datacenter: corp-dc
+    - project: prj-p-media
+      region: europe-north1
+      vpcs:
+        - name: media-vpc
+          subnets:
+            - {name: media-sub-eun1, cidr: 10.150.0.0/24, region: europe-north1}
+            - {name: media-sub-euw4, cidr: 10.150.1.0/24, region: europe-west4}
+  elements:
+    - {tf: google_storage_bucket, name: media-eur4-bucket, in: project:prj-p-media}
+    - {tf: google_storage_transfer_job, name: onprem-backup-transfer, in: project:prj-p-media}
+    - {tf: google_compute_global_forwarding_rule, name: media-https-rule, in: project:prj-p-media}
+    - {tf: google_cloud_run_v2_service, name: media-api-eun1, in: subnet:media-sub-eun1}
+    - {tf: google_cloud_run_v2_service, name: media-api-euw4, in: subnet:media-sub-euw4}
+    - {tf: google_kms_crypto_key, name: media-cmek-key, in: project:prj-p-media}
+    - {tf: google_monitoring_alert_policy, name: replication-rpo-alert, in: project:prj-p-media}
+    - {tf: google_compute_instance, name: backup-server, in: datacenter:corp-dc}
+  actors: [users, datacenter]
+  flows:
+    - {from: users, to: media-https-rule, label: HTTPS, step: 1}
+    - {from: media-https-rule, to: media-api-eun1, label: nearest region, step: 2}
+    - {from: media-https-rule, to: media-api-euw4, label: nearest region / failover, step: 2}
+    - {from: media-api-eun1, to: media-eur4-bucket, label: read/write objects, step: 3}
+    - {from: media-api-euw4, to: media-eur4-bucket, label: same bucket path, step: 3}
+    - {from: media-eur4-bucket, to: media-cmek-key, label: CMEK, step: 4}
+    - {from: backup-server, to: onprem-backup-transfer, label: agent-based transfer, step: 5}
+    - {from: onprem-backup-transfer, to: media-eur4-bucket, label: scheduled sync, step: 6}
+    - {from: replication-rpo-alert, to: media-eur4-bucket, label: turbo replication RPO metric, step: 7}
+
+- slug: warm-standby-dr-snapshots-dns
+  title: Warm standby disaster recovery with snapshots and Cloud DNS failover
+  category: resilience
+  tags: [disaster recovery, warm standby, cold, hot, snapshots, cloud dns, managed instance group, rpo]
+  source: https://docs.cloud.google.com/architecture/dr-scenarios-for-applications
+  description: The production region serves traffic from a managed instance group and a Cloud SQL primary, while the DR region keeps a minimal warm environment, a scaled-down instance group built from images and a read replica receiving continuous replication, cheaper than a hot active/active setup but faster to recover than a cold rebuild from Cloud Storage backups. Scheduled disk snapshots and image copies keep the DR templates current, and on failover the replica is promoted, the instance group is scaled up and a Cloud DNS record switches users to the DR load balancer.
+  containers:
+    - project: prj-p-erp
+      region: us-central1
+      vpcs:
+        - name: erp-vpc
+          subnets:
+            - {name: prod-sub-usc1, cidr: 10.160.0.0/24, region: us-central1}
+            - {name: dr-sub-usw1, cidr: 10.160.1.0/24, region: us-west1}
+  elements:
+    - {tf: google_dns_managed_zone, name: erp-public-zone, in: project:prj-p-erp}
+    - {tf: google_dns_record_set, name: erp-a-record, in: project:prj-p-erp}
+    - {tf: google_compute_forwarding_rule, name: prod-lb-usc1, in: subnet:prod-sub-usc1}
+    - {tf: google_compute_forwarding_rule, name: dr-lb-usw1, in: subnet:dr-sub-usw1}
+    - {tf: google_compute_region_instance_group_manager, name: erp-mig-prod, in: subnet:prod-sub-usc1}
+    - {tf: google_compute_region_instance_group_manager, name: erp-mig-dr-warm, in: subnet:dr-sub-usw1}
+    - {tf: google_compute_resource_policy, name: nightly-snapshot-schedule, in: project:prj-p-erp}
+    - {tf: google_compute_image, name: erp-golden-image, in: project:prj-p-erp}
+    - {tf: google_sql_database_instance, name: erp-pg-primary, in: vpc:erp-vpc}
+    - {tf: google_sql_database_instance, name: erp-pg-dr-replica, in: vpc:erp-vpc}
+    - {tf: google_storage_bucket, name: erp-cold-backups, in: project:prj-p-erp}
+  actors: [users]
+  flows:
+    - {from: users, to: erp-a-record, label: DNS lookup, step: 1}
+    - {from: erp-a-record, to: prod-lb-usc1, label: normal operation, step: 2}
+    - {from: prod-lb-usc1, to: erp-mig-prod, label: HTTPS, step: 3}
+    - {from: erp-mig-prod, to: erp-pg-primary, label: SQL, step: 4}
+    - {from: erp-pg-primary, to: erp-pg-dr-replica, label: continuous replication, step: 5}
+    - {from: nightly-snapshot-schedule, to: erp-mig-prod, label: scheduled disk snapshots, step: 6}
+    - {from: nightly-snapshot-schedule, to: erp-golden-image, label: refresh DR image, step: 7}
+    - {from: erp-pg-primary, to: erp-cold-backups, label: exported backups (cold fallback), step: 8}
+    - {from: erp-a-record, to: dr-lb-usw1, label: failover TTL switch, step: 9}
+    - {from: dr-lb-usw1, to: erp-mig-dr-warm, label: scaled-up from image, step: 10}
+    - {from: erp-mig-dr-warm, to: erp-pg-dr-replica, label: promoted primary, step: 11}
+
+- slug: gke-multi-cluster-gateway-failover
+  title: GKE multi-cluster Gateway with cross-region failover
+  category: containers
+  tags: [gke, multi-cluster gateway, fleet, config cluster, serviceexport, global load balancer, failover]
+  source: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-multi-cluster-gateways
+  description: Two GKE clusters in different regions are registered to one fleet with multi-cluster Services and Gateway enabled, and the config cluster hosts a Gateway of class gke-l7-global-external-managed-mc plus HTTPRoutes. ServiceExport resources in each cluster become fleet-wide ServiceImports, and the resulting global external Application Load Balancer routes each request to the healthy cluster closest to the client, failing over automatically when a cluster or region becomes unhealthy.
+  containers:
+    - project: prj-p-fleet
+      region: us-west1
+      vpcs:
+        - name: fleet-vpc
+          subnets:
+            - {name: gke-sub-usw1, cidr: 10.170.0.0/20, region: us-west1}
+            - {name: gke-sub-use1, cidr: 10.170.16.0/20, region: us-east1}
+  elements:
+    - {tf: google_container_cluster, name: gke-west-1, in: subnet:gke-sub-usw1}
+    - {tf: google_container_cluster, name: gke-east-1, in: subnet:gke-sub-use1}
+    - {tf: google_gke_hub_membership, name: gke-west-1-membership, in: project:prj-p-fleet}
+    - {tf: google_gke_hub_membership, name: gke-east-1-membership, in: project:prj-p-fleet}
+    - {tf: google_gke_hub_feature, name: multiclusterservicediscovery, in: project:prj-p-fleet}
+    - {tf: google_gke_hub_feature, name: multiclusteringress-config-cluster, in: project:prj-p-fleet}
+    - {tf: google_compute_global_forwarding_rule, name: store-external-gateway, in: project:prj-p-fleet}
+    - {tf: google_compute_health_check, name: store-health-check, in: project:prj-p-fleet}
+    - {tf: google_artifact_registry_repository, name: store-images, in: project:prj-p-fleet}
+  actors: [users]
+  flows:
+    - {from: gke-west-1-membership, to: gke-west-1, label: fleet registration, step: 1}
+    - {from: gke-east-1-membership, to: gke-east-1, label: fleet registration, step: 1}
+    - {from: multiclusteringress-config-cluster, to: gke-west-1, label: config cluster hosts Gateway, step: 2}
+    - {from: multiclusterservicediscovery, to: gke-east-1, label: ServiceExport to ServiceImport, step: 3}
+    - {from: gke-west-1, to: store-external-gateway, label: Gateway reconciles global external ALB, step: 4}
+    - {from: users, to: store-external-gateway, label: HTTPS anycast, step: 5}
+    - {from: store-external-gateway, to: gke-west-1, label: "/west and nearest healthy", step: 6}
+    - {from: store-external-gateway, to: gke-east-1, label: "/east and failover", step: 6}
+    - {from: store-health-check, to: gke-east-1, label: NEG health, step: 7}
+    - {from: gke-west-1, to: store-images, label: pull images, step: 8}
+
+- slug: cloud-dns-failover-routing-policy
+  title: DNS-based failover with Cloud DNS routing policies and health checks
+  category: resilience
+  tags: [cloud dns, routing policy, failover, geolocation, health check, internal load balancer]
+  source: https://docs.cloud.google.com/dns/docs/zones/manage-routing-policies
+  description: A Cloud DNS private zone record uses a failover routing policy whose primary target is the regional internal Application Load Balancer forwarding rule in us-central1 and whose backup geolocation policy points to the us-east1 load balancer. Cloud DNS health-checks the forwarding rules and, when all primary endpoints are unhealthy, answers queries with the backup so internal clients move to the surviving region without application changes.
+  containers:
+    - project: prj-p-internal-api
+      region: us-central1
+      vpcs:
+        - name: internal-vpc
+          subnets:
+            - {name: api-sub-usc1, cidr: 10.180.0.0/24, region: us-central1}
+            - {name: api-sub-use1, cidr: 10.180.1.0/24, region: us-east1}
+            - {name: client-sub-usc1, cidr: 10.180.10.0/24, region: us-central1}
+  elements:
+    - {tf: google_dns_managed_zone, name: internal-private-zone, in: vpc:internal-vpc}
+    - {tf: google_dns_record_set, name: api-failover-record, in: vpc:internal-vpc}
+    - {tf: google_compute_forwarding_rule, name: api-ilb-usc1, in: subnet:api-sub-usc1}
+    - {tf: google_compute_forwarding_rule, name: api-ilb-use1, in: subnet:api-sub-use1}
+    - {tf: google_compute_region_backend_service, name: api-backend-usc1, in: subnet:api-sub-usc1}
+    - {tf: google_compute_region_backend_service, name: api-backend-use1, in: subnet:api-sub-use1}
+    - {tf: google_compute_region_instance_group_manager, name: api-mig-usc1, in: subnet:api-sub-usc1}
+    - {tf: google_compute_region_instance_group_manager, name: api-mig-use1, in: subnet:api-sub-use1}
+    - {tf: google_compute_health_check, name: api-health-check, in: project:prj-p-internal-api}
+    - {tf: google_compute_instance, name: internal-client-vm, in: subnet:client-sub-usc1}
+  actors: [client]
+  flows:
+    - {from: internal-client-vm, to: api-failover-record, label: "resolve api.internal", step: 1}
+    - {from: api-failover-record, to: api-ilb-usc1, label: primary target, step: 2}
+    - {from: api-failover-record, to: api-ilb-use1, label: backup geolocation target, step: 3}
+    - {from: api-health-check, to: api-ilb-usc1, label: Cloud DNS health check, step: 4}
+    - {from: api-ilb-usc1, to: api-backend-usc1, label: regional internal ALB, step: 5}
+    - {from: api-backend-usc1, to: api-mig-usc1, label: HTTP, step: 6}
+    - {from: api-ilb-use1, to: api-backend-use1, label: regional internal ALB, step: 7}
+    - {from: api-backend-use1, to: api-mig-use1, label: HTTP, step: 8}
+    - {from: client, to: internal-client-vm, label: internal consumers, step: 9}
+
+- slug: log-based-alerting-cloud-monitoring
+  title: Log-based alerting on audit logs with Cloud Monitoring
+  category: observability
+  tags: [cloud monitoring, log-based alert, logmatch, notification channel, audit logs, pub/sub, incident]
+  source: https://docs.cloud.google.com/logging/docs/alerting/log-based-alerts
+  description: A Cloud Monitoring alert policy with a LogMatch condition watches Cloud Audit Logs for sensitive events such as a human principal decrypting with a KMS key or accessing a Secret Manager secret version, extracting labels from the log entry into the notification. Incidents route through email and Pub/Sub notification channels, and a Cloud Run function subscribed to the topic posts to the on-call chat tool, while a log-based metric on the same filter provides counts for a dashboard.
+  containers:
+    - project: prj-c-secrets
+      region: us-central1
+    - project: prj-c-monitoring
+      region: us-central1
+  elements:
+    - {tf: google_kms_crypto_key, name: payroll-key, in: project:prj-c-secrets}
+    - {tf: google_secret_manager_secret, name: payroll-db-secret, in: project:prj-c-secrets}
+    - {tf: google_logging_project_sink, name: audit-to-monitoring-sink, in: project:prj-c-secrets}
+    - {tf: google_logging_project_bucket_config, name: security-audit-bucket, in: project:prj-c-monitoring}
+    - {tf: google_monitoring_alert_policy, name: human-key-access-alert, in: project:prj-c-monitoring}
+    - {tf: google_logging_metric, name: human-key-access-count, in: project:prj-c-monitoring}
+    - {tf: google_monitoring_notification_channel, name: security-email-channel, in: project:prj-c-monitoring}
+    - {tf: google_monitoring_notification_channel, name: security-pubsub-channel, in: project:prj-c-monitoring}
+    - {tf: google_pubsub_topic, name: security-alerts-topic, in: project:prj-c-monitoring}
+    - {tf: google_cloudfunctions2_function, name: alert-to-chat-fn, in: project:prj-c-monitoring}
+    - {tf: google_monitoring_dashboard, name: key-access-dashboard, in: project:prj-c-monitoring}
+  actors: [user, users, saas]
+  flows:
+    - {from: user, to: payroll-key, label: interactive Decrypt call, step: 1}
+    - {from: user, to: payroll-db-secret, label: AccessSecretVersion, step: 1}
+    - {from: payroll-key, to: audit-to-monitoring-sink, label: Data Access audit log, step: 2}
+    - {from: audit-to-monitoring-sink, to: security-audit-bucket, label: route to central bucket, step: 3}
+    - {from: security-audit-bucket, to: human-key-access-alert, label: LogMatch on non-service-account principal, step: 4}
+    - {from: security-audit-bucket, to: human-key-access-count, label: log-based metric, step: 5}
+    - {from: human-key-access-alert, to: security-email-channel, label: incident notification, step: 6}
+    - {from: human-key-access-alert, to: security-pubsub-channel, label: incident notification, step: 6}
+    - {from: security-pubsub-channel, to: security-alerts-topic, label: publish JSON payload, step: 7}
+    - {from: security-alerts-topic, to: alert-to-chat-fn, link: google_cloudfunctions2_function}
+    - {from: alert-to-chat-fn, to: saas, label: chat webhook, step: 8}
+    - {from: security-email-channel, to: users, label: email security team, step: 9}
+    - {from: human-key-access-count, to: key-access-dashboard, label: chart, step: 10}

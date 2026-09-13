@@ -1,0 +1,47 @@
+# Generated from the official reference (https://docs.cloud.google.com/deploy/docs/deploy-app-gke); edit freely.
+title: Cloud Deploy delivery pipeline promoting releases across dev and prod GKE targets
+category: devops
+tags:
+- cloud deploy
+- delivery pipeline
+- gke
+- skaffold
+- release
+- rollout
+- promotion
+source: https://docs.cloud.google.com/deploy/docs/deploy-app-gke
+description: A Cloud Deploy delivery pipeline defines a serial progression of two targets, each pointing at a GKE cluster, and a Skaffold configuration describes the Kubernetes manifests to render. Creating
+  a release with a digest-qualified image from Artifact Registry automatically rolls out to the dev target; promoting the release creates a rollout to the prod target, and Cloud Deploy stores rendered manifests
+  in a Cloud Storage bucket.
+nodes:
+- {id: prj-deploy-gke-prj, type: gcp.project, name: deploy-gke-prj, props: {project_id: deploy-gke-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-deploy-vpc, type: gcp.vpc, name: deploy-vpc, parent: prj-deploy-gke-prj, props: {cidr: 10.120.0.0/16}}
+- {id: sub-dev-sub, type: gcp.subnetwork, name: dev-sub, parent: vpc-deploy-vpc, props: {cidr: 10.120.0.0/20, region: europe-west1}}
+- {id: sub-prod-sub, type: gcp.subnetwork, name: prod-sub, parent: vpc-deploy-vpc, props: {cidr: 10.120.16.0/20, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: my-gke-demo-app, type: gcp.res.google_clouddeploy_delivery_pipeline, name: my-gke-demo-app, parent: prj-deploy-gke-prj, props: {location: westeurope, name: changeme}}
+- {id: qsdev, type: gcp.res.google_clouddeploy_target, name: qsdev, parent: prj-deploy-gke-prj, props: {location: westeurope, name: changeme}}
+- {id: qsprod, type: gcp.res.google_clouddeploy_target, name: qsprod, parent: prj-deploy-gke-prj, props: {location: westeurope, name: changeme}}
+- {id: quickstart-cluster-qsdev, type: gcp.gke_cluster, name: quickstart-cluster-qsdev, parent: sub-dev-sub}
+- {id: quickstart-cluster-qsprod, type: gcp.gke_cluster, name: quickstart-cluster-qsprod, parent: sub-prod-sub}
+- {id: release-images, type: gcp.res.google_artifact_registry_repository, name: release-images, parent: prj-deploy-gke-prj, props: {format: changeme, repository_id: changeme}}
+- {id: rendered-manifests, type: gcp.storage_bucket, name: rendered-manifests, parent: prj-deploy-gke-prj}
+- {id: clouddeploy-sa, type: gcp.res.google_service_account, name: clouddeploy-sa, parent: prj-deploy-gke-prj, props: {account_id: changeme}}
+edges:
+- {from: users, to: my-gke-demo-app, label: create release with Skaffold config, step: '1'}
+- {from: release-images, to: my-gke-demo-app, label: SHA-qualified image}
+- {from: my-gke-demo-app, to: rendered-manifests, label: render manifests, step: '2'}
+- {from: my-gke-demo-app, to: qsdev, label: automatic first rollout, step: '3'}
+- {from: qsdev, to: quickstart-cluster-qsdev, label: kubectl apply, step: '4'}
+- {from: users, to: my-gke-demo-app, label: promote release, step: '5'}
+- {from: my-gke-demo-app, to: qsprod, label: rollout to prod, step: '6'}
+- {from: qsprod, to: quickstart-cluster-qsprod, label: kubectl apply, step: '7'}
+- {from: clouddeploy-sa, to: my-gke-demo-app, label: execution identity}
+steps:
+- {n: '1', text: 'users → my-gke-demo-app: create release with Skaffold config'}
+- {n: '2', text: 'my-gke-demo-app → rendered-manifests: render manifests'}
+- {n: '3', text: 'my-gke-demo-app → qsdev: automatic first rollout'}
+- {n: '4', text: 'qsdev → quickstart-cluster-qsdev: kubectl apply'}
+- {n: '5', text: 'users → my-gke-demo-app: promote release'}
+- {n: '6', text: 'my-gke-demo-app → qsprod: rollout to prod'}
+- {n: '7', text: 'qsprod → quickstart-cluster-qsprod: kubectl apply'}

@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.cloud.google.com/iap/docs/cloud-iap-context-aware-access-howto); edit freely.
+title: Zero trust application access with Identity-Aware Proxy
+category: identity
+tags:
+- iap
+- beyondcorp
+- zero trust
+- access context manager
+- context-aware access
+- chrome enterprise premium
+source: https://docs.cloud.google.com/iap/docs/cloud-iap-context-aware-access-howto
+description: Identity-Aware Proxy sits in front of a global external Application Load Balancer backend and authenticates every request with Google or federated identities, then authorizes it against the
+  IAP-secured Web App User role. Access levels defined in Access Context Manager, based on corporate IP ranges and device posture from Chrome Enterprise Premium, are attached as IAM conditions so only trusted
+  users on healthy devices reach the internal application without a VPN.
+nodes:
+- {id: prj-prj-p-intranet, type: gcp.project, name: prj-p-intranet, props: {project_id: prj-p-intranet-123456, project: changeme, region: us-central1}}
+- {id: vpc-intranet-vpc, type: gcp.vpc, name: intranet-vpc, parent: prj-prj-p-intranet}
+- {id: sub-app-sub, type: gcp.subnetwork, name: app-sub, parent: vpc-intranet-vpc, props: {cidr: 10.30.0.0/24, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: device, type: common.device, name: device}
+- {id: idp, type: common.idp, name: idp}
+- {id: intranet-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: intranet-https-rule, parent: prj-prj-p-intranet, props: {name: changeme, target: changeme}}
+- {id: intranet-backend, type: gcp.res.google_compute_backend_service, name: intranet-backend, parent: vpc-intranet-vpc, props: {name: changeme}}
+- id: intranet-mig
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: intranet-mig
+  parent: sub-app-sub
+  props:
+    base_instance_name: changeme
+    name: changeme
+    version: []
+- {id: corp-access-policy, type: gcp.res.google_access_context_manager_access_policy, name: corp-access-policy, parent: prj-prj-p-intranet, props: {parent: changeme, title: changeme}}
+- {id: trusted-device-corp-ip, type: gcp.res.google_access_context_manager_access_level, name: trusted-device-corp-ip, parent: prj-prj-p-intranet, props: {name: changeme, parent: changeme, title: changeme}}
+- {id: allow-iap-only, type: gcp.firewall_rule, name: allow-iap-only, parent: vpc-intranet-vpc}
+edges:
+- {from: users, to: intranet-https-rule, label: HTTPS, step: '1'}
+- {from: device, to: trusted-device-corp-ip, label: device posture and IP, step: '4'}
+- {from: trusted-device-corp-ip, to: intranet-backend, label: IAM condition on IAP role, step: '5'}
+- {from: intranet-backend, to: intranet-mig, label: signed JWT header, step: '6'}
+- {from: allow-iap-only, to: intranet-mig, label: allow only 35.235.240.0/20, step: '7'}
+steps:
+- {n: '1', text: 'users → intranet-https-rule: HTTPS'}
+- {n: '4', text: 'device → trusted-device-corp-ip: device posture and IP'}
+- {n: '5', text: 'trusted-device-corp-ip → intranet-backend: IAM condition on IAP role'}
+- {n: '6', text: 'intranet-backend → intranet-mig: signed JWT header'}
+- {n: '7', text: 'allow-iap-only → intranet-mig: allow only 35.235.240.0/20'}

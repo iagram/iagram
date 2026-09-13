@@ -1,0 +1,20 @@
+# Generated from the official reference (https://docs.cloud.google.com/api-gateway/docs/quickstart); edit freely.
+title: API Gateway securing a Cloud Run function backend with API keys
+category: serverless
+tags:
+- api gateway
+- openapi
+- cloud run functions
+- api keys
+- service account
+source: https://docs.cloud.google.com/api-gateway/docs/quickstart
+description: An API Gateway API holds an API config generated from an OpenAPI spec whose x-google-backend points at a Cloud Run function URL, and a gateway deployment exposes a gateway.dev hostname. The
+  config runs as a service account with invoker permission on the function, and clients must present an API key restricted to the API or receive UNAUTHENTICATED.
+nodes:
+- {id: prj-apigw-prj, type: gcp.project, name: apigw-prj, props: {project_id: apigw-prj-123456, project: changeme, region: europe-west1}}
+- {id: client, type: common.client, name: client}
+- {id: gateway-backend-sa, type: gcp.res.google_service_account, name: gateway-backend-sa, parent: prj-apigw-prj, props: {account_id: changeme}}
+- {id: hello-get-fn, type: gcp.res.google_cloudfunctions2_function, name: hello-get-fn, parent: prj-apigw-prj, props: {location: westeurope, name: changeme}}
+- {id: fn-source, type: gcp.storage_bucket, name: fn-source, parent: prj-apigw-prj}
+edges:
+- {from: fn-source, to: hello-get-fn, label: source}

@@ -1,0 +1,57 @@
+# Generated from the official reference (https://docs.cloud.google.com/chronicle/docs/ingestion/cloud/ingest-gcp-logs); edit freely.
+title: SIEM export of Google Cloud logs and findings to Google Security Operations
+category: security
+tags:
+- google secops
+- chronicle
+- siem
+- log export
+- pub/sub feed
+- scc findings
+- asset inventory
+source: https://docs.cloud.google.com/chronicle/docs/ingestion/cloud/ingest-gcp-logs
+description: Cloud Audit, VPC Flow, Cloud DNS and firewall logs are exported to Google Security Operations either directly through organization-level ingestion settings or through an aggregated organization
+  sink into a Pub/Sub topic consumed by a SecOps feed. Security Command Center findings and Cloud Asset Inventory metadata are exported alongside the logs so detections can be enriched with resource context
+  and posture data.
+nodes:
+- {id: prj-prj-c-logging, type: gcp.project, name: prj-c-logging, props: {project_id: prj-c-logging-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-c-scc, type: gcp.project, name: prj-c-scc, props: {project_id: prj-c-scc-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-p-workload, type: gcp.project, name: prj-p-workload, props: {project_id: prj-p-workload-123456, project: changeme, region: us-central1}}
+- {id: vpc-workload-vpc, type: gcp.vpc, name: workload-vpc, parent: prj-prj-p-workload}
+- {id: sub-app-sub, type: gcp.subnetwork, name: app-sub, parent: vpc-workload-vpc, props: {cidr: 10.90.0.0/24, region: us-central1}}
+- {id: saas, type: common.saas, name: saas}
+- {id: users, type: common.users, name: users}
+- {id: secops-audit-sink, type: gcp.res.google_logging_organization_sink, name: secops-audit-sink, parent: prj-prj-c-logging, props: {destination: changeme, name: changeme, org_id: changeme}}
+- {id: secops-logs-topic, type: gcp.pubsub_topic, name: secops-logs-topic, parent: prj-prj-c-logging}
+- {id: secops-feed-sub, type: gcp.res.google_pubsub_subscription, name: secops-feed-sub, parent: prj-prj-c-logging, props: {name: changeme, topic: changeme}}
+- id: secops-findings-export
+  type: gcp.res.google_scc_notification_config
+  name: secops-findings-export
+  parent: prj-prj-c-scc
+  props: {config_id: changeme, organization: changeme, pubsub_topic: changeme, streaming_config: {}}
+- {id: secops-findings-topic, type: gcp.pubsub_topic, name: secops-findings-topic, parent: prj-prj-c-scc}
+- id: asset-metadata-feed
+  type: gcp.res.google_cloud_asset_organization_feed
+  name: asset-metadata-feed
+  parent: prj-prj-c-scc
+  props: {billing_project: changeme, feed_id: changeme, feed_output_config: {}, org_id: changeme}
+- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-app-sub}
+- {id: dns-logging-policy, type: gcp.res.google_dns_policy, name: dns-logging-policy, parent: vpc-workload-vpc, props: {name: changeme}}
+edges:
+- {from: app-vm, to: secops-audit-sink, label: Cloud Audit and VPC Flow logs, step: '1'}
+- {from: dns-logging-policy, to: secops-audit-sink, label: Cloud DNS query logs, step: '1'}
+- {from: secops-audit-sink, to: secops-logs-topic, label: aggregated export, step: '2'}
+- {from: secops-logs-topic, to: secops-feed-sub, label: pubsub subscription}
+- {from: secops-feed-sub, to: saas, label: Google SecOps feed pull, step: '3'}
+- {from: secops-findings-export, to: secops-findings-topic, label: SCC findings, step: '4'}
+- {from: secops-findings-topic, to: saas, label: findings feed, step: '5'}
+- {from: asset-metadata-feed, to: saas, label: asset context, step: '6'}
+- {from: users, to: saas, label: threat hunting and detections, step: '7'}
+steps:
+- {n: '1', text: 'app-vm → secops-audit-sink: Cloud Audit and VPC Flow logs'}
+- {n: '2', text: 'secops-audit-sink → secops-logs-topic: aggregated export'}
+- {n: '3', text: 'secops-feed-sub → saas: Google SecOps feed pull'}
+- {n: '4', text: 'secops-findings-export → secops-findings-topic: SCC findings'}
+- {n: '5', text: 'secops-findings-topic → saas: findings feed'}
+- {n: '6', text: 'asset-metadata-feed → saas: asset context'}
+- {n: '7', text: 'users → saas: threat hunting and detections'}

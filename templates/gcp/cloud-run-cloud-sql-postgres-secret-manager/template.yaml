@@ -1,0 +1,41 @@
+# Generated from the official reference (https://docs.cloud.google.com/sql/docs/postgres/connect-run); edit freely.
+title: Cloud Run service connected to Cloud SQL for PostgreSQL with Secret Manager credentials
+category: serverless
+tags:
+- cloud run
+- cloud sql
+- postgresql
+- secret manager
+- direct vpc egress
+- private ip
+source: https://docs.cloud.google.com/sql/docs/postgres/connect-run
+description: A Cloud Run service runs under a dedicated service account holding the Cloud SQL Client role and reads the database password from a Secret Manager secret mounted at deploy time. With Direct
+  VPC egress the revision gets an address in the VPC subnet and talks TCP 5432 to the private IP of a regional Cloud SQL instance in the same region; the container image is pulled from Artifact Registry.
+nodes:
+- {id: prj-run-sql-prj, type: gcp.project, name: run-sql-prj, props: {project_id: run-sql-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-run-sql-prj, props: {cidr: 10.20.0.0/16}}
+- {id: sub-run-egress-sub, type: gcp.subnetwork, name: run-egress-sub, parent: vpc-app-vpc, props: {cidr: 10.20.1.0/24, region: europe-west1}}
+- {id: sub-db-sub, type: gcp.subnetwork, name: db-sub, parent: vpc-app-vpc, props: {cidr: 10.20.2.0/24, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: api-service, type: gcp.cloud_run_service, name: api-service, parent: prj-run-sql-prj}
+- {id: api-sa, type: gcp.res.google_service_account, name: api-sa, parent: prj-run-sql-prj, props: {account_id: changeme}}
+- id: db-password
+  type: gcp.res.google_secret_manager_secret
+  name: db-password
+  parent: prj-run-sql-prj
+  props: {replication: {}, secret_id: changeme}
+- {id: orders-pg, type: gcp.cloud_sql_instance, name: orders-pg, parent: vpc-app-vpc}
+- {id: api-images, type: gcp.res.google_artifact_registry_repository, name: api-images, parent: prj-run-sql-prj, props: {format: changeme, repository_id: changeme}}
+- {id: api-build, type: gcp.res.google_cloudbuild_trigger, name: api-build, parent: prj-run-sql-prj}
+edges:
+- {from: api-build, to: api-images, label: build and push image}
+- {from: users, to: api-service, label: HTTPS run.app URL, step: '1'}
+- {from: api-sa, to: api-service, label: runtime identity, step: '2'}
+- {from: api-service, to: db-password, label: secret mounted as env var, step: '3'}
+- {from: api-service, to: orders-pg, label: TCP 5432 private IP, step: '4'}
+- {from: api-images, to: api-service, label: image pull}
+steps:
+- {n: '1', text: 'users → api-service: HTTPS run.app URL'}
+- {n: '2', text: 'api-sa → api-service: runtime identity'}
+- {n: '3', text: 'api-service → db-password: secret mounted as env var'}
+- {n: '4', text: 'api-service → orders-pg: TCP 5432 private IP'}

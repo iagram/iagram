@@ -1,0 +1,34 @@
+# Generated from the official reference (https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule); edit freely.
+title: Cloud Run job executed on a cron schedule by Cloud Scheduler
+category: serverless
+tags:
+- cloud run jobs
+- cloud scheduler
+- cron
+- batch
+- oauth service account
+source: https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule
+description: A Cloud Scheduler job fires on a unix-cron expression and sends an authenticated HTTP POST to the run endpoint of a Cloud Run job, using a service account that holds the Cloud Run Invoker role.
+  The job runs its container tasks to completion, writes results to a Cloud Storage bucket and its logs land in Cloud Logging; the scheduler region does not need to match the job region.
+nodes:
+- {id: prj-run-jobs-prj, type: gcp.project, name: run-jobs-prj, props: {project_id: run-jobs-prj-123456, project: changeme, region: europe-west1}}
+- {id: nightly-report-cron, type: gcp.res.google_cloud_scheduler_job, name: nightly-report-cron, parent: prj-run-jobs-prj, props: {name: changeme}}
+- {id: scheduler-invoker-sa, type: gcp.res.google_service_account, name: scheduler-invoker-sa, parent: prj-run-jobs-prj, props: {account_id: changeme}}
+- id: report-job
+  type: gcp.res.google_cloud_run_v2_job
+  name: report-job
+  parent: prj-run-jobs-prj
+  props: {location: westeurope, name: changeme, template: {}}
+- {id: report-output, type: gcp.storage_bucket, name: report-output, parent: prj-run-jobs-prj}
+- {id: job-images, type: gcp.res.google_artifact_registry_repository, name: job-images, parent: prj-run-jobs-prj, props: {format: changeme, repository_id: changeme}}
+- {id: job-log-sink, type: gcp.res.google_logging_project_sink, name: job-log-sink, parent: prj-run-jobs-prj, props: {destination: changeme, name: changeme}}
+edges:
+- {from: nightly-report-cron, to: report-job, label: 'POST :run with OAuth token, 0 2 * * *', step: '1'}
+- {from: scheduler-invoker-sa, to: nightly-report-cron, label: Cloud Run Invoker identity}
+- {from: job-images, to: report-job, label: image pull, step: '2'}
+- {from: report-job, to: report-output, label: write results, step: '3'}
+- {from: report-job, to: job-log-sink, label: task logs}
+steps:
+- {n: '1', text: 'nightly-report-cron → report-job: POST :run with OAuth token, 0 2 * * *'}
+- {n: '2', text: 'job-images → report-job: image pull'}
+- {n: '3', text: 'report-job → report-output: write results'}

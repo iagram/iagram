@@ -1,0 +1,40 @@
+# Generated from the official reference (https://docs.cloud.google.com/functions/docs/tutorials/pubsub); edit freely.
+title: Event-driven Cloud Run function triggered by Pub/Sub messages
+category: serverless
+tags:
+- cloud run functions
+- pub/sub
+- eventarc
+- cloudevents
+- event-driven
+source: https://docs.cloud.google.com/functions/docs/tutorials/pubsub
+description: A CloudEvent function is deployed to Cloud Run functions with an Eventarc trigger filtered on google.cloud.pubsub.topic.v1.messagePublished for one topic. Publishing a message creates an HTTP
+  request that carries the base64-encoded payload to the function, which decodes and processes it; the function source is built by Cloud Build into an Artifact Registry image and logs go to Cloud Logging.
+nodes:
+- {id: prj-fn-events-prj, type: gcp.project, name: fn-events-prj, props: {project_id: fn-events-prj-123456, project: changeme, region: europe-west1}}
+- {id: client, type: common.client, name: client}
+- {id: orders-topic, type: gcp.pubsub_topic, name: orders-topic, parent: prj-fn-events-prj}
+- id: orders-published-trigger
+  type: gcp.res.google_eventarc_trigger
+  name: orders-published-trigger
+  parent: prj-fn-events-prj
+  props:
+    destination: {}
+    location: westeurope
+    matching_criteria: []
+    name: changeme
+- {id: process-order-fn, type: gcp.res.google_cloudfunctions2_function, name: process-order-fn, parent: prj-fn-events-prj, props: {location: westeurope, name: changeme}}
+- {id: fn-source, type: gcp.storage_bucket, name: fn-source, parent: prj-fn-events-prj}
+- {id: fn-images, type: gcp.res.google_artifact_registry_repository, name: fn-images, parent: prj-fn-events-prj, props: {format: changeme, repository_id: changeme}}
+- {id: fn-runtime-sa, type: gcp.res.google_service_account, name: fn-runtime-sa, parent: prj-fn-events-prj, props: {account_id: changeme}}
+edges:
+- {from: client, to: orders-topic, label: publish message, step: '1'}
+- {from: orders-topic, to: orders-published-trigger, label: messagePublished event, step: '2'}
+- {from: orders-published-trigger, to: process-order-fn, label: HTTP CloudEvent, step: '3'}
+- {from: fn-source, to: process-order-fn, label: source upload}
+- {from: fn-images, to: process-order-fn, label: built image}
+- {from: fn-runtime-sa, to: process-order-fn, label: runtime identity}
+steps:
+- {n: '1', text: 'client → orders-topic: publish message'}
+- {n: '2', text: 'orders-topic → orders-published-trigger: messagePublished event'}
+- {n: '3', text: 'orders-published-trigger → process-order-fn: HTTP CloudEvent'}

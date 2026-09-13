@@ -1,0 +1,65 @@
+# Generated from the official reference (https://docs.cloud.google.com/armor/docs/cloud-armor-overview); edit freely.
+title: Cloud Armor WAF and DDoS protection at the edge
+category: security
+tags:
+- cloud armor
+- waf
+- owasp
+- ddos
+- rate limiting
+- adaptive protection
+- global load balancer
+source: https://docs.cloud.google.com/armor/docs/cloud-armor-overview
+description: A Cloud Armor security policy attached to the backend service of a global external Application Load Balancer evaluates preconfigured OWASP Core Rule Set WAF rules, rate-limiting and geo-based
+  rules at Google's edge before traffic enters the VPC. Always-on Layer 3/4 DDoS mitigation protects the anycast frontend, Adaptive Protection suggests Layer 7 mitigation rules, and Cloud CDN serves cacheable
+  content while regional managed instance groups run the application.
+nodes:
+- {id: prj-prj-p-web, type: gcp.project, name: prj-p-web, props: {project_id: prj-p-web-123456, project: changeme, region: us-central1}}
+- {id: vpc-web-vpc, type: gcp.vpc, name: web-vpc, parent: prj-prj-p-web}
+- {id: sub-web-sub-usc1, type: gcp.subnetwork, name: web-sub-usc1, parent: vpc-web-vpc, props: {cidr: 10.80.0.0/24, region: us-central1}}
+- {id: sub-web-sub-euw1, type: gcp.subnetwork, name: web-sub-euw1, parent: vpc-web-vpc, props: {cidr: 10.80.1.0/24, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: web-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: web-https-rule, parent: prj-prj-p-web, props: {name: changeme, target: changeme}}
+- {id: web-waf-policy, type: gcp.res.google_compute_security_policy, name: web-waf-policy, parent: prj-prj-p-web, props: {name: changeme}}
+- {id: web-backend, type: gcp.res.google_compute_backend_service, name: web-backend, parent: vpc-web-vpc, props: {name: changeme}}
+- {id: static-assets-backend, type: gcp.res.google_compute_backend_bucket, name: static-assets-backend, parent: prj-prj-p-web, props: {bucket_name: changeme, name: changeme}}
+- {id: static-assets-bucket, type: gcp.storage_bucket, name: static-assets-bucket, parent: prj-prj-p-web}
+- id: web-mig-usc1
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: web-mig-usc1
+  parent: sub-web-sub-usc1
+  props:
+    base_instance_name: changeme
+    name: changeme
+    version: []
+- id: web-mig-euw1
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: web-mig-euw1
+  parent: sub-web-sub-euw1
+  props:
+    base_instance_name: changeme
+    name: changeme
+    version: []
+- {id: web-health-check, type: gcp.res.google_compute_health_check, name: web-health-check, parent: prj-prj-p-web, props: {name: changeme}}
+- {id: armor-logs-sink, type: gcp.res.google_logging_project_sink, name: armor-logs-sink, parent: prj-prj-p-web, props: {destination: changeme, name: changeme}}
+edges:
+- {from: users, to: web-https-rule, label: HTTPS anycast, step: '1'}
+- {from: internet, to: web-https-rule, label: volumetric DDoS absorbed at edge, step: '1'}
+- {from: web-https-rule, to: web-waf-policy, label: WAF and rate-limit evaluation, step: '2'}
+- {from: web-waf-policy, to: web-backend, label: allowed requests, step: '3'}
+- {from: web-backend, to: web-mig-usc1, label: nearest healthy region, step: '4'}
+- {from: web-backend, to: web-mig-euw1, label: failover / proximity, step: '4'}
+- {from: web-health-check, to: web-mig-usc1, label: health probes, step: '5'}
+- {from: web-https-rule, to: static-assets-backend, label: Cloud CDN cache, step: '6'}
+- {from: static-assets-backend, to: static-assets-bucket, label: origin fill, step: '7'}
+- {from: web-waf-policy, to: armor-logs-sink, label: request logs with rule outcome, step: '8'}
+steps:
+- {n: '1', text: 'users → web-https-rule: HTTPS anycast'}
+- {n: '2', text: 'web-https-rule → web-waf-policy: WAF and rate-limit evaluation'}
+- {n: '3', text: 'web-waf-policy → web-backend: allowed requests'}
+- {n: '4', text: 'web-backend → web-mig-usc1: nearest healthy region'}
+- {n: '5', text: 'web-health-check → web-mig-usc1: health probes'}
+- {n: '6', text: 'web-https-rule → static-assets-backend: Cloud CDN cache'}
+- {n: '7', text: 'static-assets-backend → static-assets-bucket: origin fill'}
+- {n: '8', text: 'web-waf-policy → armor-logs-sink: request logs with rule outcome'}

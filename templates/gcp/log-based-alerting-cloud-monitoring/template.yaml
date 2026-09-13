@@ -1,0 +1,64 @@
+# Generated from the official reference (https://docs.cloud.google.com/logging/docs/alerting/log-based-alerts); edit freely.
+title: Log-based alerting on audit logs with Cloud Monitoring
+category: observability
+tags:
+- cloud monitoring
+- log-based alert
+- logmatch
+- notification channel
+- audit logs
+- pub/sub
+- incident
+source: https://docs.cloud.google.com/logging/docs/alerting/log-based-alerts
+description: A Cloud Monitoring alert policy with a LogMatch condition watches Cloud Audit Logs for sensitive events such as a human principal decrypting with a KMS key or accessing a Secret Manager secret
+  version, extracting labels from the log entry into the notification. Incidents route through email and Pub/Sub notification channels, and a Cloud Run function subscribed to the topic posts to the on-call
+  chat tool, while a log-based metric on the same filter provides counts for a dashboard.
+nodes:
+- {id: prj-prj-c-secrets, type: gcp.project, name: prj-c-secrets, props: {project_id: prj-c-secrets-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-c-monitoring, type: gcp.project, name: prj-c-monitoring, props: {project_id: prj-c-monitoring-123456, project: changeme, region: us-central1}}
+- {id: user, type: common.user, name: user}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- id: payroll-db-secret
+  type: gcp.res.google_secret_manager_secret
+  name: payroll-db-secret
+  parent: prj-prj-c-secrets
+  props: {replication: {}, secret_id: changeme}
+- {id: audit-to-monitoring-sink, type: gcp.res.google_logging_project_sink, name: audit-to-monitoring-sink, parent: prj-prj-c-secrets, props: {destination: changeme, name: changeme}}
+- {id: security-audit-bucket, type: gcp.res.google_logging_project_bucket_config, name: security-audit-bucket, parent: prj-prj-c-monitoring, props: {bucket_id: changeme, location: westeurope, project: changeme}}
+- id: human-key-access-alert
+  type: gcp.res.google_monitoring_alert_policy
+  name: human-key-access-alert
+  parent: prj-prj-c-monitoring
+  props:
+    combiner: changeme
+    conditions: []
+    display_name: changeme
+- {id: human-key-access-count, type: gcp.res.google_logging_metric, name: human-key-access-count, parent: prj-prj-c-monitoring, props: {filter: changeme, name: changeme}}
+- {id: security-email-channel, type: gcp.res.google_monitoring_notification_channel, name: security-email-channel, parent: prj-prj-c-monitoring, props: {type: changeme}}
+- {id: security-pubsub-channel, type: gcp.res.google_monitoring_notification_channel, name: security-pubsub-channel, parent: prj-prj-c-monitoring, props: {type: changeme}}
+- {id: security-alerts-topic, type: gcp.pubsub_topic, name: security-alerts-topic, parent: prj-prj-c-monitoring}
+- {id: alert-to-chat-fn, type: gcp.res.google_cloudfunctions2_function, name: alert-to-chat-fn, parent: prj-prj-c-monitoring, props: {location: westeurope, name: changeme}}
+- {id: key-access-dashboard, type: gcp.res.google_monitoring_dashboard, name: key-access-dashboard, parent: prj-prj-c-monitoring, props: {dashboard_json: changeme}}
+edges:
+- {from: user, to: payroll-db-secret, label: AccessSecretVersion, step: '1'}
+- {from: audit-to-monitoring-sink, to: security-audit-bucket, label: route to central bucket, step: '3'}
+- {from: security-audit-bucket, to: human-key-access-alert, label: LogMatch on non-service-account principal, step: '4'}
+- {from: security-audit-bucket, to: human-key-access-count, label: log-based metric, step: '5'}
+- {from: human-key-access-alert, to: security-email-channel, label: incident notification, step: '6'}
+- {from: human-key-access-alert, to: security-pubsub-channel, label: incident notification, step: '6'}
+- {from: security-pubsub-channel, to: security-alerts-topic, label: publish JSON payload, step: '7'}
+- {from: security-alerts-topic, to: alert-to-chat-fn, label: cloudfunctions2 function}
+- {from: alert-to-chat-fn, to: saas, label: chat webhook, step: '8'}
+- {from: security-email-channel, to: users, label: email security team, step: '9'}
+- {from: human-key-access-count, to: key-access-dashboard, label: chart, step: '10'}
+steps:
+- {n: '1', text: 'user → payroll-db-secret: AccessSecretVersion'}
+- {n: '3', text: 'audit-to-monitoring-sink → security-audit-bucket: route to central bucket'}
+- {n: '4', text: 'security-audit-bucket → human-key-access-alert: LogMatch on non-service-account principal'}
+- {n: '5', text: 'security-audit-bucket → human-key-access-count: log-based metric'}
+- {n: '6', text: 'human-key-access-alert → security-email-channel: incident notification'}
+- {n: '7', text: 'security-pubsub-channel → security-alerts-topic: publish JSON payload'}
+- {n: '8', text: 'alert-to-chat-fn → saas: chat webhook'}
+- {n: '9', text: 'security-email-channel → users: email security team'}
+- {n: '10', text: 'human-key-access-count → key-access-dashboard: chart'}

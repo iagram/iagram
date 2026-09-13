@@ -1,0 +1,49 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/distributed-services-on-gke-private-using-anthos-service-mesh); edit freely.
+title: Distributed services across private GKE clusters with Cloud Service Mesh and Multi Cluster Ingress
+category: containers
+tags:
+- gke
+- cloud service mesh
+- multi-cluster
+- private clusters
+- multi cluster ingress
+- cloud nat
+- bank of anthos
+source: https://docs.cloud.google.com/architecture/distributed-services-on-gke-private-using-anthos-service-mesh
+description: Two private GKE application clusters in separate regions run Cloud Service Mesh so a service with pods in both clusters is one distributed service with cross-cluster discovery and mTLS; each
+  cluster's nodes use Cloud NAT for egress and authorized networks for control-plane access. A third small cluster is the Multi Cluster Ingress config cluster that programs a global external Application
+  Load Balancer in front of the mesh ingress gateways in both application clusters.
+nodes:
+- {id: prj-mesh-prj, type: gcp.project, name: mesh-prj, props: {project_id: mesh-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-mesh-vpc, type: gcp.vpc, name: mesh-vpc, parent: prj-mesh-prj, props: {cidr: 10.80.0.0/16}}
+- {id: sub-app1-sub, type: gcp.subnetwork, name: app1-sub, parent: vpc-mesh-vpc, props: {cidr: 10.80.0.0/20, region: europe-west1}}
+- {id: sub-app2-sub, type: gcp.subnetwork, name: app2-sub, parent: vpc-mesh-vpc, props: {cidr: 10.80.16.0/20, region: europe-west4}}
+- {id: sub-ingress-config-sub, type: gcp.subnetwork, name: ingress-config-sub, parent: vpc-mesh-vpc, props: {cidr: 10.80.32.0/22, region: europe-west3}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: gke-central-priv, type: gcp.gke_cluster, name: gke-central-priv, parent: sub-app1-sub}
+- {id: gke-west-priv, type: gcp.gke_cluster, name: gke-west-priv, parent: sub-app2-sub}
+- {id: ingress-config, type: gcp.gke_cluster, name: ingress-config, parent: sub-ingress-config-sub}
+- {id: servicemesh, type: gcp.res.google_gke_hub_feature, name: servicemesh, parent: prj-mesh-prj, props: {location: westeurope}}
+- {id: multiclusteringress, type: gcp.res.google_gke_hub_feature, name: multiclusteringress, parent: prj-mesh-prj, props: {location: westeurope}}
+- {id: mesh-router, type: gcp.res.google_compute_router, name: mesh-router, parent: vpc-mesh-vpc, props: {name: changeme, network: changeme}}
+- {id: mesh-nat, type: gcp.res.google_compute_router_nat, name: mesh-nat, parent: vpc-mesh-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+- {id: mci-frontend, type: gcp.res.google_compute_global_forwarding_rule, name: mci-frontend, parent: prj-mesh-prj, props: {name: changeme, target: changeme}}
+- {id: mci-ingress-backend, type: gcp.res.google_compute_backend_service, name: mci-ingress-backend, parent: prj-mesh-prj, props: {name: changeme}}
+edges:
+- {from: servicemesh, to: gke-central-priv, label: gke hub membership}
+- {from: servicemesh, to: gke-west-priv, label: gke hub membership}
+- {from: multiclusteringress, to: ingress-config, label: config cluster}
+- {from: users, to: mci-frontend, label: HTTPS, step: '1'}
+- {from: mci-frontend, to: mci-ingress-backend, step: '2'}
+- {from: mci-ingress-backend, to: gke-central-priv, label: mesh ingress gateway, step: '3'}
+- {from: mci-ingress-backend, to: gke-west-priv, label: mesh ingress gateway}
+- {from: gke-central-priv, to: gke-west-priv, label: cross-cluster mTLS service calls, step: '4'}
+- {from: gke-central-priv, to: mesh-nat, label: egress}
+- {from: mesh-router, to: mesh-nat}
+- {from: mesh-nat, to: internet}
+steps:
+- {n: '1', text: 'users → mci-frontend: HTTPS'}
+- {n: '2', text: mci-frontend → mci-ingress-backend}
+- {n: '3', text: 'mci-ingress-backend → gke-central-priv: mesh ingress gateway'}
+- {n: '4', text: 'gke-central-priv → gke-west-priv: cross-cluster mTLS service calls'}

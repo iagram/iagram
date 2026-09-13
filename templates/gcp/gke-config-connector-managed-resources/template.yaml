@@ -1,0 +1,40 @@
+# Generated from the official reference (https://docs.cloud.google.com/config-connector/docs/overview); edit freely.
+title: GKE cluster managing Google Cloud resources with Config Connector
+category: containers
+tags:
+- gke
+- config connector
+- kubernetes crds
+- gitops
+- workload identity
+- infrastructure as code
+source: https://docs.cloud.google.com/config-connector/docs/overview
+description: Config Connector runs as an add-on in a GKE cluster and installs CRDs so Cloud SQL instances, Pub/Sub topics and Cloud Storage buckets are declared as Kubernetes objects committed to a Git
+  repository and applied by a Cloud Build trigger. Its controllers reconcile the desired state against Google Cloud APIs using a dedicated IAM service account bound through Workload Identity, so developers
+  never hold direct cloud permissions.
+nodes:
+- {id: prj-kcc-prj, type: gcp.project, name: kcc-prj, props: {project_id: kcc-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-kcc-vpc, type: gcp.vpc, name: kcc-vpc, parent: prj-kcc-prj, props: {cidr: 10.90.0.0/16}}
+- {id: sub-kcc-gke-sub, type: gcp.subnetwork, name: kcc-gke-sub, parent: vpc-kcc-vpc, props: {cidr: 10.90.0.0/20, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: platform-cluster, type: gcp.gke_cluster, name: platform-cluster, parent: sub-kcc-gke-sub}
+- {id: cnrm-system-sa, type: gcp.res.google_service_account, name: cnrm-system-sa, parent: prj-kcc-prj, props: {account_id: changeme}}
+- {id: infra-manifests, type: gcp.res.google_sourcerepo_repository, name: infra-manifests, parent: prj-kcc-prj, props: {name: changeme}}
+- {id: apply-manifests, type: gcp.res.google_cloudbuild_trigger, name: apply-manifests, parent: prj-kcc-prj}
+- {id: vpc-prj-kcc-prj, type: gcp.vpc, name: main, parent: prj-kcc-prj}
+- {id: managed-db, type: gcp.cloud_sql_instance, name: managed-db, parent: vpc-prj-kcc-prj}
+- {id: managed-topic, type: gcp.pubsub_topic, name: managed-topic, parent: prj-kcc-prj}
+- {id: managed-bucket, type: gcp.storage_bucket, name: managed-bucket, parent: prj-kcc-prj}
+edges:
+- {from: users, to: infra-manifests, label: git push KCC manifests, step: '1'}
+- {from: infra-manifests, to: apply-manifests, label: trigger on main, step: '2'}
+- {from: apply-manifests, to: platform-cluster, label: kubectl apply, step: '3'}
+- {from: cnrm-system-sa, to: platform-cluster, label: Workload Identity for Config Connector}
+- {from: platform-cluster, to: managed-db, label: reconcile SQLInstance, step: '4'}
+- {from: platform-cluster, to: managed-topic, label: reconcile PubSubTopic}
+- {from: platform-cluster, to: managed-bucket, label: reconcile StorageBucket}
+steps:
+- {n: '1', text: 'users → infra-manifests: git push KCC manifests'}
+- {n: '2', text: 'infra-manifests → apply-manifests: trigger on main'}
+- {n: '3', text: 'apply-manifests → platform-cluster: kubectl apply'}
+- {n: '4', text: 'platform-cluster → managed-db: reconcile SQLInstance'}

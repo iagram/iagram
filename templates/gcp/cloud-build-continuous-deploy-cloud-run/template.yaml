@@ -1,0 +1,38 @@
+# Generated from the official reference (https://docs.cloud.google.com/run/docs/continuous-deployment-with-cloud-build); edit freely.
+title: Continuous deployment from a Git repository to Cloud Run with Cloud Build
+category: devops
+tags:
+- cloud build
+- cloud run
+- continuous deployment
+- buildpacks
+- artifact registry
+- developer connect
+source: https://docs.cloud.google.com/run/docs/continuous-deployment-with-cloud-build
+description: Cloud Run's continuous deployment setup connects a GitHub, GitLab or Bitbucket repository through Cloud Build or Developer Connect and creates a trigger on one branch. Each commit is built
+  from a Dockerfile or with Google Cloud buildpacks, the image is stored in Artifact Registry and a new Cloud Run revision is deployed automatically, with the build service account holding Cloud Run Developer
+  and Service Account User.
+nodes:
+- {id: prj-run-cd-prj, type: gcp.project, name: run-cd-prj, props: {project_id: run-cd-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- {id: github-connection, type: gcp.res.google_cloudbuildv2_connection, name: github-connection, parent: prj-run-cd-prj, props: {location: westeurope, name: changeme}}
+- {id: web-repo, type: gcp.res.google_cloudbuildv2_repository, name: web-repo, parent: prj-run-cd-prj, props: {name: changeme, parent_connection: changeme, remote_uri: changeme}}
+- {id: deploy-on-main, type: gcp.res.google_cloudbuild_trigger, name: deploy-on-main, parent: prj-run-cd-prj}
+- {id: build-deploy-sa, type: gcp.res.google_service_account, name: build-deploy-sa, parent: prj-run-cd-prj, props: {account_id: changeme}}
+- {id: cloud-run-source-deploy, type: gcp.res.google_artifact_registry_repository, name: cloud-run-source-deploy, parent: prj-run-cd-prj, props: {format: changeme, repository_id: changeme}}
+- {id: web-service, type: gcp.cloud_run_service, name: web-service, parent: prj-run-cd-prj}
+edges:
+- {from: saas, to: github-connection, label: GitHub app installation}
+- {from: github-connection, to: web-repo}
+- {from: users, to: web-repo, label: commit to main, step: '1'}
+- {from: web-repo, to: deploy-on-main, label: push event, step: '2'}
+- {from: build-deploy-sa, to: deploy-on-main, label: Run Developer identity}
+- {from: deploy-on-main, to: cloud-run-source-deploy, label: buildpacks or Dockerfile build and push, step: '3'}
+- {from: deploy-on-main, to: web-service, label: gcloud run deploy new revision, step: '4'}
+- {from: cloud-run-source-deploy, to: web-service, label: image pull}
+steps:
+- {n: '1', text: 'users → web-repo: commit to main'}
+- {n: '2', text: 'web-repo → deploy-on-main: push event'}
+- {n: '3', text: 'deploy-on-main → cloud-run-source-deploy: buildpacks or Dockerfile build and push'}
+- {n: '4', text: 'deploy-on-main → web-service: gcloud run deploy new revision'}

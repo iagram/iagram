@@ -1,0 +1,42 @@
+# Generated from the official reference (https://docs.cloud.google.com/kubernetes-engine/docs/how-to/private-clusters); edit freely.
+title: Private GKE cluster with private nodes, authorized control plane access and Cloud NAT egress
+category: containers
+tags:
+- gke
+- private cluster
+- private nodes
+- authorized networks
+- cloud nat
+- bastion
+source: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/private-clusters
+description: Nodes get only internal IP addresses and the control plane is reached through a DNS-based endpoint gated by IAM or an IP-based endpoint limited to authorized network ranges; a bastion VM in
+  the VPC is one of those ranges for kubectl access. Because nodes have no external addresses, a Cloud Router with Cloud NAT provides outbound internet for image pulls from public registries, while Artifact
+  Registry is reached over Private Google Access.
+nodes:
+- {id: prj-gke-private-prj, type: gcp.project, name: gke-private-prj, props: {project_id: gke-private-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-private-vpc, type: gcp.vpc, name: private-vpc, parent: prj-gke-private-prj, props: {cidr: 10.60.0.0/16}}
+- {id: sub-gke-nodes-sub, type: gcp.subnetwork, name: gke-nodes-sub, parent: vpc-private-vpc, props: {cidr: 10.60.0.0/20, region: europe-west1}}
+- {id: sub-bastion-sub, type: gcp.subnetwork, name: bastion-sub, parent: vpc-private-vpc, props: {cidr: 10.60.16.0/24, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: internet, type: common.internet, name: internet}
+- {id: private-cluster, type: gcp.gke_cluster, name: private-cluster, parent: sub-gke-nodes-sub}
+- {id: private-nodes, type: gcp.res.google_container_node_pool, name: private-nodes, parent: private-cluster, props: {cluster: changeme}}
+- {id: bastion, type: gcp.compute_instance, name: bastion, parent: sub-bastion-sub}
+- {id: egress-router, type: gcp.res.google_compute_router, name: egress-router, parent: vpc-private-vpc, props: {name: changeme, network: changeme}}
+- {id: egress-nat, type: gcp.res.google_compute_router_nat, name: egress-nat, parent: vpc-private-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+- {id: workload-images, type: gcp.res.google_artifact_registry_repository, name: workload-images, parent: prj-gke-private-prj, props: {format: changeme, repository_id: changeme}}
+- {id: allow-iap-ssh, type: gcp.firewall_rule, name: allow-iap-ssh, parent: vpc-private-vpc}
+edges:
+- {from: users, to: bastion, label: SSH via IAP TCP forwarding, step: '1'}
+- {from: bastion, to: private-cluster, label: kubectl to private endpoint (authorized network), step: '2'}
+- {from: private-cluster, to: private-nodes, label: control plane to nodes}
+- {from: private-nodes, to: workload-images, label: pull over Private Google Access, step: '3'}
+- {from: private-nodes, to: egress-nat, label: outbound to public registries, step: '4'}
+- {from: egress-router, to: egress-nat}
+- {from: egress-nat, to: internet, step: '5'}
+steps:
+- {n: '1', text: 'users → bastion: SSH via IAP TCP forwarding'}
+- {n: '2', text: 'bastion → private-cluster: kubectl to private endpoint (authorized network)'}
+- {n: '3', text: 'private-nodes → workload-images: pull over Private Google Access'}
+- {n: '4', text: 'private-nodes → egress-nat: outbound to public registries'}
+- {n: '5', text: egress-nat → internet}

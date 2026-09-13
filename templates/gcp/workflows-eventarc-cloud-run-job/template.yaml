@@ -1,0 +1,52 @@
+# Generated from the official reference (https://docs.cloud.google.com/workflows/docs/tutorials/execute-cloud-run-jobs); edit freely.
+title: Workflows orchestrating a parallel Cloud Run job from Cloud Storage events
+category: serverless
+tags:
+- workflows
+- cloud run jobs
+- eventarc
+- cloud storage
+- orchestration
+- parallel tasks
+source: https://docs.cloud.google.com/workflows/docs/tutorials/execute-cloud-run-jobs
+description: An Eventarc trigger routes Cloud Storage object.finalized events for an input bucket to a Workflows workflow, which checks the event's bucket and then calls the Cloud Run Jobs API to run a
+  job with environment variable overrides taken from the event. The job's parallel tasks each process a slice of the input file, and the workflow waits for completion and returns the execution result; the
+  job image is built by Cloud Build into Artifact Registry.
+nodes:
+- {id: prj-wf-prj, type: gcp.project, name: wf-prj, props: {project_id: wf-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: input-files, type: gcp.storage_bucket, name: input-files, parent: prj-wf-prj}
+- id: input-finalized-trigger
+  type: gcp.res.google_eventarc_trigger
+  name: input-finalized-trigger
+  parent: prj-wf-prj
+  props:
+    destination: {}
+    location: westeurope
+    matching_criteria: []
+    name: changeme
+- {id: process-input-workflow, type: gcp.res.google_workflows_workflow, name: process-input-workflow, parent: prj-wf-prj}
+- id: parallel-processor
+  type: gcp.res.google_cloud_run_v2_job
+  name: parallel-processor
+  parent: prj-wf-prj
+  props: {location: westeurope, name: changeme, template: {}}
+- {id: workflow-sa, type: gcp.res.google_service_account, name: workflow-sa, parent: prj-wf-prj, props: {account_id: changeme}}
+- {id: job-images, type: gcp.res.google_artifact_registry_repository, name: job-images, parent: prj-wf-prj, props: {format: changeme, repository_id: changeme}}
+- {id: processed-output, type: gcp.storage_bucket, name: processed-output, parent: prj-wf-prj}
+edges:
+- {from: users, to: input-files, label: upload input file, step: '1'}
+- {from: input-files, to: input-finalized-trigger, label: object.finalized, step: '2'}
+- {from: input-finalized-trigger, to: process-input-workflow, label: execute with event argument, step: '3'}
+- {from: workflow-sa, to: process-input-workflow, label: Run Developer + Eventarc receiver}
+- {from: process-input-workflow, to: parallel-processor, label: jobs.run with env overrides, step: '4'}
+- {from: job-images, to: parallel-processor, label: image pull}
+- {from: parallel-processor, to: processed-output, label: write task results, step: '5'}
+- {from: parallel-processor, to: process-input-workflow, label: execution completed, step: '6'}
+steps:
+- {n: '1', text: 'users → input-files: upload input file'}
+- {n: '2', text: 'input-files → input-finalized-trigger: object.finalized'}
+- {n: '3', text: 'input-finalized-trigger → process-input-workflow: execute with event argument'}
+- {n: '4', text: 'process-input-workflow → parallel-processor: jobs.run with env overrides'}
+- {n: '5', text: 'parallel-processor → processed-output: write task results'}
+- {n: '6', text: 'parallel-processor → process-input-workflow: execution completed'}

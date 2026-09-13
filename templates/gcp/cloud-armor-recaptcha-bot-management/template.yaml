@@ -1,0 +1,46 @@
+# Generated from the official reference (https://docs.cloud.google.com/armor/docs/bot-management); edit freely.
+title: Bot management with Cloud Armor and reCAPTCHA on a global external Application Load Balancer
+category: security
+tags:
+- cloud armor
+- recaptcha
+- bot management
+- waf
+- action token
+- challenge page
+- global external application load balancer
+source: https://docs.cloud.google.com/armor/docs/bot-management
+description: reCAPTCHA WAF keys for action tokens, session tokens and a challenge page are created for the site and associated with a Cloud Armor security policy attached to the load balancer's backend
+  service. Rules evaluate the reCAPTCHA token inline at the edge and allow, deny, rate-limit or redirect suspicious requests to the reCAPTCHA challenge page, while legitimate users pass through to the Cloud
+  Run backends via a serverless NEG.
+nodes:
+- {id: prj-bot-mgmt-prj, type: gcp.project, name: bot-mgmt-prj, props: {project_id: bot-mgmt-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: action-token-key, type: gcp.res.google_recaptcha_enterprise_key, name: action-token-key, parent: prj-bot-mgmt-prj, props: {display_name: changeme}}
+- {id: session-token-key, type: gcp.res.google_recaptcha_enterprise_key, name: session-token-key, parent: prj-bot-mgmt-prj, props: {display_name: changeme}}
+- {id: challenge-page-key, type: gcp.res.google_recaptcha_enterprise_key, name: challenge-page-key, parent: prj-bot-mgmt-prj, props: {display_name: changeme}}
+- {id: bot-policy, type: gcp.res.google_compute_security_policy, name: bot-policy, parent: prj-bot-mgmt-prj, props: {name: changeme}}
+- {id: shop-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: shop-https-rule, parent: prj-bot-mgmt-prj, props: {name: changeme, target: changeme}}
+- {id: shop-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: shop-https-proxy, parent: prj-bot-mgmt-prj, props: {name: changeme, url_map: changeme}}
+- {id: shop-url-map, type: gcp.res.google_compute_url_map, name: shop-url-map, parent: prj-bot-mgmt-prj, props: {name: changeme}}
+- {id: shop-backend, type: gcp.res.google_compute_backend_service, name: shop-backend, parent: prj-bot-mgmt-prj, props: {name: changeme}}
+- {id: shop-neg, type: gcp.res.google_compute_region_network_endpoint_group, name: shop-neg, parent: prj-bot-mgmt-prj, props: {name: changeme, region: eu-west-1}}
+- {id: shop-service, type: gcp.cloud_run_service, name: shop-service, parent: prj-bot-mgmt-prj}
+edges:
+- {from: users, to: shop-https-rule, label: HTTPS with X-Recaptcha-Token, step: '1'}
+- {from: shop-https-rule, to: shop-https-proxy, step: '2'}
+- {from: shop-https-proxy, to: shop-url-map, step: '3'}
+- {from: shop-url-map, to: shop-backend, step: '4'}
+- {from: bot-policy, to: shop-backend, label: security policy attached}
+- {from: action-token-key, to: bot-policy, label: token evaluated inline}
+- {from: session-token-key, to: bot-policy, label: session cookie scoring}
+- {from: challenge-page-key, to: bot-policy, label: redirect suspicious traffic to challenge}
+- {from: shop-backend, to: shop-neg, label: allowed requests, step: '5'}
+- {from: shop-neg, to: shop-service, step: '6'}
+steps:
+- {n: '1', text: 'users → shop-https-rule: HTTPS with X-Recaptcha-Token'}
+- {n: '2', text: shop-https-rule → shop-https-proxy}
+- {n: '3', text: shop-https-proxy → shop-url-map}
+- {n: '4', text: shop-url-map → shop-backend}
+- {n: '5', text: 'shop-backend → shop-neg: allowed requests'}
+- {n: '6', text: shop-neg → shop-service}

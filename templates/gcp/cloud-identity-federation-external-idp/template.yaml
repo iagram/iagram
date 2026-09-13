@@ -1,0 +1,44 @@
+# Generated from the official reference (https://docs.cloud.google.com/architecture/identity/reference-architectures); edit freely.
+title: Cloud Identity federation with an external identity provider
+category: identity
+tags:
+- cloud identity
+- gcds
+- saml sso
+- active directory
+- workforce identity federation
+- iam
+source: https://docs.cloud.google.com/architecture/identity/reference-architectures
+description: An on-premises Active Directory stays the authoritative source while Google Cloud Directory Sync provisions users and groups one-way into Cloud Identity and AD FS handles SAML single sign-on,
+  so MFA and password policies are inherited from the corporate IdP. Alternatively Workforce Identity Federation exchanges OIDC or SAML tokens from Entra ID or Okta for short-lived Google Cloud credentials
+  without synchronizing accounts, and IAM bindings target Cloud Identity groups or workforce pool principal sets.
+nodes:
+- {id: dc-corp-dc, type: common.datacenter, name: corp-dc}
+- {id: prj-prj-c-identity, type: gcp.project, name: prj-c-identity, props: {project_id: prj-c-identity-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-p-workload, type: gcp.project, name: prj-p-workload, props: {project_id: prj-p-workload-123456, project: changeme, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: idp, type: common.idp, name: idp}
+- {id: vpc-prj-prj-c-identity, type: gcp.vpc, name: main, parent: prj-prj-c-identity}
+- {id: sub-prj-prj-c-identity, type: gcp.subnetwork, name: main, parent: vpc-prj-prj-c-identity, props: {cidr: 10.200.0.0/24, region: europe-west1}}
+- {id: active-directory-dc, type: gcp.compute_instance, name: active-directory-dc, parent: sub-prj-prj-c-identity}
+- {id: gcds-sync-server, type: gcp.compute_instance, name: gcds-sync-server, parent: sub-prj-prj-c-identity}
+- {id: adfs-sso-server, type: gcp.compute_instance, name: adfs-sso-server, parent: sub-prj-prj-c-identity}
+- id: gcp-platform-admins
+  type: gcp.res.google_cloud_identity_group
+  name: gcp-platform-admins
+  parent: prj-prj-c-identity
+  props: {group_key: {}, labels: {}, parent: changeme}
+- {id: employees-pool, type: gcp.res.google_iam_workforce_pool, name: employees-pool, parent: prj-prj-c-identity, props: {location: westeurope, parent: changeme, workforce_pool_id: changeme}}
+- {id: workload-data-bucket, type: gcp.storage_bucket, name: workload-data-bucket, parent: prj-prj-p-workload}
+edges:
+- {from: active-directory-dc, to: gcds-sync-server, label: LDAP read, step: '1'}
+- {from: gcds-sync-server, to: gcp-platform-admins, label: one-way user and group sync, step: '2'}
+- {from: users, to: adfs-sso-server, label: SAML sign-in, step: '3'}
+- {from: adfs-sso-server, to: gcp-platform-admins, label: SAML assertion to Cloud Identity, step: '4'}
+- {from: gcp-platform-admins, to: workload-data-bucket, label: group-based IAM access, step: '8'}
+steps:
+- {n: '1', text: 'active-directory-dc → gcds-sync-server: LDAP read'}
+- {n: '2', text: 'gcds-sync-server → gcp-platform-admins: one-way user and group sync'}
+- {n: '3', text: 'users → adfs-sso-server: SAML sign-in'}
+- {n: '4', text: 'adfs-sso-server → gcp-platform-admins: SAML assertion to Cloud Identity'}
+- {n: '8', text: 'gcp-platform-admins → workload-data-bucket: group-based IAM access'}

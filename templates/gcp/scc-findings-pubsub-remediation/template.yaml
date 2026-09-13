@@ -1,0 +1,50 @@
+# Generated from the official reference (https://docs.cloud.google.com/security-command-center/docs/how-to-notifications); edit freely.
+title: Security Command Center findings to Pub/Sub with automated remediation
+category: security
+tags:
+- security command center
+- notification config
+- pub/sub
+- cloud run functions
+- auto remediation
+- bigquery
+source: https://docs.cloud.google.com/security-command-center/docs/how-to-notifications
+description: An organization-level Security Command Center NotificationConfig with a findings filter publishes new high and critical findings to a Pub/Sub topic in near real time. A Cloud Run function subscribed
+  to the topic enriches and remediates findings such as public buckets or open firewall rules, forwards the event to a chat webhook, and a BigQuery export sink keeps findings history for dashboards.
+nodes:
+- {id: prj-prj-c-scc, type: gcp.project, name: prj-c-scc, props: {project_id: prj-c-scc-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-p-workload, type: gcp.project, name: prj-p-workload, props: {project_id: prj-p-workload-123456, project: changeme, region: us-central1}}
+- {id: vpc-workload-vpc, type: gcp.vpc, name: workload-vpc, parent: prj-prj-p-workload, props: {cidr: 10.70.0.0/16}}
+- {id: users, type: common.users, name: users}
+- {id: saas, type: common.saas, name: saas}
+- id: high-critical-findings-notification
+  type: gcp.res.google_scc_notification_config
+  name: high-critical-findings-notification
+  parent: prj-prj-c-scc
+  props: {config_id: changeme, organization: changeme, pubsub_topic: changeme, streaming_config: {}}
+- {id: scc-findings-topic, type: gcp.pubsub_topic, name: scc-findings-topic, parent: prj-prj-c-scc}
+- {id: scc-findings-sub, type: gcp.res.google_pubsub_subscription, name: scc-findings-sub, parent: prj-prj-c-scc, props: {name: changeme, topic: changeme}}
+- {id: remediate-findings-fn, type: gcp.res.google_cloudfunctions2_function, name: remediate-findings-fn, parent: prj-prj-c-scc, props: {location: westeurope, name: changeme}}
+- {id: scc-findings-dataset, type: gcp.bigquery_dataset, name: scc-findings-dataset, parent: prj-prj-c-scc}
+- {id: security-oncall-channel, type: gcp.res.google_monitoring_notification_channel, name: security-oncall-channel, parent: prj-prj-c-scc, props: {type: changeme}}
+- {id: exposed-bucket, type: gcp.storage_bucket, name: exposed-bucket, parent: prj-prj-p-workload}
+- {id: open-ssh-rule, type: gcp.firewall_rule, name: open-ssh-rule, parent: vpc-workload-vpc}
+edges:
+- {from: exposed-bucket, to: high-critical-findings-notification, label: PUBLIC_BUCKET_ACL finding, step: '1'}
+- {from: open-ssh-rule, to: high-critical-findings-notification, label: OPEN_SSH_PORT finding, step: '1'}
+- {from: high-critical-findings-notification, to: scc-findings-topic, label: filtered findings, step: '2'}
+- {from: scc-findings-topic, to: scc-findings-sub, label: pubsub subscription}
+- {from: scc-findings-sub, to: remediate-findings-fn, label: push trigger, step: '3'}
+- {from: remediate-findings-fn, to: exposed-bucket, label: remove allUsers binding, step: '4'}
+- {from: remediate-findings-fn, to: open-ssh-rule, label: disable rule, step: '4'}
+- {from: remediate-findings-fn, to: saas, label: chat webhook, step: '5'}
+- {from: high-critical-findings-notification, to: scc-findings-dataset, label: BigQuery export, step: '6'}
+- {from: security-oncall-channel, to: users, label: page on-call, step: '7'}
+steps:
+- {n: '1', text: 'exposed-bucket → high-critical-findings-notification: PUBLIC_BUCKET_ACL finding'}
+- {n: '2', text: 'high-critical-findings-notification → scc-findings-topic: filtered findings'}
+- {n: '3', text: 'scc-findings-sub → remediate-findings-fn: push trigger'}
+- {n: '4', text: 'remediate-findings-fn → exposed-bucket: remove allUsers binding'}
+- {n: '5', text: 'remediate-findings-fn → saas: chat webhook'}
+- {n: '6', text: 'high-critical-findings-notification → scc-findings-dataset: BigQuery export'}
+- {n: '7', text: 'security-oncall-channel → users: page on-call'}

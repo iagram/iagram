@@ -1,0 +1,62 @@
+# Generated from the official reference (https://docs.cloud.google.com/binary-authorization/docs/overview); edit freely.
+title: Binary Authorization software supply chain for GKE
+category: containers
+tags:
+- binary authorization
+- attestor
+- attestation
+- cloud build
+- artifact registry
+- gke
+- cloud kms
+- slsa
+source: https://docs.cloud.google.com/binary-authorization/docs/overview
+description: Cloud Build builds and scans a container image, pushes it to Artifact Registry and signs an attestation with a Cloud KMS asymmetric key that a Binary Authorization attestor trusts. The project
+  Binary Authorization policy requires that attestation for deployment, so the GKE cluster admission controller blocks unsigned or unscanned images, logs violations to Cloud Audit Logs, and continuous validation
+  flags running pods that drift from the policy.
+nodes:
+- {id: prj-prj-p-platform, type: gcp.project, name: prj-p-platform, props: {project_id: prj-p-platform-123456, project: changeme, region: us-central1}}
+- {id: vpc-platform-vpc, type: gcp.vpc, name: platform-vpc, parent: prj-prj-p-platform}
+- {id: sub-gke-sub, type: gcp.subnetwork, name: gke-sub, parent: vpc-platform-vpc, props: {cidr: 10.100.0.0/20, region: us-central1}}
+- {id: users, type: common.users, name: users}
+- {id: app-source-repo, type: gcp.res.google_sourcerepo_repository, name: app-source-repo, parent: prj-prj-p-platform, props: {name: changeme}}
+- {id: build-sign-trigger, type: gcp.res.google_cloudbuild_trigger, name: build-sign-trigger, parent: prj-prj-p-platform}
+- {id: app-images, type: gcp.res.google_artifact_registry_repository, name: app-images, parent: prj-prj-p-platform, props: {format: changeme, repository_id: changeme}}
+- {id: binauthz-key-ring, type: gcp.res.google_kms_key_ring, name: binauthz-key-ring, parent: prj-prj-p-platform, props: {location: westeurope, name: changeme}}
+- id: build-verified-note
+  type: gcp.res.google_container_analysis_note
+  name: build-verified-note
+  parent: prj-prj-p-platform
+  props: {attestation_authority: {}, name: changeme}
+- id: build-verified-attestor
+  type: gcp.res.google_binary_authorization_attestor
+  name: build-verified-attestor
+  parent: prj-prj-p-platform
+  props: {attestation_authority_note: {}, name: changeme}
+- id: require-attestation-policy
+  type: gcp.res.google_binary_authorization_policy
+  name: require-attestation-policy
+  parent: prj-prj-p-platform
+  props: {default_admission_rule: {}}
+- {id: prod-gke, type: gcp.gke_cluster, name: prod-gke, parent: sub-gke-sub}
+- {id: binauthz-audit-sink, type: gcp.res.google_logging_project_sink, name: binauthz-audit-sink, parent: prj-prj-p-platform, props: {destination: changeme, name: changeme}}
+edges:
+- {from: users, to: app-source-repo, label: git push, step: '1'}
+- {from: app-source-repo, to: build-sign-trigger, label: trigger build, step: '2'}
+- {from: build-sign-trigger, to: app-images, label: push image and vulnerability scan, step: '3'}
+- {from: build-sign-trigger, to: build-verified-note, label: create attestation occurrence, step: '5'}
+- {from: build-verified-attestor, to: build-verified-note, label: trusts note and public key, step: '6'}
+- {from: require-attestation-policy, to: build-verified-attestor, label: required attestor, step: '7'}
+- {from: require-attestation-policy, to: prod-gke, label: admission enforcement, step: '8'}
+- {from: prod-gke, to: app-images, label: pull attested image only, step: '9'}
+- {from: prod-gke, to: binauthz-audit-sink, label: denied deployments audit log, step: '10'}
+steps:
+- {n: '1', text: 'users → app-source-repo: git push'}
+- {n: '2', text: 'app-source-repo → build-sign-trigger: trigger build'}
+- {n: '3', text: 'build-sign-trigger → app-images: push image and vulnerability scan'}
+- {n: '5', text: 'build-sign-trigger → build-verified-note: create attestation occurrence'}
+- {n: '6', text: 'build-verified-attestor → build-verified-note: trusts note and public key'}
+- {n: '7', text: 'require-attestation-policy → build-verified-attestor: required attestor'}
+- {n: '8', text: 'require-attestation-policy → prod-gke: admission enforcement'}
+- {n: '9', text: 'prod-gke → app-images: pull attested image only'}
+- {n: '10', text: 'prod-gke → binauthz-audit-sink: denied deployments audit log'}

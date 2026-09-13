@@ -125,8 +125,10 @@
     - {tf: google_secret_manager_secret, name: db-password, in: project:run-sql-prj}
     - {tf: google_sql_database_instance, name: orders-pg, in: subnet:db-sub}
     - {tf: google_artifact_registry_repository, name: api-images, in: project:run-sql-prj}
+    - {tf: google_cloudbuild_trigger, name: api-build, in: project:run-sql-prj}
   actors: [users]
   flows:
+    - {from: api-build, to: api-images, label: build and push image}
     - {from: users, to: api-service, label: HTTPS run.app URL, step: 1}
     - {from: api-sa, to: api-service, label: runtime identity, step: 2}
     - {from: api-service, to: db-password, label: secret mounted as env var, step: 3}
@@ -154,8 +156,10 @@
     - {tf: google_vpc_access_connector, name: legacy-connector, in: subnet:connector-sub}
     - {tf: google_service_account, name: counter-sa, in: project:run-cache-prj}
     - {tf: google_artifact_registry_repository, name: counter-images, in: project:run-cache-prj}
+    - {tf: google_cloudbuild_trigger, name: counter-build, in: project:run-cache-prj}
   actors: [users]
   flows:
+    - {from: counter-build, to: counter-images, label: build and push image}
     - {from: users, to: counter-service, label: HTTPS, step: 1}
     - {from: counter-service, to: counter-redis, label: "INCR over 6379, Direct VPC egress", step: 2}
     - {from: counter-service, to: legacy-connector, label: alternative Serverless VPC Access}
@@ -353,7 +357,7 @@
     - {from: users, to: default-firestore, label: web SDK writes}
     - {from: default-firestore, to: user-written-trigger, label: "document written on users/{userId}", step: 2}
     - {from: user-written-trigger, to: on-user-written, label: CloudEvent with before/after snapshots, step: 3}
-    - {from: default-firestore, to: on-order-created, label: onDocumentCreated orders/{orderId}}
+    - {from: default-firestore, to: on-order-created, label: "onDocumentCreated orders/{orderId}"}
     - {from: on-user-written, to: notifications-topic, label: publish side effect, step: 4}
     - {from: fn-source, to: on-user-written, label: deployed source}
     - {from: firebase-project, to: default-firestore}

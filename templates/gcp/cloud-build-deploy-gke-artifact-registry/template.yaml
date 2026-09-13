@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.cloud.google.com/build/docs/deploying-builds/deploy-gke); edit freely.
+title: Cloud Build pipeline building an image to Artifact Registry and deploying it to GKE
+category: devops
+tags:
+- cloud build
+- artifact registry
+- gke
+- gke-deploy
+- ci/cd
+- build trigger
+source: https://docs.cloud.google.com/build/docs/deploying-builds/deploy-gke
+description: A Cloud Build trigger fires on pushes to a connected Git repository and runs a three-step build that builds the container with the docker builder, pushes it to an Artifact Registry Docker repository
+  and calls the gke-deploy builder. gke-deploy rewrites the Kubernetes manifests to the image digest, adds recommended labels, fetches cluster credentials and waits until the rollout on the GKE cluster
+  is ready.
+nodes:
+- {id: prj-build-gke-prj, type: gcp.project, name: build-gke-prj, props: {project_id: build-gke-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-cicd-vpc, type: gcp.vpc, name: cicd-vpc, parent: prj-build-gke-prj, props: {cidr: 10.110.0.0/16}}
+- {id: sub-gke-sub, type: gcp.subnetwork, name: gke-sub, parent: vpc-cicd-vpc, props: {cidr: 10.110.0.0/20, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: app-repo, type: gcp.res.google_sourcerepo_repository, name: app-repo, parent: prj-build-gke-prj, props: {name: changeme}}
+- {id: build-and-deploy, type: gcp.res.google_cloudbuild_trigger, name: build-and-deploy, parent: prj-build-gke-prj}
+- {id: cloudbuild-sa, type: gcp.res.google_service_account, name: cloudbuild-sa, parent: prj-build-gke-prj, props: {account_id: changeme}}
+- {id: app-images, type: gcp.res.google_artifact_registry_repository, name: app-images, parent: prj-build-gke-prj, props: {format: changeme, repository_id: changeme}}
+- {id: prod-cluster, type: gcp.gke_cluster, name: prod-cluster, parent: sub-gke-sub}
+- {id: build-logs, type: gcp.storage_bucket, name: build-logs, parent: prj-build-gke-prj}
+edges:
+- {from: users, to: app-repo, label: git push, step: '1'}
+- {from: app-repo, to: build-and-deploy, label: push trigger, step: '2'}
+- {from: cloudbuild-sa, to: build-and-deploy, label: build identity with GKE Developer}
+- {from: build-and-deploy, to: app-images, label: docker build and push, step: '3'}
+- {from: build-and-deploy, to: prod-cluster, label: gke-deploy with image digest, step: '4'}
+- {from: app-images, to: prod-cluster, label: image pull, step: '5'}
+- {from: build-and-deploy, to: build-logs, label: build logs}
+steps:
+- {n: '1', text: 'users → app-repo: git push'}
+- {n: '2', text: 'app-repo → build-and-deploy: push trigger'}
+- {n: '3', text: 'build-and-deploy → app-images: docker build and push'}
+- {n: '4', text: 'build-and-deploy → prod-cluster: gke-deploy with image digest'}
+- {n: '5', text: 'app-images → prod-cluster: image pull'}

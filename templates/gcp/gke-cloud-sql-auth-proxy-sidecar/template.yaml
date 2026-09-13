@@ -1,0 +1,41 @@
+# Generated from the official reference (https://docs.cloud.google.com/sql/docs/mysql/connect-kubernetes-engine); edit freely.
+title: GKE workload connecting to Cloud SQL through an Auth Proxy sidecar with Workload Identity
+category: containers
+tags:
+- gke
+- cloud sql
+- cloud sql auth proxy
+- sidecar
+- workload identity federation
+- iam database auth
+source: https://docs.cloud.google.com/sql/docs/mysql/connect-kubernetes-engine
+description: The application pod runs the Cloud SQL Auth Proxy as a sidecar so the app connects to localhost while the proxy opens an IAM-authenticated, TLS-encrypted tunnel to the Cloud SQL instance. The
+  pod's Kubernetes service account is bound to a Google service account through Workload Identity Federation for GKE, so no key file is mounted; database credentials come from a Kubernetes Secret populated
+  from Secret Manager.
+nodes:
+- {id: prj-gke-sql-prj, type: gcp.project, name: gke-sql-prj, props: {project_id: gke-sql-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-gke-sql-prj, props: {cidr: 10.100.0.0/16}}
+- {id: sub-gke-sub, type: gcp.subnetwork, name: gke-sub, parent: vpc-app-vpc, props: {cidr: 10.100.0.0/20, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: app-cluster, type: gcp.gke_cluster, name: app-cluster, parent: sub-gke-sub}
+- {id: sql-client-gsa, type: gcp.res.google_service_account, name: sql-client-gsa, parent: prj-gke-sql-prj, props: {account_id: changeme}}
+- {id: vpc-prj-gke-sql-prj, type: gcp.vpc, name: main, parent: prj-gke-sql-prj}
+- {id: app-mysql, type: gcp.cloud_sql_instance, name: app-mysql, parent: vpc-prj-gke-sql-prj}
+- id: app-db-password
+  type: gcp.res.google_secret_manager_secret
+  name: app-db-password
+  parent: prj-gke-sql-prj
+  props: {replication: {}, secret_id: changeme}
+- {id: app-images, type: gcp.res.google_artifact_registry_repository, name: app-images, parent: prj-gke-sql-prj, props: {format: changeme, repository_id: changeme}}
+- {id: app-lb, type: gcp.res.google_compute_forwarding_rule, name: app-lb, parent: prj-gke-sql-prj, props: {name: changeme}}
+edges:
+- {from: users, to: app-lb, label: HTTP, step: '1'}
+- {from: app-lb, to: app-cluster, label: Service to app pods, step: '2'}
+- {from: sql-client-gsa, to: app-cluster, label: Workload Identity binding to KSA}
+- {from: app-cluster, to: app-mysql, label: 'Auth Proxy sidecar, IAM auth + TLS on 3307', step: '3'}
+- {from: app-db-password, to: app-cluster, label: Kubernetes Secret}
+- {from: app-images, to: app-cluster, label: image pull}
+steps:
+- {n: '1', text: 'users → app-lb: HTTP'}
+- {n: '2', text: 'app-lb → app-cluster: Service to app pods'}
+- {n: '3', text: 'app-cluster → app-mysql: Auth Proxy sidecar, IAM auth + TLS on 3307'}

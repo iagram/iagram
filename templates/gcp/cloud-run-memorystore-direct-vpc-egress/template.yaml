@@ -1,0 +1,37 @@
+# Generated from the official reference (https://docs.cloud.google.com/memorystore/docs/redis/connect-redis-instance-cloud-run); edit freely.
+title: Cloud Run service reaching Memorystore for Redis over Direct VPC egress
+category: serverless
+tags:
+- cloud run
+- memorystore
+- redis
+- direct vpc egress
+- serverless vpc access
+- caching
+source: https://docs.cloud.google.com/memorystore/docs/redis/connect-redis-instance-cloud-run
+description: A Memorystore for Redis instance is authorized on a VPC network and only exposes a private IP, so the Cloud Run service is deployed with Direct VPC egress into a subnet of that network and
+  reaches Redis on port 6379 without a managed connector. A Serverless VPC Access connector is the alternative path for projects that cannot use Direct VPC egress, and the Redis host and port are passed
+  to the container as environment variables.
+nodes:
+- {id: prj-run-cache-prj, type: gcp.project, name: run-cache-prj, props: {project_id: run-cache-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-cache-vpc, type: gcp.vpc, name: cache-vpc, parent: prj-run-cache-prj, props: {cidr: 10.30.0.0/16}}
+- {id: sub-run-sub, type: gcp.subnetwork, name: run-sub, parent: vpc-cache-vpc, props: {cidr: 10.30.1.0/24, region: europe-west1}}
+- {id: sub-connector-sub, type: gcp.subnetwork, name: connector-sub, parent: vpc-cache-vpc, props: {cidr: 10.30.8.0/28, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: counter-service, type: gcp.cloud_run_service, name: counter-service, parent: prj-run-cache-prj}
+- {id: counter-redis, type: gcp.res.google_redis_instance, name: counter-redis, parent: vpc-cache-vpc, props: {memory_size_gb: 1, name: changeme}}
+- {id: legacy-connector, type: gcp.res.google_vpc_access_connector, name: legacy-connector, parent: sub-connector-sub, props: {name: changeme}}
+- {id: counter-sa, type: gcp.res.google_service_account, name: counter-sa, parent: prj-run-cache-prj, props: {account_id: changeme}}
+- {id: counter-images, type: gcp.res.google_artifact_registry_repository, name: counter-images, parent: prj-run-cache-prj, props: {format: changeme, repository_id: changeme}}
+- {id: counter-build, type: gcp.res.google_cloudbuild_trigger, name: counter-build, parent: prj-run-cache-prj}
+edges:
+- {from: counter-build, to: counter-images, label: build and push image}
+- {from: users, to: counter-service, label: HTTPS, step: '1'}
+- {from: counter-service, to: counter-redis, label: 'INCR over 6379, Direct VPC egress', step: '2'}
+- {from: counter-service, to: legacy-connector, label: alternative Serverless VPC Access}
+- {from: legacy-connector, to: counter-redis}
+- {from: counter-sa, to: counter-service, label: runtime identity}
+- {from: counter-images, to: counter-service, label: image pull}
+steps:
+- {n: '1', text: 'users → counter-service: HTTPS'}
+- {n: '2', text: 'counter-service → counter-redis: INCR over 6379, Direct VPC egress'}

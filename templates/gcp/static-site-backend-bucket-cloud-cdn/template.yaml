@@ -1,0 +1,39 @@
+# Generated from the official reference (https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket); edit freely.
+title: Static website on Cloud Storage served through Cloud CDN and an HTTPS load balancer
+category: web
+tags:
+- cloud storage
+- cloud cdn
+- backend bucket
+- static website
+- https load balancer
+- cloud dns
+source: https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket
+description: A multi-region Cloud Storage bucket holds the site files and is wrapped in a backend bucket with Cloud CDN enabled so content is cached at Google edge locations. A URL map, target HTTPS proxy
+  with a Google-managed certificate and a global forwarding rule on a reserved static IP expose the bucket; a Cloud DNS zone points the custom domain at that address.
+nodes:
+- {id: prj-static-web-prj, type: gcp.project, name: static-web-prj, props: {project_id: static-web-prj-123456, project: changeme, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: site-zone, type: gcp.cloud_dns_zone, name: site-zone, parent: prj-static-web-prj, props: {domain: example.com}}
+- {id: site-ip, type: gcp.res.google_compute_global_address, name: site-ip, parent: prj-static-web-prj, props: {name: changeme}}
+- {id: site-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: site-https-rule, parent: prj-static-web-prj, props: {name: changeme, target: changeme}}
+- {id: site-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: site-https-proxy, parent: prj-static-web-prj, props: {name: changeme, url_map: changeme}}
+- {id: site-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: site-cert, parent: prj-static-web-prj}
+- {id: site-url-map, type: gcp.res.google_compute_url_map, name: site-url-map, parent: prj-static-web-prj, props: {name: changeme}}
+- {id: site-cdn-backend, type: gcp.res.google_compute_backend_bucket, name: site-cdn-backend, parent: prj-static-web-prj, props: {bucket_name: changeme, name: changeme}}
+- {id: site-assets, type: gcp.storage_bucket, name: site-assets, parent: prj-static-web-prj}
+edges:
+- {from: users, to: site-zone, label: DNS lookup, step: '1'}
+- {from: users, to: site-https-rule, label: HTTPS, step: '2'}
+- {from: site-https-rule, to: site-https-proxy, step: '3'}
+- {from: site-cert, to: site-https-proxy}
+- {from: site-https-proxy, to: site-url-map, step: '4'}
+- {from: site-url-map, to: site-cdn-backend, label: Cloud CDN cache, step: '5'}
+- {from: site-cdn-backend, to: site-assets, label: origin fetch on cache miss, step: '6'}
+steps:
+- {n: '1', text: 'users → site-zone: DNS lookup'}
+- {n: '2', text: 'users → site-https-rule: HTTPS'}
+- {n: '3', text: site-https-rule → site-https-proxy}
+- {n: '4', text: site-https-proxy → site-url-map}
+- {n: '5', text: 'site-url-map → site-cdn-backend: Cloud CDN cache'}
+- {n: '6', text: 'site-cdn-backend → site-assets: origin fetch on cache miss'}

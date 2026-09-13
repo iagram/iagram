@@ -1,0 +1,50 @@
+# Generated from the official reference (https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-multi-cluster-gateways); edit freely.
+title: GKE multi-cluster Gateway with cross-region failover
+category: containers
+tags:
+- gke
+- multi-cluster gateway
+- fleet
+- config cluster
+- serviceexport
+- global load balancer
+- failover
+source: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-multi-cluster-gateways
+description: Two GKE clusters in different regions are registered to one fleet with multi-cluster Services and Gateway enabled, and the config cluster hosts a Gateway of class gke-l7-global-external-managed-mc
+  plus HTTPRoutes. ServiceExport resources in each cluster become fleet-wide ServiceImports, and the resulting global external Application Load Balancer routes each request to the healthy cluster closest
+  to the client, failing over automatically when a cluster or region becomes unhealthy.
+nodes:
+- {id: prj-prj-p-fleet, type: gcp.project, name: prj-p-fleet, props: {project_id: prj-p-fleet-123456, project: changeme, region: us-west1}}
+- {id: vpc-fleet-vpc, type: gcp.vpc, name: fleet-vpc, parent: prj-prj-p-fleet}
+- {id: sub-gke-sub-usw1, type: gcp.subnetwork, name: gke-sub-usw1, parent: vpc-fleet-vpc, props: {cidr: 10.170.0.0/20, region: us-west1}}
+- {id: sub-gke-sub-use1, type: gcp.subnetwork, name: gke-sub-use1, parent: vpc-fleet-vpc, props: {cidr: 10.170.16.0/20, region: us-east1}}
+- {id: users, type: common.users, name: users}
+- {id: gke-west-1, type: gcp.gke_cluster, name: gke-west-1, parent: sub-gke-sub-usw1}
+- {id: gke-east-1, type: gcp.gke_cluster, name: gke-east-1, parent: sub-gke-sub-use1}
+- {id: gke-west-1-membership, type: gcp.res.google_gke_hub_membership, name: gke-west-1-membership, parent: prj-prj-p-fleet, props: {membership_id: changeme}}
+- {id: gke-east-1-membership, type: gcp.res.google_gke_hub_membership, name: gke-east-1-membership, parent: prj-prj-p-fleet, props: {membership_id: changeme}}
+- {id: multiclusterservicediscovery, type: gcp.res.google_gke_hub_feature, name: multiclusterservicediscovery, parent: prj-prj-p-fleet, props: {location: westeurope}}
+- {id: multiclusteringress-config-cluster, type: gcp.res.google_gke_hub_feature, name: multiclusteringress-config-cluster, parent: prj-prj-p-fleet, props: {location: westeurope}}
+- {id: store-external-gateway, type: gcp.res.google_compute_global_forwarding_rule, name: store-external-gateway, parent: prj-prj-p-fleet, props: {name: changeme, target: changeme}}
+- {id: store-health-check, type: gcp.res.google_compute_health_check, name: store-health-check, parent: prj-prj-p-fleet, props: {name: changeme}}
+- {id: store-images, type: gcp.res.google_artifact_registry_repository, name: store-images, parent: prj-prj-p-fleet, props: {format: changeme, repository_id: changeme}}
+edges:
+- {from: gke-west-1-membership, to: gke-west-1, label: fleet registration, step: '1'}
+- {from: gke-east-1-membership, to: gke-east-1, label: fleet registration, step: '1'}
+- {from: multiclusteringress-config-cluster, to: gke-west-1, label: config cluster hosts Gateway, step: '2'}
+- {from: multiclusterservicediscovery, to: gke-east-1, label: ServiceExport to ServiceImport, step: '3'}
+- {from: gke-west-1, to: store-external-gateway, label: Gateway reconciles global external ALB, step: '4'}
+- {from: users, to: store-external-gateway, label: HTTPS anycast, step: '5'}
+- {from: store-external-gateway, to: gke-west-1, label: /west and nearest healthy, step: '6'}
+- {from: store-external-gateway, to: gke-east-1, label: /east and failover, step: '6'}
+- {from: store-health-check, to: gke-east-1, label: NEG health, step: '7'}
+- {from: gke-west-1, to: store-images, label: pull images, step: '8'}
+steps:
+- {n: '1', text: 'gke-west-1-membership → gke-west-1: fleet registration'}
+- {n: '2', text: 'multiclusteringress-config-cluster → gke-west-1: config cluster hosts Gateway'}
+- {n: '3', text: 'multiclusterservicediscovery → gke-east-1: ServiceExport to ServiceImport'}
+- {n: '4', text: 'gke-west-1 → store-external-gateway: Gateway reconciles global external ALB'}
+- {n: '5', text: 'users → store-external-gateway: HTTPS anycast'}
+- {n: '6', text: 'store-external-gateway → gke-west-1: /west and nearest healthy'}
+- {n: '7', text: 'store-health-check → gke-east-1: NEG health'}
+- {n: '8', text: 'gke-west-1 → store-images: pull images'}

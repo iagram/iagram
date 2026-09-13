@@ -1,0 +1,52 @@
+# Generated from the official reference (https://docs.cloud.google.com/iap/docs/enabling-compute-howto); edit freely.
+title: Web app on Compute Engine protected by Identity-Aware Proxy behind an HTTPS load balancer
+category: security
+tags:
+- identity-aware proxy
+- iap
+- compute engine
+- managed instance group
+- https load balancer
+- zero trust
+source: https://docs.cloud.google.com/iap/docs/enabling-compute-howto
+description: A managed instance group behind a global external HTTPS load balancer is the IAP-protected backend service; enabling IAP on the backend service makes every request pass Google sign-in and an
+  IAM check for the IAP-secured Web App User role before it reaches a VM. The app verifies the signed JWT header that IAP adds, a Cloud DNS record maps the domain to the load balancer IP, and a firewall
+  rule allows only IAP and health-check ranges to reach the instances.
+nodes:
+- {id: prj-iap-prj, type: gcp.project, name: iap-prj, props: {project_id: iap-prj-123456, project: changeme, region: europe-west1}}
+- {id: vpc-iap-vpc, type: gcp.vpc, name: iap-vpc, parent: prj-iap-prj, props: {cidr: 10.170.0.0/16}}
+- {id: sub-app-sub, type: gcp.subnetwork, name: app-sub, parent: vpc-iap-vpc, props: {cidr: 10.170.1.0/24, region: europe-west1}}
+- {id: users, type: common.users, name: users}
+- {id: idp, type: common.idp, name: idp}
+- {id: app-zone, type: gcp.cloud_dns_zone, name: app-zone, parent: prj-iap-prj, props: {domain: example.com}}
+- {id: app-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: app-https-rule, parent: prj-iap-prj, props: {name: changeme, target: changeme}}
+- {id: app-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: app-https-proxy, parent: prj-iap-prj, props: {name: changeme, url_map: changeme}}
+- {id: app-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: app-cert, parent: prj-iap-prj}
+- {id: app-url-map, type: gcp.res.google_compute_url_map, name: app-url-map, parent: prj-iap-prj, props: {name: changeme}}
+- {id: iap-backend, type: gcp.res.google_compute_backend_service, name: iap-backend, parent: prj-iap-prj, props: {name: changeme}}
+- id: app-mig
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: app-mig
+  parent: sub-app-sub
+  props:
+    base_instance_name: changeme
+    name: changeme
+    version: []
+- {id: allow-iap-and-hc, type: gcp.firewall_rule, name: allow-iap-and-hc, parent: vpc-iap-vpc}
+edges:
+- {from: users, to: app-zone, label: DNS lookup}
+- {from: users, to: app-https-rule, label: HTTPS, step: '1'}
+- {from: app-https-rule, to: app-https-proxy, step: '2'}
+- {from: app-cert, to: app-https-proxy}
+- {from: app-https-proxy, to: app-url-map, step: '3'}
+- {from: app-url-map, to: iap-backend, label: IAP enabled, step: '4'}
+- {from: iap-backend, to: idp, label: Google sign-in and IAM check, step: '5'}
+- {from: iap-backend, to: app-mig, label: request with X-Goog-IAP-JWT-Assertion, step: '6'}
+- {from: allow-iap-and-hc, to: app-mig, label: allow 35.235.240.0/20 and health checks}
+steps:
+- {n: '1', text: 'users → app-https-rule: HTTPS'}
+- {n: '2', text: app-https-rule → app-https-proxy}
+- {n: '3', text: app-https-proxy → app-url-map}
+- {n: '4', text: 'app-url-map → iap-backend: IAP enabled'}
+- {n: '5', text: 'iap-backend → idp: Google sign-in and IAM check'}
+- {n: '6', text: 'iap-backend → app-mig: request with X-Goog-IAP-JWT-Assertion'}
