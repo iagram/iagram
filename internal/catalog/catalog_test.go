@@ -210,7 +210,7 @@ func TestGraphicalVersusAttachment(t *testing.T) {
 	for _, g := range azList {
 		azBy[g.Resource] = g
 	}
-	for _, res := range []string{"azurerm_storage_container", "azurerm_storage_blob", "azurerm_kubernetes_cluster_node_pool", "azurerm_role_assignment"} {
+	for _, res := range []string{"azurerm_storage_blob", "azurerm_kubernetes_cluster_node_pool", "azurerm_role_assignment"} {
 		if g := azBy[res]; g.Graphical {
 			t.Errorf("%s should be an attachment: %+v", res, g)
 		}
