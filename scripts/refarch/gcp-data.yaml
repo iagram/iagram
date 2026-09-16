@@ -162,33 +162,24 @@
   category: data
   tags: [batch etl, cloud composer, airflow, dataflow, bigquery]
   source: https://docs.cloud.google.com/composer/docs/how-to/using/using-dataflow-template-operator
-  description: An Airflow DAG in Cloud Composer waits for input files in a Cloud Storage bucket and launches the GCS Text to BigQuery Dataflow template with a JavaScript UDF and JSON schema stored alongside the data. Dataflow transforms the files and loads them into a BigQuery table, and downstream DAG tasks run BigQuery SQL to build aggregates.
+  description: A user uploads an input text file, a JavaScript user-defined function and a JSON schema to a Cloud Storage bucket, and an Airflow DAG in Cloud Composer launches the GCS Text to BigQuery Dataflow template that reads them. Dataflow transforms the file contents and loads them into a BigQuery reference table.
   containers:
     - project: batch-etl
       region: us-central1
-      vpcs:
-        - name: composer-vpc
-          cidr: 10.30.0.0/16
-          subnets:
-            - {name: composer-subnet, cidr: 10.30.1.0/24, region: us-central1}
+      account_at: [1, 2, 2, 1]
+      groups: [{label: data-sources, at: [2, 2]}]
   elements:
-    - {tf: google_storage_bucket, name: input-files-bucket, in: region}
-    - {tf: google_storage_bucket, name: udf-schema-bucket, in: region}
-    - {tf: google_composer_environment, name: etl-composer-env, in: subnet:composer-subnet}
-    - {tf: google_dataflow_job, name: gcs-text-to-bq-job, in: subnet:composer-subnet}
-    - {tf: google_storage_bucket, name: dataflow-staging-bucket, in: region}
-    - {tf: google_bigquery_dataset, name: etl-dataset, in: region}
-    - {tf: google_bigquery_table, name: transformed-table, in: region}
-    - {tf: google_bigquery_table, name: daily-aggregate-table, in: region}
-  actors: [server]
+    - {tf: google_composer_environment, name: etl-composer-env, in: region, at: [1, 1]}
+    - {tf: google_dataflow_job, name: gcs-text-to-bq-job, in: region, at: [1, 2]}
+    - {tf: google_bigquery_dataset, name: etl-dataset, in: region, at: [1, 3]}
+    - {tf: google_bigquery_table, name: reference-table, in: region, at: [1, 4]}
+    - {tf: google_storage_bucket, name: user-data-bucket, in: group:data-sources, at: [1, 1]}
+  actors: [{type: user, name: user inputs, at: [2, 1]}]
   flows:
-    - {from: server, to: input-files-bucket, label: nightly file drop, step: 1}
-    - {from: etl-composer-env, to: input-files-bucket, label: GCS sensor, step: 2}
-    - {from: etl-composer-env, to: gcs-text-to-bq-job, label: DataflowTemplatedJobStartOperator, step: 3}
-    - {from: gcs-text-to-bq-job, to: udf-schema-bucket, label: read UDF and schema, step: 4}
-    - {from: gcs-text-to-bq-job, to: dataflow-staging-bucket, label: staging, step: 5}
-    - {from: gcs-text-to-bq-job, to: transformed-table, label: load rows, step: 6}
-    - {from: etl-composer-env, to: daily-aggregate-table, label: BigQueryInsertJobOperator, step: 7}
+    - {from: user inputs, to: user-data-bucket, label: "upload UDF (.js), input file (.txt), JSON schema (.json)", step: 1}
+    - {from: etl-composer-env, to: gcs-text-to-bq-job, label: DataflowTemplatedJobStartOperator, step: 2}
+    - {from: user-data-bucket, to: gcs-text-to-bq-job, label: "input file, UDF and JSON schema", step: 3}
+    - {from: gcs-text-to-bq-job, to: reference-table, label: transform and load rows, step: 4}
 
 - slug: datastream-cdc-to-bigquery
   title: Change data capture from Cloud SQL to BigQuery with Datastream
@@ -228,37 +219,23 @@
   category: data
   tags: [cdc, datastream, dataflow template, pub/sub, cloud storage, bigquery]
   source: https://docs.cloud.google.com/datastream/docs/implementing-datastream-dataflow-analytics
-  description: Datastream captures MySQL change events and writes them as Avro files to a Cloud Storage bucket whose object notifications publish to Pub/Sub. The Datastream to BigQuery Dataflow template consumes those notifications, loads change events into staging tables and merges them into replica tables, allowing custom transformations in the pipeline.
+  description: Datastream captures change events from a source database that may run outside Google Cloud and writes them as Avro files to a Cloud Storage bucket. The Datastream to BigQuery Dataflow template processes the files, applies custom transformations and merges the change events into BigQuery replica tables.
   containers:
     - project: cdc-dataflow
       region: us-central1
-      vpcs:
-        - name: mysql-vpc
-          cidr: 10.50.0.0/16
-          subnets:
-            - {name: mysql-subnet, cidr: 10.50.1.0/24, region: us-central1}
+      account_at: [1, 2]
+      groups: [{label: ingest, at: [1, 1]}, {label: process, at: [1, 2]}, {label: store, at: [1, 3]}]
   elements:
-    - {tf: google_sql_database_instance, name: source-mysql, in: subnet:mysql-subnet}
-    - {tf: google_datastream_connection_profile, name: mysql-source-profile, in: region}
-    - {tf: google_datastream_stream, name: mysql-to-gcs-stream, in: region}
-    - {tf: google_storage_bucket, name: cdc-avro-bucket, in: region}
-    - {tf: google_storage_notification, name: cdc-object-notification, in: region}
-    - {tf: google_pubsub_topic, name: cdc-files-topic, in: region}
-    - {tf: google_pubsub_subscription, name: cdc-files-sub, in: region}
-    - {tf: google_dataflow_flex_template_job, name: datastream-to-bq-job, in: region}
-    - {tf: google_bigquery_dataset, name: cdc-staging-dataset, in: region}
-    - {tf: google_bigquery_dataset, name: cdc-replica-dataset, in: region}
-  actors: [client]
+    - {tf: google_datastream_stream, name: mysql-to-gcs-stream, in: group:ingest, at: [1, 1]}
+    - {tf: google_storage_bucket, name: cdc-avro-bucket, in: group:ingest, at: [2, 1]}
+    - {tf: google_dataflow_job, name: datastream-to-bq-job, in: group:process, at: [1, 1]}
+    - {tf: google_bigquery_dataset, name: cdc-replica-dataset, in: group:store, at: [1, 1]}
+  actors: [{type: database, name: source database, at: [1, 1]}]
   flows:
-    - {from: client, to: source-mysql, label: transactions, step: 1}
-    - {from: mysql-to-gcs-stream, to: mysql-source-profile, label: binlog read, step: 2}
-    - {from: mysql-source-profile, to: source-mysql, label: CDC, step: 3}
-    - {from: mysql-to-gcs-stream, to: cdc-avro-bucket, label: write Avro files, step: 4}
-    - {from: cdc-avro-bucket, to: cdc-files-topic, label: object finalize, step: 5, link: google_storage_notification}
-    - {from: cdc-files-topic, to: cdc-files-sub, label: notifications, step: 6}
-    - {from: cdc-files-sub, to: datastream-to-bq-job, label: pull file events, step: 7}
-    - {from: datastream-to-bq-job, to: cdc-staging-dataset, label: load change events, step: 8}
-    - {from: datastream-to-bq-job, to: cdc-replica-dataset, label: MERGE replicas, step: 9}
+    - {from: source database, to: mysql-to-gcs-stream, label: CDC change events, step: 1}
+    - {from: mysql-to-gcs-stream, to: cdc-avro-bucket, label: write Avro files, step: 2}
+    - {from: cdc-avro-bucket, to: datastream-to-bq-job, label: Datastream to BigQuery template, step: 3}
+    - {from: datastream-to-bq-job, to: cdc-replica-dataset, label: MERGE replica tables, step: 4}
 
 - slug: data-fusion-visual-etl-pipeline
   title: Visual ETL pipeline with Cloud Data Fusion
@@ -327,103 +304,118 @@
   category: data
   tags: [data mesh, bigquery, dataplex, domains, data products]
   source: https://docs.cloud.google.com/architecture/data-mesh
-  description: Domain teams own producer projects where they ingest and curate data products in BigQuery, while a central governance project runs Dataplex to catalog, classify and apply policies across domains. Consumer projects query authorized views and shared datasets without copying data, and a platform team provides the common infrastructure and Pub/Sub ingestion.
+  description: Domain teams own producer projects where operational sources such as Cloud Spanner and raw files in Cloud Storage are curated into data products stored natively in BigQuery or as BigLake tables, and exposed through authorized datasets as the product interface. A central services project provides management (IAM access control, Dataplex policy tags, BigQuery reservations) and discovery (Dataplex catalog, a Cloud Run search UI, documentation in Google Drive), while consumer projects run BigQuery SQL for reports in Looker, data science in Vertex AI Workbench and Spark jobs on Dataproc without copying data.
   containers:
-    - project: sales-domain
-      region: europe-west1
-    - project: marketing-domain
-      region: europe-west1
     - project: central-governance
       region: europe-west1
+      account_at: [1, 1, 1, 3]
+      groups: [{label: management, at: [1, 1]}, {label: discovery, at: [1, 2]}]
+    - project: sales-domain
+      region: europe-west1
+      account_at: [2, 1, 1, 2]
+      groups: [{label: domain-1-sources, at: [1, 1]}, {label: domain-1-product, at: [1, 2]}]
+    - project: marketing-domain
+      region: europe-west1
+      account_at: [3, 1, 1, 2]
+      groups: [{label: domain-2-curation, at: [1, 1]}, {label: domain-2-sources, at: [2, 1]}, {label: domain-2-product, at: [1, 2, 2, 1]}]
     - project: consumer-analytics
       region: europe-west1
+      account_at: [2, 3, 2, 1]
+      groups: [{label: reports-consumer, at: [1, 1]}, {label: data-science-consumer, at: [2, 1]}, {label: data-analytics-consumer, at: [3, 1]}]
   elements:
-    - {tf: google_pubsub_topic, name: sales-events-topic, in: project:sales-domain}
-    - {tf: google_dataflow_job, name: sales-ingest-job, in: project:sales-domain}
-    - {tf: google_bigquery_dataset, name: sales-product-dataset, in: project:sales-domain}
-    - {tf: google_storage_bucket, name: marketing-raw-bucket, in: project:marketing-domain}
-    - {tf: google_bigquery_dataset, name: marketing-product-dataset, in: project:marketing-domain}
-    - {tf: google_dataplex_lake, name: mesh-catalog-lake, in: project:central-governance}
-    - {tf: google_dataplex_asset, name: sales-product-asset, in: project:central-governance}
-    - {tf: google_dataplex_asset, name: marketing-product-asset, in: project:central-governance}
-    - {tf: google_bigquery_dataset, name: consumer-views-dataset, in: project:consumer-analytics}
-    - {tf: google_looker_instance, name: consumer-looker, in: project:consumer-analytics}
-  actors: [users, device]
+    - {tf: google_iam_deny_policy, name: mesh-access-control, in: group:management, at: [1, 1]}
+    - {tf: google_data_catalog_taxonomy, name: mesh-access-policies, in: group:management, at: [1, 2]}
+    - {tf: google_bigquery_reservation, name: mesh-bigquery-reservation, in: group:management, at: [1, 3]}
+    - {tf: google_dataplex_lake, name: mesh-catalog-lake, in: group:discovery, at: [1, 1]}
+    - {tf: google_cloud_run_v2_service, name: mesh-search-ui, in: group:discovery, at: [1, 2]}
+    - {tf: google_spanner_instance, name: inventory-spanner, in: group:domain-1-sources, at: [1, 1]}
+    - {tf: google_bigquery_dataset, name: sales-curated-dataset, in: group:domain-1-product, at: [1, 1]}
+    - {tf: google_bigquery_dataset, name: sales-authorized-dataset, in: group:domain-1-product, at: [1, 2]}
+    - {tf: google_dataplex_zone, name: marketing-curation-zone, in: group:domain-2-curation, at: [1, 1]}
+    - {tf: google_storage_bucket, name: marketing-raw-bucket, in: group:domain-2-sources, at: [1, 1]}
+    - {tf: google_bigquery_table, name: marketing-biglake-table, in: group:domain-2-product, at: [1, 1]}
+    - {tf: google_bigquery_dataset, name: marketing-authorized-dataset, in: group:domain-2-product, at: [1, 2]}
+    - {tf: google_bigquery_dataset, name: marketing-curated-dataset, in: group:domain-2-product, at: [2, 1]}
+    - {tf: google_bigquery_job, name: reports-sql-engine, in: group:reports-consumer, at: [1, 1]}
+    - {tf: google_looker_instance, name: consumer-looker, in: group:reports-consumer, at: [1, 2]}
+    - {tf: google_bigquery_job, name: data-science-sql-engine, in: group:data-science-consumer, at: [1, 1]}
+    - {tf: google_notebooks_instance, name: data-science-workbench, in: group:data-science-consumer, at: [1, 2]}
+    - {tf: google_bigquery_job, name: analytics-sql-engine, in: group:data-analytics-consumer, at: [1, 1]}
+    - {tf: google_dataproc_job, name: analytics-spark-job, in: group:data-analytics-consumer, at: [1, 2]}
+  actors: [{type: saas, name: Google Drive docs, at: [1, 4]}]
   flows:
-    - {from: device, to: sales-events-topic, label: events, step: 1}
-    - {from: sales-events-topic, to: sales-ingest-job, label: stream, step: 2}
-    - {from: sales-ingest-job, to: sales-product-dataset, label: write product tables, step: 3}
-    - {from: marketing-raw-bucket, to: marketing-product-dataset, label: load, step: 4}
-    - {from: sales-product-asset, to: sales-product-dataset, label: catalog, step: 5, link: google_dataplex_asset}
-    - {from: marketing-product-asset, to: marketing-product-dataset, label: catalog, step: 6, link: google_dataplex_asset}
-    - {from: consumer-views-dataset, to: sales-product-dataset, label: authorized views, step: 7}
-    - {from: consumer-views-dataset, to: marketing-product-dataset, label: authorized views, step: 8}
-    - {from: consumer-looker, to: consumer-views-dataset, label: query, step: 9}
-    - {from: users, to: consumer-looker, label: explore, step: 10}
+    - {from: inventory-spanner, to: sales-curated-dataset, label: curate operational data, step: 1}
+    - {from: sales-curated-dataset, to: sales-authorized-dataset, label: authorized views, step: 2}
+    - {from: marketing-raw-bucket, to: marketing-biglake-table, label: BigLake table over raw files, step: 3}
+    - {from: marketing-raw-bucket, to: marketing-curated-dataset, label: load curated data, step: 4}
+    - {from: marketing-biglake-table, to: marketing-authorized-dataset, label: authorized views, step: 5}
+    - {from: marketing-curated-dataset, to: marketing-authorized-dataset, label: authorized views, step: 6}
+    - {from: reports-sql-engine, to: sales-authorized-dataset, label: query interface, step: 7}
+    - {from: reports-sql-engine, to: marketing-authorized-dataset, label: query interface, step: 8}
+    - {from: data-science-sql-engine, to: marketing-authorized-dataset, label: query interface, step: 9}
+    - {from: analytics-sql-engine, to: marketing-authorized-dataset, label: query interface, step: 10}
+    - {from: analytics-spark-job, to: marketing-curated-dataset, label: Storage Read API, step: 11}
+    - {from: consumer-looker, to: reports-sql-engine, label: reports, step: 12}
+    - {from: data-science-workbench, to: data-science-sql-engine, label: notebooks, step: 13}
+    - {from: mesh-search-ui, to: mesh-catalog-lake, label: search data products, step: 14}
+    - {from: mesh-search-ui, to: Google Drive docs, label: link documentation, step: 15}
 
 - slug: analytics-hub-data-sharing
   title: Cross-organization data sharing with BigQuery Analytics Hub
   category: data
   tags: [analytics hub, bigquery sharing, data exchange, linked dataset]
   source: https://docs.cloud.google.com/bigquery/docs/analytics-hub-introduction
-  description: A publisher project curates a BigQuery dataset and a Pub/Sub topic and lists them in an Analytics Hub data exchange. Subscriber projects create linked datasets and linked subscriptions that read the shared data in place, so publishers keep a single copy while subscribers pay only for their own queries.
+  description: A data publisher project groups the BigQuery datasets and Pub/Sub topics it wants to share into shared resources and publishes each one as a listing in an Analytics Hub data exchange. Public exchanges make listings discoverable to any Google Cloud user while private exchanges restrict them to invited subscribers, and in both cases subscribers read the shared data in place so the publisher keeps a single copy.
   containers:
     - project: data-publisher
       region: us
-    - project: data-subscriber
+      account_at: [1, 1]
+      groups: [{label: shared-resources-a, at: [1, 1]}, {label: shared-resources-b, at: [2, 1]}]
+    - project: data-exchanges
       region: us
+      account_at: [1, 2]
+      groups: [{label: public-exchanges, at: [1, 1]}, {label: private-exchanges, at: [2, 1]}]
   elements:
-    - {tf: google_bigquery_dataset, name: curated-market-dataset, in: project:data-publisher}
-    - {tf: google_bigquery_table, name: market-prices-table, in: project:data-publisher}
-    - {tf: google_pubsub_topic, name: market-ticks-topic, in: project:data-publisher}
-    - {tf: google_bigquery_analytics_hub_data_exchange, name: market-data-exchange, in: project:data-publisher}
-    - {tf: google_bigquery_analytics_hub_listing, name: market-prices-listing, in: project:data-publisher}
-    - {tf: google_bigquery_analytics_hub_listing, name: market-ticks-listing, in: project:data-publisher}
-    - {tf: google_bigquery_dataset, name: linked-market-dataset, in: project:data-subscriber}
-    - {tf: google_pubsub_subscription, name: linked-ticks-subscription, in: project:data-subscriber}
-    - {tf: google_bigquery_dataset, name: subscriber-analytics-dataset, in: project:data-subscriber}
-  actors: [users]
+    - {tf: google_bigquery_dataset, name: curated-market-dataset, in: group:shared-resources-a, at: [1, 1]}
+    - {tf: google_bigquery_dataset, name: reference-data-dataset, in: group:shared-resources-b, at: [1, 1]}
+    - {tf: google_pubsub_topic, name: market-ticks-topic, in: group:shared-resources-b, at: [2, 1]}
+    - {tf: google_bigquery_analytics_hub_data_exchange, name: public-exchange, in: group:public-exchanges, at: [1, 1, 2, 1]}
+    - {tf: google_bigquery_analytics_hub_listing, name: market-data-listing, in: group:public-exchanges, at: [1, 2]}
+    - {tf: google_bigquery_analytics_hub_listing, name: reference-data-listing, in: group:public-exchanges, at: [2, 2]}
+    - {tf: google_bigquery_analytics_hub_data_exchange, name: private-exchange, in: group:private-exchanges, at: [1, 1]}
+    - {tf: google_bigquery_analytics_hub_listing, name: market-ticks-listing, in: group:private-exchanges, at: [1, 2]}
   flows:
-    - {from: market-prices-listing, to: curated-market-dataset, label: list dataset, step: 1}
-    - {from: market-ticks-listing, to: market-ticks-topic, label: list topic, step: 2}
-    - {from: market-data-exchange, to: market-prices-listing, label: contains, step: 3}
-    - {from: linked-market-dataset, to: market-prices-listing, label: subscribe, step: 4, link: google_bigquery_analytics_hub_listing_subscription}
-    - {from: linked-ticks-subscription, to: market-ticks-listing, label: subscribe, step: 5, link: google_bigquery_analytics_hub_listing_subscription}
-    - {from: subscriber-analytics-dataset, to: linked-market-dataset, label: join shared data, step: 6}
-    - {from: users, to: subscriber-analytics-dataset, label: query, step: 7}
+    - {from: curated-market-dataset, to: market-data-listing, label: publish listing, step: 1}
+    - {from: reference-data-dataset, to: reference-data-listing, label: publish listing, step: 2}
+    - {from: market-ticks-topic, to: market-ticks-listing, label: publish listing, step: 3}
 
 - slug: security-log-analytics-bigquery
   title: Log analytics with aggregated Cloud Logging sinks to BigQuery
   category: observability
   tags: [cloud logging, log sink, bigquery, security analytics, looker studio]
   source: https://docs.cloud.google.com/architecture/exporting-stackdriver-logging-for-security-and-access-analytics
-  description: An aggregated log sink routes audit, network and platform logs from all projects into a partitioned BigQuery dataset in a dedicated analytics project, while a Cloud Storage sink keeps a long-term archive. Scheduled queries and Community Security Analytics SQL detect anomalies over the log tables, and Looker Studio dashboards visualize the results.
+  description: Security data sources, namely Cloud Logging audit and platform logs, Cloud Asset Inventory asset changes and Security Command Center findings, are routed by an aggregated log sink into security analytics tools, a Log Analytics enabled log bucket and a partitioned BigQuery dataset in a dedicated analytics project, and can be forwarded to Google SecOps or a third-party SIEM. The Community Security Analytics rules, more than 40 detection queries, run over the log tables in BigQuery and Log Analytics.
   containers:
-    - project: workload-a
-      region: us-central1
-    - project: workload-b
-      region: us-central1
     - project: log-analytics
       region: us-central1
+      account_at: [2, 1, 2, 1]
+      groups: [{label: security-data-sources, at: [1, 1]}, {label: security-analytics-tools, at: [1, 2]}]
   elements:
-    - {tf: google_cloud_run_v2_service, name: api-service, in: project:workload-a}
-    - {tf: google_sql_database_instance, name: app-database, in: project:workload-b}
-    - {tf: google_logging_project_sink, name: audit-logs-bq-sink, in: project:log-analytics}
-    - {tf: google_logging_project_sink, name: archive-gcs-sink, in: project:log-analytics}
-    - {tf: google_bigquery_dataset, name: security-logs-dataset, in: project:log-analytics}
-    - {tf: google_bigquery_table, name: cloudaudit-activity-table, in: project:log-analytics}
-    - {tf: google_storage_bucket, name: logs-archive-bucket, in: project:log-analytics}
-    - {tf: google_bigquery_data_transfer_config, name: threat-detection-scheduled-query, in: project:log-analytics}
-    - {tf: google_bigquery_table, name: findings-table, in: project:log-analytics}
-  actors: [users]
+    - {tf: google_logging_project_sink, name: audit-logs-bq-sink, in: group:security-data-sources, at: [1, 1]}
+    - {tf: google_cloud_asset_project_feed, name: asset-changes-feed, in: group:security-data-sources, at: [2, 1]}
+    - {tf: google_scc_notification_config, name: security-findings-notification, in: group:security-data-sources, at: [3, 1]}
+    - {tf: google_logging_project_bucket_config, name: log-analytics-bucket, in: group:security-analytics-tools, at: [1, 1]}
+    - {tf: google_bigquery_dataset, name: security-logs-dataset, in: group:security-analytics-tools, at: [1, 2]}
+    - {tf: google_bigquery_table, name: cloudaudit-activity-table, in: group:security-analytics-tools, at: [2, 2]}
+  actors: [{type: saas, name: Community Security Analytics, at: [1, 1]}, {type: saas, name: Google SecOps SIEM, at: [2, 2]}, {type: saas, name: Third-party SIEM, at: [3, 2]}]
   flows:
-    - {from: api-service, to: audit-logs-bq-sink, label: Cloud Audit Logs, step: 1}
-    - {from: app-database, to: audit-logs-bq-sink, label: data access logs, step: 2}
-    - {from: audit-logs-bq-sink, to: cloudaudit-activity-table, label: stream partitioned rows, step: 3}
-    - {from: archive-gcs-sink, to: logs-archive-bucket, label: hourly batches, step: 4}
-    - {from: threat-detection-scheduled-query, to: security-logs-dataset, label: CSA SQL detections, step: 5}
-    - {from: threat-detection-scheduled-query, to: findings-table, label: write findings, step: 6}
-    - {from: users, to: findings-table, label: Looker Studio dashboards, step: 7}
+    - {from: audit-logs-bq-sink, to: cloudaudit-activity-table, label: audit and platform logs, step: 1}
+    - {from: audit-logs-bq-sink, to: log-analytics-bucket, label: Log Analytics, step: 2}
+    - {from: asset-changes-feed, to: security-logs-dataset, label: asset changes, step: 3}
+    - {from: security-findings-notification, to: security-logs-dataset, label: security findings, step: 4}
+    - {from: audit-logs-bq-sink, to: Google SecOps SIEM, label: forward logs, step: 5}
+    - {from: audit-logs-bq-sink, to: Third-party SIEM, label: forward logs, step: 6}
+    - {from: Community Security Analytics, to: security-logs-dataset, label: 40+ detection rules, step: 7}
 
 - slug: ecommerce-clickstream-streaming
   title: Ecommerce clickstream analytics with Dataflow, BigQuery and Bigtable
@@ -464,31 +456,27 @@
   category: analytics-bi
   tags: [real-time dashboard, pub/sub, bigquery subscription, bi engine, looker studio]
   source: https://docs.cloud.google.com/pubsub/docs/bigquery
-  description: A Pub/Sub BigQuery subscription writes messages directly into a BigQuery table using the Storage Write API with no intermediate pipeline, and a dead-letter topic captures messages that cannot be written. A BI Engine reservation accelerates the dashboard queries and Looker Studio refreshes charts against a materialized view over the live table.
+  description: A Pub/Sub BigQuery subscription writes messages from its topic directly into a BigQuery table through the BigQuery Storage Write API, acknowledging each message on a successful write with no intermediate pipeline. A BI Engine reservation accelerates the dashboard queries and Looker Studio refreshes charts against the live table.
   containers:
     - project: realtime-bi
       region: us-central1
+      account_at: [1, 2]
+      groups: [{label: cloud-pubsub, at: [1, 1, 2, 1]}]
   elements:
-    - {tf: google_pubsub_schema, name: metrics-avro-schema, in: region}
-    - {tf: google_pubsub_topic, name: metrics-topic, in: region}
-    - {tf: google_pubsub_subscription, name: metrics-bigquery-sub, in: region}
-    - {tf: google_pubsub_topic, name: metrics-deadletter-topic, in: region}
-    - {tf: google_bigquery_dataset, name: realtime-dataset, in: region}
-    - {tf: google_bigquery_table, name: metrics-live-table, in: region}
-    - {tf: google_bigquery_table, name: metrics-materialized-view, in: region}
-    - {tf: google_bigquery_bi_reservation, name: dashboard-bi-engine, in: region}
-    - {tf: google_looker_instance, name: realtime-looker, in: region}
-  actors: [device, users]
+    - {tf: google_pubsub_topic, name: metrics-topic, in: group:cloud-pubsub, at: [1, 1]}
+    - {tf: google_pubsub_subscription, name: metrics-bigquery-sub, in: group:cloud-pubsub, at: [1, 2]}
+    - {tf: google_bigquery_dataset, name: realtime-dataset, in: region, at: [1, 2]}
+    - {tf: google_bigquery_table, name: metrics-live-table, in: region, at: [1, 3]}
+    - {tf: google_bigquery_bi_reservation, name: dashboard-bi-engine, in: region, at: [2, 3]}
+  actors: [{type: device, at: [1, 1]}, {type: saas, name: Looker Studio, at: [1, 3]}, {type: users, at: [1, 4]}]
   flows:
     - {from: device, to: metrics-topic, label: publish metrics, step: 1}
-    - {from: metrics-avro-schema, to: metrics-topic, label: schema validation, step: 2}
-    - {from: metrics-topic, to: metrics-bigquery-sub, label: deliver, step: 3}
-    - {from: metrics-bigquery-sub, to: metrics-live-table, label: Storage Write API, step: 4}
-    - {from: metrics-bigquery-sub, to: metrics-deadletter-topic, label: failed writes, step: 5}
-    - {from: metrics-live-table, to: metrics-materialized-view, label: incremental refresh, step: 6}
-    - {from: dashboard-bi-engine, to: realtime-dataset, label: in-memory acceleration, step: 7}
-    - {from: realtime-looker, to: metrics-materialized-view, label: dashboard queries, step: 8}
-    - {from: users, to: realtime-looker, label: live dashboards, step: 9}
+    - {from: metrics-topic, to: metrics-bigquery-sub, label: deliver, step: 2}
+    - {from: metrics-bigquery-sub, to: metrics-live-table, label: BigQuery write API, step: 3}
+    - {from: metrics-live-table, to: metrics-bigquery-sub, label: success response, step: 4}
+    - {from: dashboard-bi-engine, to: realtime-dataset, label: in-memory acceleration, step: 5}
+    - {from: Looker Studio, to: metrics-live-table, label: dashboard queries, step: 6}
+    - {from: users, to: Looker Studio, label: live dashboards, step: 7}
 
 - slug: bigquery-ml-feature-pipeline
   title: ML feature pipelines with BigQuery ML and Vertex AI

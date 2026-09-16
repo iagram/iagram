@@ -9,38 +9,40 @@ tags:
 - lambda
 image: https://d2908q01vomqb2.cloudfront.net/1b6453892473a467d07372d45eb05abc2031647a/2021/08/26/image001-2-1024x181.png
 source: https://aws.amazon.com/blogs/compute/building-a-serverless-distributed-application-using-a-saga-orchestration-pattern
-description: A booking request starts a Step Functions standard workflow that calls flight, hotel and payment Lambda functions in sequence, each writing to its own DynamoDB table. Catch blocks route any
-  failure to compensating functions that cancel earlier steps in reverse order so the distributed transaction ends consistent.
+description: A Place Order request starts a Step Functions standard workflow that calls the order, inventory and payment Lambda services in sequence, each writing to its own DynamoDB table. Catch blocks
+  route InventoryUpdateFailed or PaymentFailed to compensating functions that undo earlier steps in reverse order so the distributed transaction ends consistent.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
 - {id: client, type: common.client, name: client, at: [1, 1]}
-- {id: booking-api, type: aws.res.aws_api_gateway_rest_api, name: booking-api, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1, 3, 1]}
-- {id: booking-saga, type: aws.res.aws_sfn_state_machine, name: booking-saga, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}, at: [1, 2, 3, 1]}
-- {id: reserve-flight, type: aws.lambda_function, name: reserve-flight, parent: reg-us-east-1, at: [1, 3]}
-- {id: reserve-hotel, type: aws.lambda_function, name: reserve-hotel, parent: reg-us-east-1, at: [1, 4]}
-- {id: charge-payment, type: aws.lambda_function, name: charge-payment, parent: reg-us-east-1, at: [1, 5]}
-- {id: cancel-flight, type: aws.lambda_function, name: cancel-flight, parent: reg-us-east-1, at: [2, 3]}
-- {id: cancel-hotel, type: aws.lambda_function, name: cancel-hotel, parent: reg-us-east-1, at: [2, 4]}
+- {id: order-api, type: aws.res.aws_api_gateway_rest_api, name: order-api, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1, 3, 1]}
+- {id: order-saga, type: aws.res.aws_sfn_state_machine, name: order-saga, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}, at: [1, 2, 3, 1]}
+- {id: order-service, type: aws.lambda_function, name: order-service, parent: reg-us-east-1, at: [1, 3]}
+- {id: inventory-service, type: aws.lambda_function, name: inventory-service, parent: reg-us-east-1, at: [1, 4]}
+- {id: payment-service, type: aws.lambda_function, name: payment-service, parent: reg-us-east-1, at: [1, 5]}
+- {id: cancel-order, type: aws.lambda_function, name: cancel-order, parent: reg-us-east-1, at: [2, 3]}
+- {id: revert-inventory, type: aws.lambda_function, name: revert-inventory, parent: reg-us-east-1, at: [2, 4]}
 - {id: refund-payment, type: aws.lambda_function, name: refund-payment, parent: reg-us-east-1, at: [2, 5]}
-- {id: flights, type: aws.dynamodb_table, name: flights, parent: reg-us-east-1, at: [3, 3]}
-- {id: hotels, type: aws.dynamodb_table, name: hotels, parent: reg-us-east-1, at: [3, 4]}
+- {id: orders, type: aws.dynamodb_table, name: orders, parent: reg-us-east-1, at: [3, 3]}
+- {id: inventory, type: aws.dynamodb_table, name: inventory, parent: reg-us-east-1, at: [3, 4]}
 - {id: payments, type: aws.dynamodb_table, name: payments, parent: reg-us-east-1, at: [3, 5]}
 edges:
-- {from: client, to: booking-api, label: POST /bookings, step: '1'}
-- {from: booking-api, to: booking-saga, label: StartExecution, step: '2'}
-- {from: booking-saga, to: reserve-flight, step: '3'}
-- {from: reserve-flight, to: flights, label: PutItem}
-- {from: booking-saga, to: reserve-hotel, step: '4'}
-- {from: reserve-hotel, to: hotels, label: PutItem}
-- {from: booking-saga, to: charge-payment, step: '5'}
-- {from: charge-payment, to: payments, label: PutItem}
-- {from: booking-saga, to: refund-payment, label: Catch compensate}
-- {from: booking-saga, to: cancel-hotel, label: Catch compensate}
-- {from: booking-saga, to: cancel-flight, label: Catch compensate}
+- {from: client, to: order-api, label: Place Order, step: '1'}
+- {from: order-api, to: order-saga, label: StartExecution, step: '2'}
+- {from: order-saga, to: order-service, label: PlaceOrder, step: '3'}
+- {from: order-service, to: orders, label: PutItem}
+- {from: order-saga, to: inventory-service, label: OrderPlaced, step: '4'}
+- {from: inventory-service, to: inventory, label: UpdateItem}
+- {from: order-saga, to: payment-service, label: InventoryUpdated, step: '5'}
+- {from: payment-service, to: payments, label: PutItem}
+- {from: payment-service, to: order-saga, label: PaymentProcessed, step: '6'}
+- {from: order-saga, to: refund-payment, label: 'PaymentFailed: compensate'}
+- {from: order-saga, to: revert-inventory, label: 'InventoryUpdateFailed: compensate'}
+- {from: order-saga, to: cancel-order, label: compensate}
 steps:
-- {n: '1', text: 'client → booking-api: POST /bookings'}
-- {n: '2', text: 'booking-api → booking-saga: StartExecution'}
-- {n: '3', text: booking-saga → reserve-flight}
-- {n: '4', text: booking-saga → reserve-hotel}
-- {n: '5', text: booking-saga → charge-payment}
+- {n: '1', text: 'client → order-api: Place Order'}
+- {n: '2', text: 'order-api → order-saga: StartExecution'}
+- {n: '3', text: 'order-saga → order-service: PlaceOrder'}
+- {n: '4', text: 'order-saga → inventory-service: OrderPlaced'}
+- {n: '5', text: 'order-saga → payment-service: InventoryUpdated'}
+- {n: '6', text: 'payment-service → order-saga: PaymentProcessed'}

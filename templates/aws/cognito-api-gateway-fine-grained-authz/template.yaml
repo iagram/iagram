@@ -10,31 +10,34 @@ tags:
 - dynamodb
 image: https://d2908q01vomqb2.cloudfront.net/22d200f8670dbdb3e253a90eee5098477c95c23d/2021/06/05/Building-fine-grained-authorization-1r.png
 source: https://aws.amazon.com/blogs/security/building-fine-grained-authorization-using-amazon-cognito-api-gateway-and-iam/
-description: Users authenticate against a Cognito user pool and present the access token to API Gateway, which invokes a Lambda authorizer that validates the JWT against the cached Cognito public keys.
-  The authorizer maps the user's Cognito group to an IAM policy stored in DynamoDB and returns it, so API Gateway allows or denies each method before invoking the backend Lambda function.
+description: A user authenticates against a Cognito user pool and presents the token to API Gateway, which passes it to a custom authorizer Lambda function that verifies the JWT and looks up the matching
+  IAM policy document in a DynamoDB policy store. The authorizer returns the policy and context to API Gateway, which evaluates the policy before invoking the service Lambda function with that context.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
 - {id: customer-user-pool, type: aws.res.aws_cognito_user_pool, name: customer-user-pool, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1]}
-- {id: orders-api, type: aws.res.aws_api_gateway_rest_api, name: orders-api, parent: reg-us-east-1, props: {name: changeme}, at: [2, 2]}
 - {id: authorizer-function, type: aws.lambda_function, name: authorizer-function, parent: reg-us-east-1, at: [1, 2]}
 - {id: group-policy-table, type: aws.dynamodb_table, name: group-policy-table, parent: reg-us-east-1, at: [1, 3]}
+- {id: api-invoke-policy, type: aws.res.aws_iam_policy, name: api-invoke-policy, parent: reg-us-east-1, props: {policy: changeme}, at: [1, 4]}
+- {id: orders-api, type: aws.res.aws_api_gateway_rest_api, name: orders-api, parent: reg-us-east-1, props: {name: changeme}, at: [2, 2]}
 - {id: orders-backend, type: aws.lambda_function, name: orders-backend, parent: reg-us-east-1, at: [2, 3]}
-- {id: authorizer-role, type: aws.res.aws_iam_role, name: authorizer-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}, at: [1, 4]}
-- {id: api-access-logs, type: aws.res.aws_cloudwatch_log_group, name: api-access-logs, parent: reg-us-east-1, at: [3, 2]}
 edges:
-- {from: users, to: customer-user-pool, label: sign in, step: '1'}
-- {from: customer-user-pool, to: users, label: JWT tokens, step: '2'}
-- {from: users, to: orders-api, label: request with bearer token, step: '3'}
-- {from: authorizer-function, to: customer-user-pool, label: fetch JWKS, step: '6'}
-- {from: authorizer-function, to: group-policy-table, label: lookup group policy, step: '7'}
-- {from: orders-api, to: orders-backend, label: allowed invoke, step: '8'}
-- {from: orders-api, to: api-access-logs, label: access logs}
+- {from: user, to: customer-user-pool, label: authenticate, step: '1'}
+- {from: user, to: orders-api, label: token, step: '2'}
+- {from: orders-api, to: authorizer-function, label: token, step: '3'}
+- {from: authorizer-function, to: customer-user-pool, label: verify token, step: '4'}
+- {from: authorizer-function, to: group-policy-table, label: lookup / return policy, step: '5'}
+- {from: group-policy-table, to: api-invoke-policy, label: stored IAM policy document}
+- {from: authorizer-function, to: orders-api, label: policy + context, step: '6'}
+- {from: orders-api, to: api-invoke-policy, label: evaluate policy, step: '7'}
+- {from: orders-api, to: orders-backend, label: context, step: '8'}
 steps:
-- {n: '1', text: 'users → customer-user-pool: sign in'}
-- {n: '2', text: 'customer-user-pool → users: JWT tokens'}
-- {n: '3', text: 'users → orders-api: request with bearer token'}
-- {n: '6', text: 'authorizer-function → customer-user-pool: fetch JWKS'}
-- {n: '7', text: 'authorizer-function → group-policy-table: lookup group policy'}
-- {n: '8', text: 'orders-api → orders-backend: allowed invoke'}
+- {n: '1', text: 'user → customer-user-pool: authenticate'}
+- {n: '2', text: 'user → orders-api: token'}
+- {n: '3', text: 'orders-api → authorizer-function: token'}
+- {n: '4', text: 'authorizer-function → customer-user-pool: verify token'}
+- {n: '5', text: 'authorizer-function → group-policy-table: lookup / return policy'}
+- {n: '6', text: 'authorizer-function → orders-api: policy + context'}
+- {n: '7', text: 'orders-api → api-invoke-policy: evaluate policy'}
+- {n: '8', text: 'orders-api → orders-backend: context'}

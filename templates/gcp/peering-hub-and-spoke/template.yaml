@@ -8,8 +8,9 @@ tags:
 - non-transitive
 image: https://docs.cloud.google.com/static/vpc/images/peering/network-peering-routes-global.svg
 source: https://docs.cloud.google.com/vpc/docs/vpc-peering
-description: Each spoke VPC is peered with a central hub VPC that hosts shared services and the hybrid connectivity to on-premises; the hub exports custom dynamic routes so spokes learn on-premises prefixes.
-  Peering is non-transitive, so spokes cannot talk to each other through the hub unless a network virtual appliance or NCC is added.
+description: Each spoke VPC is peered with a central hub VPC (importing and exporting custom routes) that hosts a shared-services subnet, an HA VPN gateway and a Cloud Router speaking BGP to on-premises;
+  with global dynamic routing the hub exports the on-premises prefixes so spokes learn them, and each VPC also keeps its own static routes such as the default route to the internet gateway. Spoke A spans
+  two regions; peering is non-transitive, so spokes cannot talk to each other through the hub unless a network virtual appliance or NCC is added.
 nodes:
 - {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 4]}
 - {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-central1}, at: [1, 2]}
@@ -18,28 +19,31 @@ nodes:
 - {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: us-central1}, at: [1, 1]}
 - {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-workload-a, props: {cidr: 10.11.0.0/16}, at: [1, 1]}
 - {id: sub-spoke-a-usc1, type: gcp.subnetwork, name: spoke-a-usc1, parent: vpc-spoke-a, props: {cidr: 10.11.0.0/24, region: us-central1}, at: [1, 1]}
+- {id: sub-spoke-a-eun1, type: gcp.subnetwork, name: spoke-a-eun1, parent: vpc-spoke-a, props: {cidr: 10.11.1.0/24, region: europe-north1}, at: [2, 1]}
 - {id: prj-workload-b, type: gcp.project, name: workload-b, props: {project_id: workload-b-123456, project: changeme, region: us-central1}, at: [1, 3]}
 - {id: vpc-spoke-b, type: gcp.vpc, name: spoke-b, parent: prj-workload-b, props: {cidr: 10.12.0.0/16}, at: [1, 1]}
 - {id: sub-spoke-b-usc1, type: gcp.subnetwork, name: spoke-b-usc1, parent: vpc-spoke-b, props: {cidr: 10.12.0.0/24, region: us-central1}, at: [1, 1]}
-- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}, at: [3, 1]}
-- {id: hub-vlan-attachment, type: gcp.res.google_compute_interconnect_attachment, name: hub-vlan-attachment, parent: vpc-hub-vpc, props: {name: changeme, router: changeme}, at: [2, 1]}
 - {id: shared-services-vm, type: gcp.compute_instance, name: shared-services-vm, parent: sub-hub-shared-svc, at: [1, 1]}
-- {id: hub-private-zone, type: gcp.cloud_dns_zone, name: hub-private-zone, parent: prj-net-hub, props: {domain: example.com}, at: [3, 1]}
-- {id: allow-spoke-ingress, type: gcp.firewall_rule, name: allow-spoke-ingress, parent: vpc-hub-vpc, at: [1, 2, 3, 1]}
+- {id: hub-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: hub-vpn-gw, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}, at: [2, 1]}
+- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}, at: [3, 1]}
+- {id: hub-default-internet-route, type: gcp.res.google_compute_route, name: hub-default-internet-route, parent: vpc-hub-vpc, props: {dest_range: changeme, name: changeme, network: changeme}, at: [4, 1]}
 - {id: app-a, type: gcp.compute_instance, name: app-a, parent: sub-spoke-a-usc1, at: [1, 1]}
+- {id: app-a2, type: gcp.compute_instance, name: app-a2, parent: sub-spoke-a-eun1, at: [1, 1]}
+- {id: spoke-a-default-internet-route, type: gcp.res.google_compute_route, name: spoke-a-default-internet-route, parent: vpc-spoke-a, props: {dest_range: changeme, name: changeme, network: changeme}, at: [
+    3, 1]}
 - {id: app-b, type: gcp.compute_instance, name: app-b, parent: sub-spoke-b-usc1, at: [1, 1]}
-- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub, at: [2, 1]}
-- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}, at: [1, 1]}
-- {id: onprem-router, type: gcp.res.google_compute_router, name: onprem-router, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}, at: [1, 1]}
+- {id: spoke-b-default-internet-route, type: gcp.res.google_compute_route, name: spoke-b-default-internet-route, parent: vpc-spoke-b, props: {dest_range: changeme, name: changeme, network: changeme}, at: [
+    2, 1]}
 edges:
-- {from: vpc-hub-vpc, to: vpc-spoke-a, link: google_compute_network_peering}
-- {from: vpc-hub-vpc, to: vpc-spoke-b, link: google_compute_network_peering}
-- {from: onprem-router, to: hub-vlan-attachment, label: Cloud Interconnect, step: '1'}
-- {from: hub-router, to: onprem-router, label: BGP, step: '2'}
+- {from: vpc-hub-vpc, to: vpc-spoke-a, label: peering importing and exporting custom routes, link: google_compute_network_peering}
+- {from: vpc-hub-vpc, to: vpc-spoke-b, label: peering importing and exporting custom routes, link: google_compute_network_peering}
+- {from: hub-vpn-gw, to: dc-on-premises, label: VPN to on-premises network, step: '1'}
+- {from: hub-router, to: dc-on-premises, label: BGP over VPN to on-premises network, step: '2'}
 - {from: app-a, to: shared-services-vm, label: shared services over peering, step: '3'}
-- {from: app-b, to: onprem-router, label: on-premises via exported custom routes, step: '4'}
+- {from: app-a2, to: shared-services-vm, label: shared services over peering from the second region, step: '3'}
+- {from: app-b, to: dc-on-premises, label: on-premises via exported custom dynamic routes, step: '4'}
 steps:
-- {n: '1', text: 'onprem-router → hub-vlan-attachment: Cloud Interconnect'}
-- {n: '2', text: 'hub-router → onprem-router: BGP'}
+- {n: '1', text: 'hub-vpn-gw → datacenter: VPN to on-premises network'}
+- {n: '2', text: 'hub-router → datacenter: BGP over VPN to on-premises network'}
 - {n: '3', text: 'app-a → shared-services-vm: shared services over peering'}
-- {n: '4', text: 'app-b → onprem-router: on-premises via exported custom routes'}
+- {n: '4', text: 'app-b → datacenter: on-premises via exported custom dynamic routes'}

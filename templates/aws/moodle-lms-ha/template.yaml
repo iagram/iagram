@@ -11,57 +11,76 @@ tags:
 - cloudfront
 image: https://docs.aws.amazon.com/images/reference-architecture-diagrams/latest/moodle-for-high-availability-on-aws/images/moodle-for-high-availability-on-aws.png
 source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/moodle-for-high-availability-on-aws/moodle-for-high-availability-on-aws.html
-description: Route 53 directs students to CloudFront, which caches Moodle content and forwards dynamic requests to an Application Load Balancer in front of Moodle application servers in a private-subnet
-  Auto Scaling group across Availability Zones. Moodledata sits on EFS, sessions and the application cache in ElastiCache, and course data in an Aurora cluster, with a bastion host for administration.
+description: Route 53 directs students to CloudFront, secured with an ACM certificate, which forwards dynamic requests through the internet gateway to an Application Load Balancer in front of Nginx and
+  PHP-FPM containers running as ECS tasks on AWS Fargate in private subnets of two Availability Zones, with NAT gateways in the public subnets for outbound access. Each zone holds ElastiCache, EFS, and
+  an Aurora DB writer that replicate with their peers, Secrets Manager supplies the database credentials, and Amazon ECR stores the container images.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-ap-southeast-2, type: aws.region, name: ap-southeast-2, parent: acct-prod, props: {region: ap-southeast-2}, at: [1, 1]}
-- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-ap-southeast-2, at: [2, 1]}
-- {id: vpc-moodle, type: aws.vpc, name: moodle, parent: reg-ap-southeast-2, props: {cidr: 10.0.0.0/16}, at: [1, 2, 3, 1]}
-- {id: az-moodle-a, type: aws.availability_zone, name: a, parent: vpc-moodle, props: {zone: a}, at: [1, 2, 2, 1]}
+- {id: grp-edge, type: common.group, name: edge, parent: reg-ap-southeast-2, at: [1, 1]}
+- {id: vpc-moodle, type: aws.vpc, name: moodle, parent: reg-ap-southeast-2, props: {cidr: 10.0.0.0/16}, at: [1, 2]}
+- {id: az-moodle-a, type: aws.availability_zone, name: a, parent: vpc-moodle, props: {zone: a}, at: [1, 2, 3, 1]}
 - {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-moodle-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
-- {id: az-moodle-b, type: aws.availability_zone, name: b, parent: vpc-moodle, props: {zone: b}, at: [1, 4, 2, 1]}
-- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-moodle-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
 - {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-moodle-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [2, 1]}
-- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-moodle-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [2, 1]}
 - {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-moodle-a, props: {cidr: 10.0.20.0/24, az: a, public: false}, at: [3, 1]}
+- {id: az-moodle-b, type: aws.availability_zone, name: b, parent: vpc-moodle, props: {zone: b}, at: [1, 4, 3, 1]}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-moodle-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
+- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-moodle-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [2, 1]}
 - {id: sub-data-b, type: aws.subnet, name: data-b, parent: az-moodle-b, props: {cidr: 10.0.21.0/24, az: b, public: false}, at: [3, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: user, type: common.user, name: user, at: [2, 1]}
-- {id: lms-zone, type: aws.route53_zone, name: lms-zone, parent: reg-ap-southeast-2, props: {domain: example.com}, at: [1, 1]}
-- {id: lms-cert, type: aws.res.aws_acm_certificate, name: lms-cert, parent: reg-ap-southeast-2, at: [3, 1]}
-- {id: lms-cdn, type: aws.cloudfront_distribution, name: lms-cdn, parent: grp-global-edge, at: [1, 1]}
-- {id: moodle-igw, type: aws.res.aws_internet_gateway, name: moodle-igw, parent: vpc-moodle, at: [1, 1, 2, 1]}
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
-- {id: bastion, type: aws.ec2_instance, name: bastion, parent: sub-public-b, at: [1, 1]}
+- {id: lms-zone, type: aws.route53_zone, name: lms-zone, parent: grp-edge, props: {domain: example.com}, at: [1, 1]}
+- {id: lms-cdn, type: aws.cloudfront_distribution, name: lms-cdn, parent: grp-edge, at: [2, 1]}
+- {id: lms-cert, type: aws.res.aws_acm_certificate, name: lms-cert, parent: grp-edge, at: [3, 1]}
+- {id: moodle-igw, type: aws.res.aws_internet_gateway, name: moodle-igw, parent: vpc-moodle, at: [1, 1]}
+- {id: db-secret, type: aws.res.aws_secretsmanager_secret, name: db-secret, parent: vpc-moodle, at: [2, 1]}
+- {id: moodle-images, type: aws.res.aws_ecr_repository, name: moodle-images, parent: vpc-moodle, props: {name: changeme}, at: [3, 1]}
 - {id: lms-alb, type: aws.alb, name: lms-alb, parent: vpc-moodle, at: [1, 3]}
-- {id: moodle-asg, type: aws.res.aws_autoscaling_group, name: moodle-asg, parent: vpc-moodle, props: {max_size: 1, min_size: 1}}
-- {id: moodle-a, type: aws.ec2_instance, name: moodle-a, parent: sub-app-a, at: [1, 1]}
-- {id: moodle-b, type: aws.ec2_instance, name: moodle-b, parent: sub-app-b, at: [1, 1]}
-- {id: moodledata, type: aws.res.aws_efs_file_system, name: moodledata, parent: vpc-moodle, at: [2, 3]}
-- {id: moodle-cache, type: aws.res.aws_elasticache_cluster, name: moodle-cache, parent: sub-data-a, props: {cluster_id: changeme}, at: [1, 1]}
-- {id: moodle-aurora, type: aws.res.aws_rds_cluster, name: moodle-aurora, parent: sub-data-b, props: {engine: changeme}, at: [1, 1]}
+- {id: moodle-fargate, type: aws.res.aws_ecs_cluster, name: moodle-fargate, parent: vpc-moodle, props: {name: changeme}, at: [2, 3]}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
+- {id: moodle-a, type: aws.res.aws_ecs_service, name: moodle-a, parent: moodle-fargate, props: {name: changeme}, at: [1, 1]}
+- {id: cache-a, type: aws.res.aws_elasticache_cluster, name: cache-a, parent: sub-data-a, props: {cluster_id: changeme}, at: [1, 1]}
+- {id: moodledata-a, type: aws.res.aws_efs_file_system, name: moodledata-a, parent: sub-data-a, at: [2, 1]}
+- {id: aurora-writer-a, type: aws.res.aws_rds_cluster, name: aurora-writer-a, parent: sub-data-a, props: {engine: changeme}, at: [3, 1]}
+- {id: nat-b, type: aws.res.aws_nat_gateway, name: nat-b, parent: sub-public-b, at: [1, 1]}
+- {id: moodle-b, type: aws.res.aws_ecs_service, name: moodle-b, parent: moodle-fargate, props: {name: changeme}, at: [1, 1]}
+- {id: cache-b, type: aws.res.aws_elasticache_cluster, name: cache-b, parent: sub-data-b, props: {cluster_id: changeme}, at: [1, 1]}
+- {id: moodledata-b, type: aws.res.aws_efs_file_system, name: moodledata-b, parent: sub-data-b, at: [2, 1]}
+- {id: aurora-writer-b, type: aws.res.aws_rds_cluster_instance, name: aurora-writer-b, parent: aurora-writer-a, props: {cluster_identifier: changeme, engine: changeme, instance_class: changeme}, at: [3,
+    1]}
 edges:
 - {from: users, to: lms-zone, label: DNS, step: '1'}
-- {from: users, to: lms-cdn, label: HTTPS, step: '2'}
-- {from: lms-cert, to: lms-cdn, label: TLS certificate}
-- {from: lms-cdn, to: lms-alb, label: origin, step: '3'}
-- {from: lms-alb, to: moodle-a, step: '4'}
-- {from: lms-alb, to: moodle-b}
-- {from: moodle-asg, to: moodle-a, label: scales}
-- {from: moodle-a, to: moodledata, label: moodledata over NFS, step: '5'}
-- {from: moodle-b, to: moodledata, label: NFS}
-- {from: moodle-a, to: moodle-cache, label: sessions and MUC cache, step: '6'}
-- {from: moodle-a, to: moodle-aurora, label: SQL, step: '7'}
-- {from: user, to: bastion, label: admin SSH}
-- {from: bastion, to: moodle-a, label: SSH}
-- {from: moodle-a, to: nat-a}
+- {from: users, to: lms-cdn, label: HTTPS}
+- {from: lms-cert, to: lms-cdn, label: TLS certificate, step: '2'}
+- {from: lms-cdn, to: moodle-igw, label: origin requests}
+- {from: moodle-igw, to: lms-alb, label: forward, step: '3'}
+- {from: moodle-a, to: nat-a, label: outbound, step: '4'}
+- {from: moodle-b, to: nat-b, label: outbound}
 - {from: nat-a, to: moodle-igw}
+- {from: nat-b, to: moodle-igw}
+- {from: lms-alb, to: moodle-a, label: HTTP to Nginx PHP-FPM tasks}
+- {from: lms-alb, to: moodle-b, label: HTTP to Nginx PHP-FPM tasks}
+- {from: moodle-fargate, to: moodle-a, label: runs ECS tasks on Fargate, step: '5'}
+- {from: moodle-fargate, to: moodle-b, label: runs ECS tasks on Fargate}
+- {from: moodle-a, to: cache-a, label: sessions and MUC cache, step: '6'}
+- {from: moodle-b, to: cache-b, label: sessions and MUC cache}
+- {from: cache-a, to: cache-b, label: distributed cache and replication}
+- {from: moodle-a, to: moodledata-a, label: moodledata over NFS, step: '7'}
+- {from: moodle-b, to: moodledata-b, label: moodledata over NFS}
+- {from: moodledata-a, to: moodledata-b, label: file system replication}
+- {from: moodle-a, to: aurora-writer-a, label: SQL, step: '8'}
+- {from: moodle-b, to: aurora-writer-b, label: SQL}
+- {from: aurora-writer-a, to: aurora-writer-b, label: database replication}
+- {from: db-secret, to: moodle-a, label: database credentials, step: '9'}
+- {from: db-secret, to: moodle-b, label: database credentials}
+- {from: moodle-images, to: moodle-fargate, label: container images, step: '10'}
 steps:
 - {n: '1', text: 'users → lms-zone: DNS'}
-- {n: '2', text: 'users → lms-cdn: HTTPS'}
-- {n: '3', text: 'lms-cdn → lms-alb: origin'}
-- {n: '4', text: lms-alb → moodle-a}
-- {n: '5', text: 'moodle-a → moodledata: moodledata over NFS'}
-- {n: '6', text: 'moodle-a → moodle-cache: sessions and MUC cache'}
-- {n: '7', text: 'moodle-a → moodle-aurora: SQL'}
+- {n: '2', text: 'lms-cert → lms-cdn: TLS certificate'}
+- {n: '3', text: 'moodle-igw → lms-alb: forward'}
+- {n: '4', text: 'moodle-a → nat-a: outbound'}
+- {n: '5', text: 'moodle-fargate → moodle-a: runs ECS tasks on Fargate'}
+- {n: '6', text: 'moodle-a → cache-a: sessions and MUC cache'}
+- {n: '7', text: 'moodle-a → moodledata-a: moodledata over NFS'}
+- {n: '8', text: 'moodle-a → aurora-writer-a: SQL'}
+- {n: '9', text: 'db-secret → moodle-a: database credentials'}
+- {n: '10', text: 'moodle-images → moodle-fargate: container images'}

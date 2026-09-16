@@ -10,42 +10,45 @@ tags:
 - private dns
 image: https://d2908q01vomqb2.cloudfront.net/fc074d501302eb2b93e2554793fcaf50b3bf7291/2018/03/30/Screen-Shot-2018-01-26-at-11.30.14-AM-1024x644.png
 source: https://aws.amazon.com/blogs/architecture/building-saas-services-for-aws-customers-with-privatelink/
-description: The provider places its application behind a Network Load Balancer and registers the load balancer with a VPC endpoint service, optionally with a verified private DNS name and acceptance rules
-  for consumer accounts. Each consumer creates an interface endpoint in its own VPC that surfaces as elastic network interfaces with private IPs, so the service is reached without internet exposure, peering,
-  or overlapping-CIDR concerns.
+description: The provider places its auto-scaled application instances, protected by a security group, behind a Network Load Balancer that spans two Availability Zones and is registered as a VPC endpoint
+  service. Each consumer creates an interface endpoint in its own VPC that surfaces as an elastic network interface in each Availability Zone, next to the consumer instances and inside their security group,
+  so the service is reached across the account boundary without internet exposure, peering, or overlapping-CIDR concerns.
 nodes:
 - {id: acct-provider, type: aws.account, name: provider, at: [1, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-provider, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-provider, type: aws.vpc, name: provider, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: vpc-provider, type: aws.vpc, name: provider, parent: reg-us-east-1, props: {cidr: 10.3.0.0/25}, at: [1, 1]}
 - {id: az-provider-a, type: aws.availability_zone, name: a, parent: vpc-provider, props: {zone: a}, at: [1, 1]}
-- {id: sub-provider-private-a, type: aws.subnet, name: provider-private-a, parent: az-provider-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: sub-provider-private-a, type: aws.subnet, name: provider-private-a, parent: az-provider-a, props: {cidr: 10.3.0.0/28, az: a, public: false}, at: [1, 1]}
 - {id: az-provider-b, type: aws.availability_zone, name: b, parent: vpc-provider, props: {zone: b}, at: [2, 1]}
-- {id: sub-provider-private-b, type: aws.subnet, name: provider-private-b, parent: az-provider-b, props: {cidr: 10.0.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: sub-provider-private-b, type: aws.subnet, name: provider-private-b, parent: az-provider-b, props: {cidr: 10.3.0.16/28, az: b, public: false}, at: [1, 1]}
 - {id: acct-consumer, type: aws.account, name: consumer, at: [1, 2]}
 - {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-consumer, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-consumer, type: aws.vpc, name: consumer, parent: reg-us-east-1-2, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: vpc-consumer, type: aws.vpc, name: consumer, parent: reg-us-east-1-2, props: {cidr: 10.0.0.0/25}, at: [1, 1]}
 - {id: az-consumer-a, type: aws.availability_zone, name: a, parent: vpc-consumer, props: {zone: a}, at: [1, 1]}
-- {id: sub-consumer-private-a, type: aws.subnet, name: consumer-private-a, parent: az-consumer-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: sub-consumer-private-a, type: aws.subnet, name: consumer-private-a, parent: az-consumer-a, props: {cidr: 10.0.0.0/28, az: a, public: false}, at: [1, 1]}
 - {id: az-consumer-b, type: aws.availability_zone, name: b, parent: vpc-consumer, props: {zone: b}, at: [2, 1]}
-- {id: sub-consumer-private-b, type: aws.subnet, name: consumer-private-b, parent: az-consumer-b, props: {cidr: 10.0.2.0/24, az: b, public: false}, at: [1, 1]}
-- {id: provider-nlb-network, type: aws.alb, name: provider-nlb-network, parent: az-provider-a, at: [1, 2]}
-- {id: saas-endpoint-service, type: aws.res.aws_vpc_endpoint_service, name: saas-endpoint-service, parent: vpc-provider, props: {acceptance_required: true}, at: [1, 2, 2, 1]}
-- {id: saas-app-fleet, type: aws.res.aws_autoscaling_group, name: saas-app-fleet, parent: sub-provider-private-a, props: {max_size: 1, min_size: 1}, at: [1, 1]}
-- {id: saas-app-1, type: aws.ec2_instance, name: saas-app-1, parent: sub-provider-private-a, at: [1, 2]}
-- {id: saas-app-2, type: aws.ec2_instance, name: saas-app-2, parent: sub-provider-private-b, at: [1, 1]}
-- {id: saas-interface-endpoint, type: aws.res.aws_vpc_endpoint, name: saas-interface-endpoint, parent: sub-consumer-private-a, props: {vpc_id: changeme}, at: [1, 1]}
-- {id: saas-private-dns, type: aws.route53_zone, name: saas-private-dns, parent: reg-us-east-1-2, props: {domain: example.com}, at: [1, 2]}
-- {id: consumer-app, type: aws.ec2_instance, name: consumer-app, parent: sub-consumer-private-a, at: [1, 2]}
+- {id: sub-consumer-private-b, type: aws.subnet, name: consumer-private-b, parent: az-consumer-b, props: {cidr: 10.0.0.16/28, az: b, public: false}, at: [1, 1]}
+- {id: provider-nlb-network, type: aws.alb, name: provider-nlb-network, parent: vpc-provider, at: [1, 2, 2, 1]}
+- {id: saas-app-fleet-a, type: aws.res.aws_autoscaling_group, name: saas-app-fleet-a, parent: sub-provider-private-a, props: {max_size: 1, min_size: 1}, at: [1, 1]}
+- {id: saas-app-sg-a, type: aws.security_group, name: saas-app-sg-a, parent: az-provider-a, at: [1, 2]}
+- {id: saas-app-1, type: aws.ec2_instance, name: saas-app-1, parent: sub-provider-private-a, at: [1, 3]}
+- {id: saas-app-fleet-b, type: aws.res.aws_autoscaling_group, name: saas-app-fleet-b, parent: sub-provider-private-b, props: {max_size: 1, min_size: 1}, at: [1, 1]}
+- {id: saas-app-sg-b, type: aws.security_group, name: saas-app-sg-b, parent: az-provider-b, at: [1, 2]}
+- {id: saas-app-2, type: aws.ec2_instance, name: saas-app-2, parent: sub-provider-private-b, at: [1, 3]}
+- {id: consumer-sg-a, type: aws.security_group, name: consumer-sg-a, parent: az-consumer-a, at: [1, 1]}
+- {id: saas-interface-endpoint, type: aws.res.aws_vpc_endpoint, name: saas-interface-endpoint, parent: sub-consumer-private-a, props: {vpc_id: changeme}, at: [1, 2]}
+- {id: consumer-app-a, type: aws.ec2_instance, name: consumer-app-a, parent: sub-consumer-private-a, at: [1, 3]}
+- {id: consumer-sg-b, type: aws.security_group, name: consumer-sg-b, parent: az-consumer-b, at: [1, 1]}
+- {id: saas-endpoint-eni-b, type: aws.res.aws_network_interface, name: saas-endpoint-eni-b, parent: sub-consumer-private-b, props: {subnet_id: changeme}, at: [1, 2]}
+- {id: consumer-app-b, type: aws.ec2_instance, name: consumer-app-b, parent: sub-consumer-private-b, at: [1, 3]}
 edges:
-- {from: consumer-app, to: saas-private-dns, label: resolve api.saas.example.com, step: '1'}
-- {from: consumer-app, to: saas-interface-endpoint, label: TLS to endpoint ENI, step: '2'}
-- {from: saas-interface-endpoint, to: saas-endpoint-service, label: PrivateLink (overlapping CIDRs allowed), step: '3'}
-- {from: saas-endpoint-service, to: provider-nlb-network, step: '4'}
-- {from: provider-nlb-network, to: saas-app-1, step: '5'}
+- {from: consumer-app-a, to: saas-interface-endpoint, label: TLS to endpoint ENI, step: '1'}
+- {from: consumer-app-b, to: saas-endpoint-eni-b, label: TLS to endpoint ENI}
+- {from: saas-interface-endpoint, to: provider-nlb-network, label: PrivateLink across the account boundary (overlapping CIDRs allowed), step: '2'}
+- {from: saas-endpoint-eni-b, to: provider-nlb-network, label: PrivateLink}
+- {from: provider-nlb-network, to: saas-app-1, step: '3'}
 - {from: provider-nlb-network, to: saas-app-2}
 steps:
-- {n: '1', text: 'consumer-app → saas-private-dns: resolve api.saas.example.com'}
-- {n: '2', text: 'consumer-app → saas-interface-endpoint: TLS to endpoint ENI'}
-- {n: '3', text: 'saas-interface-endpoint → saas-endpoint-service: PrivateLink (overlapping CIDRs allowed)'}
-- {n: '4', text: saas-endpoint-service → provider-nlb-network}
-- {n: '5', text: provider-nlb-network → saas-app-1}
+- {n: '1', text: 'consumer-app-a → saas-interface-endpoint: TLS to endpoint ENI'}
+- {n: '2', text: 'saas-interface-endpoint → provider-nlb-network: PrivateLink across the account boundary (overlapping CIDRs allowed)'}
+- {n: '3', text: provider-nlb-network → saas-app-1}

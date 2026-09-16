@@ -11,41 +11,51 @@ tags:
 - iot
 image: https://docs.cloud.google.com/static/architecture/images/mqtt_broker_arch.svg
 source: https://docs.cloud.google.com/architecture/connected-devices/mqtt-broker-architecture
-description: Edge devices open TLS MQTT sessions through a regional external passthrough Network Load Balancer with session affinity to a three-node standards-based MQTT broker cluster hosted on GKE, which
-  authenticates devices against a credential store in Cloud SQL. The broker bridges topics to Pub/Sub, and Dataflow (Apache Beam MQTT driver or Pub/Sub source) processes the stream into BigQuery while commands
-  flow back to devices through the same broker.
+description: Edge devices connect through an edge gateway (certificate store, edge software, device connectors) and cloud clients connect directly, all opening TLS MQTT sessions through Cloud Load Balancing
+  to a standards-based MQTT broker cluster hosted on GKE; a broker administration tier authenticates and authorises devices against a device credential store in Cloud SQL and exposes a broker administration
+  API. Google Cloud connectors (an Apache Beam MqttIO Dataflow job and an MQTT Pub/Sub connector) move telemetry into BigQuery and downstream processing, while Cloud IAM, Cloud Logging and Cloud Monitoring
+  are the project-level resources.
 nodes:
-- {id: prj-iot-prj, type: gcp.project, name: iot-prj, props: {project_id: iot-prj-123456, project: changeme, region: europe-west1}, at: [1, 2, 2, 1]}
-- {id: vpc-iot-vpc, type: gcp.vpc, name: iot-vpc, parent: prj-iot-prj, props: {cidr: 10.40.0.0/16}, at: [1, 1, 2, 1]}
-- {id: sub-broker-sub, type: gcp.subnetwork, name: broker-sub, parent: vpc-iot-vpc, props: {cidr: 10.40.1.0/24, region: europe-west1}, at: [1, 2]}
-- {id: device, type: common.device, name: device, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [2, 1]}
+- {id: prj-iot-prj, type: gcp.project, name: iot-prj, props: {project_id: iot-prj-123456, project: changeme, region: europe-west1}, at: [1, 2, 3, 1]}
+- {id: grp-gcp-connectors, type: common.group, name: gcp-connectors, parent: prj-iot-prj, at: [1, 4]}
+- {id: grp-project-level-resources, type: common.group, name: project-level-resources, parent: prj-iot-prj, at: [2, 1, 1, 5]}
+- {id: vpc-iot-vpc, type: gcp.vpc, name: iot-vpc, parent: prj-iot-prj, props: {cidr: 10.40.0.0/16}, at: [1, 1, 1, 3]}
+- {id: sub-broker-sub, type: gcp.subnetwork, name: broker-sub, parent: vpc-iot-vpc, props: {cidr: 10.40.1.0/24, region: europe-west1}, at: [1, 2, 1, 2]}
+- {id: sub-broker-admin-sub, type: gcp.subnetwork, name: broker-admin-sub, parent: vpc-iot-vpc, props: {cidr: 10.40.2.0/24, region: europe-west1}, at: [2, 3]}
+- {id: edge-devices, type: common.device, name: edge-devices, at: [1, 1]}
+- {id: edge-gateway, type: common.server, name: edge-gateway, at: [2, 1]}
+- {id: cloud-clients, type: common.client, name: cloud-clients, at: [3, 1]}
 - {id: mqtt-nlb, type: gcp.res.google_compute_forwarding_rule, name: mqtt-nlb, parent: vpc-iot-vpc, props: {name: changeme}, at: [1, 1, 2, 1]}
 - {id: mqtt-broker-gke, type: gcp.gke_cluster, name: mqtt-broker-gke, parent: sub-broker-sub, at: [1, 1]}
 - {id: device-credential-db, type: gcp.cloud_sql_instance, name: device-credential-db, parent: vpc-iot-vpc, at: [2, 2]}
-- {id: telemetry-topic, type: gcp.pubsub_topic, name: telemetry-topic, parent: prj-iot-prj, at: [1, 2]}
-- {id: command-topic, type: gcp.pubsub_topic, name: command-topic, parent: prj-iot-prj, at: [2, 2]}
-- {id: telemetry-stream-job, type: gcp.res.google_dataflow_job, name: telemetry-stream-job, parent: prj-iot-prj, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}, at: [1, 3]}
-- {id: telemetry-ds, type: gcp.bigquery_dataset, name: telemetry-ds, parent: prj-iot-prj, at: [1, 4]}
-- {id: telemetry-raw, type: gcp.res.google_bigquery_table, name: telemetry-raw, parent: prj-iot-prj, props: {dataset_id: changeme, table_id: changeme}, at: [1, 5]}
-- {id: device-command-api, type: gcp.cloud_run_service, name: device-command-api, parent: prj-iot-prj, at: [2, 3]}
+- {id: device-auth-service, type: gcp.compute_instance, name: device-auth-service, parent: sub-broker-admin-sub, at: [1, 1]}
+- {id: broker-admin-api, type: gcp.compute_instance, name: broker-admin-api, parent: sub-broker-admin-sub, at: [1, 2]}
+- {id: telemetry-stream-job, type: gcp.res.google_dataflow_job, name: telemetry-stream-job, parent: grp-gcp-connectors, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme},
+  at: [1, 1]}
+- {id: telemetry-topic, type: gcp.pubsub_topic, name: telemetry-topic, parent: grp-gcp-connectors, at: [2, 1]}
+- {id: telemetry-ds, type: gcp.bigquery_dataset, name: telemetry-ds, parent: prj-iot-prj, at: [1, 5]}
+- {id: broker-iam-service-account, type: gcp.res.google_service_account, name: broker-iam-service-account, parent: grp-project-level-resources, props: {account_id: changeme}, at: [1, 1]}
+- {id: broker-logs, type: gcp.res.google_logging_project_bucket_config, name: broker-logs, parent: grp-project-level-resources, props: {bucket_id: changeme, location: westeurope, project: changeme}, at: [
+    1, 2]}
+- {id: broker-monitoring, type: gcp.res.google_monitoring_dashboard, name: broker-monitoring, parent: grp-project-level-resources, props: {dashboard_json: changeme}, at: [1, 3]}
 edges:
-- {from: device, to: mqtt-nlb, label: MQTT over TLS 8883, step: '1'}
-- {from: mqtt-nlb, to: mqtt-broker-gke, label: session-affine TCP, step: '2'}
-- {from: mqtt-broker-gke, to: device-credential-db, label: device auth lookup, step: '3'}
-- {from: mqtt-broker-gke, to: telemetry-topic, label: topic bridge publish, step: '4'}
-- {from: telemetry-topic, to: telemetry-stream-job, label: pubsub subscription}
-- {from: telemetry-stream-job, to: telemetry-raw, label: streaming insert, step: '5'}
-- {from: users, to: device-command-api, label: send command, step: '6'}
-- {from: device-command-api, to: command-topic, label: publish command, step: '7'}
-- {from: command-topic, to: mqtt-broker-gke, label: pubsub subscription}
-- {from: mqtt-broker-gke, to: device, label: MQTT command topic, step: '8'}
+- {from: edge-devices, to: edge-gateway, label: device connectors, step: '1'}
+- {from: edge-gateway, to: mqtt-nlb, label: MQTT with TLS 8883, step: '2'}
+- {from: cloud-clients, to: mqtt-nlb, label: MQTT with TLS 8883, step: '2'}
+- {from: mqtt-nlb, to: mqtt-broker-gke, label: session-affine TCP to broker 1..N, step: '3'}
+- {from: mqtt-broker-gke, to: device-auth-service, label: device authentication and authorization, step: '4'}
+- {from: device-auth-service, to: device-credential-db, label: credential lookup}
+- {from: broker-admin-api, to: mqtt-broker-gke, label: broker administration API (HTTPS/gRPC)}
+- {from: mqtt-broker-gke, to: telemetry-stream-job, label: Beam MqttIO connector, step: '5'}
+- {from: mqtt-broker-gke, to: telemetry-topic, label: MQTT Pub/Sub connector, step: '6'}
+- {from: telemetry-stream-job, to: telemetry-ds, label: streaming insert, step: '7'}
+- {from: mqtt-broker-gke, to: edge-gateway, label: command topics over MQTT with TLS, step: '8'}
 steps:
-- {n: '1', text: 'device → mqtt-nlb: MQTT over TLS 8883'}
-- {n: '2', text: 'mqtt-nlb → mqtt-broker-gke: session-affine TCP'}
-- {n: '3', text: 'mqtt-broker-gke → device-credential-db: device auth lookup'}
-- {n: '4', text: 'mqtt-broker-gke → telemetry-topic: topic bridge publish'}
-- {n: '5', text: 'telemetry-stream-job → telemetry-raw: streaming insert'}
-- {n: '6', text: 'users → device-command-api: send command'}
-- {n: '7', text: 'device-command-api → command-topic: publish command'}
-- {n: '8', text: 'mqtt-broker-gke → device: MQTT command topic'}
+- {n: '1', text: 'edge-devices → edge-gateway: device connectors'}
+- {n: '2', text: 'edge-gateway → mqtt-nlb: MQTT with TLS 8883'}
+- {n: '3', text: 'mqtt-nlb → mqtt-broker-gke: session-affine TCP to broker 1..N'}
+- {n: '4', text: 'mqtt-broker-gke → device-auth-service: device authentication and authorization'}
+- {n: '5', text: 'mqtt-broker-gke → telemetry-stream-job: Beam MqttIO connector'}
+- {n: '6', text: 'mqtt-broker-gke → telemetry-topic: MQTT Pub/Sub connector'}
+- {n: '7', text: 'telemetry-stream-job → telemetry-ds: streaming insert'}
+- {n: '8', text: 'mqtt-broker-gke → edge-gateway: command topics over MQTT with TLS'}

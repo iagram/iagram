@@ -11,34 +11,27 @@ tags:
 image: https://d2908q01vomqb2.cloudfront.net/b6692ea5df920cad691c20319a6fffd7a4a766b8/2021/05/25/bdb1040-streaming-ddb-data-lake-1.jpg
 source: https://aws.amazon.com/blogs/big-data/streaming-amazon-dynamodb-data-into-a-centralized-data-lake/
 description: Kinesis Data Streams for DynamoDB captures item-level modifications from a table and replicates them to a Kinesis data stream. A Firehose delivery stream reads the stream, invokes a Lambda
-  transformation to flatten the nested change records, and delivers compressed batches to an S3 data lake that is catalogued in Glue and queried with Athena.
+  transformation running in a private subnet through a Firehose VPC endpoint to flatten the nested change records, and delivers compressed batches to an S3 data lake bucket.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-source, type: common.group, name: source, parent: reg-us-east-1, at: [1, 1]}
-- {id: grp-data-lake, type: common.group, name: data lake, parent: reg-us-east-1, at: [1, 2]}
-- {id: client, type: common.client, name: client, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 3]}
-- {id: orders-table, type: aws.dynamodb_table, name: orders-table, parent: grp-source, at: [1, 1]}
-- {id: orders-cdc-stream, type: aws.res.aws_kinesis_stream, name: orders-cdc-stream, parent: grp-source, props: {name: changeme}, at: [1, 2]}
-- {id: datalake-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: datalake-delivery, parent: grp-data-lake, props: {destination: changeme, name: changeme}, at: [1, 1]}
-- {id: flatten-transform, type: aws.lambda_function, name: flatten-transform, parent: grp-data-lake, at: [2, 1]}
-- {id: datalake-bucket, type: aws.s3_bucket, name: datalake-bucket, parent: grp-data-lake, at: [1, 2]}
-- {id: datalake-catalog, type: aws.res.aws_glue_catalog_database, name: datalake-catalog, parent: grp-data-lake, props: {name: changeme}, at: [2, 2]}
-- {id: analysts, type: aws.res.aws_athena_workgroup, name: analysts, parent: grp-data-lake, props: {name: changeme}, at: [1, 3]}
+- {id: vpc-transform-vpc, type: aws.vpc, name: transform-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [2, 3, 1, 2]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: vpc-transform-vpc, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: orders-table, type: aws.dynamodb_table, name: orders-table, parent: reg-us-east-1, at: [1, 1]}
+- {id: orders-cdc-stream, type: aws.res.aws_kinesis_stream, name: orders-cdc-stream, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
+- {id: datalake-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: datalake-delivery, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [1, 3]}
+- {id: datalake-bucket, type: aws.s3_bucket, name: datalake-bucket, parent: reg-us-east-1, at: [1, 4]}
+- {id: firehose-endpoint, type: aws.res.aws_vpc_endpoint, name: firehose-endpoint, parent: vpc-transform-vpc, props: {vpc_id: changeme}, at: [1, 2]}
+- {id: flatten-transform, type: aws.lambda_function, name: flatten-transform, parent: sub-private-a, at: [1, 1]}
 edges:
-- {from: client, to: orders-table, label: application writes, step: '1'}
-- {from: orders-table, to: orders-cdc-stream, label: Kinesis Data Streams for DynamoDB, step: '2'}
-- {from: orders-cdc-stream, to: datalake-delivery, label: Firehose source, step: '3'}
-- {from: datalake-delivery, to: flatten-transform, label: data transformation, step: '4'}
+- {from: orders-table, to: orders-cdc-stream, label: Kinesis Data Streams for DynamoDB, step: '1'}
+- {from: orders-cdc-stream, to: datalake-delivery, label: Firehose source, step: '2'}
+- {from: datalake-delivery, to: firehose-endpoint, label: PrivateLink, step: '3'}
+- {from: firehose-endpoint, to: flatten-transform, label: data transformation, step: '4'}
 - {from: datalake-delivery, to: datalake-bucket, label: compressed batches, step: '5'}
-- {from: datalake-catalog, to: datalake-bucket, label: table definitions, step: '6'}
-- {from: users, to: analysts, label: SQL queries, step: '7'}
 steps:
-- {n: '1', text: 'client → orders-table: application writes'}
-- {n: '2', text: 'orders-table → orders-cdc-stream: Kinesis Data Streams for DynamoDB'}
-- {n: '3', text: 'orders-cdc-stream → datalake-delivery: Firehose source'}
-- {n: '4', text: 'datalake-delivery → flatten-transform: data transformation'}
+- {n: '1', text: 'orders-table → orders-cdc-stream: Kinesis Data Streams for DynamoDB'}
+- {n: '2', text: 'orders-cdc-stream → datalake-delivery: Firehose source'}
+- {n: '3', text: 'datalake-delivery → firehose-endpoint: PrivateLink'}
+- {n: '4', text: 'firehose-endpoint → flatten-transform: data transformation'}
 - {n: '5', text: 'datalake-delivery → datalake-bucket: compressed batches'}
-- {n: '6', text: 'datalake-catalog → datalake-bucket: table definitions'}
-- {n: '7', text: 'users → analysts: SQL queries'}

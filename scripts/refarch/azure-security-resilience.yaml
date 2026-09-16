@@ -7,69 +7,88 @@
   category: security
   tags: [landing zone, management groups, platform landing zone, connectivity, identity, policy, cloud adoption framework]
   source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/
-  description: A platform landing zone (management group hierarchy plus centralized management, connectivity and identity subscriptions) provides governance and shared services for application landing zone subscriptions placed under Corp, Online or Sandbox management groups. Azure Policy assigned at management group scope is inherited by every subscription, while the connectivity hub (firewall, gateways, DDoS) and the central Log Analytics workspace serve all workloads.
+  description: In the Cloud Adoption Framework conceptual architecture a platform landing zone (the management group hierarchy with its Azure Policy guardrails plus the centralized management, connectivity and identity subscriptions) provides governance and centralized resources for application landing zone subscriptions that each host one Azure workload, and Microsoft Foundry with Foundry IQ can be added to any workload. Unified identity, security and governance come from Microsoft Entra, Microsoft Defender and Microsoft Agent 365 above the landing zone, while the central Log Analytics workspace and the hub firewall are shared by every workload.
   containers:
-    - datacenter: on-premises
-    - group: platform
-      subscriptions:
-        - subscription: management
-          resource_group: {name: rg-management, location: westeurope}
-        - subscription: connectivity
-          resource_group: {name: rg-connectivity, location: westeurope}
-          vnets:
-            - name: hub
-              cidr: 10.0.0.0/16
-              subnets:
-                - {name: AzureFirewallSubnet, cidr: 10.0.1.0/26}
-                - {name: GatewaySubnet, cidr: 10.0.0.0/27}
-        - subscription: identity
-          resource_group: {name: rg-identity, location: westeurope}
-          vnets:
-            - name: vnet-identity
-              cidr: 10.10.0.0/24
-              subnets:
-                - {name: snet-adds, cidr: 10.10.0.0/26}
-    - group: landing-zones
-      subscriptions:
-        - subscription: corp-app-1
-          resource_group: {name: rg-corp-app-1, location: westeurope}
-          vnets:
-            - name: vnet-corp-app-1
-              cidr: 10.1.0.0/16
-              subnets:
-                - {name: snet-corp-app, cidr: 10.1.1.0/24}
-        - subscription: online-app-1
-          resource_group: {name: rg-online-app-1, location: westeurope}
-    - group: sandbox
-      subscriptions:
-        - subscription: sandbox-1
-          resource_group: {name: rg-sandbox, location: westeurope}
+    - subscription: management
+      account_at: [2, 1]
+      resource_group: {name: rg-management, location: westeurope}
+      groups: [{label: management-groups, at: [1, 1]}]
+    - subscription: connectivity
+      account_at: [2, 2]
+      resource_group: {name: rg-connectivity, location: westeurope}
+      vnets:
+        - name: hub
+          cidr: 10.0.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: AzureFirewallSubnet, cidr: 10.0.1.0/26, at: [1, 1]}
+    - subscription: identity
+      account_at: [2, 3]
+      resource_group: {name: rg-identity, location: westeurope}
+      vnets:
+        - name: vnet-identity
+          cidr: 10.10.0.0/24
+          at: [1, 1]
+          subnets:
+            - {name: snet-adds, cidr: 10.10.0.0/26, at: [1, 1]}
+    - subscription: corp-app-1
+      account_at: [3, 1]
+      resource_group: {name: rg-corp-app-1, location: westeurope}
+      vnets:
+        - name: vnet-corp-app-1
+          cidr: 10.1.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: snet-corp-app, cidr: 10.1.1.0/24, at: [1, 1]}
+    - subscription: online-app-1
+      account_at: [3, 2]
+      resource_group: {name: rg-online-app-1, location: westeurope}
+    - subscription: sandbox-1
+      account_at: [3, 3]
+      resource_group: {name: rg-sandbox, location: westeurope}
+      vnets:
+        - name: vnet-sandbox
+          cidr: 10.2.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: snet-sandbox, cidr: 10.2.1.0/24, at: [1, 1]}
+    - subscription: ai-foundry
+      account_at: [4, 2]
+      resource_group: {name: rg-ai-foundry, location: westeurope}
   elements:
-    - {tf: azurerm_management_group, name: mg-platform, in: group:platform}
-    - {tf: azurerm_management_group, name: mg-landing-zones, in: group:landing-zones}
-    - {tf: azurerm_management_group, name: mg-sandbox, in: group:sandbox}
-    - {tf: azurerm_management_group_policy_assignment, name: alz-guardrails, in: group:landing-zones}
-    - {tf: azurerm_log_analytics_workspace, name: law-central, in: resource_group:rg-management}
-    - {tf: azurerm_firewall, name: hub-fw, in: subnet:AzureFirewallSubnet}
-    - {tf: azurerm_virtual_network_gateway, name: hub-ergw, in: subnet:GatewaySubnet}
-    - {tf: azurerm_network_ddos_protection_plan, name: ddos-plan, in: resource_group:rg-connectivity}
-    - {tf: azurerm_windows_virtual_machine, name: adds-dc-1, in: subnet:snet-adds}
-    - {tf: azurerm_linux_virtual_machine, name: vm-corp-app, in: subnet:snet-corp-app}
-    - {tf: azurerm_linux_web_app, name: web-online-app, in: resource_group:rg-online-app-1}
-    - {tf: azurerm_linux_virtual_machine, name: vm-sandbox, in: resource_group:rg-sandbox}
-  actors: [datacenter, internet]
+    - {tf: azurerm_management_group, name: mg-platform, in: group:management-groups, at: [1, 1]}
+    - {tf: azurerm_management_group, name: mg-landing-zones, in: group:management-groups, at: [1, 2]}
+    - {tf: azurerm_management_group, name: mg-sandbox, in: group:management-groups, at: [1, 3]}
+    - {tf: azurerm_management_group_policy_assignment, name: alz-guardrails, in: group:management-groups, at: [1, 4]}
+    - {tf: azurerm_log_analytics_workspace, name: law-central, in: resource_group:rg-management, at: [2, 1]}
+    - {tf: azurerm_firewall, name: hub-fw, in: subnet:AzureFirewallSubnet, at: [1, 1]}
+    - {tf: azurerm_windows_virtual_machine, name: adds-dc-1, in: subnet:snet-adds, at: [1, 1]}
+    - {tf: azurerm_linux_virtual_machine, name: vm-corp-app, in: subnet:snet-corp-app, at: [1, 1]}
+    - {tf: azurerm_linux_web_app, name: web-online-app, in: resource_group:rg-online-app-1, at: [1, 1]}
+    - {tf: azurerm_linux_virtual_machine, name: vm-sandbox, in: subnet:snet-sandbox, at: [1, 1]}
+    - {tf: azurerm_ai_foundry, name: foundry, in: resource_group:rg-ai-foundry, at: [1, 1]}
+    - {tf: azurerm_search_service, name: foundry-iq, in: resource_group:rg-ai-foundry, at: [1, 2]}
+  actors:
+    - {type: saas, name: Microsoft Agent 365, at: [1, 1]}
+    - {type: saas, name: Microsoft Defender, at: [1, 2]}
+    - {type: idp, name: Microsoft Entra ID, at: [1, 3]}
   flows:
-    - {from: datacenter, to: hub-ergw, label: ExpressRoute / VPN, step: 1}
-    - {from: vnet:hub, to: vnet:vnet-corp-app-1, link: azurerm_virtual_network_peering, label: hub-spoke peering}
-    - {from: vnet:hub, to: vnet:vnet-identity, link: azurerm_virtual_network_peering, label: hub-spoke peering}
-    - {from: vm-corp-app, to: hub-fw, label: "0.0.0.0/0 via UDR", step: 2}
-    - {from: hub-fw, to: internet, label: SNAT egress, step: 3}
-    - {from: vm-corp-app, to: adds-dc-1, label: domain authentication, step: 4}
+    - {from: Microsoft Entra ID, to: mg-platform, label: unified identity}
+    - {from: Microsoft Defender, to: law-central, label: unified security}
+    - {from: Microsoft Agent 365, to: foundry, label: control agents}
     - {from: alz-guardrails, to: subscription:corp-app-1, label: policy inheritance}
     - {from: alz-guardrails, to: subscription:online-app-1, label: policy inheritance}
+    - {from: alz-guardrails, to: subscription:sandbox-1, label: policy inheritance}
+    - {from: vnet:hub, to: vnet:vnet-corp-app-1, link: azurerm_virtual_network_peering, label: hub-spoke peering}
+    - {from: vnet:hub, to: vnet:vnet-identity, link: azurerm_virtual_network_peering, label: hub-spoke peering}
+    - {from: vm-corp-app, to: hub-fw, label: "0.0.0.0/0 via UDR"}
+    - {from: vm-corp-app, to: adds-dc-1, label: domain authentication}
     - {from: hub-fw, to: law-central, label: diagnostics}
     - {from: web-online-app, to: law-central, label: diagnostics}
-    - {from: ddos-plan, to: vnet:hub, label: DDoS Network Protection}
+    - {from: foundry, to: subscription:corp-app-1, label: add Foundry to the workload}
+    - {from: foundry, to: subscription:online-app-1, label: add Foundry to the workload}
+    - {from: foundry, to: subscription:sandbox-1, label: add Foundry to the workload}
+    - {from: foundry-iq, to: foundry, label: Foundry IQ knowledge}
 
 - slug: subscription-vending
   title: Subscription vending for application landing zones
@@ -319,54 +338,58 @@
   category: security
   tags: [private link, private endpoint, private dns zone, dns private resolver, hub-spoke, zero trust, expressroute]
   source: https://learn.microsoft.com/en-us/azure/architecture/networking/guide/private-link-hub-spoke-network
-  description: PaaS services are reached only through private endpoints; shared endpoints used from on-premises or by several workloads live in a dedicated hub subnet behind the firewall, while single-application endpoints sit in the spoke, and public endpoints are disabled. Centralized private DNS zones linked to every virtual network resolve the privatelink FQDNs, and a DNS Private Resolver inbound endpoint lets on-premises resolvers answer the same names over ExpressRoute.
+  description: On-premises VMs reach a storage account in the landing zone only through a private endpoint in the spoke virtual network, over the ExpressRoute circuit and the hub-spoke peering, with the storage account's public endpoint disabled. The on-premises DNS servers conditionally forward privatelink.blob.core.windows.net to two DNS forwarder VMs in the hub, which forward to the Azure-provided DNS at 168.63.129.16 so that the Azure recursive resolver answers from the private DNS zone linked to the hub virtual network; a DNS Private Resolver inbound endpoint can replace the forwarder VMs.
   containers:
     - datacenter: on-premises
+      at: [1, 1]
     - subscription: connectivity
+      account_at: [2, 2, 1, 2]
       resource_group: {name: rg-hub, location: westeurope}
       vnets:
         - name: hub
-          cidr: 10.0.0.0/16
+          cidr: 10.100.0.0/16
+          at: [2, 1, 1, 2]
           subnets:
-            - {name: GatewaySubnet, cidr: 10.0.0.0/27}
-            - {name: AzureFirewallSubnet, cidr: 10.0.1.0/26}
-            - {name: snet-hub-private-endpoints, cidr: 10.0.2.0/24}
-            - {name: snet-dns-resolver-inbound, cidr: 10.0.3.0/28}
+            - {name: GatewaySubnet, cidr: 10.100.0.0/27, at: [1, 1]}
+            - {name: snet-dns-forwarders, cidr: 10.100.2.0/24, at: [1, 2]}
     - subscription: landing-zone-app
+      account_at: [3, 2, 1, 2]
       resource_group: {name: rg-spoke, location: westeurope}
       vnets:
         - name: spoke
-          cidr: 10.1.0.0/16
+          cidr: 10.0.1.0/24
+          at: [1, 1]
           subnets:
-            - {name: snet-app, cidr: 10.1.1.0/24}
-            - {name: snet-spoke-private-endpoints, cidr: 10.1.2.0/24}
+            - {name: snet-app, cidr: 10.0.1.0/26, at: [1, 1]}
+            - {name: snet-spoke-private-endpoints, cidr: 10.0.1.64/26, at: [1, 2]}
   elements:
-    - {tf: azurerm_virtual_network_gateway, name: ergw-hub, in: subnet:GatewaySubnet}
-    - {tf: azurerm_firewall, name: hub-fw, in: subnet:AzureFirewallSubnet}
-    - {tf: azurerm_private_dns_resolver, name: dns-resolver-hub, in: subnet:snet-dns-resolver-inbound}
-    - {tf: azurerm_private_dns_zone, name: pdz-blob, in: resource_group:rg-hub}
-    - {tf: azurerm_private_dns_zone, name: pdz-sql, in: resource_group:rg-hub}
-    - {tf: azurerm_network_security_group, name: nsg-hub-pe, in: resource_group:rg-hub}
-    - {tf: azurerm_private_endpoint, name: pe-shared-storage, in: subnet:snet-hub-private-endpoints}
-    - {tf: azurerm_storage_account, name: st-shared, in: resource_group:rg-hub}
-    - {tf: azurerm_linux_virtual_machine, name: vm-app, in: subnet:snet-app}
-    - {tf: azurerm_private_endpoint, name: pe-sql-app, in: subnet:snet-spoke-private-endpoints}
-    - {tf: azurerm_mssql_server, name: sql-app, in: resource_group:rg-spoke}
-  actors: [datacenter]
+    - {tf: azurerm_express_route_circuit, name: er-circuit, in: resource_group:rg-hub, at: [1, 1]}
+    - {tf: azurerm_private_dns_zone, name: pdz-blob, in: resource_group:rg-hub, at: [1, 2]}
+    - {tf: azurerm_virtual_network_gateway, name: ergw-hub, in: subnet:GatewaySubnet, at: [1, 1]}
+    - {tf: azurerm_linux_virtual_machine, name: dns-forwarder-1, in: subnet:snet-dns-forwarders, at: [1, 1]}
+    - {tf: azurerm_linux_virtual_machine, name: dns-forwarder-2, in: subnet:snet-dns-forwarders, at: [1, 2]}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app, in: subnet:snet-app, at: [1, 1]}
+    - {tf: azurerm_private_endpoint, name: pe-storage-app, in: subnet:snet-spoke-private-endpoints, at: [1, 1]}
+    - {tf: azurerm_storage_account, name: st-app, in: resource_group:rg-spoke, at: [1, 2]}
+  actors:
+    - {type: server, name: on-premises VMs 172.16.4.40-41, at: [2, 1]}
+    - {type: server, name: on-premises DNS servers 172.16.1.10-11, at: [3, 1]}
+    - {type: server, name: Azure-provided DNS 168.63.129.16, at: [1, 2]}
+    - {type: server, name: Azure recursive resolver, at: [1, 3]}
   flows:
-    - {from: datacenter, to: ergw-hub, label: ExpressRoute private peering, step: 1}
-    - {from: vnet:hub, to: vnet:spoke, link: azurerm_virtual_network_peering, label: hub-spoke peering}
-    - {from: datacenter, to: dns-resolver-hub, label: conditional forwarder for privatelink zones, step: 2}
-    - {from: dns-resolver-hub, to: pdz-blob, label: resolve privatelink.blob.core.windows.net}
-    - {from: datacenter, to: pe-shared-storage, label: private IP over ExpressRoute, step: 3}
-    - {from: nsg-hub-pe, to: pe-shared-storage, label: inbound filtering}
-    - {from: pe-shared-storage, to: st-shared, label: Private Link (public endpoint disabled)}
-    - {from: vm-app, to: hub-fw, label: UDR to firewall (SNAT + logging), step: 4}
-    - {from: hub-fw, to: pe-shared-storage, label: inspected traffic}
-    - {from: vm-app, to: pe-sql-app, label: single-app endpoint in spoke, step: 5}
-    - {from: pe-sql-app, to: sql-app, label: Private Link}
+    - {from: datacenter, to: er-circuit, label: ExpressRoute circuit, step: 1}
+    - {from: er-circuit, to: ergw-hub, label: ExpressRoute private peering}
+    - {from: vnet:hub, to: vnet:spoke, link: azurerm_virtual_network_peering, label: virtual network peering}
+    - {from: on-premises DNS servers 172.16.1.10-11, to: dns-forwarder-1, label: conditional forwarder for privatelink.blob.core.windows.net, step: 2}
+    - {from: on-premises DNS servers 172.16.1.10-11, to: dns-forwarder-2, label: conditional forwarder for privatelink.blob.core.windows.net, step: 2}
+    - {from: dns-forwarder-1, to: Azure-provided DNS 168.63.129.16, label: forward to 168.63.129.16, step: 3}
+    - {from: dns-forwarder-2, to: Azure-provided DNS 168.63.129.16, label: forward to 168.63.129.16, step: 3}
+    - {from: Azure-provided DNS 168.63.129.16, to: pdz-blob, label: resolve privatelink.blob.core.windows.net, step: 4}
+    - {from: Azure-provided DNS 168.63.129.16, to: Azure recursive resolver, label: public names}
     - {from: pdz-blob, to: vnet:hub, link: azurerm_private_dns_zone_virtual_network_link}
-    - {from: pdz-sql, to: vnet:spoke, link: azurerm_private_dns_zone_virtual_network_link}
+    - {from: on-premises VMs 172.16.4.40-41, to: pe-storage-app, label: private IP over ExpressRoute, step: 5}
+    - {from: vm-app, to: pe-storage-app, label: private endpoint in the spoke}
+    - {from: pe-storage-app, to: st-app, label: Private Link (public endpoint disabled)}
 
 - slug: firewall-premium-appgw-tls-inspection
   title: Application Gateway WAF in front of Azure Firewall Premium with TLS inspection and IDPS
@@ -856,43 +879,44 @@
   category: security
   tags: [azure bastion, jump host, rdp, ssh, tls 443, no public ip, session recording, hub-spoke]
   source: https://learn.microsoft.com/en-us/azure/bastion/bastion-overview
-  description: Azure Bastion is deployed in the hub's AzureBastionSubnet with a single public IP and brokers RDP and SSH over TLS on port 443 from the Azure portal or native clients to VMs in peered spoke networks, so no VM needs a public IP, agent or open management port. Entra ID authentication with MFA and just-in-time role activation gate access, SSH keys come from Key Vault, and Bastion audit logs and Premium session recordings provide the compliance trail.
+  description: Azure Bastion is deployed in the AzureBastionSubnet of the hub virtual network and, in this private-only deployment, is reached on its private IP address over TLS on port 443 from the Azure portal or a native client; it brokers RDP and SSH (ports 3389/22) to the private IP addresses of VMs in the peered spoke subnets, so no VM needs a public IP, agent or open management port. Network security groups on the Bastion subnet and on the target VM subnets limit traffic to the Bastion control plane and to remote-protocol ports from AzureBastionSubnet, and Entra ID authentication with MFA and just-in-time role activation gate access.
   containers:
     - subscription: connectivity
+      account_at: [1, 2]
       resource_group: {name: rg-hub, location: westeurope}
       vnets:
         - name: hub
           cidr: 10.0.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: AzureBastionSubnet, cidr: 10.0.4.0/26}
+            - {name: AzureBastionSubnet, cidr: 10.0.4.0/26, at: [1, 2]}
     - subscription: landing-zone-prod
+      account_at: [1, 3]
       resource_group: {name: rg-prod, location: westeurope}
       vnets:
         - name: spoke-prod
           cidr: 10.1.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: snet-app, cidr: 10.1.1.0/24}
-            - {name: snet-data, cidr: 10.1.2.0/24}
+            - {name: snet-app, cidr: 10.1.1.0/24, at: [1, 2]}
+            - {name: snet-data, cidr: 10.1.2.0/24, at: [2, 2]}
   elements:
-    - {tf: azurerm_public_ip, name: pip-bastion, in: resource_group:rg-hub}
-    - {tf: azurerm_bastion_host, name: bastion-hub, in: subnet:AzureBastionSubnet}
-    - {tf: azurerm_network_security_group, name: nsg-bastion, in: resource_group:rg-hub}
-    - {tf: azurerm_network_ddos_protection_plan, name: ddos-hub, in: resource_group:rg-hub}
-    - {tf: azurerm_key_vault, name: kv-admin-ssh-keys, in: resource_group:rg-hub}
-    - {tf: azurerm_log_analytics_workspace, name: law-hub, in: resource_group:rg-hub}
-    - {tf: azurerm_storage_account, name: st-session-recordings, in: resource_group:rg-hub}
-    - {tf: azurerm_linux_virtual_machine, name: vm-app-1, in: subnet:snet-app}
-    - {tf: azurerm_windows_virtual_machine, name: vm-sql-1, in: subnet:snet-data}
-  actors: [user, internet]
+    - {tf: azurerm_network_security_group, name: nsg-bastion, in: vnet:hub, at: [1, 1]}
+    - {tf: azurerm_bastion_host, name: bastion-hub, in: subnet:AzureBastionSubnet, at: [1, 1]}
+    - {tf: azurerm_network_security_group, name: nsg-target-vms, in: vnet:spoke-prod, at: [1, 1, 2, 1]}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-1, in: subnet:snet-app, at: [1, 1]}
+    - {tf: azurerm_linux_virtual_machine, name: vm-app-2, in: subnet:snet-app, at: [1, 2]}
+    - {tf: azurerm_windows_virtual_machine, name: vm-sql-1, in: subnet:snet-data, at: [1, 1]}
+  actors:
+    - {type: user, name: user, at: [1, 1]}
+    - {type: client, name: portal or native client, at: [2, 1]}
   flows:
-    - {from: user, to: pip-bastion, label: TLS 443 (portal / native client, Entra ID + MFA + PIM), step: 1}
-    - {from: pip-bastion, to: bastion-hub}
-    - {from: nsg-bastion, to: bastion-hub, label: allow 443 in, 22/3389 out to VNet}
-    - {from: ddos-hub, to: vnet:hub, label: protects Bastion public IP}
+    - {from: user, to: portal or native client, label: TLS}
+    - {from: portal or native client, to: bastion-hub, label: "TLS to the Bastion private IP address, port 443", step: 1}
+    - {from: nsg-bastion, to: subnet:AzureBastionSubnet, label: allow 443 in and 3389/22 out to the VNet}
     - {from: vnet:hub, to: vnet:spoke-prod, link: azurerm_virtual_network_peering, label: hub-spoke peering}
-    - {from: kv-admin-ssh-keys, to: bastion-hub, label: SSH private key from Key Vault, step: 2}
-    - {from: bastion-hub, to: vm-app-1, label: SSH 22 to private IP, step: 3}
-    - {from: bastion-hub, to: vm-sql-1, label: RDP 3389 to private IP, step: 3}
-    - {from: internet, to: vm-app-1, label: no public IP; 22/3389 closed, style: {dash: dashed}}
-    - {from: bastion-hub, to: law-hub, label: BastionAuditLogs, step: 4}
-    - {from: bastion-hub, to: st-session-recordings, label: session recording (Premium)}
+    - {from: bastion-hub, to: vm-app-1, label: "remote protocol (SSH) to private IP address, port 22", step: 2}
+    - {from: bastion-hub, to: vm-app-2, label: "remote protocol (SSH) to private IP address, port 22", step: 2}
+    - {from: bastion-hub, to: vm-sql-1, label: "remote protocol (RDP) to private IP address, port 3389", step: 2}
+    - {from: nsg-target-vms, to: subnet:snet-app, label: allow 3389/22 from AzureBastionSubnet only}
+    - {from: nsg-target-vms, to: subnet:snet-data, label: allow 3389/22 from AzureBastionSubnet only}

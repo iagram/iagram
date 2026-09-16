@@ -11,7 +11,7 @@ One YAML list per file, `scripts/refarch/<provider>-<domain>.yaml`. Each item:
   description: Two sentences, factual, no marketing.
   containers:
     - datacenter: on-premises          # optional on-prem site
-    - region: eu-west-1                # AWS: region (account optional: `account: prod`); GCP: `project: name` + `region:`; Azure: `subscription: name` + `resource_group: {name, location}`
+    - region: eu-west-1                # AWS: region (account optional: `account: prod`); GCP: `project: name` + `region:`; Azure: `subscription: name` + `resource_group: {name, location}`; `at:` = the region's cell, `account_at:` = the account / project / subscription's cell among the roots
       groups: [{label: ingestion}]     # optional labelled boxes
       vpcs:                            # AWS/GCP `vpcs`, Azure `vnets`
         - name: main

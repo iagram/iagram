@@ -11,75 +11,88 @@ tags:
 - key vault
 image: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/containers/aks/images/aks-baseline-architecture.svg
 source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/containers/aks/baseline-aks
-description: A private AKS cluster with system and user node pools runs in a spoke virtual network peered to a hub that hosts Azure Firewall, a gateway subnet and Azure Bastion, with all cluster egress
-  forced through the firewall by user-defined routes. Application Gateway with WAF terminates TLS and forwards to an internal load balancer and in-cluster ingress, and the cluster reaches Container Registry
-  and Key Vault only through private endpoints.
+description: A private AKS cluster with system and user node pools runs in a spoke virtual network peered to a hub that hosts Azure Firewall, Azure Bastion and a gateway subnet whose virtual network gateway
+  connects the on-premises network, with all cluster egress forced through the firewall by user-defined routes. Application Gateway with WAF terminates TLS and forwards to an internal load balancer and
+  in-cluster ingress, operators reach the API server through an Azure Bastion tunnel to the internal load balancer of the API server VNet integration subnet, and the cluster reaches Container Registry and
+  Key Vault only through private endpoints while Azure Monitor collects container insights.
 nodes:
 - {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
-- {id: rg-rg-enterprise-networking-hubs, type: azure.resource_group, name: rg-enterprise-networking-hubs, parent: sub-connectivity, props: {location: eastus2}}
-- {id: vpc-vnet-hub, type: azure.vnet, name: vnet-hub, parent: rg-rg-enterprise-networking-hubs, props: {cidr: 10.200.0.0/24}}
+- {id: rg-rg-enterprise-networking-hubs, type: azure.resource_group, name: rg-enterprise-networking-hubs, parent: sub-connectivity, props: {location: eastus2}, at: [1, 1]}
+- {id: vpc-vnet-hub, type: azure.vnet, name: vnet-hub, parent: rg-rg-enterprise-networking-hubs, props: {cidr: 10.200.0.0/24}, at: [1, 1]}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-hub, props: {cidr: 10.200.0.128/26}, at: [1, 1]}
 - {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-hub, props: {cidr: 10.200.0.0/26}, at: [1, 2]}
 - {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-hub, props: {cidr: 10.200.0.64/27}, at: [1, 3]}
-- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-hub, props: {cidr: 10.200.0.128/26}, at: [1, 1]}
 - {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 2]}
-- {id: rg-rg-bu0001a0008, type: azure.resource_group, name: rg-bu0001a0008, parent: sub-workload, props: {location: eastus2}}
+- {id: rg-rg-bu0001a0008, type: azure.resource_group, name: rg-bu0001a0008, parent: sub-workload, props: {location: eastus2}, at: [1, 1]}
 - {id: vpc-vnet-spoke-aks, type: azure.vnet, name: vnet-spoke-aks, parent: rg-rg-bu0001a0008, props: {cidr: 10.240.0.0/16}, at: [1, 2, 2, 1]}
-- {id: sub-snet-clusternodes, type: azure.subnet, name: snet-clusternodes, parent: vpc-vnet-spoke-aks, props: {cidr: 10.240.0.0/22}, at: [2, 1, 1, 3]}
-- {id: sub-snet-clusteringressservices, type: azure.subnet, name: snet-clusteringressservices, parent: vpc-vnet-spoke-aks, props: {cidr: 10.240.4.0/28}, at: [1, 2]}
-- {id: sub-snet-applicationgateway, type: azure.subnet, name: snet-applicationgateway, parent: vpc-vnet-spoke-aks, props: {cidr: 10.240.4.16/28}, at: [1, 3]}
 - {id: sub-snet-privatelinkendpoints, type: azure.subnet, name: snet-privatelinkendpoints, parent: vpc-vnet-spoke-aks, props: {cidr: 10.240.4.32/28}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [2, 3]}
-- {id: internet, type: common.internet, name: internet, at: [1, 3]}
+- {id: sub-snet-apiserver, type: azure.subnet, name: snet-apiserver, parent: vpc-vnet-spoke-aks, props: {cidr: 10.240.5.0/28}, at: [1, 2]}
+- {id: sub-snet-clusteringressservices, type: azure.subnet, name: snet-clusteringressservices, parent: vpc-vnet-spoke-aks, props: {cidr: 10.240.4.0/28}, at: [1, 3]}
+- {id: sub-snet-applicationgateway, type: azure.subnet, name: snet-applicationgateway, parent: vpc-vnet-spoke-aks, props: {cidr: 10.240.4.16/28}, at: [1, 4]}
+- {id: sub-snet-clusternodes, type: azure.subnet, name: snet-clusternodes, parent: vpc-vnet-spoke-aks, props: {cidr: 10.240.0.0/22}, at: [2, 1, 1, 4]}
 - {id: user, type: common.user, name: user, at: [1, 1]}
-- {id: fw-hub, type: azure.res.azurerm_firewall, name: fw-hub, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
-- {id: bastion-hub, type: azure.res.azurerm_bastion_host, name: bastion-hub, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- id: appgw-waf
-  type: azure.res.azurerm_application_gateway
-  name: appgw-waf
-  parent: sub-snet-applicationgateway
-  props:
-    backend_address_pool: []
-    frontend_ip_configuration: []
-    frontend_port: []
-    gateway_ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: {}
-- {id: ilb-ingress, type: azure.res.azurerm_lb, name: ilb-ingress, parent: sub-snet-clusteringressservices, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: aks-baseline, type: azure.aks_cluster, name: aks-baseline, parent: sub-snet-clusternodes}
-- id: pe-acr
-  at: [2, 1]
-  type: azure.res.azurerm_private_endpoint
-  name: pe-acr
-  parent: sub-snet-privatelinkendpoints
-  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises network, at: [1, 3]}
+- {id: users, type: common.users, name: users, at: [2, 3]}
+- {id: bastion-hub, type: azure.res.azurerm_bastion_host, name: bastion-hub, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: fw-hub, type: azure.res.azurerm_firewall, name: fw-hub, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme},
+  at: [1, 1]}
+- id: vgw-hub
+  type: azure.res.azurerm_virtual_network_gateway
+  name: vgw-hub
+  parent: sub-gatewaysubnet
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme, type: changeme}
+  at:
+  - 1
+  - 1
 - id: pe-keyvault
-  at: [1, 1]
   type: azure.res.azurerm_private_endpoint
   name: pe-keyvault
   parent: sub-snet-privatelinkendpoints
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: acr-baseline, type: azure.container_registry, name: acr-baseline, parent: rg-rg-bu0001a0008, at: [2, 1]}
+  at:
+  - 1
+  - 1
+- id: pe-acr
+  type: azure.res.azurerm_private_endpoint
+  name: pe-acr
+  parent: sub-snet-privatelinkendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 2
+  - 1
+- {id: ilb-apiserver, type: azure.res.azurerm_lb, name: ilb-apiserver, parent: sub-snet-apiserver, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: ilb-ingress, type: azure.res.azurerm_lb, name: ilb-ingress, parent: sub-snet-clusteringressservices, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- id: appgw-waf
+  type: azure.res.azurerm_application_gateway
+  name: appgw-waf
+  parent: sub-snet-applicationgateway
+  props: {backend_address_pool: [], frontend_ip_configuration: [], frontend_port: [], gateway_ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 1
+  - 1
+- {id: aks-baseline, type: azure.aks_cluster, name: aks-baseline, parent: sub-snet-clusternodes, at: [1, 1]}
+- {id: npsystem, type: azure.res.azurerm_kubernetes_cluster_node_pool, name: npsystem, parent: aks-baseline, props: {kubernetes_cluster_id: changeme, name: changeme}, at: [1, 1]}
+- {id: npuser01, type: azure.res.azurerm_kubernetes_cluster_node_pool, name: npuser01, parent: aks-baseline, props: {kubernetes_cluster_id: changeme, name: changeme}, at: [1, 2]}
 - {id: kv-aks-baseline, type: azure.key_vault, name: kv-aks-baseline, parent: rg-rg-bu0001a0008, at: [1, 1]}
+- {id: acr-baseline, type: azure.container_registry, name: acr-baseline, parent: rg-rg-bu0001a0008, at: [2, 1]}
 - {id: law-aks, type: azure.res.azurerm_log_analytics_workspace, name: law-aks, parent: rg-rg-bu0001a0008, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 3, 2, 1]}
 edges:
-- {from: vpc-vnet-hub, to: vpc-vnet-spoke-aks, label: peering, link: azurerm_virtual_network_peering}
-- {from: users, to: appgw-waf, label: HTTPS (WAF, step: '1'}
+- {from: vpc-vnet-hub, to: vpc-vnet-spoke-aks, label: virtual network peering, link: azurerm_virtual_network_peering}
+- {from: dc-on-premises, to: vgw-hub, label: VPN or ExpressRoute to the gateway subnet}
+- {from: user, to: bastion-hub, label: Azure Bastion tunnel (kubectl via native client)}
+- {from: bastion-hub, to: ilb-apiserver, label: private IP address of the API server}
+- {from: ilb-apiserver, to: aks-baseline, label: API server VNet integration}
+- {from: users, to: appgw-waf, label: 'HTTPS (WAF, TLS termination)', step: '1'}
 - {from: appgw-waf, to: ilb-ingress, label: HTTPS to internal load balancer, step: '2'}
 - {from: ilb-ingress, to: aks-baseline, label: ingress controller to pods, step: '3'}
-- {from: aks-baseline, to: fw-hub, label: 0.0.0.0/0 via UDR, step: '4'}
-- {from: fw-hub, to: internet, label: allowed egress (FQDN rules), step: '5'}
-- {from: aks-baseline, to: pe-acr, label: image pull}
-- {from: pe-acr, to: acr-baseline, label: private link}
+- {from: aks-baseline, to: fw-hub, label: '0.0.0.0/0 via UDR: allowed egress by FQDN rules', step: '4'}
+- {from: kv-aks-baseline, to: pe-keyvault, label: private link}
+- {from: acr-baseline, to: pe-acr, label: private link}
 - {from: aks-baseline, to: pe-keyvault, label: Secrets Store CSI driver}
-- {from: pe-keyvault, to: kv-aks-baseline, label: private link}
-- {from: user, to: bastion-hub, label: operator access}
-- {from: bastion-hub, to: aks-baseline, label: private API server}
-- {from: aks-baseline, to: law-aks, label: container insights}
+- {from: aks-baseline, to: pe-acr, label: image pull}
+- {from: aks-baseline, to: law-aks, label: container insights (Azure Monitor)}
 steps:
-- {n: '1', text: 'users → appgw-waf: HTTPS (WAF'}
+- {n: '1', text: 'users → appgw-waf: HTTPS (WAF, TLS termination)'}
 - {n: '2', text: 'appgw-waf → ilb-ingress: HTTPS to internal load balancer'}
 - {n: '3', text: 'ilb-ingress → aks-baseline: ingress controller to pods'}
-- {n: '4', text: 'aks-baseline → fw-hub: 0.0.0.0/0 via UDR'}
-- {n: '5', text: 'fw-hub → internet: allowed egress (FQDN rules)'}
+- {n: '4', text: 'aks-baseline → fw-hub: 0.0.0.0/0 via UDR: allowed egress by FQDN rules'}

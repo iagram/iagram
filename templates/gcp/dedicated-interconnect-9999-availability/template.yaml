@@ -9,36 +9,45 @@ tags:
 - cloud router
 image: https://docs.cloud.google.com/static/network-connectivity/docs/interconnect/images/sla-9999-mr.svg
 source: https://docs.cloud.google.com/network-connectivity/docs/interconnect/tutorials/dedicated-creating-9999-availability
-description: Four Dedicated Interconnect connections are provisioned in two metropolitan areas, two per metro in separate edge availability domains, with one VLAN attachment each terminating on two Cloud
-  Routers in two Google Cloud regions. The VPC uses global dynamic routing so any region reaches on-premises over any surviving path.
+description: Four Dedicated Interconnect connections (int-lga1, int-lga2, int-iad1, int-iad2) are provisioned in two metropolitan areas, LGA (New York) and IAD (Ashburn), two per metro in separate colocation
+  facilities and edge availability domains, each terminating on an on-premises customer router (ASN 12345). One VLAN attachment per connection lands on a Cloud Router in us-central1 or us-east1 with its
+  own BGP session on a 169.254.x.x/29 link, and the VPC uses global dynamic routing so any region reaches on-premises over any surviving path.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 2]}
-- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-east4}, at: [1, 1]}
-- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-net-hub, props: {cidr: 10.40.0.0/16}, at: [1, 1]}
-- {id: sub-hybrid-use4, type: gcp.subnetwork, name: hybrid-use4, parent: vpc-hybrid-vpc, props: {cidr: 10.40.0.0/24, region: us-east4}, at: [1, 1]}
-- {id: sub-hybrid-usw2, type: gcp.subnetwork, name: hybrid-usw2, parent: vpc-hybrid-vpc, props: {cidr: 10.40.1.0/24, region: us-west2}, at: [2, 1]}
-- {id: router-use4, type: gcp.res.google_compute_router, name: router-use4, parent: sub-hybrid-use4, props: {name: changeme, network: changeme}, at: [1, 1, 2, 1]}
-- {id: router-usw2, type: gcp.res.google_compute_router, name: router-usw2, parent: sub-hybrid-usw2, props: {name: changeme, network: changeme}, at: [1, 1, 2, 1]}
-- {id: vlan-metro1-ead1, type: gcp.res.google_compute_interconnect_attachment, name: vlan-metro1-ead1, parent: sub-hybrid-use4, props: {name: changeme, router: changeme}, at: [1, 2]}
-- {id: vlan-metro1-ead2, type: gcp.res.google_compute_interconnect_attachment, name: vlan-metro1-ead2, parent: sub-hybrid-use4, props: {name: changeme, router: changeme}, at: [2, 2]}
-- {id: vlan-metro2-ead1, type: gcp.res.google_compute_interconnect_attachment, name: vlan-metro2-ead1, parent: sub-hybrid-usw2, props: {name: changeme, router: changeme}, at: [1, 2]}
-- {id: vlan-metro2-ead2, type: gcp.res.google_compute_interconnect_attachment, name: vlan-metro2-ead2, parent: sub-hybrid-usw2, props: {name: changeme, router: changeme}, at: [2, 2]}
-- {id: app-use4, type: gcp.compute_instance, name: app-use4, parent: sub-hybrid-use4, at: [1, 3, 2, 1]}
-- {id: app-usw2, type: gcp.compute_instance, name: app-usw2, parent: sub-hybrid-usw2, at: [1, 3, 2, 1]}
-- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub, at: [1, 2]}
-- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}, at: [1, 1]}
-- {id: onprem-router-metro1, type: gcp.res.google_compute_router, name: onprem-router-metro1, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}, at: [1, 1]}
-- {id: onprem-router-metro2, type: gcp.res.google_compute_router, name: onprem-router-metro2, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}, at: [2, 1]}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 3]}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-central1}, at: [1, 1]}
+- {id: grp-metro-lga-new-york, type: common.group, name: Metro LGA (New York), parent: prj-net-hub, at: [1, 2]}
+- {id: grp-metro-iad-ashburn, type: common.group, name: Metro IAD (Ashburn), parent: prj-net-hub, at: [2, 2]}
+- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-net-hub, props: {cidr: 10.40.0.0/16}, at: [1, 1, 2, 1]}
+- {id: sub-us-central1, type: gcp.subnetwork, name: us-central1, parent: vpc-hybrid-vpc, props: {cidr: 10.40.0.0/24, region: us-central1}, at: [1, 1]}
+- {id: sub-us-east1, type: gcp.subnetwork, name: us-east1, parent: vpc-hybrid-vpc, props: {cidr: 10.40.1.0/24, region: us-east1}, at: [2, 1]}
+- {id: rtr-cent1, type: gcp.res.google_compute_router, name: rtr-cent1, parent: sub-us-central1, props: {name: changeme, network: changeme}, at: [1, 1, 2, 1]}
+- {id: attachment-lga1-central1, type: gcp.res.google_compute_interconnect_attachment, name: attachment-lga1-central1, parent: sub-us-central1, props: {name: changeme, router: changeme}, at: [1, 2]}
+- {id: attachment-lga2-central1, type: gcp.res.google_compute_interconnect_attachment, name: attachment-lga2-central1, parent: sub-us-central1, props: {name: changeme, router: changeme}, at: [2, 2]}
+- {id: rtr-east1, type: gcp.res.google_compute_router, name: rtr-east1, parent: sub-us-east1, props: {name: changeme, network: changeme}, at: [1, 1, 2, 1]}
+- {id: attachment-iad1-east1, type: gcp.res.google_compute_interconnect_attachment, name: attachment-iad1-east1, parent: sub-us-east1, props: {name: changeme, router: changeme}, at: [1, 2]}
+- {id: attachment-iad2-east1, type: gcp.res.google_compute_interconnect_attachment, name: attachment-iad2-east1, parent: sub-us-east1, props: {name: changeme, router: changeme}, at: [2, 2]}
+- {id: int-lga1, type: gcp.res.google_compute_interconnect, name: int-lga1, parent: grp-metro-lga-new-york, props: {interconnect_type: changeme, link_type: changeme, location: westeurope, name: changeme,
+    requested_link_count: 1}, at: [1, 1]}
+- {id: int-lga2, type: gcp.res.google_compute_interconnect, name: int-lga2, parent: grp-metro-lga-new-york, props: {interconnect_type: changeme, link_type: changeme, location: westeurope, name: changeme,
+    requested_link_count: 1}, at: [2, 1]}
+- {id: int-iad1, type: gcp.res.google_compute_interconnect, name: int-iad1, parent: grp-metro-iad-ashburn, props: {interconnect_type: changeme, link_type: changeme, location: westeurope, name: changeme,
+    requested_link_count: 1}, at: [1, 1]}
+- {id: int-iad2, type: gcp.res.google_compute_interconnect, name: int-iad2, parent: grp-metro-iad-ashburn, props: {interconnect_type: changeme, link_type: changeme, location: westeurope, name: changeme,
+    requested_link_count: 1}, at: [2, 1]}
 edges:
-- {from: onprem-router-metro1, to: vlan-metro1-ead1, label: 10G Dedicated Interconnect, step: '1'}
-- {from: onprem-router-metro1, to: vlan-metro1-ead2, label: 10G Dedicated Interconnect, step: '1'}
-- {from: onprem-router-metro2, to: vlan-metro2-ead1, label: 10G Dedicated Interconnect, step: '2'}
-- {from: onprem-router-metro2, to: vlan-metro2-ead2, label: 10G Dedicated Interconnect, step: '2'}
-- {from: router-use4, to: onprem-router-metro1, label: BGP, step: '3'}
-- {from: router-usw2, to: onprem-router-metro2, label: BGP, step: '3'}
-- {from: app-use4, to: onprem-router-metro1, label: private traffic, step: '4'}
+- {from: rtr-cent1, to: attachment-lga1-central1, label: BGP session 169.254.58.49/29}
+- {from: rtr-cent1, to: attachment-lga2-central1, label: BGP session 169.254.68.49/29}
+- {from: rtr-east1, to: attachment-iad1-east1, label: BGP session 169.254.78.49/29}
+- {from: rtr-east1, to: attachment-iad2-east1, label: BGP session 169.254.88.49/29}
+- {from: attachment-lga1-central1, to: int-lga1, label: VLAN attachment on lga-zone1-16 (Digital Realty | Telx New York), step: '1'}
+- {from: attachment-lga2-central1, to: int-lga2, label: VLAN attachment on lga-zone2-1422 (DataBank New York LGA1), step: '1'}
+- {from: attachment-iad1-east1, to: int-iad1, label: VLAN attachment on iad-zone1-1 (Equinix DC1-DC15 Ashburn), step: '2'}
+- {from: attachment-iad2-east1, to: int-iad2, label: VLAN attachment on iad-zone2-1 (Equinix DC21 Ashburn), step: '2'}
+- {from: int-lga1, to: dc-on-premises, label: '10G Dedicated Interconnect to customer router (ASN 12345, 169.254.58.50)', step: '3'}
+- {from: int-lga2, to: dc-on-premises, label: '10G Dedicated Interconnect to customer router (ASN 12345, 169.254.68.50)', step: '3'}
+- {from: int-iad1, to: dc-on-premises, label: '10G Dedicated Interconnect to customer router (ASN 12345, 169.254.78.50)', step: '3'}
+- {from: int-iad2, to: dc-on-premises, label: '10G Dedicated Interconnect to customer router (ASN 12345, 169.254.88.50)', step: '3'}
 steps:
-- {n: '1', text: 'onprem-router-metro1 → vlan-metro1-ead1: 10G Dedicated Interconnect'}
-- {n: '2', text: 'onprem-router-metro2 → vlan-metro2-ead1: 10G Dedicated Interconnect'}
-- {n: '3', text: 'router-use4 → onprem-router-metro1: BGP'}
-- {n: '4', text: 'app-use4 → onprem-router-metro1: private traffic'}
+- {n: '1', text: 'attachment-lga1-central1 → int-lga1: VLAN attachment on lga-zone1-16 (Digital Realty | Telx New York)'}
+- {n: '2', text: 'attachment-iad1-east1 → int-iad1: VLAN attachment on iad-zone1-1 (Equinix DC1-DC15 Ashburn)'}
+- {n: '3', text: 'int-lga1 → datacenter: 10G Dedicated Interconnect to customer router (ASN 12345, 169.254.58.50)'}

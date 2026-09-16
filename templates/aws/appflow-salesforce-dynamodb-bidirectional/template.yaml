@@ -14,52 +14,71 @@ description: An event-triggered AppFlow flow forwards Salesforce change events t
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: saas, type: common.saas, name: saas, at: [1, 1]}
+- {id: business-users, type: common.users, name: business-users, at: [1, 1]}
+- {id: salesforce, type: common.saas, name: salesforce, at: [2, 1]}
+- {id: business-users-and-support-team, type: common.users, name: business-users-and-support-team, at: [1, 3]}
+- {id: aws-solution-support-team, type: common.users, name: aws-solution-support-team, at: [2, 3]}
 - id: salesforce-to-eventbridge
   type: aws.res.aws_appflow_flow
   name: salesforce-to-eventbridge
   parent: reg-us-east-1
-  at: [2, 1]
-  props:
-    destination_flow_config: []
-    name: changeme
-    source_flow_config: {}
-    task: []
-    trigger_config: {}
-- {id: appflow-partner-bus, type: aws.res.aws_cloudwatch_event_bus, name: appflow-partner-bus, parent: reg-us-east-1, props: {name: changeme}, at: [2, 2]}
-- {id: account-changed, type: aws.res.aws_cloudwatch_event_rule, name: account-changed, parent: reg-us-east-1, at: [2, 3]}
-- {id: upsert-account, type: aws.lambda_function, name: upsert-account, parent: reg-us-east-1, at: [2, 4]}
-- {id: accounts, type: aws.dynamodb_table, name: accounts, parent: reg-us-east-1, at: [1, 5, 2, 1]}
-- {id: write-status-csv, type: aws.lambda_function, name: write-status-csv, parent: reg-us-east-1, at: [1, 3]}
-- {id: sync-status-files, type: aws.s3_bucket, name: sync-status-files, parent: reg-us-east-1, at: [1, 2]}
+  props: {destination_flow_config: [], name: changeme, source_flow_config: {}, task: [], trigger_config: {}}
+  at:
+  - 3
+  - 1
+- {id: appflow-partner-bus, type: aws.res.aws_cloudwatch_event_bus, name: appflow-partner-bus, parent: reg-us-east-1, props: {name: changeme}, at: [3, 2]}
+- {id: upsert-account, type: aws.lambda_function, name: upsert-account, parent: reg-us-east-1, at: [3, 3]}
+- {id: accounts, type: aws.dynamodb_table, name: accounts, parent: reg-us-east-1, at: [3, 5]}
+- {id: write-status-csv, type: aws.lambda_function, name: write-status-csv, parent: reg-us-east-1, at: [2, 3]}
+- {id: sync-status-files, type: aws.s3_bucket, name: sync-status-files, parent: reg-us-east-1, at: [2, 2]}
 - id: s3-to-salesforce
   type: aws.res.aws_appflow_flow
   name: s3-to-salesforce
   parent: reg-us-east-1
-  at: [1, 1]
-  props:
-    destination_flow_config: []
-    name: changeme
-    source_flow_config: {}
-    task: []
-    trigger_config: {}
-- {id: sync-notifications, type: aws.res.aws_sns_topic, name: sync-notifications, parent: reg-us-east-1, at: [1, 4]}
+  props: {destination_flow_config: [], name: changeme, source_flow_config: {}, task: [], trigger_config: {}}
+  at:
+  - 2
+  - 1
+- {id: notify-sync-status, type: aws.lambda_function, name: notify-sync-status, parent: reg-us-east-1, at: [1, 5]}
+- {id: sync-notifications, type: aws.res.aws_sns_topic, name: sync-notifications, parent: reg-us-east-1, at: [1, 6]}
+- {id: connect-account-lookup, type: aws.lambda_function, name: connect-account-lookup, parent: reg-us-east-1, at: [3, 6]}
+- {id: contact-center, type: aws.res.aws_connect_instance, name: contact-center, parent: reg-us-east-1, props: {identity_management_type: changeme, inbound_calls_enabled: true, outbound_calls_enabled: true},
+  at: [3, 7]}
+- {id: flow-break-bus, type: aws.res.aws_cloudwatch_event_bus, name: flow-break-bus, parent: reg-us-east-1, props: {name: changeme}, at: [4, 1]}
+- {id: flow-break-alert, type: aws.lambda_function, name: flow-break-alert, parent: reg-us-east-1, at: [4, 2]}
+- {id: support-alerts, type: aws.res.aws_sns_topic, name: support-alerts, parent: reg-us-east-1, at: [4, 3]}
 edges:
-- {from: saas, to: salesforce-to-eventbridge, label: Salesforce change event, step: '1'}
+- {from: business-users, to: salesforce, label: account changes}
+- {from: salesforce, to: salesforce-to-eventbridge, label: event request payload as input, step: '1'}
 - {from: salesforce-to-eventbridge, to: appflow-partner-bus, label: PutEvents, step: '2'}
-- {from: appflow-partner-bus, to: account-changed, step: '3'}
-- {from: account-changed, to: upsert-account, link: aws_cloudwatch_event_target}
+- {from: appflow-partner-bus, to: upsert-account, step: '3', label: cloudwatch event target}
 - {from: upsert-account, to: accounts, label: UpdateItem, step: '4'}
-- {from: accounts, to: write-status-csv, link: aws_lambda_event_source_mapping}
-- {from: write-status-csv, to: sync-status-files, label: PutObject status.csv, step: '5'}
-- {from: sync-status-files, to: s3-to-salesforce, label: scheduled flow source, step: '6'}
-- {from: s3-to-salesforce, to: saas, label: update Salesforce records, step: '7'}
-- {from: write-status-csv, to: sync-notifications, label: Publish}
+- {from: accounts, to: write-status-csv, label: DynamoDB Streams, step: '6', link: aws_lambda_event_source_mapping}
+- {from: write-status-csv, to: sync-status-files, label: PutObject status.csv, step: '7'}
+- {from: sync-status-files, to: s3-to-salesforce, label: scheduled flow source, step: '8'}
+- {from: s3-to-salesforce, to: salesforce, label: event request status as output, step: '9'}
+- {from: accounts, to: notify-sync-status, label: DynamoDB Streams, step: '10', link: aws_lambda_event_source_mapping}
+- {from: notify-sync-status, to: sync-notifications, label: Publish, step: '11'}
+- {from: sync-notifications, to: business-users-and-support-team, label: email}
+- {from: salesforce-to-eventbridge, to: flow-break-bus, label: if any flow breaks, step: '12'}
+- {from: flow-break-bus, to: flow-break-alert, step: '13', label: cloudwatch event target}
+- {from: flow-break-alert, to: support-alerts, label: Publish, step: '14'}
+- {from: support-alerts, to: aws-solution-support-team, label: email}
+- {from: contact-center, to: connect-account-lookup, label: contact flow invokes, step: '15'}
+- {from: connect-account-lookup, to: accounts, label: GetItem / UpdateItem, step: '16'}
 steps:
-- {n: '1', text: 'saas → salesforce-to-eventbridge: Salesforce change event'}
+- {n: '1', text: 'salesforce → salesforce-to-eventbridge: event request payload as input'}
 - {n: '2', text: 'salesforce-to-eventbridge → appflow-partner-bus: PutEvents'}
-- {n: '3', text: appflow-partner-bus → account-changed}
+- {n: '3', text: appflow-partner-bus → upsert-account}
 - {n: '4', text: 'upsert-account → accounts: UpdateItem'}
-- {n: '5', text: 'write-status-csv → sync-status-files: PutObject status.csv'}
-- {n: '6', text: 'sync-status-files → s3-to-salesforce: scheduled flow source'}
-- {n: '7', text: 's3-to-salesforce → saas: update Salesforce records'}
+- {n: '6', text: 'accounts → write-status-csv: DynamoDB Streams'}
+- {n: '7', text: 'write-status-csv → sync-status-files: PutObject status.csv'}
+- {n: '8', text: 'sync-status-files → s3-to-salesforce: scheduled flow source'}
+- {n: '9', text: 's3-to-salesforce → salesforce: event request status as output'}
+- {n: '10', text: 'accounts → notify-sync-status: DynamoDB Streams'}
+- {n: '11', text: 'notify-sync-status → sync-notifications: Publish'}
+- {n: '12', text: 'salesforce-to-eventbridge → flow-break-bus: if any flow breaks'}
+- {n: '13', text: flow-break-bus → flow-break-alert}
+- {n: '14', text: 'flow-break-alert → support-alerts: Publish'}
+- {n: '15', text: 'contact-center → connect-account-lookup: contact flow invokes'}
+- {n: '16', text: 'connect-account-lookup → accounts: GetItem / UpdateItem'}

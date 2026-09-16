@@ -118,113 +118,106 @@
   category: analytics-bi
   tags: [kinesis data streams, kinesis data analytics, random cut forest, firehose, opensearch, clickstream]
   source: https://aws.amazon.com/blogs/big-data/perform-near-real-time-analytics-on-streaming-data-with-amazon-kinesis-and-amazon-elasticsearch-service/
-  description: Web clickstream events are ingested into a Kinesis data stream and scored by a Kinesis Data Analytics application using the RANDOM_CUT_FOREST anomaly detection function. Scored records are exported through a Firehose delivery stream into an OpenSearch Service domain, where dashboards visualize anomalies in near real time.
+  description: Clickstream events from sensors and web clients are ingested into a Kinesis data stream and scored by a Kinesis Data Analytics application using the RANDOM_CUT_FOREST anomaly detection function. The application writes the scored records to a Firehose delivery stream that indexes them into an OpenSearch Service domain, where dashboards visualize anomalies in near real time.
   containers:
     - region: us-east-1
-      groups: [{label: ingestion}, {label: analytics}]
   elements:
-    - {tf: aws_kinesis_stream, name: clickstream, in: group:ingestion}
-    - {tf: aws_kinesisanalyticsv2_application, name: anomaly-detector, in: group:analytics}
-    - {tf: aws_kinesis_stream, name: scored-stream, in: group:analytics}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: opensearch-delivery, in: group:analytics}
-    - {tf: aws_opensearch_domain, name: clickstream-domain, in: region}
-    - {tf: aws_s3_bucket, name: firehose-backup, in: region}
-  actors: [users]
+    - {tf: aws_kinesis_stream, name: clickstream, in: region, at: [1, 1]}
+    - {tf: aws_kinesisanalyticsv2_application, name: anomaly-detector, in: region, at: [1, 2]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: opensearch-delivery, in: region, at: [1, 3]}
+    - {tf: aws_opensearch_domain, name: clickstream-domain, in: region, at: [1, 4]}
+  actors: [{type: device, name: sensors, at: [1, 1]}]
   flows:
-    - {from: users, to: clickstream, label: page views and clicks, step: 1}
+    - {from: sensors, to: clickstream, label: clickstream events, step: 1}
     - {from: clickstream, to: anomaly-detector, label: streaming SQL input, step: 2}
-    - {from: anomaly-detector, to: scored-stream, label: anomaly scores, step: 3}
-    - {from: scored-stream, to: opensearch-delivery, label: Firehose source, step: 4}
-    - {from: opensearch-delivery, to: clickstream-domain, label: index documents, step: 5}
-    - {from: opensearch-delivery, to: firehose-backup, label: failed records backup, step: 6}
+    - {from: anomaly-detector, to: opensearch-delivery, label: anomaly scores, step: 3}
+    - {from: opensearch-delivery, to: clickstream-domain, label: index documents, step: 4}
 
 - slug: redshift-streaming-ingestion-kinesis
   title: Redshift streaming ingestion from Kinesis Data Streams
   category: analytics-bi
   tags: [redshift, streaming ingestion, materialized view, kinesis data streams, quicksight]
   source: https://aws.amazon.com/blogs/big-data/real-time-analytics-with-amazon-redshift-streaming-ingestion/
-  description: Amazon Redshift streaming ingestion consumes a Kinesis data stream directly through a materialized view, removing the S3 staging step of the traditional Firehose and COPY pipeline. Transformations run in Redshift SQL against the auto-refreshed view and QuickSight visualizes the results with seconds of latency.
+  description: Amazon Redshift streaming ingestion consumes a Kinesis data stream or an Amazon MSK topic directly into a streaming table that a real-time materialized view refreshes, removing the S3 staging step of the traditional Firehose and COPY pipeline. Transformations run in Redshift SQL against the auto-refreshed view and its results are joined with permanent tables with seconds of latency.
   containers:
     - region: us-east-1
-      vpcs:
-        - name: analytics-vpc
-          cidr: 10.0.0.0/16
-          subnets:
-            - {name: redshift-a, cidr: 10.0.1.0/24, az: a}
-            - {name: redshift-b, cidr: 10.0.2.0/24, az: b}
+      groups: [{label: Amazon Redshift, at: [1, 2, 2, 1]}]
   elements:
-    - {tf: aws_kinesis_stream, name: events-stream, in: region}
-    - {tf: aws_redshift_cluster, name: analytics-cluster, in: vpc:analytics-vpc}
-    - {tf: aws_iam_role, name: redshift-stream-role, in: region}
-    - {tf: aws_s3_bucket, name: legacy-staging-bucket, in: region}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: legacy-delivery, in: region}
-    - {tf: aws_quicksight_data_source, name: redshift-source, in: region}
-  actors: [client, users]
+    - {tf: aws_kinesis_stream, name: events-stream, in: region, at: [1, 1]}
+    - {tf: aws_msk_cluster, name: msk-source, in: region, at: [2, 1]}
+    - {tf: aws_redshift_cluster, name: analytics-cluster, in: group:Amazon Redshift, at: [1, 1]}
+    - {tf: aws_redshiftdata_statement, name: realtime-materialized-view, in: group:Amazon Redshift, at: [1, 2]}
+    - {tf: aws_redshiftdata_statement, name: streaming-table, in: group:Amazon Redshift, at: [2, 1]}
+    - {tf: aws_redshiftdata_statement, name: permanent-tables, in: group:Amazon Redshift, at: [2, 2]}
+  actors: [{type: client, at: [1, 1]}]
   flows:
-    - {from: client, to: events-stream, label: Kinesis Data Generator, step: 1}
-    - {from: events-stream, to: analytics-cluster, label: streaming materialized view, step: 2}
-    - {from: events-stream, to: legacy-delivery, label: "legacy path: Firehose", step: 3}
-    - {from: legacy-delivery, to: legacy-staging-bucket, label: staged files, step: 4}
-    - {from: legacy-staging-bucket, to: analytics-cluster, label: COPY, step: 5}
-    - {from: analytics-cluster, to: redshift-source, label: SQL queries, step: 6}
-    - {from: redshift-source, to: users, label: dashboards, step: 7}
+    - {from: client, to: events-stream, label: producers, step: 1}
+    - {from: client, to: msk-source, label: producers, step: 1}
+    - {from: events-stream, to: streaming-table, label: streaming ingestion, step: 2}
+    - {from: msk-source, to: streaming-table, label: streaming ingestion, step: 2}
+    - {from: streaming-table, to: realtime-materialized-view, label: REFRESH MATERIALIZED VIEW, step: 3}
+    - {from: realtime-materialized-view, to: permanent-tables, label: join and load, step: 4}
 
 - slug: redshift-ml-streaming-fraud-detection
   title: Near real-time fraud detection with Redshift streaming ingestion and Redshift ML
   category: analytics-bi
   tags: [fraud detection, redshift ml, streaming ingestion, kinesis data streams]
   source: https://aws.amazon.com/blogs/big-data/near-real-time-fraud-detection-using-amazon-redshift-streaming-ingestion-with-amazon-kinesis-data-streams-and-amazon-redshift-ml
-  description: A producer on EC2 simulates credit card transactions into a Kinesis data stream, which Redshift ingests through a streaming materialized view. A Redshift ML model trained on historical transactions scores the incoming records with a SQL prediction function so fraudulent transactions are flagged within seconds.
+  description: A Python Boto3 producer on EC2 simulates credit card transactions into a Kinesis data stream, which Redshift ingests through a streaming materialized view. A Redshift ML model trained on the customer payment history scores the incoming records into a predictions table, and a Lambda function reads the flagged transactions to alert customers through Amazon Pinpoint and to block the card in the payment application.
   containers:
     - region: us-east-1
-      vpcs:
-        - name: fraud-vpc
-          cidr: 10.0.0.0/16
-          subnets:
-            - {name: app-subnet, cidr: 10.0.0.0/24, az: a, public: true}
-            - {name: redshift-a, cidr: 10.0.1.0/24, az: a}
-            - {name: redshift-b, cidr: 10.0.2.0/24, az: b}
+      groups: [{label: Stream Producer, at: [1, 1]}, {label: Stream Consumer, at: [1, 3]}]
   elements:
-    - {tf: aws_instance, name: transaction-simulator, in: subnet:app-subnet}
-    - {tf: aws_kinesis_stream, name: transactions-stream, in: region}
-    - {tf: aws_redshift_cluster, name: fraud-cluster, in: vpc:fraud-vpc}
-    - {tf: aws_s3_bucket, name: training-data-bucket, in: region}
-    - {tf: aws_sagemaker_model, name: fraud-model, in: region}
-    - {tf: aws_iam_role, name: redshift-ml-role, in: region}
-  actors: [users]
+    - {tf: aws_ec2_fleet, name: transaction-simulator, in: group:Stream Producer, at: [1, 1]}
+    - {tf: aws_kinesis_stream, name: transactions-stream, in: region, at: [1, 2]}
+    - {tf: aws_redshiftdata_statement, name: streaming-materialized-view, in: group:Stream Consumer, at: [1, 1, 1, 2]}
+    - {tf: aws_sagemaker_model, name: fraud-model, in: group:Stream Consumer, at: [2, 2]}
+    - {tf: aws_redshiftdata_statement, name: predictions-table, in: group:Stream Consumer, at: [2, 3]}
+    - {tf: aws_redshiftdata_statement, name: customer-payment-history, in: group:Stream Consumer, at: [3, 1]}
+    - {tf: aws_redshift_cluster, name: fraud-cluster, in: group:Stream Consumer, at: [3, 3]}
+    - {tf: aws_lambda_function, name: alert-handler, in: region, at: [1, 4]}
+    - {tf: aws_pinpoint_app, name: customer-alerts, in: region, at: [1, 5]}
+  actors: [{type: users, name: customers, at: [1, 2]}, {type: server, name: payment application, at: [2, 2]}]
   flows:
     - {from: transaction-simulator, to: transactions-stream, label: PutRecords, step: 1}
-    - {from: transactions-stream, to: fraud-cluster, label: streaming materialized view, step: 2}
-    - {from: training-data-bucket, to: fraud-cluster, label: historical training set, step: 3}
-    - {from: fraud-cluster, to: fraud-model, label: CREATE MODEL via SageMaker Autopilot, step: 4}
-    - {from: fraud-cluster, to: users, label: fraud predictions, step: 5}
+    - {from: transactions-stream, to: streaming-materialized-view, label: Redshift streaming ingestion, step: 2}
+    - {from: streaming-materialized-view, to: fraud-model, label: streaming data ingestion, step: 3}
+    - {from: customer-payment-history, to: fraud-model, label: training and test sets (CREATE MODEL), step: 4}
+    - {from: fraud-model, to: predictions-table, label: deployed model predictions, step: 5}
+    - {from: fraud-cluster, to: predictions-table, label: customer data}
+    - {from: predictions-table, to: alert-handler, label: flagged transactions, step: 6}
+    - {from: alert-handler, to: customer-alerts, label: alert customers}
+    - {from: customer-alerts, to: customers, label: notifications}
+    - {from: alert-handler, to: payment application, label: block credit card}
 
 - slug: flink-sagemaker-in-stream-inference
   title: Real-time in-stream fraud inference with Flink and SageMaker
   category: ml
   tags: [fraud detection, managed service for apache flink, sagemaker, api gateway, async io]
   source: https://aws.amazon.com/blogs/architecture/realtime-in-stream-inference-kinesis-sagemaker-flink/
-  description: Credit card transactions are ingested into Kinesis Data Streams with the Kinesis Producer Library and processed by a Managed Service for Apache Flink application. The Flink job uses asynchronous I/O to call an API Gateway endpoint that fronts a SageMaker inference endpoint, so each transaction is scored for fraud in-stream instead of in batch.
+  description: A producer on an EC2 instance writes credit card transactions into Kinesis Data Streams with the Kinesis Producer Library and a Managed Service for Apache Flink application processes them. The Flink job uses asynchronous I/O to call an API Gateway endpoint backed by a Lambda function, or optionally a SageMaker inference endpoint, so each transaction is scored for fraud in-stream while CloudWatch metrics and alarms monitor the application.
   containers:
     - region: us-east-1
-      groups: [{label: streaming}, {label: inference}]
+      groups:
+        - {label: CloudWatch console, at: [1, 2, 1, 2]}
+        - {label: options, at: [3, 4, 1, 2]}
   elements:
-    - {tf: aws_kinesis_stream, name: transactions-stream, in: group:streaming}
-    - {tf: aws_kinesisanalyticsv2_application, name: fraud-flink-app, in: group:streaming}
-    - {tf: aws_kinesis_stream, name: scored-transactions, in: group:streaming}
-    - {tf: aws_api_gateway_rest_api, name: inference-api, in: group:inference}
-    - {tf: aws_sagemaker_endpoint, name: fraud-endpoint, in: group:inference}
-    - {tf: aws_s3_bucket, name: model-artifacts, in: region}
-    - {tf: aws_cloudwatch_log_group, name: flink-logs, in: region}
-  actors: [client]
+    - {tf: aws_ec2_fleet, name: transaction-producer, in: region, at: [2, 1]}
+    - {tf: aws_kinesis_stream, name: transactions-stream, in: region, at: [2, 2]}
+    - {tf: aws_kinesisanalyticsv2_application, name: fraud-flink-app, in: region, at: [2, 3]}
+    - {tf: aws_api_gateway_rest_api, name: inference-api, in: region, at: [2, 4]}
+    - {tf: aws_lambda_function, name: inference-function, in: region, at: [2, 5]}
+    - {tf: aws_sagemaker_endpoint, name: fraud-endpoint, in: group:options, at: [1, 1]}
+    - {tf: aws_cloudwatch_log_group, name: flink-logs, in: group:CloudWatch console, at: [1, 1]}
+    - {tf: aws_cloudwatch_metric_alarm, name: flink-alarms, in: group:CloudWatch console, at: [1, 2]}
   flows:
-    - {from: client, to: transactions-stream, label: KPL PutRecords, step: 1}
+    - {from: transaction-producer, to: transactions-stream, label: KPL PutRecords, step: 1}
     - {from: transactions-stream, to: fraud-flink-app, label: Flink Kinesis source, step: 2}
     - {from: fraud-flink-app, to: inference-api, label: async HTTPS invoke, step: 3}
-    - {from: inference-api, to: fraud-endpoint, label: InvokeEndpoint, step: 4}
-    - {from: model-artifacts, to: fraud-endpoint, label: model artifact, step: 5}
-    - {from: fraud-flink-app, to: scored-transactions, label: enriched records, step: 6}
-    - {from: fraud-flink-app, to: flink-logs, label: logs, step: 7}
+    - {from: inference-api, to: inference-function, label: Lambda integration, step: 4}
+    - {from: inference-api, to: fraud-endpoint, label: "option: InvokeEndpoint", step: 5}
+    - {from: fraud-flink-app, to: flink-logs, label: metrics and logs, step: 6}
+    - {from: flink-logs, to: flink-alarms, label: alarms, step: 7}
 
 - slug: appsync-live-sports-realtime-updates
   title: Real-time live sports updates with Kinesis, Lambda, DynamoDB and AppSync
@@ -259,32 +252,33 @@
   category: serverless
   tags: [leaderboard, kinesis data streams, lambda tumbling window, dynamodb streams, iot core, api gateway]
   source: https://aws.amazon.com/blogs/compute/building-serverless-applications-with-streaming-data-part-4/
-  description: Race telemetry lands in a Kinesis data stream where a Lambda consumer with tumbling windows aggregates scores every few seconds and writes them to DynamoDB, while a second consumer persists final results. DynamoDB Streams trigger a publisher Lambda that pushes updates to live leaderboards through IoT Core, and an API Gateway endpoint serves historical rankings sorted by a global secondary index.
+  description: Race telemetry lands in a Kinesis data stream where a Lambda consumer with tumbling windows aggregates scores every few seconds and writes them to a DynamoDB table, while a second consumer records final race results in a second table. DynamoDB Streams trigger a publisher Lambda that pushes updates to the live leaderboard through an IoT Core topic, and an API Gateway endpoint with a fetch-results Lambda serves the final rankings to the bike frontend application.
   containers:
     - region: us-east-1
-      groups: [{label: stream processing}, {label: serving}]
+      account_at: [1, 1]
+      groups: [{label: Real-time updates, at: [1, 2]}, {label: Record final race results, at: [2, 2]}]
   elements:
-    - {tf: aws_kinesis_stream, name: race-telemetry, in: group:stream processing}
-    - {tf: aws_lambda_function, name: tumbling-window-aggregator, in: group:stream processing}
-    - {tf: aws_lambda_function, name: final-results, in: group:stream processing}
-    - {tf: aws_dynamodb_table, name: leaderboard-table, in: group:serving}
-    - {tf: aws_lambda_function, name: publish-updates, in: group:serving}
-    - {tf: aws_iot_topic_rule, name: leaderboard-topic, in: group:serving}
-    - {tf: aws_api_gateway_rest_api, name: leaderboard-api, in: group:serving}
-    - {tf: aws_lambda_function, name: get-leaderboard, in: group:serving}
-  actors: [device, users]
+    - {tf: aws_kinesis_stream, name: race-telemetry, in: region, at: [1, 1, 2, 1]}
+    - {tf: aws_lambda_function, name: tumbling-window-aggregator, in: group:Real-time updates, at: [1, 1]}
+    - {tf: aws_dynamodb_table, name: leaderboard-table, in: group:Real-time updates, at: [1, 2]}
+    - {tf: aws_lambda_function, name: publish-updates, in: region, at: [1, 3]}
+    - {tf: aws_iot_topic_rule, name: leaderboard-topic, in: region, at: [1, 4]}
+    - {tf: aws_lambda_function, name: final-results, in: group:Record final race results, at: [1, 1]}
+    - {tf: aws_dynamodb_table, name: race-results-table, in: group:Record final race results, at: [1, 2]}
+    - {tf: aws_lambda_function, name: fetch-results, in: region, at: [2, 3]}
+    - {tf: aws_api_gateway_rest_api, name: leaderboard-api, in: region, at: [2, 4]}
+  actors: [{type: users, name: bike frontend application, at: [1, 2]}]
   flows:
-    - {from: device, to: race-telemetry, label: competitor metrics, step: 1}
-    - {from: race-telemetry, to: tumbling-window-aggregator, link: aws_lambda_event_source_mapping, step: 2}
+    - {from: race-telemetry, to: tumbling-window-aggregator, link: aws_lambda_event_source_mapping, step: 1}
+    - {from: tumbling-window-aggregator, to: leaderboard-table, label: aggregated scores}
+    - {from: leaderboard-table, to: publish-updates, link: aws_lambda_event_source_mapping, step: 2}
+    - {from: publish-updates, to: leaderboard-topic, label: MQTT publish}
+    - {from: leaderboard-topic, to: bike frontend application, label: live leaderboard}
     - {from: race-telemetry, to: final-results, link: aws_lambda_event_source_mapping, step: 3}
-    - {from: tumbling-window-aggregator, to: leaderboard-table, label: aggregated scores, step: 4}
-    - {from: final-results, to: leaderboard-table, label: final scores, step: 5}
-    - {from: leaderboard-table, to: publish-updates, link: aws_lambda_event_source_mapping, step: 6}
-    - {from: publish-updates, to: leaderboard-topic, label: MQTT publish, step: 7}
-    - {from: leaderboard-topic, to: users, label: live leaderboard, step: 8}
-    - {from: users, to: leaderboard-api, label: historical results, step: 9}
-    - {from: leaderboard-api, to: get-leaderboard, label: Lambda proxy, step: 10}
-    - {from: get-leaderboard, to: leaderboard-table, label: query GSI, step: 11}
+    - {from: final-results, to: race-results-table, label: final scores}
+    - {from: bike frontend application, to: leaderboard-api, label: fetch final results, step: 4}
+    - {from: leaderboard-api, to: fetch-results, label: Lambda proxy}
+    - {from: fetch-results, to: race-results-table, label: query results}
 
 - slug: cloudwatch-logs-kinesis-opensearch-pipeline
   title: CloudWatch Logs to Kinesis to OpenSearch log analytics pipeline
@@ -321,59 +315,83 @@
   category: data
   tags: [dynamodb, change data capture, kinesis data streams for dynamodb, firehose, s3, data lake]
   source: https://aws.amazon.com/blogs/big-data/streaming-amazon-dynamodb-data-into-a-centralized-data-lake/
-  description: Kinesis Data Streams for DynamoDB captures item-level modifications from a table and replicates them to a Kinesis data stream. A Firehose delivery stream reads the stream, invokes a Lambda transformation to flatten the nested change records, and delivers compressed batches to an S3 data lake that is catalogued in Glue and queried with Athena.
+  description: Kinesis Data Streams for DynamoDB captures item-level modifications from a table and replicates them to a Kinesis data stream. A Firehose delivery stream reads the stream, invokes a Lambda transformation running in a private subnet through a Firehose VPC endpoint to flatten the nested change records, and delivers compressed batches to an S3 data lake bucket.
   containers:
     - region: us-east-1
-      groups: [{label: source}, {label: data lake}]
+      vpcs:
+        - name: transform-vpc
+          cidr: 10.0.0.0/16
+          at: [2, 3, 1, 2]
+          subnets:
+            - {name: private-a, cidr: 10.0.1.0/24, at: [1, 1]}
   elements:
-    - {tf: aws_dynamodb_table, name: orders-table, in: group:source}
-    - {tf: aws_kinesis_stream, name: orders-cdc-stream, in: group:source}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: datalake-delivery, in: group:data lake}
-    - {tf: aws_lambda_function, name: flatten-transform, in: group:data lake}
-    - {tf: aws_s3_bucket, name: datalake-bucket, in: group:data lake}
-    - {tf: aws_glue_catalog_database, name: datalake-catalog, in: group:data lake}
-    - {tf: aws_athena_workgroup, name: analysts, in: group:data lake}
-  actors: [client, users]
+    - {tf: aws_dynamodb_table, name: orders-table, in: region, at: [1, 1]}
+    - {tf: aws_kinesis_stream, name: orders-cdc-stream, in: region, at: [1, 2]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: datalake-delivery, in: region, at: [1, 3]}
+    - {tf: aws_s3_bucket, name: datalake-bucket, in: region, at: [1, 4]}
+    - {tf: aws_vpc_endpoint, name: firehose-endpoint, in: vpc:transform-vpc, at: [1, 2]}
+    - {tf: aws_lambda_function, name: flatten-transform, in: subnet:private-a, at: [1, 1]}
   flows:
-    - {from: client, to: orders-table, label: application writes, step: 1}
-    - {from: orders-table, to: orders-cdc-stream, label: Kinesis Data Streams for DynamoDB, step: 2}
-    - {from: orders-cdc-stream, to: datalake-delivery, label: Firehose source, step: 3}
-    - {from: datalake-delivery, to: flatten-transform, label: data transformation, step: 4}
+    - {from: orders-table, to: orders-cdc-stream, label: Kinesis Data Streams for DynamoDB, step: 1}
+    - {from: orders-cdc-stream, to: datalake-delivery, label: Firehose source, step: 2}
+    - {from: datalake-delivery, to: firehose-endpoint, label: PrivateLink, step: 3}
+    - {from: firehose-endpoint, to: flatten-transform, label: data transformation, step: 4}
     - {from: datalake-delivery, to: datalake-bucket, label: compressed batches, step: 5}
-    - {from: datalake-catalog, to: datalake-bucket, label: table definitions, step: 6}
-    - {from: users, to: analysts, label: SQL queries, step: 7}
 
 - slug: dms-cdc-to-kinesis
   title: Change data capture from relational databases to Kinesis with AWS DMS
   category: database
   tags: [dms, change data capture, kinesis data streams, firehose, s3, oracle]
   source: https://aws.amazon.com/blogs/database/use-the-aws-database-migration-service-to-stream-change-data-to-amazon-kinesis-data-streams/
-  description: An AWS DMS replication instance reads the transaction log of a relational database such as Oracle on RDS and publishes insert, update and delete events to a Kinesis data stream as the target endpoint. Consumers such as Lambda process the changes in near real time while a Firehose delivery stream archives them to S3 for analytics.
+  description: AWS DMS reads the transaction logs of data producers such as RDS MySQL, Oracle, SQL Server and PostgreSQL, DynamoDB and an on-premises DB2 LUW database and publishes insert, update and delete events to a Kinesis data stream as the target endpoint. A streaming layer of EMR Spark reads the raw stream and writes processed records to a second stream that feeds consumers such as Redshift, DynamoDB, QuickSight, CloudSearch, Athena and Kinesis-enabled applications, while Firehose archives both streams to S3 as the persistent layer.
   containers:
     - region: us-east-1
-      vpcs:
-        - name: data-vpc
-          cidr: 10.0.0.0/16
-          subnets:
-            - {name: db-a, cidr: 10.0.1.0/24, az: a}
-            - {name: db-b, cidr: 10.0.2.0/24, az: b}
+      groups:
+        - {label: data producers, at: [1, 1, 3, 1]}
+        - {label: streaming layer, at: [1, 3, 1, 2]}
+        - {label: persistent layer, at: [3, 3, 1, 2]}
+        - {label: data consumers, at: [1, 5, 3, 1]}
   elements:
-    - {tf: aws_db_instance, name: source-oracle, in: vpc:data-vpc}
-    - {tf: aws_dms_replication_instance, name: dms-replication, in: vpc:data-vpc}
-    - {tf: aws_dms_endpoint, name: kinesis-target, in: region}
-    - {tf: aws_kinesis_stream, name: cdc-stream, in: region}
-    - {tf: aws_lambda_function, name: change-consumer, in: region}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: archive-delivery, in: region}
-    - {tf: aws_s3_bucket, name: cdc-archive, in: region}
-  actors: [client]
+    - {tf: aws_rds_cluster, name: rds-mysql, in: group:data producers, at: [1, 1]}
+    - {tf: aws_rds_cluster, name: rds-oracle, in: group:data producers, at: [2, 1]}
+    - {tf: aws_rds_cluster, name: rds-mssql, in: group:data producers, at: [3, 1]}
+    - {tf: aws_dynamodb_table, name: source-dynamodb, in: group:data producers, at: [4, 1]}
+    - {tf: aws_rds_cluster, name: rds-postgresql, in: group:data producers, at: [5, 1]}
+    - {tf: aws_dms_replication_instance, name: dms-kinesis-target, in: region, at: [1, 2]}
+    - {tf: aws_kinesis_stream, name: cdc-stream, in: group:streaming layer, at: [1, 1]}
+    - {tf: aws_emr_cluster, name: emr-spark, in: group:streaming layer, at: [1, 2]}
+    - {tf: aws_kinesis_stream, name: processed-stream, in: group:streaming layer, at: [1, 3]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: raw-archive-delivery, in: region, at: [2, 3]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: processed-archive-delivery, in: region, at: [2, 4]}
+    - {tf: aws_s3_bucket, name: raw-archive, in: group:persistent layer, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: processed-archive, in: group:persistent layer, at: [1, 2]}
+    - {tf: aws_redshift_cluster, name: redshift-warehouse, in: group:data consumers, at: [1, 1]}
+    - {tf: aws_dynamodb_table, name: consumer-dynamodb, in: group:data consumers, at: [2, 1]}
+    - {tf: aws_quicksight_data_source, name: quicksight, in: group:data consumers, at: [3, 1]}
+    - {tf: aws_cloudsearch_domain, name: cloudsearch, in: group:data consumers, at: [4, 1]}
+    - {tf: aws_athena_workgroup, name: athena, in: group:data consumers, at: [5, 1]}
+    - {tf: aws_lambda_function, name: kinesis-enabled-app, in: group:data consumers, at: [6, 1]}
+  actors: [{type: database, name: DB2 LUW, at: [1, 1]}]
   flows:
-    - {from: client, to: source-oracle, label: OLTP writes, step: 1}
-    - {from: source-oracle, to: dms-replication, label: transaction log CDC, step: 2}
-    - {from: dms-replication, to: kinesis-target, label: DMS task, step: 3}
-    - {from: kinesis-target, to: cdc-stream, label: PutRecords JSON, step: 4}
-    - {from: cdc-stream, to: change-consumer, link: aws_lambda_event_source_mapping, step: 5}
-    - {from: cdc-stream, to: archive-delivery, label: Firehose source, step: 6}
-    - {from: archive-delivery, to: cdc-archive, label: archive, step: 7}
+    - {from: rds-mysql, to: dms-kinesis-target, label: transaction log CDC, step: 1}
+    - {from: rds-oracle, to: dms-kinesis-target, label: transaction log CDC}
+    - {from: rds-mssql, to: dms-kinesis-target, label: transaction log CDC}
+    - {from: source-dynamodb, to: dms-kinesis-target, label: CDC}
+    - {from: rds-postgresql, to: dms-kinesis-target, label: transaction log CDC}
+    - {from: DB2 LUW, to: dms-kinesis-target, label: on-premises CDC}
+    - {from: dms-kinesis-target, to: cdc-stream, label: PutRecords JSON, step: 2}
+    - {from: cdc-stream, to: emr-spark, label: Spark streaming, step: 3}
+    - {from: emr-spark, to: processed-stream, label: processed records, step: 4}
+    - {from: cdc-stream, to: raw-archive-delivery, label: Firehose source}
+    - {from: raw-archive-delivery, to: raw-archive, label: archive}
+    - {from: processed-stream, to: processed-archive-delivery, label: Firehose source}
+    - {from: processed-archive-delivery, to: processed-archive, label: archive}
+    - {from: processed-stream, to: redshift-warehouse, label: load, step: 5}
+    - {from: processed-stream, to: consumer-dynamodb, label: materialize}
+    - {from: processed-stream, to: quicksight, label: visualize}
+    - {from: processed-stream, to: cloudsearch, label: index}
+    - {from: processed-stream, to: athena, label: query}
+    - {from: processed-stream, to: kinesis-enabled-app, link: aws_lambda_event_source_mapping}
 
 - slug: msk-connect-debezium-cdc
   title: End-to-end CDC with MSK Connect, Debezium and Glue Schema Registry
@@ -383,142 +401,154 @@
   description: A Debezium MySQL source connector on MSK Connect monitors an Aurora MySQL cluster and pushes row-level changes to Kafka topics on an MSK cluster, serializing records against schemas in the AWS Glue Schema Registry. A Confluent S3 sink connector, also on MSK Connect, deserializes the topics and writes Parquet files to an S3 bucket for downstream consumers.
   containers:
     - region: us-east-1
-      vpcs:
-        - name: cdc-vpc
-          cidr: 10.0.0.0/16
-          subnets:
-            - {name: private-a, cidr: 10.0.1.0/24, az: a}
-            - {name: private-b, cidr: 10.0.2.0/24, az: b}
-            - {name: private-c, cidr: 10.0.3.0/24, az: c}
+      account_at: [1, 1]
   elements:
-    - {tf: aws_rds_cluster, name: aurora-mysql, in: vpc:cdc-vpc}
-    - {tf: aws_mskconnect_connector, name: debezium-source, in: vpc:cdc-vpc}
-    - {tf: aws_msk_cluster, name: msk-cluster, in: vpc:cdc-vpc}
-    - {tf: aws_glue_registry, name: schema-registry, in: region}
-    - {tf: aws_mskconnect_connector, name: s3-sink, in: vpc:cdc-vpc}
-    - {tf: aws_s3_bucket, name: cdc-bucket, in: region}
-    - {tf: aws_mskconnect_custom_plugin, name: connector-plugins, in: region}
-  actors: [client]
+    - {tf: aws_rds_cluster, name: aurora-mysql, in: region, at: [1, 1]}
+    - {tf: aws_mskconnect_connector, name: debezium-source, in: region, at: [1, 2]}
+    - {tf: aws_msk_cluster, name: msk-cluster, in: region, at: [1, 3]}
+    - {tf: aws_mskconnect_connector, name: s3-sink, in: region, at: [1, 4]}
+    - {tf: aws_s3_bucket, name: cdc-bucket, in: region, at: [1, 5]}
+    - {tf: aws_glue_registry, name: schema-registry, in: region, at: [2, 3]}
   flows:
-    - {from: client, to: aurora-mysql, label: transactions, step: 1}
-    - {from: aurora-mysql, to: debezium-source, label: binlog CDC, step: 2}
-    - {from: debezium-source, to: schema-registry, label: register schema, step: 3}
-    - {from: debezium-source, to: msk-cluster, label: change events to topics, step: 4}
-    - {from: msk-cluster, to: s3-sink, label: consume topics, step: 5}
-    - {from: s3-sink, to: schema-registry, label: fetch schema, step: 6}
-    - {from: s3-sink, to: cdc-bucket, label: Parquet objects, step: 7}
-    - {from: connector-plugins, to: debezium-source, label: custom plugin, step: 8}
+    - {from: aurora-mysql, to: debezium-source, label: binlog CDC, step: 1}
+    - {from: debezium-source, to: msk-cluster, label: change events to topics, step: 2}
+    - {from: msk-cluster, to: s3-sink, label: consume topics, step: 3}
+    - {from: s3-sink, to: cdc-bucket, label: Parquet objects, step: 4}
+    - {from: debezium-source, to: schema-registry, label: Schema}
+    - {from: schema-registry, to: s3-sink, label: Schema}
 
 - slug: kinesis-video-rekognition-face-analysis
   title: Serverless live video facial analysis with Kinesis Video Streams and Rekognition
   category: media
   tags: [kinesis video streams, rekognition video, stream processor, lambda, sns]
   source: https://aws.amazon.com/blogs/machine-learning/easily-perform-facial-analysis-on-live-feeds-by-creating-a-serverless-video-analytics-environment-with-amazon-rekognition-video-and-amazon-kinesis-video-streams/
-  description: A camera streams live video into a Kinesis video stream, where a Rekognition Video stream processor compares detected faces against a face collection. Match results are written to a Kinesis data stream, a Lambda consumer formats them, and Amazon SNS delivers email notifications.
+  description: A webcam streams live video into a Kinesis video stream, where a Rekognition Video stream processor compares detected faces against a face collection. Match results are written to a Kinesis data stream, a Lambda consumer formats them, and Amazon SNS delivers a text notification to the end user's phone.
   containers:
     - region: us-east-1
-      groups: [{label: video ingestion}, {label: analysis}, {label: notification}]
   elements:
-    - {tf: aws_kinesis_video_stream, name: camera-feed, in: group:video ingestion}
-    - {tf: aws_rekognition_collection, name: known-faces, in: group:analysis}
-    - {tf: aws_rekognition_stream_processor, name: face-search-processor, in: group:analysis}
-    - {tf: aws_kinesis_stream, name: face-matches, in: group:analysis}
-    - {tf: aws_lambda_function, name: match-handler, in: group:notification}
-    - {tf: aws_sns_topic, name: match-alerts, in: group:notification}
-  actors: [device, users]
+    - {tf: aws_kinesis_video_stream, name: camera-feed, in: region, at: [1, 2]}
+    - {tf: aws_rekognition_stream_processor, name: face-search-processor, in: region, at: [1, 3]}
+    - {tf: aws_rekognition_collection, name: known-faces, in: region, at: [1, 4]}
+    - {tf: aws_kinesis_stream, name: face-matches, in: region, at: [2, 3]}
+    - {tf: aws_lambda_function, name: match-handler, in: region, at: [2, 2]}
+    - {tf: aws_sns_topic, name: match-alerts, in: region, at: [2, 1]}
+  actors: [{type: device, name: webcam, at: [1, 1]}, {type: mobile, name: text notification, at: [2, 1]}]
   flows:
-    - {from: device, to: camera-feed, label: KVS producer SDK, step: 1}
+    - {from: webcam, to: camera-feed, label: camera-captured video, step: 1}
     - {from: camera-feed, to: face-search-processor, label: video fragments, step: 2}
-    - {from: known-faces, to: face-search-processor, label: face collection, step: 3}
-    - {from: face-search-processor, to: face-matches, label: match records, step: 4}
-    - {from: face-matches, to: match-handler, link: aws_lambda_event_source_mapping, step: 5}
-    - {from: match-handler, to: match-alerts, label: Publish, step: 6}
-    - {from: match-alerts, to: users, label: email, step: 7}
+    - {from: known-faces, to: face-search-processor, label: face collection}
+    - {from: face-search-processor, to: face-matches, label: match records}
+    - {from: face-matches, to: match-handler, link: aws_lambda_event_source_mapping}
+    - {from: match-handler, to: match-alerts, label: Publish}
+    - {from: match-alerts, to: text notification, label: face match notification, step: 3}
 
 - slug: kinesis-flink-timestream-grafana
   title: Near real-time IoT time series processing with Kinesis, Flink, Timestream and Grafana
   category: iot
   tags: [timestream, time series, managed service for apache flink, kinesis data streams, grafana, iot]
   source: https://aws.amazon.com/blogs/database/near-real-time-processing-with-amazon-kinesis-amazon-timestream-and-grafana/
-  description: Simulated IoT devices publish events to a Kinesis data stream; a Managed Service for Apache Flink application transforms records, detects out-of-order timestamps and writes them to an Amazon Timestream table. A parallel Firehose consumer archives raw events to S3, and Grafana queries Timestream for operational dashboards.
+  description: IoT devices publish events to a Kinesis data stream; a Managed Service for Apache Flink application transforms the device data and batch-inserts it into an Amazon Timestream database that Grafana queries for operational dashboards. A parallel Firehose consumer uses a Lambda function to transform batches and lands raw records in an S3 data lake bucket that analytics and machine learning services consume.
   containers:
     - region: us-east-1
-      groups: [{label: ingestion}, {label: storage}]
+      groups:
+        - {label: data lake, at: [2, 3]}
   elements:
-    - {tf: aws_lambda_function, name: device-simulator, in: group:ingestion}
-    - {tf: aws_kinesis_stream, name: sensor-stream, in: group:ingestion}
-    - {tf: aws_kinesisanalyticsv2_application, name: timeseries-flink-app, in: group:ingestion}
-    - {tf: aws_timestreamwrite_database, name: iot-timeseries, in: group:storage}
-    - {tf: aws_timestreamwrite_table, name: sensor-readings, in: group:storage}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: raw-archive-delivery, in: group:storage}
-    - {tf: aws_s3_bucket, name: raw-events-bucket, in: group:storage}
-    - {tf: aws_grafana_workspace, name: ops-grafana, in: region}
-  actors: [device, users]
+    - {tf: aws_kinesis_stream, name: sensor-stream, in: region, at: [1, 1]}
+    - {tf: aws_kinesisanalyticsv2_application, name: timeseries-flink-app, in: region, at: [1, 2]}
+    - {tf: aws_timestreamwrite_database, name: iot-timeseries, in: region, at: [1, 3]}
+    - {tf: aws_grafana_workspace, name: ops-grafana, in: region, at: [1, 4]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: raw-archive-delivery, in: region, at: [2, 1]}
+    - {tf: aws_lambda_function, name: batch-transform, in: region, at: [2, 2]}
+    - {tf: aws_s3_bucket, name: raw-events-bucket, in: group:data lake, at: [1, 1]}
+    - {tf: aws_athena_workgroup, name: analytics-services, in: region, at: [2, 4]}
+    - {tf: aws_sagemaker_notebook_instance, name: machine-learning, in: region, at: [3, 4]}
+  actors: [{type: device, name: device, at: [1, 1]}]
   flows:
-    - {from: device, to: device-simulator, label: simulated telemetry, step: 1}
-    - {from: device-simulator, to: sensor-stream, label: PutRecords, step: 2}
-    - {from: sensor-stream, to: timeseries-flink-app, label: Flink Kinesis source, step: 3}
-    - {from: timeseries-flink-app, to: sensor-readings, label: WriteRecords, step: 4}
-    - {from: iot-timeseries, to: sensor-readings, label: contains, step: 5}
-    - {from: sensor-stream, to: raw-archive-delivery, label: Firehose source, step: 6}
-    - {from: raw-archive-delivery, to: raw-events-bucket, label: raw archive, step: 7}
-    - {from: ops-grafana, to: sensor-readings, label: Timestream data source, step: 8}
-    - {from: users, to: ops-grafana, label: dashboards, step: 9}
+    - {from: device, to: sensor-stream, label: device events, step: 1}
+    - {from: sensor-stream, to: timeseries-flink-app, label: Flink Kinesis source, step: 2}
+    - {from: timeseries-flink-app, to: iot-timeseries, label: transform device data and batch insert, step: 3}
+    - {from: iot-timeseries, to: ops-grafana, label: Timestream data source, step: 4}
+    - {from: sensor-stream, to: raw-archive-delivery, label: Firehose source, step: 5}
+    - {from: raw-archive-delivery, to: batch-transform, label: transform batches, step: 6}
+    - {from: raw-archive-delivery, to: raw-events-bucket, label: batch records, step: 7}
+    - {from: raw-events-bucket, to: analytics-services, label: query}
+    - {from: raw-events-bucket, to: machine-learning, label: train}
 
 - slug: flink-streaming-data-enrichment
   title: Streaming data enrichment patterns in Managed Service for Apache Flink
   category: data
   tags: [stream enrichment, managed service for apache flink, async io, dynamodb, reference data, kinesis data streams]
   source: https://aws.amazon.com/blogs/big-data/common-streaming-data-enrichment-patterns-in-amazon-managed-service-for-apache-flink/
-  description: A Managed Service for Apache Flink application enriches each event on the main Kinesis data stream with reference data, either by asynchronous per-record lookups against DynamoDB or by joining against a second reference stream fed by change data capture. Enriched events are written to an output stream and delivered to S3 by Firehose.
+  description: A Managed Service for Apache Flink data enrichment application preloads reference data from an S3 bucket into the heap memory of every task slot on each TaskManager when the job starts, then enriches the partitioned input stream (one partition per key such as developer, project manager or accountant) with in-memory lookups. Enriched events are written to a Kinesis output stream; the same pattern can swap the S3 preload for asynchronous per-record lookups against a database.
   containers:
     - region: us-east-1
-      groups: [{label: streams}, {label: reference data}]
   elements:
-    - {tf: aws_kinesis_stream, name: main-events, in: group:streams}
-    - {tf: aws_kinesis_stream, name: reference-updates, in: group:streams}
-    - {tf: aws_dynamodb_table, name: reference-table, in: group:reference data}
-    - {tf: aws_kinesisanalyticsv2_application, name: enrichment-flink-app, in: region}
-    - {tf: aws_kinesis_stream, name: enriched-events, in: group:streams}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: enriched-delivery, in: region}
-    - {tf: aws_s3_bucket, name: enriched-bucket, in: region}
-  actors: [client, database]
+    - {tf: aws_s3_bucket, name: reference-data, in: region, at: [1, 1]}
+    - {tf: aws_kinesis_stream, name: main-events, in: region, at: [2, 1]}
+    - {tf: aws_kinesisanalyticsv2_application, name: enrichment-flink-app, in: region, at: [1, 2, 2, 1]}
+    - {tf: aws_kinesis_stream, name: enriched-events, in: region, at: [1, 3, 2, 1]}
   flows:
-    - {from: client, to: main-events, label: raw events, step: 1}
-    - {from: database, to: reference-updates, label: CDC of reference data, step: 2}
-    - {from: main-events, to: enrichment-flink-app, label: main stream, step: 3}
-    - {from: reference-updates, to: enrichment-flink-app, label: reference stream join, step: 4}
-    - {from: enrichment-flink-app, to: reference-table, label: async lookup, step: 5}
-    - {from: enrichment-flink-app, to: enriched-events, label: enriched records, step: 6}
-    - {from: enriched-events, to: enriched-delivery, label: Firehose source, step: 7}
-    - {from: enriched-delivery, to: enriched-bucket, label: delivery, step: 8}
+    - {from: reference-data, to: enrichment-flink-app, label: load all reference data into task slot heap memory, step: 1}
+    - {from: main-events, to: enrichment-flink-app, label: partitioned input stream, step: 2}
+    - {from: enrichment-flink-app, to: enriched-events, label: output stream, step: 3}
 
 - slug: kinesis-event-sourcing-replay
   title: Event-sourcing microservices with Kinesis replay and Flink state snapshots
   category: serverless
   tags: [event sourcing, event replay, kinesis data streams, retention, managed service for apache flink, lambda]
   source: https://aws.amazon.com/blogs/big-data/architectural-patterns-for-real-time-analytics-using-amazon-kinesis-data-streams-part-1/
-  description: Kinesis Data Streams acts as the centralized event store for event-sourcing microservices, retaining events for up to 365 days so consumers can replay them by resetting their position. A Managed Service for Apache Flink application maintains stateful aggregates with snapshots persisted to S3, and emits derived events to output streams consumed by Lambda-based microservices behind API Gateway.
+  description: Kinesis Data Streams is the central stream storage of the pattern; producers such as mobile apps, clickstream and social feeds, application logs and IoT sensors reach it through the Kinesis SDK, the Kinesis Producer Library or Kinesis Agent on EC2, AWS DMS, IoT Core, DynamoDB streams and CloudWatch Logs subscriptions. Events are retained for up to 365 days so stream processors (Managed Service for Apache Flink, Lambda, Redshift streaming ingestion, KCL applications, Glue streaming and EMR) can replay them from any position and write results to destinations such as DynamoDB, S3, OpenSearch, RDS and event-driven applications.
   containers:
     - region: us-east-1
-      groups: [{label: event store}, {label: microservices}]
+      groups:
+        - {label: streaming ingestion, at: [1, 1]}
+        - {label: stream storage, at: [1, 2]}
+        - {label: stream processing, at: [1, 3]}
+        - {label: stream destination, at: [1, 4]}
   elements:
-    - {tf: aws_kinesis_stream, name: event-store, in: group:event store}
-    - {tf: aws_kinesisanalyticsv2_application, name: stateful-processor, in: region}
-    - {tf: aws_s3_bucket, name: state-snapshots, in: region}
-    - {tf: aws_kinesis_stream, name: derived-events, in: group:event store}
-    - {tf: aws_lambda_function, name: order-service, in: group:microservices}
-    - {tf: aws_lambda_function, name: replay-consumer, in: group:microservices}
-    - {tf: aws_api_gateway_rest_api, name: commands-api, in: group:microservices}
-  actors: [client]
+    - {tf: aws_ec2_fleet, name: kpl-kinesis-agent, in: group:streaming ingestion, at: [1, 1]}
+    - {tf: aws_dms_replication_instance, name: dms-ingestion, in: group:streaming ingestion, at: [2, 1]}
+    - {tf: aws_iot_topic_rule, name: iot-core-rule, in: group:streaming ingestion, at: [3, 1]}
+    - {tf: aws_dynamodb_table, name: dynamodb-source, in: group:streaming ingestion, at: [4, 1]}
+    - {tf: aws_cloudwatch_log_group, name: cloudwatch-logs, in: group:streaming ingestion, at: [5, 1]}
+    - {tf: aws_kinesis_stream, name: event-store, in: group:stream storage, at: [1, 1]}
+    - {tf: aws_kinesisanalyticsv2_application, name: stateful-processor, in: group:stream processing, at: [1, 1]}
+    - {tf: aws_lambda_function, name: lambda-consumer, in: group:stream processing, at: [2, 1]}
+    - {tf: aws_redshift_cluster, name: redshift-streaming, in: group:stream processing, at: [3, 1]}
+    - {tf: aws_ec2_fleet, name: kcl-consumer, in: group:stream processing, at: [4, 1]}
+    - {tf: aws_glue_job, name: glue-streaming-job, in: group:stream processing, at: [5, 1]}
+    - {tf: aws_emr_cluster, name: emr-cluster, in: group:stream processing, at: [6, 1]}
+    - {tf: aws_dynamodb_table, name: materialized-views, in: group:stream destination, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: event-archive, in: group:stream destination, at: [2, 1]}
+    - {tf: aws_opensearch_domain, name: search-index, in: group:stream destination, at: [3, 1]}
+    - {tf: aws_rds_cluster, name: relational-store, in: group:stream destination, at: [4, 1]}
+  actors:
+    - {type: mobile, name: mobile apps, at: [1, 1]}
+    - {type: users, name: clickstream and social, at: [2, 1]}
+    - {type: server, name: application logs, at: [3, 1]}
+    - {type: device, name: IoT sensors and connected products, at: [4, 1]}
+    - {type: server, name: event-driven application, at: [1, 3]}
   flows:
-    - {from: client, to: commands-api, label: commands, step: 1}
-    - {from: commands-api, to: event-store, label: append events, step: 2}
+    - {from: mobile apps, to: kpl-kinesis-agent, label: Kinesis SDK, step: 1}
+    - {from: clickstream and social, to: kpl-kinesis-agent, label: KPL}
+    - {from: application logs, to: cloudwatch-logs, label: Kinesis Agent and CloudWatch Logs}
+    - {from: IoT sensors and connected products, to: iot-core-rule, label: MQTT}
+    - {from: kpl-kinesis-agent, to: event-store, label: PutRecords, step: 2}
+    - {from: dms-ingestion, to: event-store, label: CDC target}
+    - {from: iot-core-rule, to: event-store, label: Kinesis rule action}
+    - {from: dynamodb-source, to: event-store, label: Kinesis Data Streams for DynamoDB}
+    - {from: cloudwatch-logs, to: event-store, label: subscription filter}
     - {from: event-store, to: stateful-processor, label: Flink Kinesis source, step: 3}
-    - {from: stateful-processor, to: state-snapshots, label: state snapshots, step: 4}
-    - {from: stateful-processor, to: derived-events, label: aggregated events, step: 5}
-    - {from: derived-events, to: order-service, link: aws_lambda_event_source_mapping, step: 6}
-    - {from: event-store, to: replay-consumer, label: "replay: TRIM_HORIZON or AT_TIMESTAMP", step: 7}
+    - {from: event-store, to: lambda-consumer, link: aws_lambda_event_source_mapping}
+    - {from: event-store, to: redshift-streaming, label: streaming ingestion}
+    - {from: event-store, to: kcl-consumer, label: KCL}
+    - {from: event-store, to: glue-streaming-job, label: Glue streaming source}
+    - {from: event-store, to: emr-cluster, label: "replay: TRIM_HORIZON or AT_TIMESTAMP"}
+    - {from: stateful-processor, to: materialized-views, label: aggregates, step: 4}
+    - {from: lambda-consumer, to: event-driven application, label: events}
+    - {from: glue-streaming-job, to: event-archive, label: archive}
+    - {from: kcl-consumer, to: search-index, label: index}
+    - {from: emr-cluster, to: relational-store, label: load}
 
 - slug: flink-studio-opensearch-kpi-dashboard
   title: Real-time KPI dashboard with Flink Studio and OpenSearch
@@ -553,31 +583,28 @@
   category: data
   tags: [glue streaming, apache hudi, dms, dynamodb, kinesis data streams, athena, stream enrichment]
   source: https://aws.amazon.com/blogs/big-data/join-streaming-source-cdc-glue/
-  description: AWS DMS continuously replicates a reference table from Aurora MySQL into DynamoDB while application events flow into a Kinesis data stream. An AWS Glue streaming job joins each micro-batch with the DynamoDB reference data and upserts the enriched records into an Apache Hudi table on S3 that Athena queries through the Glue Data Catalog.
+  description: A sample producer in an AWS Cloud9 environment writes records into a Kinesis data stream while AWS DMS continuously replicates a MySQL reference table into DynamoDB. An AWS Glue streaming job joins each micro-batch with the DynamoDB reference data and upserts the enriched records into an Apache Hudi table on S3, syncing the table to the Glue Data Catalog so analysts can query it with Athena.
   containers:
     - region: us-east-1
-      vpcs:
-        - name: source-vpc
-          cidr: 10.0.0.0/16
-          subnets:
-            - {name: db-a, cidr: 10.0.1.0/24, az: a}
-            - {name: db-b, cidr: 10.0.2.0/24, az: b}
   elements:
-    - {tf: aws_rds_cluster, name: aurora-reference-db, in: vpc:source-vpc}
-    - {tf: aws_dms_replication_instance, name: reference-replication, in: vpc:source-vpc}
-    - {tf: aws_dynamodb_table, name: reference-lookup, in: region}
-    - {tf: aws_kinesis_stream, name: app-events, in: region}
-    - {tf: aws_glue_job, name: streaming-join-job, in: region}
-    - {tf: aws_s3_bucket, name: hudi-datalake, in: region}
-    - {tf: aws_glue_catalog_database, name: enriched-catalog, in: region}
-    - {tf: aws_athena_workgroup, name: analytics, in: region}
-  actors: [client, users]
+    - {tf: aws_cloud9_environment_ec2, name: sample-producer, in: region, at: [1, 1]}
+    - {tf: aws_kinesis_stream, name: app-events, in: region, at: [1, 2]}
+    - {tf: aws_rds_cluster, name: aurora-reference-db, in: region, at: [3, 1]}
+    - {tf: aws_dms_replication_instance, name: reference-replication, in: region, at: [3, 2]}
+    - {tf: aws_dynamodb_table, name: reference-lookup, in: region, at: [3, 3]}
+    - {tf: aws_glue_job, name: streaming-join-job, in: region, at: [2, 3]}
+    - {tf: aws_glue_catalog_database, name: enriched-catalog, in: region, at: [1, 4]}
+    - {tf: aws_s3_bucket, name: hudi-datalake, in: region, at: [3, 4]}
+    - {tf: aws_athena_workgroup, name: analytics, in: region, at: [2, 5]}
+  actors: [{type: users, name: analysts, at: [1, 3]}]
   flows:
-    - {from: client, to: app-events, label: clickstream and IoT events, step: 1}
-    - {from: aurora-reference-db, to: reference-replication, label: CDC, step: 2}
+    - {from: sample-producer, to: app-events, label: sample records, step: 1}
+    - {from: aurora-reference-db, to: reference-replication, label: reference table CDC, step: 2}
     - {from: reference-replication, to: reference-lookup, label: DMS DynamoDB target, step: 3}
-    - {from: app-events, to: streaming-join-job, label: Glue streaming source, step: 4}
-    - {from: reference-lookup, to: streaming-join-job, label: reference lookup, step: 5}
-    - {from: streaming-join-job, to: hudi-datalake, label: Hudi upsert, step: 6}
-    - {from: streaming-join-job, to: enriched-catalog, label: sync table, step: 7}
-    - {from: users, to: analytics, label: Athena SQL, step: 8}
+    - {from: app-events, to: streaming-join-job, label: join, step: 4}
+    - {from: reference-lookup, to: streaming-join-job, label: join, step: 5}
+    - {from: streaming-join-job, to: hudi-datalake, label: Apache Hudi upsert, step: 6}
+    - {from: streaming-join-job, to: enriched-catalog, label: Hudi Hive-sync, step: 7}
+    - {from: analytics, to: enriched-catalog, label: table metadata, step: 8}
+    - {from: analytics, to: hudi-datalake, label: scan Hudi table}
+    - {from: analysts, to: analytics, label: Athena SQL, step: 9}

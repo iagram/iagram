@@ -10,43 +10,36 @@ tags:
 - kms
 image: https://docs.aws.amazon.com/images/prescriptive-guidance/latest/security-reference-architecture/images/guide-img/91d313fc-d5f1-45a8-a5a6-2f4fc7abc93a/images/664aad4f-2aa6-458a-b8a4-57992a45c041.png
 source: https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/log-archive.html
-description: The Log Archive account receives the CloudTrail organization trail, Config snapshots, VPC flow logs and GuardDuty findings in dedicated S3 buckets encrypted with a controlled KMS key and protected
-  by Object Lock and lifecycle rules. Access is limited to automated, monitored roles; the CloudTrail delegated administrator lives in the Security Tooling account while the buckets stay in Log Archive
-  to separate duties.
+description: The Log Archive account holds a central logs S3 bucket that receives the CloudTrail organization trail, S3 access logs, Route 53 Resolver DNS query logs and VPC flow logs, alongside an Amazon
+  Security Lake data lake, with access limited to tightly scoped IAM permissions and roles. Security Hub CSPM, Security Hub, GuardDuty, Macie, AWS Config, IAM Access Analyzer and the organization trail
+  are the log sources, run from the Security Tooling account so that ownership of the archive stays separate from the services that write to it.
 nodes:
-- {id: acct-management, type: aws.account, name: management, at: [1, 2]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}, at: [1, 1]}
-- {id: acct-security-tooling, type: aws.account, name: security-tooling, at: [2, 1, 1, 2]}
-- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}, at: [1, 4]}
-- {id: acct-log-archive, type: aws.account, name: log-archive, at: [1, 3]}
-- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-log-archive, props: {region: us-east-1}, at: [2, 1, 1, 2]}
-- {id: acct-workload, type: aws.account, name: workload, at: [2, 3]}
-- {id: reg-us-east-1-4, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1-4, props: {cidr: 10.20.0.0/16}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: org-trail, type: aws.res.aws_cloudtrail, name: org-trail, parent: acct-security-tooling, props: {name: changeme, s3_bucket_name: changeme}, at: [1, 1]}
-- {id: config-aggregator, type: aws.res.aws_config_configuration_aggregator, name: config-aggregator, parent: acct-security-tooling, props: {name: changeme}, at: [1, 2]}
-- {id: guardduty-admin, type: aws.res.aws_guardduty_detector, name: guardduty-admin, parent: acct-security-tooling, at: [1, 3]}
-- {id: cloudtrail-archive, type: aws.s3_bucket, name: cloudtrail-archive, parent: reg-us-east-1, at: [1, 1]}
-- {id: config-archive, type: aws.s3_bucket, name: config-archive, parent: reg-us-east-1, at: [1, 2]}
-- {id: guardduty-findings-archive, type: aws.s3_bucket, name: guardduty-findings-archive, parent: reg-us-east-1, at: [1, 3]}
-- {id: flow-logs-archive, type: aws.s3_bucket, name: flow-logs-archive, parent: reg-us-east-1, at: [1, 4]}
-- {id: log-archive-cmk, type: aws.res.aws_kms_key, name: log-archive-cmk, parent: acct-log-archive, at: [1, 1]}
-- {id: cloudtrail-events, type: aws.res.aws_cloudwatch_log_group, name: cloudtrail-events, parent: acct-log-archive, at: [1, 2]}
-- {id: app-vpc-flow-log, type: aws.res.aws_flow_log, name: app-vpc-flow-log, parent: vpc-app, at: [1, 1, 1, 2]}
-- {id: sub-vpc-app-a, type: aws.subnet, name: private-a, parent: vpc-app, props: {cidr: 10.20.250.0/24, az: a, public: false}, at: [2, 1]}
-- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: vpc-app, props: {cidr: 10.20.251.0/24, az: b, public: false}, at: [2, 2]}
+- {id: acct-log-archive, type: aws.account, name: log-archive, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-log-archive, props: {region: us-east-1}, at: [1, 1]}
+- {id: acct-security-tooling, type: aws.account, name: security-tooling, at: [2, 1]}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}, at: [1, 1]}
+- {id: log-archive-permissions, type: aws.res.aws_iam_policy, name: log-archive-permissions, parent: reg-us-east-1, props: {policy: changeme}, at: [1, 1]}
+- {id: log-archive-roles, type: aws.res.aws_iam_role, name: log-archive-roles, parent: reg-us-east-1, props: {assume_role_policy: changeme}, at: [1, 2]}
+- {id: central-logs, type: aws.s3_bucket, name: central-logs, parent: reg-us-east-1, at: [1, 3]}
+- {id: security-lake, type: aws.res.aws_securitylake_data_lake, name: security-lake, parent: reg-us-east-1, props: {meta_store_manager_role_arn: changeme}, at: [1, 4]}
+- {id: dns-query-logs, type: aws.res.aws_route53_resolver_query_log_config, name: dns-query-logs, parent: reg-us-east-1, props: {destination_arn: changeme, name: changeme}, at: [2, 3]}
+- {id: vpc-flow-logs, type: aws.res.aws_flow_log, name: vpc-flow-logs, parent: reg-us-east-1, at: [2, 4]}
+- {id: security-hub-cspm, type: aws.res.aws_securityhub_account, name: security-hub-cspm, parent: reg-us-east-1-2, at: [1, 1]}
+- {id: security-hub, type: aws.res.aws_securityhub_organization_admin_account, name: security-hub, parent: reg-us-east-1-2, props: {admin_account_id: changeme}, at: [1, 2]}
+- {id: guardduty-admin, type: aws.res.aws_guardduty_detector, name: guardduty-admin, parent: reg-us-east-1-2, at: [1, 3]}
+- {id: macie-admin, type: aws.res.aws_macie2_account, name: macie-admin, parent: reg-us-east-1-2, at: [1, 4]}
+- {id: config-aggregator, type: aws.res.aws_config_configuration_aggregator, name: config-aggregator, parent: reg-us-east-1-2, props: {name: changeme}, at: [1, 5]}
+- {id: access-analyzer, type: aws.res.aws_accessanalyzer_analyzer, name: access-analyzer, parent: reg-us-east-1-2, props: {analyzer_name: changeme}, at: [1, 6]}
+- {id: org-trail, type: aws.res.aws_cloudtrail, name: org-trail, parent: reg-us-east-1-2, props: {name: changeme, s3_bucket_name: changeme}, at: [1, 7]}
 edges:
-- {from: org-trail, to: cloudtrail-archive, label: org trail SSE-KMS, step: '1'}
-- {from: org-trail, to: cloudtrail-events, label: CloudWatch Logs, step: '2'}
-- {from: config-aggregator, to: config-archive, label: delivery channel, step: '3'}
-- {from: guardduty-admin, to: guardduty-findings-archive, label: findings export, step: '4'}
-- {from: app-vpc-flow-log, to: flow-logs-archive, label: flow logs, step: '5'}
-- {from: log-archive-cmk, to: cloudtrail-archive, label: encrypts}
-- {from: users, to: cloudtrail-archive, label: read via least-privilege role}
+- {from: org-trail, to: central-logs, label: from CloudTrail organization trail, step: '1'}
+- {from: dns-query-logs, to: central-logs, label: DNS logs, step: '2'}
+- {from: vpc-flow-logs, to: central-logs, label: flow logs, step: '3'}
+- {from: log-archive-roles, to: central-logs, label: least-privilege access}
+- {from: log-archive-permissions, to: log-archive-roles, label: permissions}
+- {from: config-aggregator, to: central-logs, label: Config delivery}
+- {from: guardduty-admin, to: central-logs, label: findings export}
 steps:
-- {n: '1', text: 'org-trail → cloudtrail-archive: org trail SSE-KMS'}
-- {n: '2', text: 'org-trail → cloudtrail-events: CloudWatch Logs'}
-- {n: '3', text: 'config-aggregator → config-archive: delivery channel'}
-- {n: '4', text: 'guardduty-admin → guardduty-findings-archive: findings export'}
-- {n: '5', text: 'app-vpc-flow-log → flow-logs-archive: flow logs'}
+- {n: '1', text: 'org-trail → central-logs: from CloudTrail organization trail'}
+- {n: '2', text: 'dns-query-logs → central-logs: DNS logs'}
+- {n: '3', text: 'vpc-flow-logs → central-logs: flow logs'}

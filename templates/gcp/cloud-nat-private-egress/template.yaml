@@ -9,27 +9,29 @@ tags:
 - egress
 image: https://docs.cloud.google.com/static/nat/images/07.svg
 source: https://docs.cloud.google.com/nat/docs/overview
-description: Compute Engine and GKE nodes without external IPs send outbound internet traffic through a regional Public NAT gateway configured on a Cloud Router for selected subnets. The gateway is a distributed
-  software-defined service with no proxy VM, and it does not allow unsolicited inbound connections.
+description: Compute Engine instances without external IPs reach internet destinations through a regional Public NAT gateway that maps their traffic to the static NAT IP 203.0.113.1, each VM being programmed
+  with its own port range (32000-32063, 32101-32164, 32300-32363). Unlike a NAT proxy, Cloud NAT is a distributed software-defined service with no intermediate appliance in the data path, and it does not
+  allow unsolicited inbound connections.
 nodes:
-- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: europe-west1}, at: [2, 1]}
-- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-workload, props: {cidr: 10.100.0.0/16}, at: [2, 1, 1, 2]}
-- {id: sub-private-ew1, type: gcp.subnetwork, name: private-ew1, parent: vpc-app-vpc, props: {cidr: 10.100.0.0/24, region: europe-west1}, at: [2, 1]}
-- {id: sub-private-ew1-b, type: gcp.subnetwork, name: private-ew1-b, parent: vpc-app-vpc, props: {cidr: 10.100.1.0/24, region: europe-west1}, at: [2, 2]}
-- {id: internet, type: common.internet, name: internet, at: [1, 1]}
-- {id: nat-router, type: gcp.res.google_compute_router, name: nat-router, parent: vpc-app-vpc, props: {name: changeme, network: changeme}, at: [1, 3]}
-- {id: public-nat-gw, type: gcp.res.google_compute_router_nat, name: public-nat-gw, parent: vpc-app-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [1, 1, 1, 2]}
+- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: europe-west1}, at: [2, 1, 1, 2]}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-workload, props: {cidr: 10.100.0.0/16}, at: [2, 1]}
+- {id: sub-private-ew1, type: gcp.subnetwork, name: private-ew1, parent: vpc-app-vpc, props: {cidr: 10.100.0.0/24, region: europe-west1}, at: [2, 1, 1, 3]}
+- {id: destination-1, type: common.internet, name: Destination 1, at: [1, 1]}
+- {id: destination-2, type: common.internet, name: Destination 2, at: [1, 2]}
 - {id: nat-ip-1, type: gcp.res.google_compute_address, name: nat-ip-1, parent: prj-workload, props: {name: changeme}, at: [1, 1]}
-- {id: nat-ip-2, type: gcp.res.google_compute_address, name: nat-ip-2, parent: prj-workload, props: {name: changeme}, at: [1, 2]}
-- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-private-ew1, at: [1, 1]}
-- {id: batch-vm, type: gcp.compute_instance, name: batch-vm, parent: sub-private-ew1-b, at: [1, 1]}
-- {id: deny-all-ingress, type: gcp.firewall_rule, name: deny-all-ingress, parent: vpc-app-vpc, at: [2, 3]}
+- {id: public-nat-gw, type: gcp.res.google_compute_router_nat, name: public-nat-gw, parent: vpc-app-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [1,
+    2]}
+- {id: vm-ip3, type: gcp.compute_instance, name: vm-ip3, parent: sub-private-ew1, at: [1, 1]}
+- {id: vm-ip4, type: gcp.compute_instance, name: vm-ip4, parent: sub-private-ew1, at: [1, 2]}
+- {id: vm-ip5, type: gcp.compute_instance, name: vm-ip5, parent: sub-private-ew1, at: [1, 3]}
 edges:
-- {from: app-vm, to: public-nat-gw, label: outbound TCP/UDP from private IP, step: '1'}
-- {from: batch-vm, to: public-nat-gw, label: outbound package downloads, step: '1'}
-- {from: public-nat-gw, to: nat-ip-1, label: source NAT to static IP, step: '2'}
-- {from: nat-ip-1, to: internet, label: egress, step: '3'}
+- {from: nat-ip-1, to: public-nat-gw, label: 'NAT IP: 203.0.113.1', step: '1'}
+- {from: public-nat-gw, to: vm-ip3, label: 'programs NAT IP 203.0.113.1, ports 32000-32063', step: '2'}
+- {from: public-nat-gw, to: vm-ip4, label: 'programs NAT IP 203.0.113.1, ports 32101-32164', step: '2'}
+- {from: public-nat-gw, to: vm-ip5, label: 'programs NAT IP 203.0.113.1, ports 32300-32363', step: '2'}
+- {from: vm-ip3, to: destination-1, label: egress from 203.0.113.1 with no intermediate NAT proxy in the data path, step: '3'}
+- {from: vm-ip5, to: destination-2, label: egress from 203.0.113.1 with no intermediate NAT proxy in the data path, step: '3'}
 steps:
-- {n: '1', text: 'app-vm → public-nat-gw: outbound TCP/UDP from private IP'}
-- {n: '2', text: 'public-nat-gw → nat-ip-1: source NAT to static IP'}
-- {n: '3', text: 'nat-ip-1 → internet: egress'}
+- {n: '1', text: 'nat-ip-1 → public-nat-gw: NAT IP: 203.0.113.1'}
+- {n: '2', text: 'public-nat-gw → vm-ip3: programs NAT IP 203.0.113.1, ports 32000-32063'}
+- {n: '3', text: 'vm-ip3 → Destination 1: egress from 203.0.113.1 with no intermediate NAT proxy in the data path'}

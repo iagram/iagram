@@ -12,51 +12,40 @@ tags:
 - cognito
 image: https://d2908q01vomqb2.cloudfront.net/fc074d501302eb2b93e2554793fcaf50b3bf7291/2021/07/14/Figure-2.-Microservices-based-order-submission-workflow.jpg
 source: https://aws.amazon.com/blogs/architecture/architecting-a-highly-available-serverless-microservices-based-ecommerce-site/
-description: A static frontend on S3 and CloudFront talks to independently deployable product, cart, and order microservices exposed through API Gateway and implemented as Lambda functions, each owning
-  its DynamoDB table. Checkout hands off to an SQS queue and a Step Functions workflow that processes payment and fulfilment asynchronously and confirms the order over SES, while Cognito authenticates shoppers.
+description: End users load the static storefront from S3 through CloudFront, authenticate against an authentication layer (Cognito), and send dynamic traffic to an API Gateway backed by a Lambda application
+  server that validates the token and submits orders to DynamoDB. A second Lambda picks each new order from the table and starts a Step Functions workflow that updates the order status, confirms it over
+  SES, charges the external payment system and hands batches to the external shipment system twice a week, with CloudWatch monitoring the whole flow.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1, at: [1, 1]}
-- {id: grp-product-service, type: common.group, name: product service, parent: reg-us-east-1, at: [2, 2]}
-- {id: grp-cart-service, type: common.group, name: cart service, parent: reg-us-east-1, at: [2, 3]}
-- {id: grp-order-service, type: common.group, name: order service, parent: reg-us-east-1, at: [3, 2, 1, 2]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: shop-cdn, type: aws.cloudfront_distribution, name: shop-cdn, parent: grp-global-edge, at: [1, 1]}
+- {id: end-users, type: common.users, name: end-users, at: [1, 1]}
+- {id: external-payment-system, type: common.saas, name: external-payment-system, at: [1, 3]}
+- {id: external-shipment-system, type: common.saas, name: external-shipment-system, at: [2, 3]}
+- {id: shop-cdn, type: aws.cloudfront_distribution, name: shop-cdn, parent: reg-us-east-1, at: [1, 1]}
 - {id: shop-frontend, type: aws.s3_bucket, name: shop-frontend, parent: reg-us-east-1, at: [1, 2]}
-- {id: shoppers, type: aws.res.aws_cognito_user_pool, name: shoppers, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
+- {id: cloudwatch-monitoring, type: aws.res.aws_cloudwatch_dashboard, name: cloudwatch-monitoring, parent: reg-us-east-1, props: {dashboard_body: changeme, dashboard_name: changeme}, at: [1, 4]}
+- {id: authentication-layer, type: aws.res.aws_cognito_user_pool, name: authentication-layer, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
+- {id: orders, type: aws.dynamodb_table, name: orders, parent: reg-us-east-1, at: [2, 3]}
+- {id: shop-mail, type: aws.res.aws_ses_domain_identity, name: shop-mail, parent: reg-us-east-1, props: {domain: example.com}, at: [2, 4]}
 - {id: shop-api, type: aws.res.aws_api_gateway_rest_api, name: shop-api, parent: reg-us-east-1, props: {name: changeme}, at: [3, 1]}
-- {id: product-fn, type: aws.lambda_function, name: product-fn, parent: grp-product-service, at: [1, 1]}
-- {id: products, type: aws.dynamodb_table, name: products, parent: grp-product-service, at: [1, 2]}
-- {id: cart-fn, type: aws.lambda_function, name: cart-fn, parent: grp-cart-service, at: [1, 1]}
-- {id: carts, type: aws.dynamodb_table, name: carts, parent: grp-cart-service, at: [1, 2]}
-- {id: order-fn, type: aws.lambda_function, name: order-fn, parent: grp-order-service, at: [2, 1]}
-- {id: order-queue, type: aws.sqs_queue, name: order-queue, parent: grp-order-service, at: [2, 2]}
-- {id: checkout-workflow, type: aws.res.aws_sfn_state_machine, name: checkout-workflow, parent: grp-order-service, props: {definition: changeme, role_arn: changeme}, at: [2, 3]}
-- {id: orders, type: aws.dynamodb_table, name: orders, parent: grp-order-service, at: [1, 1, 1, 3]}
-- {id: shop-mail, type: aws.res.aws_ses_domain_identity, name: shop-mail, parent: reg-us-east-1, props: {domain: example.com}, at: [3, 4]}
+- {id: app-server, type: aws.lambda_function, name: app-server, parent: reg-us-east-1, at: [3, 2]}
+- {id: order-processor, type: aws.lambda_function, name: order-processor, parent: reg-us-east-1, at: [3, 3]}
+- {id: order-workflow, type: aws.res.aws_sfn_state_machine, name: order-workflow, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}, at: [3, 4]}
 edges:
-- {from: users, to: shop-cdn, label: HTTPS, step: '1'}
-- {from: shop-cdn, to: shop-frontend, label: static origin}
-- {from: users, to: shoppers, label: sign in, step: '2'}
-- {from: users, to: shop-api, label: REST with JWT, step: '3'}
-- {from: shop-api, to: shoppers, label: Cognito authorizer}
-- {from: shop-api, to: product-fn, label: GET /products, step: '4'}
-- {from: product-fn, to: products}
-- {from: shop-api, to: cart-fn, label: PUT /cart}
-- {from: cart-fn, to: carts}
-- {from: shop-api, to: order-fn, label: POST /checkout, step: '5'}
-- {from: order-fn, to: order-queue, label: enqueue order, step: '6'}
-- {from: order-queue, to: checkout-workflow, label: start execution, step: '7'}
-- {from: checkout-workflow, to: orders, label: persist order state, step: '8'}
-- {from: checkout-workflow, to: shop-mail, label: order confirmation email, step: '9'}
+- {from: end-users, to: shop-cdn, label: static traffic}
+- {from: shop-cdn, to: shop-frontend, label: static file storage}
+- {from: end-users, to: authentication-layer, label: authentication traffic}
+- {from: end-users, to: shop-api, label: dynamic traffic, step: '1'}
+- {from: shop-api, to: app-server, label: order submission workflow API}
+- {from: app-server, to: authentication-layer, label: authentication token validation}
+- {from: app-server, to: orders, label: order submit}
+- {from: orders, to: order-processor, label: order processing (stream), step: '2'}
+- {from: order-processor, to: order-workflow, label: start execution}
+- {from: order-workflow, to: orders, label: update order status}
+- {from: order-workflow, to: shop-mail, label: emailing system}
+- {from: order-workflow, to: external-payment-system, label: payment}
+- {from: order-workflow, to: external-shipment-system, label: 2x per week}
+- {from: cloudwatch-monitoring, to: order-workflow, label: monitoring}
 steps:
-- {n: '1', text: 'users → shop-cdn: HTTPS'}
-- {n: '2', text: 'users → shoppers: sign in'}
-- {n: '3', text: 'users → shop-api: REST with JWT'}
-- {n: '4', text: 'shop-api → product-fn: GET /products'}
-- {n: '5', text: 'shop-api → order-fn: POST /checkout'}
-- {n: '6', text: 'order-fn → order-queue: enqueue order'}
-- {n: '7', text: 'order-queue → checkout-workflow: start execution'}
-- {n: '8', text: 'checkout-workflow → orders: persist order state'}
-- {n: '9', text: 'checkout-workflow → shop-mail: order confirmation email'}
+- {n: '1', text: 'end-users → shop-api: dynamic traffic'}
+- {n: '2', text: 'orders → order-processor: order processing (stream)'}

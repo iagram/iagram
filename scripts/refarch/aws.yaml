@@ -3,43 +3,52 @@
   category: networking
   tags: [transit gateway, hub and spoke, multi-vpc, centralized egress]
   source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/transit-gateway.html
-  description: A regional Transit Gateway acts as the hub; each spoke VPC attaches once and reaches the others and the internet through TGW route tables. A shared egress VPC with NAT gateways centralizes outbound traffic so spokes hold no internet gateway of their own.
+  description: A regional Transit Gateway acts as the hub; each spoke VPC attaches once and its VPC route table sends non-local traffic to the Transit Gateway, whose own route tables decide which attachment receives it. A shared egress VPC with NAT gateways centralizes outbound traffic so spokes hold no internet gateway of their own.
   containers:
     - region: eu-west-1
+      at: [1, 1]
       vpcs:
         - name: egress
           cidr: 10.0.0.0/16
+          at: [1, 3, 3, 1]
           subnets:
-            - {name: egress-public-a, cidr: 10.0.0.0/24, az: a, public: true}
-            - {name: egress-public-b, cidr: 10.0.1.0/24, az: b, public: true}
-            - {name: egress-tgw-a, cidr: 10.0.10.0/28, az: a, public: false}
+            - {name: egress-public-a, cidr: 10.0.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: egress-public-b, cidr: 10.0.1.0/24, az: b, public: true, at: [1, 1]}
+            - {name: egress-tgw-a, cidr: 10.0.10.0/28, az: a, public: false, at: [2, 1]}
         - name: spoke-a
           cidr: 10.1.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: app-a, cidr: 10.1.1.0/24, az: a, public: false}
+            - {name: app-a, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
         - name: spoke-b
           cidr: 10.2.0.0/16
+          at: [3, 1]
           subnets:
-            - {name: app-b, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: app-b, cidr: 10.2.1.0/24, az: a, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_ec2_transit_gateway_route_table, name: spoke-rt, in: region}
-    - {tf: aws_ec2_transit_gateway_route_table, name: egress-rt, in: region}
-    - {tf: aws_internet_gateway, name: egress-igw, in: vpc:egress}
-    - {tf: aws_nat_gateway, name: nat-a, in: subnet:egress-public-a}
-    - {tf: aws_nat_gateway, name: nat-b, in: subnet:egress-public-b}
-    - {tf: aws_instance, name: app-a, in: subnet:app-a}
-    - {tf: aws_instance, name: app-b, in: subnet:app-b}
-  actors: [internet]
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [2, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: spoke-rt, in: region, at: [1, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: egress-rt, in: region, at: [3, 2]}
+    - {tf: aws_route_table, name: spoke-a-rt, in: vpc:spoke-a, at: [1, 2]}
+    - {tf: aws_route_table, name: spoke-b-rt, in: vpc:spoke-b, at: [1, 2]}
+    - {tf: aws_route_table, name: egress-vpc-rt, in: vpc:egress, at: [2, 3]}
+    - {tf: aws_internet_gateway, name: egress-igw, in: vpc:egress, at: [1, 3]}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:egress-public-a, at: [1, 1]}
+    - {tf: aws_nat_gateway, name: nat-b, in: subnet:egress-public-b, at: [1, 1]}
+  actors: [{type: internet, at: [1, 2]}]
   flows:
     - {from: hub-tgw, to: vpc:spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
     - {from: hub-tgw, to: vpc:spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}
     - {from: hub-tgw, to: vpc:egress, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: app-a, to: hub-tgw, label: 0.0.0.0/0 via TGW, step: 1}
+    - {from: spoke-a-rt, to: hub-tgw, label: 0.0.0.0/0 via tgw, step: 1}
+    - {from: spoke-b-rt, to: hub-tgw, label: 0.0.0.0/0 via tgw}
+    - {from: spoke-rt, to: hub-tgw, label: "spoke attachments: default route to the egress VPC"}
+    - {from: egress-rt, to: hub-tgw, label: "egress attachment: 10.0.0.0/8 back to the spokes"}
     - {from: hub-tgw, to: nat-a, label: egress-rt default route, step: 2}
     - {from: nat-a, to: egress-igw, step: 3}
     - {from: egress-igw, to: internet, step: 4}
-    - {from: app-a, to: app-b, label: east-west via spoke-rt}
+    - {from: egress-vpc-rt, to: hub-tgw, label: 10.0.0.0/8 via tgw (return traffic)}
+    - {from: vpc:spoke-a, to: vpc:spoke-b, label: east-west via spoke-rt}
 
 - slug: vpc-peering-shared-services
   title: VPC peering to a central shared-services VPC
@@ -82,55 +91,76 @@
   category: networking
   tags: [direct connect, site-to-site vpn, hybrid, transit gateway, bgp failover]
   source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/hybrid-connectivity-transit-gateway/hybrid-dx-primary-vpn-backup.html
-  description: The on-premises data center reaches AWS over a Direct Connect connection with a transit virtual interface into a Direct Connect gateway, which associates with a Transit Gateway. A Site-to-Site VPN terminating on the same Transit Gateway provides an encrypted backup path over the internet; BGP prefers the Direct Connect route and fails over when it withdraws.
+  description: Two spoke VPCs attach to a Transit Gateway through Transit Gateway ENIs in dedicated subnets; each VPC route table sends the office prefix to the Transit Gateway, whose spoke and on-premises route tables steer traffic to a Direct Connect gateway or to the Site-to-Site VPN attachment. Direct Connect, with a transit virtual interface from the router at the DX location, is the primary path and the VPN over the internet is the encrypted backup; BGP prefers the Direct Connect route and fails over when it withdraws.
   containers:
-    - datacenter: on-premises
+    - {datacenter: office-branch, at: [2, 2]}
     - region: eu-central-1
+      groups:
+        - {label: DX location, at: [1, 5, 2, 1]}
       vpcs:
-        - name: prod
-          cidr: 10.10.0.0/16
+        - name: spoke-a
+          cidr: 10.0.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: prod-private-a, cidr: 10.10.1.0/24, az: a, public: false}
-            - {name: prod-private-b, cidr: 10.10.2.0/24, az: b, public: false}
+            - {name: workload-a, cidr: 10.0.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: tgw-a, cidr: 10.0.2.0/28, az: a, public: false, at: [2, 1]}
+        - name: spoke-b
+          cidr: 10.1.0.0/16
+          at: [2, 1]
+          subnets:
+            - {name: tgw-b, cidr: 10.1.2.0/28, az: a, public: false, at: [1, 1]}
+            - {name: workload-b, cidr: 10.1.1.0/24, az: a, public: false, at: [2, 1]}
   elements:
-    - {tf: aws_customer_gateway, name: onprem-router, in: datacenter}
-    - {tf: aws_dx_connection, name: dx-1g, in: region}
-    - {tf: aws_dx_gateway, name: dxgw, in: region}
-    - {tf: aws_ec2_transit_gateway, name: tgw, in: region}
-    - {tf: aws_instance, name: app-1, in: subnet:prod-private-a}
-    - {tf: aws_instance, name: app-2, in: subnet:prod-private-b}
-  actors: [datacenter, internet]
+    - {tf: aws_instance, name: app-a, in: subnet:workload-a, at: [1, 1]}
+    - {tf: aws_network_interface, name: tgw-eni-a, in: subnet:tgw-a, at: [1, 1]}
+    - {tf: aws_route_table, name: spoke-a-rt, in: vpc:spoke-a, at: [1, 2]}
+    - {tf: aws_instance, name: app-b, in: subnet:workload-b, at: [1, 1]}
+    - {tf: aws_network_interface, name: tgw-eni-b, in: subnet:tgw-b, at: [1, 1]}
+    - {tf: aws_route_table, name: spoke-b-rt, in: vpc:spoke-b, at: [1, 2]}
+    - {tf: aws_ec2_transit_gateway, name: tgw, in: region, at: [1, 2, 2, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: spoke-vpc-tgw-rt, in: region, at: [1, 3]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: onprem-tgw-rt, in: region, at: [2, 3]}
+    - {tf: aws_dx_gateway, name: dxgw, in: region, at: [1, 4, 2, 1]}
+    - {tf: aws_dx_connection, name: dx-1g, in: group:DX location, at: [1, 1]}
+  actors: [datacenter, {type: internet, at: [1, 2]}]
   flows:
-    - {from: onprem-router, to: dx-1g, label: primary path (dedicated fibre), step: 1}
-    - {from: dx-1g, to: dxgw, label: transit VIF + BGP, step: 2}
-    - {from: dxgw, to: tgw, link: aws_dx_gateway_association, step: 3}
-    - {from: onprem-router, to: internet, label: backup path, step: 4}
-    - {from: onprem-router, to: tgw, link: aws_vpn_connection, label: IPsec tunnels x2, step: 5}
-    - {from: tgw, to: vpc:prod, link: aws_ec2_transit_gateway_vpc_attachment, step: 6}
+    - {from: tgw, to: vpc:spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: tgw, to: vpc:spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: spoke-a-rt, to: tgw-eni-a, label: 10.10.0.0/24 via tgw}
+    - {from: spoke-b-rt, to: tgw-eni-b, label: 10.10.0.0/24 via tgw}
+    - {from: spoke-vpc-tgw-rt, to: tgw, label: "spoke VPC route table: 10.10.0.0/24 via DX gateway, VPN as backup"}
+    - {from: onprem-tgw-rt, to: tgw, label: "on-premises route table: 10.0.0.0/16 and 10.1.0.0/16 to the spokes"}
+    - {from: app-b, to: tgw-eni-b, label: to office branch 10.10.0.0/24, step: 1}
+    - {from: tgw-eni-b, to: tgw, step: 2}
+    - {from: tgw, to: dxgw, link: aws_dx_gateway_association, label: primary path, step: 3}
+    - {from: dxgw, to: dx-1g, label: transit VIF + BGP, step: 4}
+    - {from: dx-1g, to: datacenter, label: dedicated fibre to the DX router, step: 5}
+    - {from: datacenter, to: internet, label: backup path, step: 6}
+    - {from: datacenter, to: tgw, link: aws_vpn_connection, label: "Site-to-Site VPN over the internet, IPsec tunnels x2", step: 7}
 
 - slug: static-site-s3-cloudfront-route53
   title: Secure static website with S3, CloudFront, and Route 53
   category: web
   tags: [static website, s3, cloudfront, route 53, acm, origin access control]
   source: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/getting-started-secure-static-website-cloudformation-template.html
-  description: Static assets live in a private S3 bucket that only CloudFront can read through origin access control. Route 53 alias records point the apex and www names at the CloudFront distribution, which terminates TLS with an ACM certificate issued in us-east-1 and caches content at edge locations worldwide.
+  description: Static assets live in a private S3 bucket that only CloudFront can read through origin access control. Route 53 alias records point the apex and www names at the CloudFront distribution, which terminates TLS with an ACM certificate issued in us-east-1, fetches objects from the bucket on a cache miss and serves them from edge locations worldwide.
   containers:
     - region: us-east-1
       groups:
-        - {label: global edge}
+        - {label: global edge, at: [1, 2]}
   elements:
-    - {tf: aws_route53_zone, name: example-com, in: region}
-    - {tf: aws_acm_certificate, name: site-cert, in: region}
-    - {tf: aws_cloudfront_distribution, name: site-cdn, in: group:global edge}
-    - {tf: aws_s3_bucket, name: site-content, in: region}
-    - {tf: aws_s3_bucket, name: cdn-logs, in: region}
-  actors: [users]
+    - {tf: aws_route53_zone, name: example-com, in: region, at: [1, 1]}
+    - {tf: aws_acm_certificate, name: site-cert, in: region, at: [2, 2]}
+    - {tf: aws_cloudfront_distribution, name: site-cdn, in: group:global edge, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: site-content, in: region, at: [1, 3]}
+  actors: [{type: users, at: [1, 1]}]
   flows:
     - {from: users, to: example-com, label: DNS lookup, step: 1}
-    - {from: example-com, to: site-cdn, label: alias A/AAAA, step: 2}
-    - {from: users, to: site-cdn, label: HTTPS (ACM cert), step: 3}
-    - {from: site-cdn, to: site-content, label: origin fetch via OAC on cache miss, step: 4}
-    - {from: site-cdn, to: cdn-logs, label: access logs}
+    - {from: example-com, to: site-cdn, label: alias A/AAAA}
+    - {from: users, to: site-cdn, label: HTTPS GET (ACM cert), step: 2}
+    - {from: site-cdn, to: site-content, label: origin fetch via OAC on cache miss, step: 3}
+    - {from: site-content, to: site-cdn, label: object, step: 4}
+    - {from: site-cdn, to: users, label: response cached at the edge, step: 5}
     - {from: site-cert, to: site-cdn, label: TLS certificate}
 
 - slug: sns-sqs-fanout-lambda
@@ -170,54 +200,53 @@
   category: serverless
   tags: [api gateway, lambda, dynamodb, rest, crud, serverless]
   source: https://docs.aws.amazon.com/lambda/latest/dg/services-apigateway-tutorial.html
-  description: An API Gateway REST API exposes CRUD routes and proxies each request to a single Lambda function that reads and writes a DynamoDB table. IAM roles scope the function to the table, and CloudWatch Logs captures execution and access logs, with no servers to manage at any tier.
+  description: A client calls an API Gateway REST API that proxies each CRUD request to a single Lambda function, which reads and writes a DynamoDB users table. A permissions policy attached to the function's execution role scopes it to the table and to CloudWatch Logs, with no servers to manage at any tier.
   containers:
     - region: us-east-1
   elements:
-    - {tf: aws_api_gateway_rest_api, name: items-api, in: region}
-    - {tf: aws_lambda_function, name: items-crud, in: region}
-    - {tf: aws_iam_role, name: items-crud-role, in: region}
-    - {tf: aws_dynamodb_table, name: items, in: region}
-    - {tf: aws_cloudwatch_log_group, name: items-crud-logs, in: region}
-  actors: [client, mobile]
+    - {tf: aws_api_gateway_rest_api, name: rest-api, in: region, at: [2, 1]}
+    - {tf: aws_lambda_function, name: crud-user-function, in: region, at: [2, 2]}
+    - {tf: aws_iam_policy, name: permissions-policy, in: region, at: [1, 2]}
+    - {tf: aws_dynamodb_table, name: users-table, in: region, at: [2, 3]}
+  actors: [{type: client, at: [1, 1]}]
   flows:
-    - {from: client, to: items-api, label: HTTPS GET/POST/PUT/DELETE /items, step: 1}
-    - {from: mobile, to: items-api, label: HTTPS, step: 1}
-    - {from: items-api, to: items-crud, label: Lambda proxy integration, step: 2}
-    - {from: items-crud, to: items, label: GetItem / PutItem / UpdateItem / DeleteItem, step: 3}
-    - {from: items-crud, to: items-crud-logs, label: logs}
-    - {from: items-crud-role, to: items-crud, label: execution role}
+    - {from: client, to: rest-api, label: HTTPS GET/POST/PUT/DELETE, step: 1}
+    - {from: rest-api, to: crud-user-function, label: Lambda proxy integration, step: 2}
+    - {from: crud-user-function, to: users-table, label: GetItem / PutItem / UpdateItem / DeleteItem, step: 3}
+    - {from: permissions-policy, to: crud-user-function, label: attached to the execution role}
 
 - slug: eventbridge-event-driven
   title: Event-driven application with EventBridge
   category: serverless
   tags: [eventbridge, event bus, rules, event-driven, step functions, choreography]
   source: https://aws.amazon.com/blogs/compute/building-an-event-driven-application-with-amazon-eventbridge/
-  description: Producers put domain events onto a custom EventBridge event bus; rules match event patterns and route each event to one or more targets such as Lambda functions, Step Functions workflows, and SQS queues. An event archive enables replay, and producers and consumers stay decoupled because nobody addresses anyone directly.
+  description: Three kinds of event source publish to EventBridge event buses. AWS services emit to the default bus, applications put custom events on a custom bus and SaaS partners deliver to a partner event bus; rules on each bus match event patterns and route events to targets such as Lambda functions, Kinesis streams, Step Functions workflows, API Gateway endpoints and event buses in other accounts, so producers and consumers stay decoupled.
   containers:
     - region: us-east-1
+      groups:
+        - {label: event sources, at: [1, 1, 3, 1]}
+        - {label: event targets, at: [1, 3, 3, 1]}
   elements:
-    - {tf: aws_api_gateway_rest_api, name: ingest-api, in: region}
-    - {tf: aws_lambda_function, name: order-producer, in: region}
-    - {tf: aws_cloudwatch_event_bus, name: orders-bus, in: region}
-    - {tf: aws_cloudwatch_event_rule, name: order-created-rule, in: region}
-    - {tf: aws_cloudwatch_event_rule, name: order-shipped-rule, in: region}
-    - {tf: aws_sfn_state_machine, name: fulfillment-workflow, in: region}
-    - {tf: aws_lambda_function, name: inventory-updater, in: region}
-    - {tf: aws_sqs_queue, name: notifications-queue, in: region}
-    - {tf: aws_dynamodb_table, name: orders, in: region}
-  actors: [client]
+    - {tf: aws_s3_bucket, name: uploads-bucket, in: group:event sources, at: [1, 1]}
+    - {tf: aws_lambda_function, name: custom-event-producer, in: group:event sources, at: [2, 1]}
+    - {tf: aws_cloudwatch_event_bus, name: default-bus, in: region, at: [1, 2]}
+    - {tf: aws_cloudwatch_event_bus, name: custom-bus, in: region, at: [2, 2]}
+    - {tf: aws_cloudwatch_event_bus, name: saas-bus, in: region, at: [3, 2]}
+    - {tf: aws_lambda_function, name: target-function, in: group:event targets, at: [1, 1]}
+    - {tf: aws_kinesis_stream, name: events-stream, in: group:event targets, at: [2, 1]}
+    - {tf: aws_sfn_state_machine, name: orders-workflow, in: group:event targets, at: [3, 1]}
+    - {tf: aws_api_gateway_rest_api, name: webhook-api, in: group:event targets, at: [4, 1]}
+    - {tf: aws_cloudwatch_event_bus, name: other-account-bus, in: group:event targets, at: [5, 1]}
+  actors: [{type: saas, at: [1, 1]}]
   flows:
-    - {from: client, to: ingest-api, label: POST /orders, step: 1}
-    - {from: ingest-api, to: order-producer, step: 2}
-    - {from: order-producer, to: orders-bus, label: PutEvents OrderCreated, step: 3}
-    - {from: orders-bus, to: order-created-rule, label: pattern match, step: 4}
-    - {from: order-created-rule, to: fulfillment-workflow, link: aws_cloudwatch_event_target, step: 5}
-    - {from: order-created-rule, to: inventory-updater, link: aws_cloudwatch_event_target, step: 5}
-    - {from: fulfillment-workflow, to: orders-bus, label: PutEvents OrderShipped, step: 6}
-    - {from: orders-bus, to: order-shipped-rule, step: 7}
-    - {from: order-shipped-rule, to: notifications-queue, link: aws_cloudwatch_event_target, step: 8}
-    - {from: inventory-updater, to: orders, label: UpdateItem}
+    - {from: uploads-bucket, to: default-bus, label: AWS service events, step: 1}
+    - {from: custom-event-producer, to: custom-bus, label: PutEvents custom events, step: 1}
+    - {from: saas, to: saas-bus, label: partner event source, step: 1}
+    - {from: default-bus, to: target-function, label: rule match, step: 2}
+    - {from: custom-bus, to: events-stream, label: rule match, step: 2}
+    - {from: custom-bus, to: orders-workflow, label: rule match, step: 2}
+    - {from: saas-bus, to: webhook-api, label: rule match, step: 2}
+    - {from: custom-bus, to: other-account-bus, label: cross-account rule, step: 2}
 
 - slug: ecs-fargate-microservices-alb
   title: ECS Fargate microservices behind an Application Load Balancer
@@ -263,34 +292,55 @@
   category: data
   tags: [data lake, s3, glue, athena, lake formation, etl]
   source: https://docs.aws.amazon.com/solutions/data-lakes-on-aws/
-  description: Source data lands in a raw S3 bucket, Glue crawlers register its schema in the Glue Data Catalog, and Glue ETL jobs transform it into partitioned Parquet in a curated bucket. Lake Formation governs table and column access, and analysts query the curated zone in place with Athena.
+  description: Data uploaded to a raw S3 bucket raises an EventBridge event that is queued in SQS and triggers a Lambda function, which starts a Step Functions ingestion workflow whose Lambda steps validate the data, record pipeline state in DynamoDB and write it to a stage bucket. An EventBridge Scheduler schedule then starts a second Step Functions workflow in which a Glue job transforms stage data into an analytics bucket and a Glue crawler registers the tables in the Glue Data Catalog; Lake Formation governs the buckets and the catalog, and business analysts query them with Athena.
   containers:
     - region: us-east-1
       groups:
-        - {label: storage zones}
-        - {label: catalog and governance}
-        - {label: processing}
-        - {label: consumption}
+        - {label: ingestion workflow, at: [1, 2]}
+        - {label: analytics workflow, at: [1, 4, 2, 1]}
+        - {label: Lake Formation, at: [3, 2, 1, 4]}
   elements:
-    - {tf: aws_s3_bucket, name: raw-zone, in: group:storage zones}
-    - {tf: aws_s3_bucket, name: curated-zone, in: group:storage zones}
-    - {tf: aws_glue_crawler, name: raw-crawler, in: group:catalog and governance}
-    - {tf: aws_glue_catalog_database, name: lake-catalog, in: group:catalog and governance}
-    - {tf: aws_glue_job, name: raw-to-curated-etl, in: group:processing}
-    - {tf: aws_athena_workgroup, name: analytics-wg, in: group:consumption}
-    - {tf: aws_s3_bucket, name: athena-results, in: group:consumption}
-  actors: [server, users]
+    - {tf: aws_lambda_function, name: ingestion-trigger, in: region, at: [1, 1]}
+    - {tf: aws_sqs_queue, name: raw-events-queue, in: region, at: [2, 1]}
+    - {tf: aws_cloudwatch_event_rule, name: raw-object-created, in: region, at: [3, 1]}
+    - {tf: aws_sfn_state_machine, name: ingestion-workflow, in: group:ingestion workflow, at: [1, 1]}
+    - {tf: aws_lambda_function, name: validate-raw, in: group:ingestion workflow, at: [1, 2]}
+    - {tf: aws_lambda_function, name: raw-to-stage, in: group:ingestion workflow, at: [1, 3]}
+    - {tf: aws_scheduler_schedule, name: analytics-schedule, in: region, at: [1, 3]}
+    - {tf: aws_lambda_function, name: analytics-trigger, in: region, at: [2, 3]}
+    - {tf: aws_sfn_state_machine, name: analytics-workflow, in: group:analytics workflow, at: [1, 1]}
+    - {tf: aws_lambda_function, name: prepare-analytics, in: group:analytics workflow, at: [1, 2]}
+    - {tf: aws_glue_job, name: stage-to-analytics, in: group:analytics workflow, at: [2, 1]}
+    - {tf: aws_glue_crawler, name: analytics-crawler, in: group:analytics workflow, at: [2, 2]}
+    - {tf: aws_dynamodb_table, name: pipeline-state, in: region, at: [1, 5]}
+    - {tf: aws_s3_bucket, name: raw-bucket, in: group:Lake Formation, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: stage-bucket, in: group:Lake Formation, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: analytics-bucket, in: group:Lake Formation, at: [1, 3]}
+    - {tf: aws_glue_catalog_database, name: analytics-database, in: group:Lake Formation, at: [1, 4]}
+    - {tf: aws_athena_workgroup, name: analytics-wg, in: group:Lake Formation, at: [2, 4]}
+  actors: [{type: client, at: [1, 1]}, {type: users, at: [1, 3]}]
   flows:
-    - {from: server, to: raw-zone, label: batch/stream ingest, step: 1}
-    - {from: raw-crawler, to: raw-zone, label: crawl, step: 2}
-    - {from: raw-crawler, to: lake-catalog, label: register tables, step: 3}
-    - {from: raw-to-curated-etl, to: raw-zone, label: read, step: 4}
-    - {from: raw-to-curated-etl, to: curated-zone, label: write Parquet partitions, step: 5}
-    - {from: raw-to-curated-etl, to: lake-catalog, label: update curated tables, step: 6}
-    - {from: users, to: analytics-wg, label: SQL, step: 7}
-    - {from: analytics-wg, to: lake-catalog, label: schema lookup, step: 8}
-    - {from: analytics-wg, to: curated-zone, label: scan, step: 9}
-    - {from: analytics-wg, to: athena-results, label: query results}
+    - {from: client, to: raw-bucket, label: upload raw data, step: 1}
+    - {from: raw-bucket, to: raw-object-created, label: object created event, step: 2}
+    - {from: raw-object-created, to: raw-events-queue, link: aws_cloudwatch_event_target}
+    - {from: raw-events-queue, to: ingestion-trigger, link: aws_lambda_event_source_mapping}
+    - {from: ingestion-trigger, to: ingestion-workflow, label: StartExecution, step: 3}
+    - {from: ingestion-workflow, to: validate-raw}
+    - {from: validate-raw, to: raw-to-stage}
+    - {from: ingestion-workflow, to: pipeline-state, label: record pipeline state, step: 4}
+    - {from: raw-to-stage, to: stage-bucket, label: write stage data, step: 5}
+    - {from: analytics-schedule, to: analytics-trigger, label: scheduled invocation, step: 6}
+    - {from: analytics-trigger, to: analytics-workflow, label: StartExecution}
+    - {from: analytics-workflow, to: prepare-analytics}
+    - {from: prepare-analytics, to: stage-to-analytics, label: start Glue job}
+    - {from: stage-to-analytics, to: stage-bucket, label: read stage data}
+    - {from: stage-to-analytics, to: analytics-bucket, label: write analytics data, step: 7}
+    - {from: analytics-crawler, to: analytics-bucket, label: crawl}
+    - {from: analytics-crawler, to: analytics-database, label: register tables, step: 8}
+    - {from: analytics-wg, to: analytics-database, label: schema lookup in the Data Catalog, step: 9}
+    - {from: analytics-workflow, to: pipeline-state, label: record job status, step: 10}
+    - {from: users, to: analytics-wg, label: SQL queries, step: 11}
+    - {from: analytics-wg, to: analytics-bucket, label: scan}
 
 - slug: streaming-kinesis-firehose-s3
   title: Streaming ingestion with Kinesis Data Streams and Firehose to S3
@@ -324,31 +374,26 @@
   category: ml
   tags: [rag, bedrock, knowledge base, opensearch serverless, vector search, generative ai]
   source: https://docs.aws.amazon.com/prescriptive-guidance/latest/retrieval-augmented-generation-options/rag-fully-managed-bedrock.html
-  description: Documents in S3 are chunked and embedded by a Bedrock Knowledge Base, which stores vectors in an OpenSearch Serverless collection. At query time an orchestrating Lambda behind API Gateway calls RetrieveAndGenerate, so the knowledge base fetches the most similar chunks and a Bedrock foundation model composes a grounded answer.
+  description: A user's query goes to a Bedrock agent, which retrieves the most similar chunks from a Bedrock Knowledge Base backed by an OpenSearch Serverless vector collection and passes the augmented prompt to a foundation model that composes the grounded response. Documents in S3 are the knowledge base's data source; a sync job chunks and embeds them into the collection.
   containers:
     - region: us-east-1
       groups:
-        - {label: ingestion}
-        - {label: retrieval and generation}
+        - {label: Amazon Bedrock, at: [1, 1, 2, 1]}
   elements:
-    - {tf: aws_s3_bucket, name: knowledge-docs, in: group:ingestion}
-    - {tf: aws_bedrockagent_knowledge_base, name: enterprise-kb, in: group:ingestion}
-    - {tf: aws_opensearchserverless_collection, name: kb-vectors, in: group:ingestion}
-    - {tf: aws_cognito_user_pool, name: app-users, in: group:retrieval and generation}
-    - {tf: aws_api_gateway_rest_api, name: chat-api, in: group:retrieval and generation}
-    - {tf: aws_lambda_function, name: rag-orchestrator, in: group:retrieval and generation}
-    - {tf: aws_bedrock_inference_profile, name: claude-generation, in: group:retrieval and generation}
-  actors: [users]
+    - {tf: aws_bedrockagent_agent, name: rag-agent, in: group:Amazon Bedrock, at: [1, 1]}
+    - {tf: aws_bedrockagent_knowledge_base, name: enterprise-kb, in: group:Amazon Bedrock, at: [1, 2]}
+    - {tf: aws_bedrock_inference_profile, name: claude-generation, in: group:Amazon Bedrock, at: [2, 1]}
+    - {tf: aws_opensearchserverless_collection, name: kb-vectors, in: region, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: knowledge-docs, in: region, at: [2, 2]}
+  actors: [{type: user, at: [1, 1]}]
   flows:
-    - {from: knowledge-docs, to: enterprise-kb, label: sync, chunk + Titan embeddings, step: 1}
-    - {from: enterprise-kb, to: kb-vectors, label: index vectors, step: 2}
-    - {from: users, to: chat-api, label: question (JWT from Cognito), step: 3}
-    - {from: app-users, to: chat-api, label: authorizer}
-    - {from: chat-api, to: rag-orchestrator, step: 4}
-    - {from: rag-orchestrator, to: enterprise-kb, label: RetrieveAndGenerate, step: 5}
-    - {from: enterprise-kb, to: kb-vectors, label: k-NN similarity search, step: 6}
-    - {from: enterprise-kb, to: claude-generation, label: augmented prompt, step: 7}
-    - {from: rag-orchestrator, to: users, label: grounded answer + citations, step: 8}
+    - {from: user, to: rag-agent, label: query, step: 1}
+    - {from: rag-agent, to: enterprise-kb, label: Retrieve, step: 2}
+    - {from: enterprise-kb, to: kb-vectors, label: k-NN similarity search, step: 3}
+    - {from: rag-agent, to: claude-generation, label: augmented prompt, step: 4}
+    - {from: claude-generation, to: user, label: response, step: 5}
+    - {from: knowledge-docs, to: enterprise-kb, label: "sync: chunk + Titan embeddings"}
+    - {from: enterprise-kb, to: kb-vectors, label: index vectors}
 
 - slug: multi-region-active-passive-aurora-global
   title: Multi-Region active/passive with Route 53 failover and Aurora Global Database

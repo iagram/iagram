@@ -11,50 +11,103 @@ tags:
 - power-bi
 image: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/media/azure-databricks-modern-analytics-architecture.svg
 source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/azure-databricks-modern-analytics-architecture
-description: Batch data lands in Data Lake Storage through Data Factory and streaming data arrives via Event Hubs; Azure Databricks curates both into Bronze, Silver and Gold Delta Lake layers, trains models
-  tracked in MLflow and serves SQL warehouses to Power BI. Unity Catalog and Microsoft Purview govern the lake, Key Vault holds non-identity credentials and Azure Monitor observes the platform.
+description: Streaming data arrives through Event Hubs and batch data lands through Data Factory; Azure Databricks curates both into Bronze, Silver and Gold Delta Lake containers on Data Lake Storage, trains
+  models tracked in MLflow that are served from Azure Machine Learning, and its SQL warehouses feed Power BI while Microsoft Fabric reads the lake directly. Unity Catalog and Microsoft Purview govern the
+  lake, and Microsoft Entra ID, Cost Management, Key Vault, Azure Monitor and Azure DevOps/GitHub form the platform layer.
 nodes:
-- {id: sub-data-platform, type: azure.subscription, name: data-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2, 2, 1]}
+- {id: sub-data-platform, type: azure.subscription, name: data-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1, 1, 2]}
 - {id: rg-rg-lakehouse, type: azure.resource_group, name: rg-lakehouse, parent: sub-data-platform, props: {location: westeurope}, at: [1, 1]}
-- {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-lakehouse, at: [1, 1, 2, 1]}
+- {id: grp-sources, type: common.group, name: Sources, parent: rg-rg-lakehouse, at: [1, 1, 2, 1]}
+- {id: grp-process, type: common.group, name: Process, parent: rg-rg-lakehouse, at: [1, 2]}
 - {id: grp-store, type: common.group, name: Store, parent: rg-rg-lakehouse, at: [2, 2]}
-- {id: grp-process-and-serve, type: common.group, name: Process and serve, parent: rg-rg-lakehouse, at: [1, 2]}
-- {id: grp-governance, type: common.group, name: Governance, parent: rg-rg-lakehouse, at: [3, 1, 1, 2]}
-- {id: database, type: common.database, name: database, at: [2, 1]}
-- {id: saas, type: common.saas, name: saas, at: [1, 3]}
-- {id: device, type: common.device, name: device, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [2, 3]}
-- {id: evhns-telemetry, type: azure.res.azurerm_eventhub_namespace, name: evhns-telemetry, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}, at: [1, 1]}
-- {id: adf-batch-ingest, type: azure.res.azurerm_data_factory, name: adf-batch-ingest, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
-- {id: stdatalake, type: azure.storage_account, name: stdatalake, parent: grp-store, at: [1, 1]}
-- {id: dbw-lakehouse, type: azure.res.azurerm_databricks_workspace, name: dbw-lakehouse, parent: grp-process-and-serve, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}, at: [1, 1]}
+- {id: grp-serve, type: common.group, name: Serve, parent: rg-rg-lakehouse, at: [1, 3, 2, 1]}
+- {id: grp-discover-and-govern, type: common.group, name: Discover and govern, parent: rg-rg-lakehouse, at: [3, 1, 1, 3]}
+- {id: grp-platform, type: common.group, name: Platform, parent: rg-rg-lakehouse, at: [4, 1, 1, 3]}
+- {id: microsoft-entra-id, type: common.idp, name: Microsoft Entra ID, at: [2, 1]}
+- {id: azure-devops-and-github, type: common.saas, name: Azure DevOps and GitHub, at: [2, 2]}
+- {id: evhns-telemetry, type: azure.res.azurerm_eventhub_namespace, name: evhns-telemetry, parent: grp-sources, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme},
+  at: [1, 1]}
+- {id: adf-batch-ingest, type: azure.res.azurerm_data_factory, name: adf-batch-ingest, parent: grp-sources, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
+- {id: dbw-lakehouse, type: azure.res.azurerm_databricks_workspace, name: dbw-lakehouse, parent: grp-process, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme},
+  at: [1, 1]}
+- {id: bronze, type: azure.res.azurerm_storage_data_lake_gen2_filesystem, name: bronze, parent: grp-store, props: {name: changeme, storage_account_id: changeme}, at: [1, 1]}
+- {id: silver, type: azure.res.azurerm_storage_data_lake_gen2_filesystem, name: silver, parent: grp-store, props: {name: changeme, storage_account_id: changeme}, at: [1, 2]}
+- {id: gold, type: azure.res.azurerm_storage_data_lake_gen2_filesystem, name: gold, parent: grp-store, props: {name: changeme, storage_account_id: changeme}, at: [1, 3]}
+- {id: stdatalake, type: azure.storage_account, name: stdatalake, parent: grp-store, at: [2, 1, 1, 3]}
 - id: mlw-serving
   type: azure.res.azurerm_machine_learning_workspace
   name: mlw-serving
-  parent: grp-process-and-serve
-  at: [1, 2]
+  parent: grp-serve
   props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+  at:
+  - 1
+  - 1
+  - 1
+  - 2
+- id: power-bi
+  type: azure.res.azurerm_powerbi_embedded
+  name: power-bi
+  parent: grp-serve
+  props: {administrators: [], location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}
+  at:
+  - 2
+  - 1
+  - 1
+  - 2
+- id: fabric-capacity
+  type: azure.res.azurerm_fabric_capacity
+  name: fabric-capacity
+  parent: grp-serve
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 3
+  - 1
+  - 1
+  - 2
+- {id: unity-catalog-access-connector, type: azure.res.azurerm_databricks_access_connector, name: unity-catalog-access-connector, parent: grp-discover-and-govern, props: {location: westeurope, name: changeme,
+    resource_group_name: changeme}, at: [1, 1]}
 - id: pview-governance
   type: azure.res.azurerm_purview_account
   name: pview-governance
-  parent: grp-governance
-  at: [1, 1]
+  parent: grp-discover-and-govern
   props: {identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
-- {id: kv-lakehouse, type: azure.key_vault, name: kv-lakehouse, parent: grp-governance, at: [1, 2]}
-- {id: law-lakehouse, type: azure.res.azurerm_log_analytics_workspace, name: law-lakehouse, parent: grp-governance, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 3]}
+  at:
+  - 1
+  - 2
+- id: cost-management-budget
+  type: azure.res.azurerm_consumption_budget_subscription
+  name: cost-management-budget
+  parent: grp-platform
+  props: {amount: 1, name: changeme, notification: [], subscription_id: 00000000-0000-0000-0000-000000000000, time_period: {}}
+  at:
+  - 1
+  - 1
+- {id: kv-lakehouse, type: azure.key_vault, name: kv-lakehouse, parent: grp-platform, at: [1, 2]}
+- {id: law-lakehouse, type: azure.res.azurerm_log_analytics_workspace, name: law-lakehouse, parent: grp-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 3]}
 edges:
-- {from: device, to: evhns-telemetry, label: streaming events (AMQP/Kafka), step: '1'}
-- {from: evhns-telemetry, to: dbw-lakehouse, label: streaming pipeline, step: '2'}
-- {from: database, to: adf-batch-ingest, label: batch extract, step: '1'}
-- {from: adf-batch-ingest, to: stdatalake, label: raw load (bronze), step: '2'}
-- {from: dbw-lakehouse, to: stdatalake, label: silver / gold Delta tables, step: '3'}
-- {from: dbw-lakehouse, to: mlw-serving, label: MLflow model deploy, step: '4'}
-- {from: dbw-lakehouse, to: saas, label: SQL warehouse to Power BI, step: '5'}
-- {from: pview-governance, to: stdatalake, label: scan and classify}
+- {from: evhns-telemetry, to: dbw-lakehouse, label: streaming ingest, step: '1'}
+- {from: adf-batch-ingest, to: bronze, label: batch load, step: '2'}
+- {from: dbw-lakehouse, to: bronze, label: raw Delta tables, step: '3'}
+- {from: dbw-lakehouse, to: silver, label: cleansed Delta tables, step: '4'}
+- {from: bronze, to: silver, label: refine}
+- {from: silver, to: gold, label: aggregate}
+- {from: dbw-lakehouse, to: mlw-serving, label: MLflow model deploy, step: '5'}
+- {from: gold, to: dbw-lakehouse, label: SQL warehouse queries, step: '6'}
+- {from: stdatalake, to: fabric-capacity, label: OneLake shortcut to Delta tables, step: '7'}
+- {from: dbw-lakehouse, to: power-bi, label: SQL warehouse to Power BI, step: '8'}
+- {from: unity-catalog-access-connector, to: stdatalake, label: Unity Catalog governance, step: '9'}
+- {from: pview-governance, to: stdatalake, label: scan and classify, step: '9'}
+- {from: microsoft-entra-id, to: dbw-lakehouse, label: SSO and SCIM}
 - {from: dbw-lakehouse, to: kv-lakehouse, label: secret scope}
+- {from: dbw-lakehouse, to: law-lakehouse, label: Azure Monitor}
+- {from: azure-devops-and-github, to: dbw-lakehouse, label: CI/CD (Databricks Repos)}
 steps:
-- {n: '1', text: 'device → evhns-telemetry: streaming events (AMQP/Kafka)'}
-- {n: '2', text: 'evhns-telemetry → dbw-lakehouse: streaming pipeline'}
-- {n: '3', text: 'dbw-lakehouse → stdatalake: silver / gold Delta tables'}
-- {n: '4', text: 'dbw-lakehouse → mlw-serving: MLflow model deploy'}
-- {n: '5', text: 'dbw-lakehouse → saas: SQL warehouse to Power BI'}
+- {n: '1', text: 'evhns-telemetry → dbw-lakehouse: streaming ingest'}
+- {n: '2', text: 'adf-batch-ingest → bronze: batch load'}
+- {n: '3', text: 'dbw-lakehouse → bronze: raw Delta tables'}
+- {n: '4', text: 'dbw-lakehouse → silver: cleansed Delta tables'}
+- {n: '5', text: 'dbw-lakehouse → mlw-serving: MLflow model deploy'}
+- {n: '6', text: 'gold → dbw-lakehouse: SQL warehouse queries'}
+- {n: '7', text: 'stdatalake → fabric-capacity: OneLake shortcut to Delta tables'}
+- {n: '8', text: 'dbw-lakehouse → power-bi: SQL warehouse to Power BI'}
+- {n: '9', text: 'unity-catalog-access-connector → stdatalake: Unity Catalog governance'}

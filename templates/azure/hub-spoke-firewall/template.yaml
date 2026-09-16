@@ -10,54 +10,74 @@ tags:
 - udr
 image: https://learn.microsoft.com/en-us/azure/architecture/networking/architecture/_images/hub-spoke-network-topology-architecture.svg
 source: https://learn.microsoft.com/en-us/azure/architecture/networking/architecture/hub-spoke
-description: A customer-managed hub virtual network hosts shared services (Azure Firewall, Azure Bastion, VPN/ExpressRoute gateway) and is peered to isolated spoke virtual networks that hold workloads.
-  Spoke egress and spoke-to-spoke traffic are forced through the hub firewall with user-defined routes, and the hub gateway provides cross-premises connectivity for every spoke.
+description: A customer-managed hub virtual network hosts shared services (Azure Firewall, Azure Bastion, VPN gateway) and is connected through Azure Virtual Network Manager or peered to isolated production
+  and nonproduction spoke virtual networks whose resource subnets hold virtual machines. Spoke egress is forced through the hub firewall with user-defined routes (forced tunnel), the hub VPN gateway connects
+  the cross-premises network for every spoke, and Azure Monitor collects diagnostics from the hub services.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 1]}
+- {id: dc-cross-premises-network, type: common.datacenter, name: cross-premises network, at: [2, 1]}
 - {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2, 2, 1]}
-- {id: rg-rg-hub, type: azure.resource_group, name: rg-hub, parent: sub-connectivity, props: {location: westeurope}}
-- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: rg-rg-hub, type: azure.resource_group, name: rg-hub, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.0.0.0/16}, at: [1, 1, 3, 1]}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-hub, props: {cidr: 10.0.2.0/26}, at: [1, 1]}
 - {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub, props: {cidr: 10.0.0.0/26}, at: [2, 1]}
 - {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-hub, props: {cidr: 10.0.1.0/26}, at: [3, 1]}
-- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-hub, props: {cidr: 10.0.2.0/26}, at: [1, 1]}
-- {id: sub-landing-zone-prod, type: azure.subscription, name: landing-zone-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 3]}
-- {id: rg-rg-spoke-prod, type: azure.resource_group, name: rg-spoke-prod, parent: sub-landing-zone-prod, props: {location: westeurope}}
-- {id: vpc-spoke-prod, type: azure.vnet, name: spoke-prod, parent: rg-rg-spoke-prod, props: {cidr: 10.1.0.0/16}}
-- {id: sub-snet-workload-prod, type: azure.subnet, name: snet-workload-prod, parent: vpc-spoke-prod, props: {cidr: 10.1.0.0/24}}
-- {id: sub-landing-zone-nonprod, type: azure.subscription, name: landing-zone-nonprod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [3, 2]}
-- {id: rg-rg-spoke-nonprod, type: azure.resource_group, name: rg-spoke-nonprod, parent: sub-landing-zone-nonprod, props: {location: westeurope}}
-- {id: vpc-spoke-nonprod, type: azure.vnet, name: spoke-nonprod, parent: rg-rg-spoke-nonprod, props: {cidr: 10.2.0.0/16}}
-- {id: sub-snet-workload-nonprod, type: azure.subnet, name: snet-workload-nonprod, parent: vpc-spoke-nonprod, props: {cidr: 10.2.0.0/24}}
-- {id: internet, type: common.internet, name: internet, at: [1, 3]}
-- {id: user, type: common.user, name: user, at: [1, 1]}
-- {id: hub-fw, type: azure.res.azurerm_firewall, name: hub-fw, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: sub-landing-zone-prod, type: azure.subscription, name: landing-zone-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 3, 2, 1]}
+- {id: rg-rg-spoke-prod, type: azure.resource_group, name: rg-spoke-prod, parent: sub-landing-zone-prod, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-spoke-prod-1, type: azure.vnet, name: spoke-prod-1, parent: rg-rg-spoke-prod, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: sub-snet-workload-prod-1, type: azure.subnet, name: snet-workload-prod-1, parent: vpc-spoke-prod-1, props: {cidr: 10.1.0.0/24}, at: [1, 1]}
+- {id: vpc-spoke-prod-2, type: azure.vnet, name: spoke-prod-2, parent: rg-rg-spoke-prod, props: {cidr: 10.3.0.0/16}, at: [2, 1]}
+- {id: sub-snet-workload-prod-2, type: azure.subnet, name: snet-workload-prod-2, parent: vpc-spoke-prod-2, props: {cidr: 10.3.0.0/24}, at: [1, 1]}
+- {id: sub-landing-zone-nonprod, type: azure.subscription, name: landing-zone-nonprod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [3, 2, 1, 2]}
+- {id: rg-rg-spoke-nonprod, type: azure.resource_group, name: rg-spoke-nonprod, parent: sub-landing-zone-nonprod, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-spoke-nonprod-1, type: azure.vnet, name: spoke-nonprod-1, parent: rg-rg-spoke-nonprod, props: {cidr: 10.2.0.0/16}, at: [1, 1]}
+- {id: sub-snet-workload-nonprod-1, type: azure.subnet, name: snet-workload-nonprod-1, parent: vpc-spoke-nonprod-1, props: {cidr: 10.2.0.0/24}, at: [1, 1]}
+- {id: vpc-spoke-nonprod-2, type: azure.vnet, name: spoke-nonprod-2, parent: rg-rg-spoke-nonprod, props: {cidr: 10.4.0.0/16}, at: [1, 2]}
+- {id: sub-snet-workload-nonprod-2, type: azure.subnet, name: snet-workload-nonprod-2, parent: vpc-spoke-nonprod-2, props: {cidr: 10.4.0.0/24}, at: [1, 1]}
+- {id: onprem-vpn-device, type: azure.res.azurerm_local_network_gateway, name: onprem-vpn-device, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1,
+    1]}
+- {id: hub-bastion, type: azure.res.azurerm_bastion_host, name: hub-bastion, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: hub-fw, type: azure.res.azurerm_firewall, name: hub-fw, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme},
+  at: [1, 1]}
 - id: hub-vpngw
   type: azure.res.azurerm_virtual_network_gateway
   name: hub-vpngw
   parent: sub-gatewaysubnet
-  props:
-    ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: changeme
-    type: changeme
-- {id: hub-bastion, type: azure.res.azurerm_bastion_host, name: hub-bastion, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: vm-prod-1, type: azure.virtual_machine, name: vm-prod-1, parent: sub-snet-workload-prod}
-- {id: vm-nonprod-1, type: azure.virtual_machine, name: vm-nonprod-1, parent: sub-snet-workload-nonprod}
-- {id: law-hub, type: azure.res.azurerm_log_analytics_workspace, name: law-hub, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2]}
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme, type: changeme}
+  at:
+  - 1
+  - 1
+- id: avnm-hub-spoke
+  type: azure.res.azurerm_network_manager
+  name: avnm-hub-spoke
+  parent: rg-rg-hub
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, scope: {}}
+  at:
+  - 1
+  - 2
+- {id: law-hub, type: azure.res.azurerm_log_analytics_workspace, name: law-hub, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 2]}
+- {id: vm-prod-1a, type: azure.virtual_machine, name: vm-prod-1a, parent: sub-snet-workload-prod-1, at: [1, 1]}
+- {id: vm-prod-1b, type: azure.virtual_machine, name: vm-prod-1b, parent: sub-snet-workload-prod-1, at: [1, 2]}
+- {id: vm-prod-2a, type: azure.virtual_machine, name: vm-prod-2a, parent: sub-snet-workload-prod-2, at: [1, 1]}
+- {id: vm-prod-2b, type: azure.virtual_machine, name: vm-prod-2b, parent: sub-snet-workload-prod-2, at: [1, 2]}
+- {id: vm-nonprod-1a, type: azure.virtual_machine, name: vm-nonprod-1a, parent: sub-snet-workload-nonprod-1, at: [1, 1]}
+- {id: vm-nonprod-1b, type: azure.virtual_machine, name: vm-nonprod-1b, parent: sub-snet-workload-nonprod-1, at: [1, 2]}
+- {id: vm-nonprod-2a, type: azure.virtual_machine, name: vm-nonprod-2a, parent: sub-snet-workload-nonprod-2, at: [1, 1]}
+- {id: vm-nonprod-2b, type: azure.virtual_machine, name: vm-nonprod-2b, parent: sub-snet-workload-nonprod-2, at: [1, 2]}
 edges:
-- {from: dc-on-premises, to: hub-vpngw, label: IPsec VPN / ExpressRoute, step: '1'}
-- {from: vpc-hub, to: vpc-spoke-prod, label: peering (gateway transit), link: azurerm_virtual_network_peering}
-- {from: vpc-hub, to: vpc-spoke-nonprod, label: peering (gateway transit), link: azurerm_virtual_network_peering}
-- {from: vm-prod-1, to: hub-fw, label: 0.0.0.0/0 via UDR, step: '2'}
-- {from: hub-fw, to: internet, label: SNAT egress, step: '3'}
-- {from: vm-prod-1, to: vm-nonprod-1, label: spoke-to-spoke via firewall, step: '4'}
-- {from: user, to: hub-bastion, label: RDP/SSH over TLS}
-- {from: hub-bastion, to: vm-prod-1, label: RDP/SSH}
+- {from: onprem-vpn-device, to: hub-vpngw, label: IPsec VPN (cross-premises), step: '1'}
+- {from: avnm-hub-spoke, to: vpc-hub, label: connected virtual networks (network group)}
+- {from: vpc-hub, to: vpc-spoke-prod-1, label: connected or peered through hub, link: azurerm_virtual_network_peering}
+- {from: vpc-hub, to: vpc-spoke-prod-2, label: connected or peered through hub, link: azurerm_virtual_network_peering}
+- {from: vpc-hub, to: vpc-spoke-nonprod-1, label: connected virtual networks, link: azurerm_virtual_network_peering}
+- {from: vpc-hub, to: vpc-spoke-nonprod-2, label: connected virtual networks, link: azurerm_virtual_network_peering}
+- {from: vpc-spoke-nonprod-1, to: vpc-spoke-nonprod-2, label: peered or directly connected virtual networks, link: azurerm_virtual_network_peering}
+- {from: vm-prod-1a, to: hub-fw, label: forced tunnel (UDR 0.0.0.0/0), step: '2'}
+- {from: vm-prod-2a, to: hub-fw, label: forced tunnel (UDR 0.0.0.0/0), step: '2'}
+- {from: hub-bastion, to: law-hub, label: diagnostics}
 - {from: hub-fw, to: law-hub, label: diagnostics}
+- {from: hub-vpngw, to: law-hub, label: diagnostics}
+- {from: hub-bastion, to: vm-prod-1a, label: RDP/SSH over TLS, step: '3'}
 steps:
-- {n: '1', text: 'datacenter → hub-vpngw: IPsec VPN / ExpressRoute'}
-- {n: '2', text: 'vm-prod-1 → hub-fw: 0.0.0.0/0 via UDR'}
-- {n: '3', text: 'hub-fw → internet: SNAT egress'}
-- {n: '4', text: 'vm-prod-1 → vm-nonprod-1: spoke-to-spoke via firewall'}
+- {n: '1', text: 'onprem-vpn-device → hub-vpngw: IPsec VPN (cross-premises)'}
+- {n: '2', text: 'vm-prod-1a → hub-fw: forced tunnel (UDR 0.0.0.0/0)'}
+- {n: '3', text: 'hub-bastion → vm-prod-1a: RDP/SSH over TLS'}

@@ -10,42 +10,45 @@ tags:
 - cdn
 image: https://d2908q01vomqb2.cloudfront.net/1b6453892473a467d07372d45eb05abc2031647a/2019/11/07/WP4_1.png
 source: https://aws.amazon.com/blogs/compute/deploying-a-highly-available-wordpress-site-on-amazon-lightsail-part-4-increasing-performance-and-scalability-with-a-lightsail-load-balancer/
-description: Multiple WordPress instances cloned from a snapshot and spread across Availability Zones sit behind a Lightsail load balancer that terminates TLS with a managed certificate. All instances write
-  to one highly available Lightsail managed MySQL database, and media uploads are offloaded to a Lightsail bucket served through a Lightsail CDN distribution.
+description: Three WordPress instances cloned from a snapshot sit behind a Lightsail load balancer that answers https://www.example.com inside the Lightsail VPC. All instances write to one highly available
+  Lightsail managed MySQL database, and media uploads are offloaded to a bucket served through a Lightsail CDN distribution at https://media.example.com.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-lightsail, type: common.group, name: lightsail, parent: reg-us-east-1, at: [1, 1]}
+- {id: grp-www-example-com, type: common.group, name: www.example.com, parent: reg-us-east-1, at: [1, 1, 2, 1]}
+- {id: grp-media-example-com, type: common.group, name: media.example.com, parent: reg-us-east-1, at: [1, 2]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: site-domain, type: aws.res.aws_lightsail_domain, name: site-domain, parent: grp-lightsail, props: {domain_name: changeme}, at: [1, 1]}
-- {id: lb-cert, type: aws.res.aws_lightsail_certificate, name: lb-cert, parent: grp-lightsail, props: {name: changeme}, at: [2, 1]}
-- {id: wp-lb, type: aws.res.aws_lightsail_lb, name: wp-lb, parent: grp-lightsail, props: {instance_port: 1, name: changeme}, at: [1, 2, 2, 1]}
-- {id: wp-1, type: aws.res.aws_lightsail_instance, name: wp-1, parent: grp-lightsail, props: {availability_zone: changeme, blueprint_id: changeme, bundle_id: changeme, name: changeme}, at: [1, 3]}
-- {id: wp-2, type: aws.res.aws_lightsail_instance, name: wp-2, parent: grp-lightsail, props: {availability_zone: changeme, blueprint_id: changeme, bundle_id: changeme, name: changeme}, at: [2, 3]}
-- {id: wp-db, type: aws.res.aws_lightsail_database, name: wp-db, parent: grp-lightsail, props: {blueprint_id: changeme, bundle_id: changeme, master_database_name: changeme, master_password: changeme, master_username: changeme,
-    relational_database_name: changeme}, at: [2, 4]}
-- {id: wp-media, type: aws.res.aws_lightsail_bucket, name: wp-media, parent: grp-lightsail, props: {bundle_id: changeme, name: changeme}, at: [1, 5]}
+- {id: wp-lb, type: aws.res.aws_lightsail_lb, name: wp-lb, parent: grp-www-example-com, props: {instance_port: 1, name: changeme}, at: [1, 1, 3, 1]}
+- {id: wp-1, type: aws.res.aws_lightsail_instance, name: wp-1, parent: grp-www-example-com, props: {availability_zone: changeme, blueprint_id: changeme, bundle_id: changeme, name: changeme}, at: [1, 2]}
+- {id: wp-2, type: aws.res.aws_lightsail_instance, name: wp-2, parent: grp-www-example-com, props: {availability_zone: changeme, blueprint_id: changeme, bundle_id: changeme, name: changeme}, at: [2, 2]}
+- {id: wp-3, type: aws.res.aws_lightsail_instance, name: wp-3, parent: grp-www-example-com, props: {availability_zone: changeme, blueprint_id: changeme, bundle_id: changeme, name: changeme}, at: [3, 2]}
 - id: media-cdn
   type: aws.res.aws_lightsail_distribution
   name: media-cdn
-  parent: grp-lightsail
-  at: [1, 4]
+  parent: grp-media-example-com
   props: {bundle_id: changeme, default_cache_behavior: {}, name: changeme, origin: {}}
+  at:
+  - 1
+  - 1
+- {id: wp-media, type: aws.res.aws_lightsail_bucket, name: wp-media, parent: grp-media-example-com, props: {bundle_id: changeme, name: changeme}, at: [1, 2]}
+- {id: wp-db, type: aws.res.aws_lightsail_database, name: wp-db, parent: reg-us-east-1, props: {blueprint_id: changeme, bundle_id: changeme, master_database_name: changeme, master_password: changeme, master_username: changeme,
+    relational_database_name: changeme}, at: [2, 2]}
 edges:
-- {from: users, to: site-domain, label: DNS, step: '1'}
-- {from: users, to: wp-lb, label: HTTPS, step: '2'}
-- {from: lb-cert, to: wp-lb, label: managed TLS certificate}
-- {from: wp-lb, to: wp-1, label: HTTP with session persistence, step: '3'}
+- {from: users, to: wp-lb, label: 'https://www.example.com', step: '1'}
+- {from: wp-lb, to: wp-1, label: HTTP with session persistence, step: '2'}
 - {from: wp-lb, to: wp-2, label: HTTP with session persistence}
-- {from: wp-1, to: wp-db, label: MySQL, step: '4'}
+- {from: wp-lb, to: wp-3, label: HTTP with session persistence}
+- {from: wp-1, to: wp-db, label: MySQL, step: '3'}
 - {from: wp-2, to: wp-db, label: MySQL}
-- {from: wp-1, to: wp-media, label: offload uploads, step: '5'}
+- {from: wp-3, to: wp-db, label: MySQL}
+- {from: wp-1, to: wp-media, label: offload media uploads, step: '4'}
+- {from: wp-2, to: wp-media, label: offload media uploads}
+- {from: wp-3, to: wp-media, label: offload media uploads}
 - {from: media-cdn, to: wp-media, label: origin}
-- {from: users, to: media-cdn, label: media assets, step: '6'}
+- {from: users, to: media-cdn, label: 'https://media.example.com', step: '5'}
 steps:
-- {n: '1', text: 'users → site-domain: DNS'}
-- {n: '2', text: 'users → wp-lb: HTTPS'}
-- {n: '3', text: 'wp-lb → wp-1: HTTP with session persistence'}
-- {n: '4', text: 'wp-1 → wp-db: MySQL'}
-- {n: '5', text: 'wp-1 → wp-media: offload uploads'}
-- {n: '6', text: 'users → media-cdn: media assets'}
+- {n: '1', text: 'users → wp-lb: https://www.example.com'}
+- {n: '2', text: 'wp-lb → wp-1: HTTP with session persistence'}
+- {n: '3', text: 'wp-1 → wp-db: MySQL'}
+- {n: '4', text: 'wp-1 → wp-media: offload media uploads'}
+- {n: '5', text: 'users → media-cdn: https://media.example.com'}

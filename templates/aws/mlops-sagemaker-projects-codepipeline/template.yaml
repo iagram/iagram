@@ -10,74 +10,88 @@ tags:
 - staging production
 image: https://docs.aws.amazon.com/images/sagemaker/latest/dg/images/projects/projects-templates-gitjenkins.png
 source: https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-projects-templates-sm.html
-description: The SageMaker-provided MLOps template creates a model-build CodePipeline whose CodeBuild step upserts and runs a SageMaker pipeline from a third-party Git repository, registering models in
-  the Model Registry. An EventBridge rule on model approval starts a model-deploy CodePipeline that builds CloudFormation stacks and deploys endpoints to staging and, after manual approval, to production.
+description: The SageMaker-provided MLOps template with third-party Git repositories seeds a model-build and a model-deploy GitHub repository through a CodeBuild project and a Lambda check-in function,
+  then a model-build pipeline (CodePipeline or Jenkins) checks out the build repository through a CodeStar connection, installs the AWS CLI and runs a SageMaker pipeline whose processing, training and evaluation
+  steps write model artifacts to S3 and register the model in the Model Registry. On model approval an EventBridge rule invokes a Lambda that triggers the model-deploy pipeline, which builds CloudFormation
+  templates into S3 and deploys the stack to a staging endpoint and, after testing and manual approval, to production.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 3]}
 - {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 1]}
 - {id: grp-model-build, type: common.group, name: model-build, parent: reg-eu-west-1, at: [1, 2]}
-- {id: grp-model-deploy, type: common.group, name: model-deploy, parent: reg-eu-west-1, at: [1, 3]}
-- {id: user, type: common.user, name: user, at: [1, 1]}
-- {id: saas, type: common.saas, name: saas, at: [1, 2]}
+- {id: grp-model-deploy, type: common.group, name: model-deploy, parent: reg-eu-west-1, at: [1, 3, 1, 2]}
+- {id: grp-seeding, type: common.group, name: seeding, parent: reg-eu-west-1, at: [2, 1]}
+- {id: grp-sagemaker-pipelines, type: common.group, name: sagemaker pipelines, parent: reg-eu-west-1, at: [2, 2]}
+- {id: grp-model-registry, type: common.group, name: model registry, parent: reg-eu-west-1, at: [2, 3]}
+- {id: grp-hosting, type: common.group, name: hosting, parent: reg-eu-west-1, at: [2, 4]}
+- {id: github-model-build-repo, type: common.saas, name: GitHub model build repo, at: [1, 1]}
+- {id: data-scientist, type: common.user, name: Data Scientist, at: [2, 1]}
+- {id: github-model-deploy-repo, type: common.saas, name: GitHub model deploy repo, at: [1, 4]}
 - {id: github-connection, type: aws.res.aws_codestarconnections_connection, name: github-connection, parent: reg-eu-west-1, props: {name: changeme}, at: [1, 1]}
 - id: model-build-pipeline
   type: aws.res.aws_codepipeline
   name: model-build-pipeline
   parent: grp-model-build
-  at: [1, 1]
-  props:
-    artifact_store: []
-    name: changeme
-    role_arn: changeme
-    stage: []
-- id: build-pipeline-project
-  type: aws.res.aws_codebuild_project
-  name: build-pipeline-project
-  parent: grp-model-build
-  at: [1, 2]
-  props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: abalone-pipeline, type: aws.res.aws_sagemaker_pipeline, name: abalone-pipeline, parent: grp-model-build, props: {pipeline_display_name: changeme, pipeline_name: changeme}, at: [2, 1]}
-- {id: abalone-models, type: aws.res.aws_sagemaker_model_package_group, name: abalone-models, parent: grp-model-build, props: {model_package_group_name: changeme}, at: [2, 2]}
-- {id: mlops-artifacts, type: aws.s3_bucket, name: mlops-artifacts, parent: reg-eu-west-1, at: [2, 2]}
-- {id: model-approved-rule, type: aws.res.aws_cloudwatch_event_rule, name: model-approved-rule, parent: grp-model-deploy, at: [2, 1]}
+  props: {artifact_store: [], name: changeme, role_arn: changeme, stage: []}
+  at:
+  - 1
+  - 1
 - id: model-deploy-pipeline
   type: aws.res.aws_codepipeline
   name: model-deploy-pipeline
   parent: grp-model-deploy
-  at: [1, 1, 1, 2]
-  props:
-    artifact_store: []
-    name: changeme
-    role_arn: changeme
-    stage: []
-- id: deploy-build-project
+  props: {artifact_store: [], name: changeme, role_arn: changeme, stage: []}
+  at:
+  - 1
+  - 1
+  - 1
+  - 2
+- {id: model-deploy-trigger-fn, type: aws.lambda_function, name: model-deploy-trigger-fn, parent: grp-model-deploy, at: [2, 1]}
+- {id: model-approved-rule, type: aws.res.aws_cloudwatch_event_rule, name: model-approved-rule, parent: grp-model-deploy, at: [2, 2]}
+- {id: cfn-templates, type: aws.s3_bucket, name: cfn-templates, parent: grp-model-deploy, at: [3, 1]}
+- {id: endpoint-stack, type: aws.res.aws_cloudformation_stack, name: endpoint-stack, parent: grp-model-deploy, props: {name: changeme}, at: [3, 2]}
+- id: seed-code-project
   type: aws.res.aws_codebuild_project
-  name: deploy-build-project
-  parent: grp-model-deploy
-  at: [2, 2]
+  name: seed-code-project
+  parent: grp-seeding
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: staging-endpoint, type: aws.res.aws_sagemaker_endpoint, name: staging-endpoint, parent: grp-model-deploy, props: {endpoint_config_name: changeme}, at: [3, 1]}
-- {id: prod-endpoint, type: aws.res.aws_sagemaker_endpoint, name: prod-endpoint, parent: grp-model-deploy, props: {endpoint_config_name: changeme}, at: [3, 2]}
+  at:
+  - 1
+  - 1
+- {id: seed-code-checkin-fn, type: aws.lambda_function, name: seed-code-checkin-fn, parent: grp-seeding, at: [2, 1]}
+- {id: abalone-pipeline, type: aws.res.aws_sagemaker_pipeline, name: abalone-pipeline, parent: grp-sagemaker-pipelines, props: {pipeline_display_name: changeme, pipeline_name: changeme}, at: [1, 1]}
+- {id: abalone-training-job, type: aws.res.aws_sagemaker_training_job, name: abalone-training-job, parent: grp-sagemaker-pipelines, props: {role_arn: changeme, training_job_name: changeme}, at: [1, 2]}
+- {id: abalone-models, type: aws.res.aws_sagemaker_model_package_group, name: abalone-models, parent: grp-model-registry, props: {model_package_group_name: changeme}, at: [1, 1]}
+- {id: staging-endpoint, type: aws.res.aws_sagemaker_endpoint, name: staging-endpoint, parent: grp-hosting, props: {endpoint_config_name: changeme}, at: [1, 1]}
+- {id: prod-endpoint, type: aws.res.aws_sagemaker_endpoint, name: prod-endpoint, parent: grp-hosting, props: {endpoint_config_name: changeme}, at: [1, 2]}
+- {id: mlops-artifacts, type: aws.s3_bucket, name: mlops-artifacts, parent: reg-eu-west-1, at: [3, 2]}
 edges:
-- {from: user, to: saas, label: push modelbuild repo, step: '1'}
-- {from: saas, to: github-connection, label: webhook}
-- {from: github-connection, to: model-build-pipeline, label: source stage, step: '2'}
-- {from: model-build-pipeline, to: build-pipeline-project, label: build stage, step: '3'}
-- {from: build-pipeline-project, to: abalone-pipeline, label: upsert and start execution, step: '4'}
-- {from: abalone-pipeline, to: mlops-artifacts, label: training artifacts}
-- {from: abalone-pipeline, to: abalone-models, label: RegisterModel PendingManualApproval, step: '5'}
+- {from: seed-code-project, to: seed-code-checkin-fn, label: initial seeding on project create}
+- {from: seed-code-checkin-fn, to: github-model-build-repo, label: seed model build code}
+- {from: seed-code-checkin-fn, to: github-model-deploy-repo, label: seed model deploy code}
+- {from: data-scientist, to: github-model-build-repo, label: commits pipeline code, step: '1'}
+- {from: github-model-build-repo, to: github-connection, label: Studio Git clone}
+- {from: github-connection, to: model-build-pipeline, label: 'Checkout source: build trigger polling every minute', step: '2'}
+- {from: model-build-pipeline, to: abalone-pipeline, label: 'Install AWS CLI, update and run SageMaker pipeline', step: '3'}
+- {from: abalone-pipeline, to: abalone-training-job, label: 'processing, training and evaluate steps', step: '4'}
+- {from: abalone-training-job, to: mlops-artifacts, label: model artifact}
+- {from: abalone-pipeline, to: abalone-models, label: Register model, step: '5'}
+- {from: data-scientist, to: abalone-models, label: Approve deployment}
 - {from: abalone-models, to: model-approved-rule, label: ModelPackage state change Approved, step: '6'}
-- {from: model-approved-rule, to: model-deploy-pipeline, link: aws_cloudwatch_event_target}
-- {from: model-deploy-pipeline, to: deploy-build-project, label: build CloudFormation templates, step: '7'}
-- {from: deploy-build-project, to: staging-endpoint, label: DeployStaging stack, step: '8'}
-- {from: deploy-build-project, to: prod-endpoint, label: DeployProd after manual approval, step: '9'}
+- {from: model-approved-rule, to: model-deploy-trigger-fn, link: aws_cloudwatch_event_target}
+- {from: model-deploy-trigger-fn, to: model-deploy-pipeline, label: 'Deploy trigger: approved model', step: '7'}
+- {from: github-model-deploy-repo, to: model-deploy-pipeline, label: Checkout source model deploy code}
+- {from: model-deploy-pipeline, to: cfn-templates, label: Build CloudFormation templates, step: '8'}
+- {from: cfn-templates, to: endpoint-stack, label: templates}
+- {from: endpoint-stack, to: staging-endpoint, label: Staging deploy and test staging, step: '9'}
+- {from: endpoint-stack, to: prod-endpoint, label: Prod deploy after manual approval, step: '10'}
 steps:
-- {n: '1', text: 'user → saas: push modelbuild repo'}
-- {n: '2', text: 'github-connection → model-build-pipeline: source stage'}
-- {n: '3', text: 'model-build-pipeline → build-pipeline-project: build stage'}
-- {n: '4', text: 'build-pipeline-project → abalone-pipeline: upsert and start execution'}
-- {n: '5', text: 'abalone-pipeline → abalone-models: RegisterModel PendingManualApproval'}
+- {n: '1', text: 'Data Scientist → GitHub model build repo: commits pipeline code'}
+- {n: '2', text: 'github-connection → model-build-pipeline: Checkout source: build trigger polling every minute'}
+- {n: '3', text: 'model-build-pipeline → abalone-pipeline: Install AWS CLI, update and run SageMaker pipeline'}
+- {n: '4', text: 'abalone-pipeline → abalone-training-job: processing, training and evaluate steps'}
+- {n: '5', text: 'abalone-pipeline → abalone-models: Register model'}
 - {n: '6', text: 'abalone-models → model-approved-rule: ModelPackage state change Approved'}
-- {n: '7', text: 'model-deploy-pipeline → deploy-build-project: build CloudFormation templates'}
-- {n: '8', text: 'deploy-build-project → staging-endpoint: DeployStaging stack'}
-- {n: '9', text: 'deploy-build-project → prod-endpoint: DeployProd after manual approval'}
+- {n: '7', text: 'model-deploy-trigger-fn → model-deploy-pipeline: Deploy trigger: approved model'}
+- {n: '8', text: 'model-deploy-pipeline → cfn-templates: Build CloudFormation templates'}
+- {n: '9', text: 'endpoint-stack → staging-endpoint: Staging deploy and test staging'}
+- {n: '10', text: 'endpoint-stack → prod-endpoint: Prod deploy after manual approval'}

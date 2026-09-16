@@ -10,27 +10,29 @@ tags:
 - multi-region
 image: https://docs.cloud.google.com/static/load-balancing/images/lb-serverless-run-ext-https.svg
 source: https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-serverless
-description: Cloud Run services in two regions are registered in regional serverless network endpoint groups that are the backends of one global backend service, so a single anycast IP with a Google-managed
-  certificate routes users to the nearest healthy region. A Cloud Armor security policy attached to the backend service filters traffic at the edge and Cloud CDN caches cacheable responses; ingress on the
-  services is restricted to internal-and-load-balancer traffic.
+description: Traffic from the internet reaches the global external Application Load Balancer's forwarding rule, target HTTPS proxy with a Google-managed certificate and URL map, then one global backend
+  service whose backends are regional serverless network endpoint groups pointing at Cloud Run services in two regions, so a single anycast IP routes users to the nearest healthy region. A Cloud Armor security
+  policy attached to the backend service filters traffic at the edge and Cloud CDN caches cacheable responses; ingress on the services is restricted to internal-and-load-balancer traffic.
 nodes:
 - {id: prj-run-web-prj, type: gcp.project, name: run-web-prj, props: {project_id: run-web-prj-123456, project: changeme, region: europe-west1}, at: [1, 2]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: app-ip, type: gcp.res.google_compute_global_address, name: app-ip, parent: prj-run-web-prj, props: {name: changeme}, at: [2, 1]}
-- {id: app-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: app-https-rule, parent: prj-run-web-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
-- {id: app-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: app-https-proxy, parent: prj-run-web-prj, props: {name: changeme, url_map: changeme}, at: [1, 2]}
-- {id: app-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: app-cert, parent: prj-run-web-prj, at: [2, 2]}
-- {id: app-url-map, type: gcp.res.google_compute_url_map, name: app-url-map, parent: prj-run-web-prj, props: {name: changeme}, at: [1, 3]}
-- {id: app-backend, type: gcp.res.google_compute_backend_service, name: app-backend, parent: prj-run-web-prj, props: {name: changeme}, at: [1, 4]}
-- {id: app-edge-policy, type: gcp.res.google_compute_security_policy, name: app-edge-policy, parent: prj-run-web-prj, props: {name: changeme}, at: [2, 4]}
-- {id: app-neg-ew1, type: gcp.res.google_compute_region_network_endpoint_group, name: app-neg-ew1, parent: prj-run-web-prj, props: {name: changeme, region: eu-west-1}, at: [1, 5]}
-- {id: app-neg-ew4, type: gcp.res.google_compute_region_network_endpoint_group, name: app-neg-ew4, parent: prj-run-web-prj, props: {name: changeme, region: eu-west-1}, at: [2, 5]}
-- {id: app-ew1, type: gcp.cloud_run_service, name: app-ew1, parent: prj-run-web-prj, at: [1, 6]}
-- {id: app-ew4, type: gcp.cloud_run_service, name: app-ew4, parent: prj-run-web-prj, at: [2, 6]}
+- {id: grp-external-application-load-balancer, type: common.group, name: external-application-load-balancer, parent: prj-run-web-prj, at: [1, 1, 2, 1]}
+- {id: grp-region-europe-west1, type: common.group, name: region-europe-west1, parent: prj-run-web-prj, at: [1, 2]}
+- {id: grp-region-europe-west4, type: common.group, name: region-europe-west4, parent: prj-run-web-prj, at: [2, 2]}
+- {id: internet, type: common.internet, name: internet, at: [1, 1]}
+- {id: app-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: app-https-rule, parent: grp-external-application-load-balancer, props: {name: changeme, target: changeme}, at: [1, 1]}
+- {id: app-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: app-https-proxy, parent: grp-external-application-load-balancer, props: {name: changeme, url_map: changeme}, at: [1, 2]}
+- {id: app-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: app-cert, parent: grp-external-application-load-balancer, at: [2, 2]}
+- {id: app-url-map, type: gcp.res.google_compute_url_map, name: app-url-map, parent: grp-external-application-load-balancer, props: {name: changeme}, at: [1, 3]}
+- {id: app-backend, type: gcp.res.google_compute_backend_service, name: app-backend, parent: grp-external-application-load-balancer, props: {name: changeme}, at: [1, 4]}
+- {id: app-edge-policy, type: gcp.res.google_compute_security_policy, name: app-edge-policy, parent: grp-external-application-load-balancer, props: {name: changeme}, at: [2, 4]}
+- {id: app-neg-ew1, type: gcp.res.google_compute_region_network_endpoint_group, name: app-neg-ew1, parent: grp-region-europe-west1, props: {name: changeme, region: eu-west-1}, at: [1, 1]}
+- {id: app-ew1, type: gcp.cloud_run_service, name: app-ew1, parent: grp-region-europe-west1, at: [1, 2]}
+- {id: app-neg-ew4, type: gcp.res.google_compute_region_network_endpoint_group, name: app-neg-ew4, parent: grp-region-europe-west4, props: {name: changeme, region: eu-west-1}, at: [1, 1]}
+- {id: app-ew4, type: gcp.cloud_run_service, name: app-ew4, parent: grp-region-europe-west4, at: [1, 2]}
 edges:
-- {from: users, to: app-https-rule, label: HTTPS, step: '1'}
+- {from: internet, to: app-https-rule, label: HTTPS, step: '1'}
 - {from: app-https-rule, to: app-https-proxy, step: '2'}
-- {from: app-cert, to: app-https-proxy}
+- {from: app-cert, to: app-https-proxy, label: SSL certificate}
 - {from: app-https-proxy, to: app-url-map, step: '3'}
 - {from: app-url-map, to: app-backend, label: Cloud CDN enabled, step: '4'}
 - {from: app-edge-policy, to: app-backend, label: Cloud Armor rules}
@@ -39,7 +41,7 @@ edges:
 - {from: app-neg-ew1, to: app-ew1, step: '6'}
 - {from: app-neg-ew4, to: app-ew4}
 steps:
-- {n: '1', text: 'users → app-https-rule: HTTPS'}
+- {n: '1', text: 'internet → app-https-rule: HTTPS'}
 - {n: '2', text: app-https-rule → app-https-proxy}
 - {n: '3', text: app-https-proxy → app-url-map}
 - {n: '4', text: 'app-url-map → app-backend: Cloud CDN enabled'}

@@ -10,57 +10,75 @@ tags:
 - 99.999
 image: https://docs.cloud.google.com/static/architecture/images/multiregional-ra-gclb.svg
 source: https://docs.cloud.google.com/architecture/multiregional-vms
-description: A global external Application Load Balancer sends users to the closest healthy region, where regional managed instance groups spread across three zones run the web and application tiers in
-  isolated stacks. A Spanner multi-region instance in the nam3 configuration keeps read-write replicas in us-east4 and us-east1 with a witness in us-central1, giving both regions strongly consistent access
-  to one database and a 99.999% availability SLA.
+description: A global external Application Load Balancer sends application users to the closest healthy region, where a regional managed instance group spread across three zones runs the web tier, a regional
+  internal load balancer hands requests to a second regional managed instance group running the application tier, and both regions share one VPC. In place of the reference's replicated PostgreSQL VMs, a
+  Spanner multi-region instance in the nam3 configuration keeps read-write replicas in us-east4 and us-east1 with a witness in us-central1, giving both regions strongly consistent access to one database
+  and a 99.999% availability SLA, while dual-region Cloud Storage buckets hold shared assets.
 nodes:
 - {id: prj-prj-p-global-app, type: gcp.project, name: prj-p-global-app, props: {project_id: prj-p-global-app-123456, project: changeme, region: us-east4}, at: [2, 1]}
-- {id: vpc-global-app-vpc, type: gcp.vpc, name: global-app-vpc, parent: prj-prj-p-global-app, at: [2, 1, 1, 3]}
+- {id: vpc-global-app-vpc, type: gcp.vpc, name: global-app-vpc, parent: prj-prj-p-global-app, at: [2, 1, 1, 2]}
 - {id: sub-app-sub-use4, type: gcp.subnetwork, name: app-sub-use4, parent: vpc-global-app-vpc, props: {cidr: 10.120.0.0/22, region: us-east4}, at: [2, 1]}
 - {id: sub-app-sub-use1, type: gcp.subnetwork, name: app-sub-use1, parent: vpc-global-app-vpc, props: {cidr: 10.120.4.0/22, region: us-east1}, at: [2, 2]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: global-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: global-https-rule, parent: prj-prj-p-global-app, props: {name: changeme, target: changeme}, at: [1, 1]}
+- {id: application-users, type: common.users, name: Application Users, at: [1, 1]}
+- {id: global-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: global-https-rule, parent: prj-prj-p-global-app, props: {name: changeme, target: changeme}, at: [1, 1, 1, 2]}
 - {id: app-global-backend, type: gcp.res.google_compute_backend_service, name: app-global-backend, parent: vpc-global-app-vpc, props: {name: changeme}, at: [1, 1, 1, 2]}
-- {id: app-armor-policy, type: gcp.res.google_compute_security_policy, name: app-armor-policy, parent: prj-prj-p-global-app, props: {name: changeme}, at: [1, 2]}
 - id: web-mig-use4
   type: gcp.res.google_compute_region_instance_group_manager
   name: web-mig-use4
   parent: sub-app-sub-use4
-  at: [1, 1]
-  props:
-    base_instance_name: changeme
-    name: changeme
-    version: []
+  props: {base_instance_name: changeme, name: changeme, version: []}
+  at:
+  - 1
+  - 1
+- {id: app-ilb-use4, type: gcp.res.google_compute_forwarding_rule, name: app-ilb-use4, parent: sub-app-sub-use4, props: {name: changeme}, at: [2, 1]}
+- id: app-mig-use4
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: app-mig-use4
+  parent: sub-app-sub-use4
+  props: {base_instance_name: changeme, name: changeme, version: []}
+  at:
+  - 3
+  - 1
 - id: web-mig-use1
   type: gcp.res.google_compute_region_instance_group_manager
   name: web-mig-use1
   parent: sub-app-sub-use1
-  at: [1, 1]
-  props:
-    base_instance_name: changeme
-    name: changeme
-    version: []
-- {id: app-health-check, type: gcp.res.google_compute_health_check, name: app-health-check, parent: prj-prj-p-global-app, props: {name: changeme}, at: [1, 3]}
+  props: {base_instance_name: changeme, name: changeme, version: []}
+  at:
+  - 1
+  - 1
+- {id: app-ilb-use1, type: gcp.res.google_compute_forwarding_rule, name: app-ilb-use1, parent: sub-app-sub-use1, props: {name: changeme}, at: [2, 1]}
+- id: app-mig-use1
+  type: gcp.res.google_compute_region_instance_group_manager
+  name: app-mig-use1
+  parent: sub-app-sub-use1
+  props: {base_instance_name: changeme, name: changeme, version: []}
+  at:
+  - 3
+  - 1
 - {id: orders-spanner-nam3, type: gcp.res.google_spanner_instance, name: orders-spanner-nam3, parent: prj-prj-p-global-app, props: {config: changeme, display_name: changeme}, at: [3, 1]}
 - {id: orders-db, type: gcp.res.google_spanner_database, name: orders-db, parent: prj-prj-p-global-app, props: {instance: changeme, name: changeme}, at: [3, 2]}
-- {id: assets-dual-region, type: gcp.storage_bucket, name: assets-dual-region, parent: prj-prj-p-global-app, at: [3, 3]}
+- {id: assets-dual-region, type: gcp.storage_bucket, name: assets-dual-region, parent: prj-prj-p-global-app, at: [4, 1, 1, 2]}
 edges:
-- {from: users, to: global-https-rule, label: HTTPS anycast, step: '1'}
-- {from: global-https-rule, to: app-armor-policy, label: WAF, step: '2'}
-- {from: app-armor-policy, to: app-global-backend, label: allowed, step: '3'}
-- {from: app-global-backend, to: web-mig-use4, label: nearest region, step: '4'}
-- {from: app-global-backend, to: web-mig-use1, label: nearest region / failover, step: '4'}
-- {from: app-health-check, to: web-mig-use4, label: health, step: '5'}
-- {from: web-mig-use4, to: orders-db, label: strongly consistent reads and writes, step: '6'}
-- {from: web-mig-use1, to: orders-db, label: strongly consistent reads and writes, step: '6'}
+- {from: application-users, to: global-https-rule, label: HTTPS anycast, step: '1'}
+- {from: global-https-rule, to: app-global-backend, label: closest healthy region, step: '2'}
+- {from: app-global-backend, to: web-mig-use4, label: web tier region AA, step: '3'}
+- {from: app-global-backend, to: web-mig-use1, label: web tier region BB, step: '3'}
+- {from: web-mig-use4, to: app-ilb-use4, label: regional internal load balancer, step: '4'}
+- {from: web-mig-use1, to: app-ilb-use1, label: regional internal load balancer, step: '4'}
+- {from: app-ilb-use4, to: app-mig-use4, label: application tier, step: '5'}
+- {from: app-ilb-use1, to: app-mig-use1, label: application tier, step: '5'}
+- {from: app-mig-use4, to: orders-db, label: strongly consistent reads and writes, step: '6'}
+- {from: app-mig-use1, to: orders-db, label: strongly consistent reads and writes, step: '6'}
 - {from: orders-spanner-nam3, to: orders-db, label: nam3 read-write replicas plus witness, step: '7'}
-- {from: web-mig-use1, to: assets-dual-region, label: static assets, step: '8'}
+- {from: app-mig-use4, to: assets-dual-region, label: dual-region buckets, step: '8'}
+- {from: app-mig-use1, to: assets-dual-region, label: dual-region buckets, step: '8'}
 steps:
-- {n: '1', text: 'users → global-https-rule: HTTPS anycast'}
-- {n: '2', text: 'global-https-rule → app-armor-policy: WAF'}
-- {n: '3', text: 'app-armor-policy → app-global-backend: allowed'}
-- {n: '4', text: 'app-global-backend → web-mig-use4: nearest region'}
-- {n: '5', text: 'app-health-check → web-mig-use4: health'}
-- {n: '6', text: 'web-mig-use4 → orders-db: strongly consistent reads and writes'}
+- {n: '1', text: 'Application Users → global-https-rule: HTTPS anycast'}
+- {n: '2', text: 'global-https-rule → app-global-backend: closest healthy region'}
+- {n: '3', text: 'app-global-backend → web-mig-use4: web tier region AA'}
+- {n: '4', text: 'web-mig-use4 → app-ilb-use4: regional internal load balancer'}
+- {n: '5', text: 'app-ilb-use4 → app-mig-use4: application tier'}
+- {n: '6', text: 'app-mig-use4 → orders-db: strongly consistent reads and writes'}
 - {n: '7', text: 'orders-spanner-nam3 → orders-db: nam3 read-write replicas plus witness'}
-- {n: '8', text: 'web-mig-use1 → assets-dual-region: static assets'}
+- {n: '8', text: 'app-mig-use4 → assets-dual-region: dual-region buckets'}

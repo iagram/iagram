@@ -9,35 +9,40 @@ tags:
 - archive
 image: https://d2908q01vomqb2.cloudfront.net/1b6453892473a467d07372d45eb05abc2031647a/2020/11/18/res-pol1-1024x388.png
 source: https://aws.amazon.com/blogs/compute/simplifying-cross-account-access-with-amazon-eventbridge-resource-policies
-description: Producer accounts forward domain events from their local event bus to a central bus in a shared account; a resource policy on the central bus grants PutEvents to the organization. Rules on
-  the central bus route events on to consumer-account buses and an archive keeps a replayable copy.
+description: A Lambda function in a web-store producer account publishes "New order created" events straight to a central event bus in a shared account; a resource policy on the central bus grants PutEvents
+  to the organization. Rules on the central bus subscribe consumer accounts, forwarding the event to an invoice-processing bus whose rule invokes a Lambda function and to a forecasting bus whose rule starts
+  a Step Functions workflow.
 nodes:
-- {id: acct-orders-producer, type: aws.account, name: orders-producer, at: [1, 1]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-orders-producer, props: {region: us-east-1}}
+- {id: acct-web-store, type: aws.account, name: web-store, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-web-store, props: {region: us-east-1}, at: [1, 1]}
 - {id: acct-central-events, type: aws.account, name: central-events, at: [1, 2]}
-- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-central-events, props: {region: us-east-1}}
-- {id: acct-billing-consumer, type: aws.account, name: billing-consumer, at: [1, 3]}
-- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-billing-consumer, props: {region: us-east-1}}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-central-events, props: {region: us-east-1}, at: [1, 1]}
+- {id: acct-invoice-processing, type: aws.account, name: invoice-processing, at: [1, 3]}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-invoice-processing, props: {region: us-east-1}, at: [1, 1]}
+- {id: acct-forecasting, type: aws.account, name: forecasting, at: [2, 3]}
+- {id: reg-us-east-1-4, type: aws.region, name: us-east-1, parent: acct-forecasting, props: {region: us-east-1}, at: [1, 1]}
 - {id: order-service, type: aws.lambda_function, name: order-service, parent: reg-us-east-1, at: [1, 1]}
-- {id: orders-local-bus, type: aws.res.aws_cloudwatch_event_bus, name: orders-local-bus, parent: acct-orders-producer, props: {name: changeme}, at: [1, 2]}
-- {id: forward-to-central, type: aws.res.aws_cloudwatch_event_rule, name: forward-to-central, parent: acct-orders-producer, at: [1, 3]}
-- {id: central-bus, type: aws.res.aws_cloudwatch_event_bus, name: central-bus, parent: acct-central-events, props: {name: changeme}, at: [1, 1, 2, 1]}
-- {id: central-archive, type: aws.res.aws_cloudwatch_event_archive, name: central-archive, parent: acct-central-events, props: {event_source_arn: changeme, name: changeme}, at: [2, 2]}
-- {id: route-order-created, type: aws.res.aws_cloudwatch_event_rule, name: route-order-created, parent: acct-central-events, at: [1, 2]}
-- {id: billing-bus, type: aws.res.aws_cloudwatch_event_bus, name: billing-bus, parent: acct-billing-consumer, props: {name: changeme}, at: [1, 1]}
-- {id: invoice-on-order, type: aws.res.aws_cloudwatch_event_rule, name: invoice-on-order, parent: acct-billing-consumer, at: [1, 2]}
-- {id: billing-service, type: aws.lambda_function, name: billing-service, parent: reg-us-east-1-3, at: [1, 3]}
+- {id: ecommerce-event-bus, type: aws.res.aws_cloudwatch_event_bus, name: ecommerce-event-bus, parent: acct-central-events, props: {name: changeme}, at: [1, 1, 2, 1]}
+- {id: route-to-invoicing, type: aws.res.aws_cloudwatch_event_rule, name: route-to-invoicing, parent: acct-central-events, at: [1, 2]}
+- {id: route-to-forecasting, type: aws.res.aws_cloudwatch_event_rule, name: route-to-forecasting, parent: acct-central-events, at: [2, 2]}
+- {id: invoicing-bus, type: aws.res.aws_cloudwatch_event_bus, name: invoicing-bus, parent: acct-invoice-processing, props: {name: changeme}, at: [1, 1]}
+- {id: invoice-rule, type: aws.res.aws_cloudwatch_event_rule, name: invoice-rule, parent: acct-invoice-processing, at: [1, 2]}
+- {id: invoice-service, type: aws.lambda_function, name: invoice-service, parent: reg-us-east-1-3, at: [1, 3]}
+- {id: forecasting-bus, type: aws.res.aws_cloudwatch_event_bus, name: forecasting-bus, parent: acct-forecasting, props: {name: changeme}, at: [1, 1]}
+- {id: forecasting-rule, type: aws.res.aws_cloudwatch_event_rule, name: forecasting-rule, parent: acct-forecasting, at: [1, 2]}
+- {id: forecast-workflow, type: aws.res.aws_sfn_state_machine, name: forecast-workflow, parent: acct-forecasting, props: {definition: changeme, role_arn: changeme}, at: [1, 3]}
 edges:
-- {from: order-service, to: orders-local-bus, label: PutEvents OrderCreated, step: '1'}
-- {from: orders-local-bus, to: forward-to-central, label: match source, step: '2'}
-- {from: forward-to-central, to: central-bus, link: aws_cloudwatch_event_target}
-- {from: central-bus, to: central-archive, label: archive all events}
-- {from: central-bus, to: route-order-created, label: detail-type OrderCreated, step: '3'}
-- {from: route-order-created, to: billing-bus, link: aws_cloudwatch_event_target}
-- {from: billing-bus, to: invoice-on-order, step: '4'}
-- {from: invoice-on-order, to: billing-service, link: aws_cloudwatch_event_target}
+- {from: order-service, to: ecommerce-event-bus, label: publishes New order created, step: '1'}
+- {from: ecommerce-event-bus, to: route-to-invoicing, label: rules, step: '2'}
+- {from: ecommerce-event-bus, to: route-to-forecasting, label: rules}
+- {from: route-to-invoicing, to: invoicing-bus, label: subscribes New order created, step: '3', link: aws_cloudwatch_event_target}
+- {from: route-to-forecasting, to: forecasting-bus, label: subscribes New order created, link: aws_cloudwatch_event_target}
+- {from: invoicing-bus, to: invoice-rule, label: Invoice rule, step: '4'}
+- {from: invoice-rule, to: invoice-service, link: aws_cloudwatch_event_target}
+- {from: forecasting-bus, to: forecasting-rule, label: Forecasting rule}
+- {from: forecasting-rule, to: forecast-workflow, link: aws_cloudwatch_event_target}
 steps:
-- {n: '1', text: 'order-service → orders-local-bus: PutEvents OrderCreated'}
-- {n: '2', text: 'orders-local-bus → forward-to-central: match source'}
-- {n: '3', text: 'central-bus → route-order-created: detail-type OrderCreated'}
-- {n: '4', text: billing-bus → invoice-on-order}
+- {n: '1', text: 'order-service → ecommerce-event-bus: publishes New order created'}
+- {n: '2', text: 'ecommerce-event-bus → route-to-invoicing: rules'}
+- {n: '3', text: 'route-to-invoicing → invoicing-bus: subscribes New order created'}
+- {n: '4', text: 'invoicing-bus → invoice-rule: Invoice rule'}

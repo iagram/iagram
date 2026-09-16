@@ -10,58 +10,65 @@ tags:
 - hybrid dns
 image: https://learn.microsoft.com/en-us/azure/architecture/networking/architecture/_images/dns-forwarder-architecture.svg
 source: https://learn.microsoft.com/en-us/azure/architecture/networking/architecture/azure-dns-private-resolver
-description: DNS Private Resolver in the hub virtual network replaces DNS forwarder VMs, with an inbound endpoint that on-premises servers target through conditional forwarders and an outbound endpoint
-  that forwards Azure queries for on-premises domains through a DNS forwarding ruleset. Private DNS zones for private endpoint services are linked to the hub and spoke virtual networks, and ExpressRoute
-  or VPN with Azure Firewall provides the secured hybrid path.
+description: An on-premises client asks the internal DNS server for a SQL Database name, a conditional forwarder for database.windows.net sends the query to the hub virtual network, where a DNS forwarder
+  virtual machine (or the inbound endpoint of Azure DNS Private Resolver, which replaces it) hands it to Azure-provided DNS at 168.63.129.16; the Azure recursive resolver answers from the privatelink.database.windows.net
+  private DNS zone linked to the hub, and the private endpoint IP travels back to the client, which then reaches the database over ExpressRoute or VPN. The resolver outbound endpoint forwards queries for
+  on-premises domains back to the internal DNS server through a DNS forwarding ruleset.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 1]}
-- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1]}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [3, 1]}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1, 1, 3]}
 - {id: rg-rg-hub-dns, type: azure.resource_group, name: rg-hub-dns, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
-- {id: vpc-hub-dns, type: azure.vnet, name: hub-dns, parent: rg-rg-hub-dns, props: {cidr: 10.0.0.0/24}, at: [2, 1, 1, 2]}
-- {id: sub-snet-dns-inbound, type: azure.subnet, name: snet-dns-inbound, parent: vpc-hub-dns, props: {cidr: 10.0.0.0/28}, at: [2, 1]}
-- {id: sub-snet-dns-outbound, type: azure.subnet, name: snet-dns-outbound, parent: vpc-hub-dns, props: {cidr: 10.0.0.16/28}, at: [2, 2]}
-- {id: sub-dns-gatewaysubnet, type: azure.subnet, name: dns-GatewaySubnet, parent: vpc-hub-dns, props: {cidr: 10.0.0.64/27}, at: [3, 1]}
-- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub-dns, props: {cidr: 10.0.0.128/26}, at: [3, 2]}
-- {id: sub-landing-zone, type: azure.subscription, name: landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
-- {id: rg-rg-spokes-dns, type: azure.resource_group, name: rg-spokes-dns, parent: sub-landing-zone, props: {location: westeurope}, at: [1, 1]}
-- {id: vpc-spoke-1, type: azure.vnet, name: spoke-1, parent: rg-rg-spokes-dns, props: {cidr: 10.1.0.0/24}, at: [1, 1]}
-- {id: sub-snet-spoke-1, type: azure.subnet, name: snet-spoke-1, parent: vpc-spoke-1, props: {cidr: 10.1.0.0/25}, at: [1, 1]}
-- {id: vpc-spoke-2, type: azure.vnet, name: spoke-2, parent: rg-rg-spokes-dns, props: {cidr: 10.2.0.0/24}, at: [2, 1]}
-- {id: sub-snet-spoke-2, type: azure.subnet, name: snet-spoke-2, parent: vpc-spoke-2, props: {cidr: 10.2.0.0/25}, at: [1, 1]}
-- {id: dns-resolver, type: azure.res.azurerm_private_dns_resolver, name: dns-resolver, parent: vpc-hub-dns, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_network_id: changeme}, at: [1, 1, 1, 2]}
+- {id: vpc-hub-dns, type: azure.vnet, name: hub-dns, parent: rg-rg-hub-dns, props: {cidr: 10.5.0.0/24}, at: [2, 1, 1, 2]}
+- {id: sub-snet-consumer, type: azure.subnet, name: snet-consumer, parent: vpc-hub-dns, props: {cidr: 10.5.0.0/25}, at: [1, 1, 1, 2]}
+- {id: sub-snet-dns-inbound, type: azure.subnet, name: snet-dns-inbound, parent: vpc-hub-dns, props: {cidr: 10.5.0.128/27}, at: [2, 1]}
+- {id: sub-dns-gatewaysubnet, type: azure.subnet, name: dns-GatewaySubnet, parent: vpc-hub-dns, props: {cidr: 10.5.0.192/27}, at: [2, 2]}
+- {id: azure-provided-dns-168-63-129-16, type: common.saas, name: Azure-provided DNS 168.63.129.16, at: [1, 2]}
+- {id: azure-recursive-resolver, type: common.saas, name: Azure recursive resolver, at: [1, 3]}
+- {id: on-premises-internal-dns-10-0-0-254, type: common.server, name: On-premises internal DNS 10.0.0.254, at: [3, 2]}
+- {id: on-premises-client-vm, type: common.client, name: On-premises client VM, at: [3, 3]}
+- {id: pdz-database, type: azure.res.azurerm_private_dns_zone, name: pdz-database, parent: rg-rg-hub-dns, props: {name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: sql-consumer, type: azure.res.azurerm_mssql_server, name: sql-consumer, parent: rg-rg-hub-dns, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}, at: [
+    1, 2]}
+- {id: dns-forwarder-vm, type: azure.virtual_machine, name: dns-forwarder-vm, parent: sub-snet-consumer, at: [1, 1]}
+- id: pe-sql
+  type: azure.res.azurerm_private_endpoint
+  name: pe-sql
+  parent: sub-snet-consumer
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 2
+- {id: dns-resolver, type: azure.res.azurerm_private_dns_resolver, name: dns-resolver, parent: sub-snet-dns-inbound, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_network_id: changeme},
+  at: [1, 1]}
 - id: ergw-dns
   type: azure.res.azurerm_virtual_network_gateway
   name: ergw-dns
   parent: sub-dns-gatewaysubnet
-  at: [1, 1]
-  props:
-    ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: changeme
-    type: changeme
-- {id: fw-hub-dns, type: azure.res.azurerm_firewall, name: fw-hub-dns, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [1, 1]}
-- {id: pdz-blob, type: azure.res.azurerm_private_dns_zone, name: pdz-blob, parent: rg-rg-hub-dns, props: {name: changeme, resource_group_name: changeme}, at: [1, 1]}
-- {id: pdz-apim, type: azure.res.azurerm_private_dns_zone, name: pdz-apim, parent: rg-rg-hub-dns, props: {name: changeme, resource_group_name: changeme}, at: [1, 2]}
-- {id: vm-1, type: azure.virtual_machine, name: vm-1, parent: sub-snet-spoke-1, at: [1, 1]}
-- {id: vm-2, type: azure.virtual_machine, name: vm-2, parent: sub-snet-spoke-2, at: [1, 1]}
-- id: pe-blob
-  type: azure.res.azurerm_private_endpoint
-  name: pe-blob
-  parent: sub-snet-spoke-1
-  at: [1, 2]
-  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: st-data, type: azure.storage_account, name: st-data, parent: rg-rg-spokes-dns, at: [1, 2]}
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme, type: changeme}
+  at:
+  - 1
+  - 1
 edges:
-- {from: vpc-hub-dns, to: vpc-spoke-1, link: azurerm_virtual_network_peering}
-- {from: vpc-hub-dns, to: vpc-spoke-2, link: azurerm_virtual_network_peering}
-- {from: pdz-blob, to: vpc-hub-dns, label: privatelink.blob.core.windows.net, link: azurerm_private_dns_zone_virtual_network_link}
-- {from: pdz-blob, to: vpc-spoke-1, link: azurerm_private_dns_zone_virtual_network_link}
-- {from: pdz-apim, to: vpc-hub-dns, label: privatelink.azure-api.net, link: azurerm_private_dns_zone_virtual_network_link}
-- {from: dc-on-premises, to: ergw-dns, label: ExpressRoute / S2S VPN, step: '1'}
-- {from: vm-1, to: pe-blob, label: private IP 10.1.0.5}
-- {from: pe-blob, to: st-data, label: Private Link}
-- {from: fw-hub-dns, to: vm-2, label: spoke traffic through hub firewall}
+- {from: pdz-database, to: vpc-hub-dns, label: virtual network link (privatelink.database.windows.net), link: azurerm_private_dns_zone_virtual_network_link}
+- {from: on-premises-client-vm, to: on-premises-internal-dns-10-0-0-254, label: query sqlserver.database.windows.net, step: '1'}
+- {from: on-premises-internal-dns-10-0-0-254, to: dns-forwarder-vm, label: conditional forwarder for database.windows.net, step: '2'}
+- {from: dns-forwarder-vm, to: azure-provided-dns-168-63-129-16, label: forward to Azure-provided DNS, step: '3'}
+- {from: azure-provided-dns-168-63-129-16, to: azure-recursive-resolver, label: recursive resolution, step: '4'}
+- {from: azure-provided-dns-168-63-129-16, to: pdz-database, label: lookup in the linked private DNS zone, step: '5'}
+- {from: azure-provided-dns-168-63-129-16, to: dns-forwarder-vm, label: private endpoint IP 10.5.0.5, step: '6'}
+- {from: dns-forwarder-vm, to: on-premises-internal-dns-10-0-0-254, label: response, step: '7'}
+- {from: on-premises-internal-dns-10-0-0-254, to: on-premises-client-vm, label: 10.5.0.5, step: '8'}
+- {from: pe-sql, to: sql-consumer, label: Private Link}
+- {from: dc-on-premises, to: ergw-dns, label: ExpressRoute or S2S VPN (private connection)}
+- {from: ergw-dns, to: pe-sql, label: private connection to 10.5.0.5}
+- {from: on-premises-internal-dns-10-0-0-254, to: dns-resolver, label: conditional forwarder to the resolver inbound endpoint (replaces the forwarder VM)}
+- {from: dns-resolver, to: dc-on-premises, label: outbound endpoint forwards on-premises domains (forwarding ruleset)}
 steps:
-- {n: '1', text: 'datacenter → ergw-dns: ExpressRoute / S2S VPN'}
+- {n: '1', text: 'On-premises client VM → On-premises internal DNS 10.0.0.254: query sqlserver.database.windows.net'}
+- {n: '2', text: 'On-premises internal DNS 10.0.0.254 → dns-forwarder-vm: conditional forwarder for database.windows.net'}
+- {n: '3', text: 'dns-forwarder-vm → Azure-provided DNS 168.63.129.16: forward to Azure-provided DNS'}
+- {n: '4', text: 'Azure-provided DNS 168.63.129.16 → Azure recursive resolver: recursive resolution'}
+- {n: '5', text: 'Azure-provided DNS 168.63.129.16 → pdz-database: lookup in the linked private DNS zone'}
+- {n: '6', text: 'Azure-provided DNS 168.63.129.16 → dns-forwarder-vm: private endpoint IP 10.5.0.5'}
+- {n: '7', text: 'dns-forwarder-vm → On-premises internal DNS 10.0.0.254: response'}
+- {n: '8', text: 'On-premises internal DNS 10.0.0.254 → On-premises client VM: 10.5.0.5'}

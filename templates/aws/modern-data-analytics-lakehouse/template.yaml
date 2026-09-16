@@ -11,71 +11,106 @@ tags:
 - quicksight
 image: https://docs.aws.amazon.com/images/reference-architecture-diagrams/latest/modern-data-analytics-on-aws/images/modern-data-analytics-on-aws.png
 source: https://docs.aws.amazon.com/architecture-diagrams/latest/modern-data-analytics-on-aws/modern-data-analytics-on-aws.html
-description: Enterprise, SaaS, device and file sources are ingested through DMS, DataSync, Kinesis and Transfer Family into an S3 data lake registered with Lake Formation and catalogued in the Glue Data
-  Catalog. Glue transforms the data, EMR and Redshift process it, and Athena, Redshift Spectrum, QuickSight and OpenSearch consume it under Lake Formation governance.
+description: Enterprise databases, file shares, devices, logs, social and media feeds, SaaS applications and flat files are ingested through DMS, DataSync, Kinesis, MSK, IoT Core, AppFlow and Transfer Family,
+  joined by third-party datasets from AWS Data Exchange, into an S3 data lake registered with Lake Formation and catalogued in the Glue Data Catalog. Glue moves and transforms the data, and purpose-built
+  services (Kinesis Data Analytics, QuickSight, OpenSearch, Redshift and Redshift Spectrum, EMR, SageMaker, Athena and Aurora) consume it under Lake Formation governance.
 nodes:
 - {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1]}
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 3, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1, at: [1, 1]}
-- {id: grp-lake-storage-and-governance, type: common.group, name: lake storage and governance, parent: reg-us-east-1, at: [1, 2]}
-- {id: grp-consumption, type: common.group, name: consumption, parent: reg-us-east-1, at: [1, 3]}
-- {id: vpc-analytics, type: aws.vpc, name: analytics, parent: reg-us-east-1, props: {cidr: 10.20.0.0/16}, at: [2, 1, 1, 3]}
-- {id: az-analytics-a, type: aws.availability_zone, name: a, parent: vpc-analytics, props: {zone: a}, at: [1, 1]}
-- {id: sub-analytics-private-a, type: aws.subnet, name: analytics-private-a, parent: az-analytics-a, props: {cidr: 10.20.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-analytics-b, type: aws.availability_zone, name: b, parent: vpc-analytics, props: {zone: b}, at: [1, 2]}
-- {id: sub-analytics-private-b, type: aws.subnet, name: analytics-private-b, parent: az-analytics-b, props: {cidr: 10.20.2.0/24, az: b, public: false}, at: [1, 1]}
-- {id: saas, type: common.saas, name: saas, at: [3, 1]}
+- {id: grp-data-ingestion, type: common.group, name: data ingestion, parent: reg-us-east-1, at: [1, 1, 2, 1]}
+- {id: grp-scalable-data-lake, type: common.group, name: scalable data lake, parent: reg-us-east-1, at: [2, 2]}
+- {id: grp-seamless-data-movement, type: common.group, name: seamless data movement, parent: reg-us-east-1, at: [2, 3]}
+- {id: grp-purpose-built-analytics-and-insights, type: common.group, name: purpose-built analytics and insights, parent: reg-us-east-1, at: [1, 4, 2, 1]}
 - {id: device, type: common.device, name: device, at: [2, 1]}
+- {id: saas, type: common.saas, name: saas, at: [3, 1]}
 - {id: users, type: common.users, name: users, at: [2, 3]}
-- {id: dms-replication, type: aws.res.aws_dms_replication_instance, name: dms-replication, parent: sub-analytics-private-a, props: {replication_instance_class: changeme, replication_instance_id: changeme}, at: [1, 1]}
-- {id: datasync-files, type: aws.res.aws_datasync_task, name: datasync-files, parent: grp-ingestion, props: {destination_location_arn: changeme, source_location_arn: changeme}, at: [1, 1]}
-- {id: event-stream, type: aws.res.aws_kinesis_stream, name: event-stream, parent: grp-ingestion, props: {name: changeme}, at: [2, 1]}
-- {id: sftp-endpoint, type: aws.res.aws_transfer_server, name: sftp-endpoint, parent: grp-ingestion, at: [3, 1]}
-- {id: data-lake, type: aws.s3_bucket, name: data-lake, parent: grp-lake-storage-and-governance, at: [1, 1]}
-- {id: lake-formation-location, type: aws.res.aws_lakeformation_resource, name: lake-formation-location, parent: grp-lake-storage-and-governance, props: {arn: changeme}, at: [3, 1]}
-- {id: lake-catalog, type: aws.res.aws_glue_catalog_database, name: lake-catalog, parent: grp-lake-storage-and-governance, props: {name: changeme}, at: [2, 1]}
+- {id: dms-replication, type: aws.res.aws_dms_replication_instance, name: dms-replication, parent: grp-data-ingestion, props: {replication_instance_class: changeme, replication_instance_id: changeme}, at: [
+    1, 1]}
+- {id: datasync-files, type: aws.res.aws_datasync_task, name: datasync-files, parent: grp-data-ingestion, props: {destination_location_arn: changeme, source_location_arn: changeme}, at: [2, 1]}
+- {id: event-stream, type: aws.res.aws_kinesis_stream, name: event-stream, parent: grp-data-ingestion, props: {name: changeme}, at: [3, 1]}
+- id: msk-stream
+  type: aws.res.aws_msk_cluster
+  name: msk-stream
+  parent: grp-data-ingestion
+  props: {broker_node_group_info: {}, cluster_name: changeme, kafka_version: changeme, number_of_broker_nodes: 1}
+  at:
+  - 4
+  - 1
+- {id: iot-core-ingest, type: aws.res.aws_iot_topic_rule, name: iot-core-ingest, parent: grp-data-ingestion, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}, at: [5, 1]}
+- id: appflow-saas
+  type: aws.res.aws_appflow_flow
+  name: appflow-saas
+  parent: grp-data-ingestion
+  props: {destination_flow_config: [], name: changeme, source_flow_config: {}, task: [], trigger_config: {}}
+  at:
+  - 6
+  - 1
+- {id: sftp-endpoint, type: aws.res.aws_transfer_server, name: sftp-endpoint, parent: grp-data-ingestion, at: [7, 1]}
+- {id: data-exchange, type: aws.res.aws_dataexchange_data_set, name: data-exchange, parent: reg-us-east-1, props: {asset_type: changeme, description: changeme, name: changeme}, at: [1, 2]}
+- {id: data-lake, type: aws.s3_bucket, name: data-lake, parent: grp-scalable-data-lake, at: [1, 1]}
+- {id: lake-catalog, type: aws.res.aws_glue_catalog_database, name: lake-catalog, parent: grp-scalable-data-lake, props: {name: changeme}, at: [2, 1]}
+- {id: lake-formation-location, type: aws.res.aws_lakeformation_resource, name: lake-formation-location, parent: grp-scalable-data-lake, props: {arn: changeme}, at: [3, 1]}
 - id: glue-etl
   type: aws.res.aws_glue_job
   name: glue-etl
-  parent: grp-lake-storage-and-governance
-  at: [1, 2, 3, 1]
+  parent: grp-seamless-data-movement
   props: {command: {}, name: changeme, role_arn: changeme}
-- {id: emr-spark, type: aws.res.aws_emr_cluster, name: emr-spark, parent: sub-analytics-private-b, props: {name: changeme, release_label: changeme, service_role: changeme}, at: [1, 1]}
-- {id: redshift-dw, type: aws.res.aws_redshift_cluster, name: redshift-dw, parent: sub-analytics-private-a, props: {cluster_identifier: changeme, node_type: changeme}, at: [2, 1]}
-- {id: opensearch-ops, type: aws.res.aws_opensearch_domain, name: opensearch-ops, parent: sub-analytics-private-b, props: {domain_name: changeme}, at: [2, 1]}
-- {id: athena-analytics, type: aws.res.aws_athena_workgroup, name: athena-analytics, parent: grp-consumption, props: {name: changeme}, at: [2, 1]}
-- id: quicksight-bi
-  type: aws.res.aws_quicksight_data_source
-  name: quicksight-bi
-  parent: grp-consumption
-  at: [1, 1]
-  props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+  at:
+  - 1
+  - 1
+- {id: kinesis-analytics, type: aws.res.aws_kinesisanalyticsv2_application, name: kinesis-analytics, parent: grp-purpose-built-analytics-and-insights, props: {name: changeme, runtime_environment: changeme,
+    service_execution_role: changeme}, at: [1, 1]}
+- {id: quicksight-bi, type: aws.res.aws_quicksight_dashboard, name: quicksight-bi, parent: grp-purpose-built-analytics-and-insights, props: {dashboard_id: changeme, name: changeme, version_description: changeme},
+  at: [2, 1]}
+- {id: opensearch-ops, type: aws.res.aws_opensearch_domain, name: opensearch-ops, parent: grp-purpose-built-analytics-and-insights, props: {domain_name: changeme}, at: [3, 1]}
+- {id: redshift-dw, type: aws.res.aws_redshift_cluster, name: redshift-dw, parent: grp-purpose-built-analytics-and-insights, props: {cluster_identifier: changeme, node_type: changeme}, at: [4, 1]}
+- {id: emr-spark, type: aws.res.aws_emr_cluster, name: emr-spark, parent: grp-purpose-built-analytics-and-insights, props: {name: changeme, release_label: changeme, service_role: changeme}, at: [5, 1]}
+- id: sagemaker-ml
+  type: aws.res.aws_sagemaker_domain
+  name: sagemaker-ml
+  parent: grp-purpose-built-analytics-and-insights
+  props: {auth_mode: changeme, default_user_settings: {}, domain_name: changeme, subnet_ids: [], vpc_id: changeme}
+  at:
+  - 6
+  - 1
+- {id: athena-analytics, type: aws.res.aws_athena_workgroup, name: athena-analytics, parent: grp-purpose-built-analytics-and-insights, props: {name: changeme}, at: [7, 1]}
+- {id: aurora-serving, type: aws.res.aws_rds_cluster, name: aurora-serving, parent: grp-purpose-built-analytics-and-insights, props: {engine: changeme}, at: [8, 1]}
 edges:
-- {from: dc-on-premises, to: dms-replication, label: database CDC, step: '1'}
-- {from: dc-on-premises, to: datasync-files, label: file shares, step: '1'}
-- {from: device, to: event-stream, label: telemetry, step: '1'}
+- {from: dc-on-premises, to: dms-replication, label: SQL and NoSQL databases, step: '1'}
+- {from: dc-on-premises, to: datasync-files, label: file shares and flat files, step: '1'}
+- {from: device, to: event-stream, label: devices and logs, step: '1'}
+- {from: device, to: msk-stream, label: social and media streams, step: '1'}
+- {from: device, to: iot-core-ingest, label: IoT telemetry, step: '1'}
+- {from: saas, to: appflow-saas, label: SaaS applications, step: '1'}
 - {from: saas, to: sftp-endpoint, label: SFTP drops, step: '1'}
 - {from: dms-replication, to: data-lake, label: Parquet, step: '2'}
 - {from: datasync-files, to: data-lake, step: '2'}
 - {from: event-stream, to: data-lake, step: '2'}
+- {from: msk-stream, to: data-lake, step: '2'}
+- {from: iot-core-ingest, to: data-lake, step: '2'}
+- {from: appflow-saas, to: data-lake, step: '2'}
 - {from: sftp-endpoint, to: data-lake, step: '2'}
-- {from: lake-formation-location, to: data-lake, label: registered location, step: '3'}
-- {from: glue-etl, to: data-lake, label: transform and enrich, step: '4'}
-- {from: glue-etl, to: lake-catalog, label: catalog tables, step: '4'}
-- {from: emr-spark, to: data-lake, label: Spark processing, step: '5'}
-- {from: redshift-dw, to: lake-catalog, label: Spectrum external schema, step: '5'}
+- {from: data-exchange, to: data-lake, label: third-party datasets, step: '3'}
+- {from: lake-formation-location, to: data-lake, label: registered location, step: '4'}
+- {from: glue-etl, to: data-lake, label: transform and enrich, step: '5'}
+- {from: glue-etl, to: lake-catalog, label: catalog tables, step: '5'}
+- {from: kinesis-analytics, to: event-stream, label: streaming analytics, step: '6'}
+- {from: opensearch-ops, to: data-lake, label: operational analytics, step: '6'}
+- {from: redshift-dw, to: lake-catalog, label: Spectrum external schema, step: '6'}
+- {from: emr-spark, to: data-lake, label: Spark processing, step: '6'}
+- {from: sagemaker-ml, to: data-lake, label: model training, step: '6'}
 - {from: athena-analytics, to: lake-catalog, label: SQL, step: '6'}
+- {from: glue-etl, to: aurora-serving, label: load serving tables, step: '6'}
 - {from: quicksight-bi, to: athena-analytics, step: '7'}
 - {from: quicksight-bi, to: redshift-dw, step: '7'}
-- {from: opensearch-ops, to: data-lake, label: operational analytics}
 - {from: users, to: quicksight-bi, label: dashboards, step: '8'}
 steps:
-- {n: '1', text: 'datacenter → dms-replication: database CDC'}
+- {n: '1', text: 'datacenter → dms-replication: SQL and NoSQL databases'}
 - {n: '2', text: 'dms-replication → data-lake: Parquet'}
-- {n: '3', text: 'lake-formation-location → data-lake: registered location'}
-- {n: '4', text: 'glue-etl → data-lake: transform and enrich'}
-- {n: '5', text: 'emr-spark → data-lake: Spark processing'}
-- {n: '6', text: 'athena-analytics → lake-catalog: SQL'}
+- {n: '3', text: 'data-exchange → data-lake: third-party datasets'}
+- {n: '4', text: 'lake-formation-location → data-lake: registered location'}
+- {n: '5', text: 'glue-etl → data-lake: transform and enrich'}
+- {n: '6', text: 'kinesis-analytics → event-stream: streaming analytics'}
 - {n: '7', text: quicksight-bi → athena-analytics}
 - {n: '8', text: 'users → quicksight-bi: dashboards'}

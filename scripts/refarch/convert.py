@@ -132,6 +132,10 @@ def convert(arch):
         else:
             acct = ensure_account(rootname)
         if first_root is None: first_root = acct
+        if c.get('account_at'):
+            # the account / subscription / project's own cell among the roots
+            for n in nodes:
+                if n['id'] == acct: n['at'] = [int(x) for x in c['account_at']]
         for g in c.get('groups') or []:
             if isinstance(g, dict) and 'accounts' in g:
                 gid = add(f'ou-{g["label"]}', 'aws.organizational_unit', re.sub(r'\s*OU$', '', g['label']), ids['org'])

@@ -12,62 +12,97 @@ tags:
 - landing-zones
 image: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/data/images/unified-data-platform-architecture-ai-analytics.svg
 source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/data/architecture-fabric-data-lake-unify-data-platform
-description: Each data domain owns Fabric workspaces and a Fabric capacity hosted in a data management landing zone, producing governed data products in OneLake with Fabric and Azure Databricks while Microsoft
-  Purview provides the shared catalog, lineage and governance domains. Copilot, Foundry agents, Power BI and data science tools consume the products, and region, disaster recovery and workspace ownership
-  are set as central platform decisions.
+description: Microsoft Entra ID, Agent 365, Purview and Defender govern the whole organization while a platform landing zone with management groups, Azure Policy and Azure Monitor hosts application landing
+  zones per data domain, each owning Fabric capacities, Azure Databricks or Foundry agents that publish governed data products to OneLake. Azure databases are mirrored into Fabric, Foundry agents consume
+  data products through Foundry IQ, and Power BI, data science tools, Copilot Studio and Microsoft 365 Copilot consume them from the OneLake catalog.
 nodes:
 - {id: sub-data-management-landing-zone, type: azure.subscription, name: data-management-landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1, 1, 4]}
 - {id: rg-rg-data-governance, type: azure.resource_group, name: rg-data-governance, parent: sub-data-management-landing-zone, props: {location: westeurope}, at: [1, 1]}
 - {id: grp-shared-governance, type: common.group, name: Shared governance, parent: rg-rg-data-governance, at: [1, 1]}
+- {id: grp-platform-landing-zone, type: common.group, name: Platform landing zone, parent: rg-rg-data-governance, at: [1, 2]}
 - {id: sub-data-domain-sales, type: azure.subscription, name: data-domain-sales, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 2, 2, 1]}
 - {id: rg-rg-domain-sales, type: azure.resource_group, name: rg-domain-sales, parent: sub-data-domain-sales, props: {location: westeurope}, at: [1, 1]}
 - {id: grp-sales-data-products, type: common.group, name: Sales data products, parent: rg-rg-domain-sales, at: [1, 1]}
 - {id: sub-data-domain-supply-chain, type: azure.subscription, name: data-domain-supply-chain, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 3, 2, 1]}
 - {id: rg-rg-domain-supply-chain, type: azure.resource_group, name: rg-domain-supply-chain, parent: sub-data-domain-supply-chain, props: {location: westeurope}, at: [1, 1]}
 - {id: grp-supply-chain-data-products, type: common.group, name: Supply chain data products, parent: rg-rg-domain-supply-chain, at: [1, 1]}
-- {id: database, type: common.database, name: database, at: [2, 1]}
-- {id: saas, type: common.saas, name: saas, at: [3, 1]}
-- {id: users, type: common.users, name: users, at: [2, 4, 2, 1]}
+- {id: microsoft-entra-id, type: common.idp, name: Microsoft Entra ID, at: [2, 1]}
+- {id: microsoft-agent-365, type: common.saas, name: Microsoft Agent 365, at: [3, 1]}
+- {id: users, type: common.users, name: users, at: [2, 4]}
+- {id: microsoft-copilot-studio, type: common.saas, name: Microsoft Copilot Studio, at: [4, 2]}
+- {id: microsoft-365-copilot, type: common.saas, name: Microsoft 365 Copilot, at: [4, 3]}
 - id: pview-enterprise
   type: azure.res.azurerm_purview_account
   name: pview-enterprise
   parent: grp-shared-governance
-  at: [1, 1]
   props: {identity: {}, location: westeurope, name: changeme, resource_group_name: changeme}
-- {id: kv-platform, type: azure.key_vault, name: kv-platform, parent: grp-shared-governance, at: [1, 2]}
-- {id: law-data-platform, type: azure.res.azurerm_log_analytics_workspace, name: law-data-platform, parent: grp-shared-governance, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 3]}
+  at:
+  - 1
+  - 1
+- {id: defender-for-cloud, type: azure.res.azurerm_security_center_subscription_pricing, name: defender-for-cloud, parent: grp-shared-governance, props: {tier: changeme}, at: [1, 2]}
+- {id: mg-platform, type: azure.res.azurerm_management_group, name: mg-platform, parent: grp-platform-landing-zone, at: [1, 1]}
+- {id: mg-landing-zones, type: azure.res.azurerm_management_group, name: mg-landing-zones, parent: grp-platform-landing-zone, at: [1, 2]}
+- {id: policy-platform-guardrails, type: azure.res.azurerm_policy_definition, name: policy-platform-guardrails, parent: grp-platform-landing-zone, props: {display_name: changeme, mode: changeme, name: changeme,
+    policy_type: changeme}, at: [2, 1]}
+- {id: law-data-platform, type: azure.res.azurerm_log_analytics_workspace, name: law-data-platform, parent: grp-platform-landing-zone, props: {location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [2, 2]}
+- {id: sql-sales-mirrored, type: azure.res.azurerm_mssql_server, name: sql-sales-mirrored, parent: grp-sales-data-products, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme},
+  at: [1, 1]}
 - id: fabric-sales-f64
   type: azure.res.azurerm_fabric_capacity
   name: fabric-sales-f64
   parent: grp-sales-data-products
-  at: [2, 1]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
-- {id: stsales-raw, type: azure.storage_account, name: stsales-raw, parent: grp-sales-data-products, at: [1, 1]}
+  at:
+  - 2
+  - 1
+- id: pbi-sales-dashboards
+  type: azure.res.azurerm_powerbi_embedded
+  name: pbi-sales-dashboards
+  parent: grp-sales-data-products
+  props: {administrators: [], location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}
+  at:
+  - 3
+  - 1
+- {id: dbw-supply-engineering, type: azure.res.azurerm_databricks_workspace, name: dbw-supply-engineering, parent: grp-supply-chain-data-products, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}, at: [1, 1]}
 - id: fabric-supply-f32
   type: azure.res.azurerm_fabric_capacity
   name: fabric-supply-f32
   parent: grp-supply-chain-data-products
-  at: [2, 1, 1, 2]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
-- {id: dbw-supply-engineering, type: azure.res.azurerm_databricks_workspace, name: dbw-supply-engineering, parent: grp-supply-chain-data-products, props: {location: westeurope, name: changeme, resource_group_name: changeme,
-    sku: changeme}, at: [1, 2]}
-- {id: stsupply-raw, type: azure.storage_account, name: stsupply-raw, parent: grp-supply-chain-data-products, at: [1, 1]}
+  at:
+  - 2
+  - 1
+- id: foundry-supply-agents
+  type: azure.res.azurerm_ai_foundry
+  name: foundry-supply-agents
+  parent: grp-supply-chain-data-products
+  props: {identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+  at:
+  - 3
+  - 1
 edges:
-- {from: database, to: stsales-raw, label: source extracts, step: '1'}
-- {from: stsales-raw, to: fabric-sales-f64, label: OneLake shortcut / pipelines, step: '2'}
-- {from: saas, to: stsupply-raw, label: supplier feeds, step: '1'}
-- {from: stsupply-raw, to: dbw-supply-engineering, label: Delta engineering, step: '2'}
-- {from: dbw-supply-engineering, to: fabric-supply-f32, label: mirror Unity Catalog tables to OneLake, step: '3'}
-- {from: fabric-sales-f64, to: fabric-supply-f32, label: cross-domain data product sharing (shortcuts), step: '4'}
+- {from: sql-sales-mirrored, to: fabric-sales-f64, label: Azure databases mirrored to Fabric OneLake, step: '1'}
+- {from: dbw-supply-engineering, to: fabric-supply-f32, label: mirror Unity Catalog tables to OneLake, step: '2'}
+- {from: fabric-sales-f64, to: fabric-supply-f32, label: cross-domain data product sharing (OneLake shortcuts), step: '3'}
+- {from: fabric-supply-f32, to: foundry-supply-agents, label: Foundry agents consume data products via Foundry IQ, step: '4'}
+- {from: microsoft-agent-365, to: foundry-supply-agents, label: control all agents}
 - {from: pview-enterprise, to: fabric-sales-f64, label: scan}
 - {from: pview-enterprise, to: fabric-supply-f32, label: scan}
 - {from: pview-enterprise, to: dbw-supply-engineering, label: Unity Catalog metadata}
+- {from: policy-platform-guardrails, to: mg-landing-zones, label: Azure Policy assignments}
+- {from: mg-platform, to: law-data-platform, label: Azure Monitor for the platform}
+- {from: microsoft-entra-id, to: mg-platform, label: identity for the whole organization}
 - {from: users, to: pview-enterprise, label: discover and request data products, step: '5'}
-- {from: fabric-sales-f64, to: users, label: Power BI, step: '6'}
+- {from: fabric-sales-f64, to: pbi-sales-dashboards, label: dashboards and AI model training, step: '6'}
+- {from: pbi-sales-dashboards, to: users, label: Power BI and data science}
+- {from: fabric-sales-f64, to: microsoft-copilot-studio, label: OneLake catalog data products}
+- {from: fabric-supply-f32, to: microsoft-365-copilot, label: OneLake catalog data products (Work IQ)}
 steps:
-- {n: '1', text: 'database → stsales-raw: source extracts'}
-- {n: '2', text: 'stsales-raw → fabric-sales-f64: OneLake shortcut / pipelines'}
-- {n: '3', text: 'dbw-supply-engineering → fabric-supply-f32: mirror Unity Catalog tables to OneLake'}
-- {n: '4', text: 'fabric-sales-f64 → fabric-supply-f32: cross-domain data product sharing (shortcuts)'}
+- {n: '1', text: 'sql-sales-mirrored → fabric-sales-f64: Azure databases mirrored to Fabric OneLake'}
+- {n: '2', text: 'dbw-supply-engineering → fabric-supply-f32: mirror Unity Catalog tables to OneLake'}
+- {n: '3', text: 'fabric-sales-f64 → fabric-supply-f32: cross-domain data product sharing (OneLake shortcuts)'}
+- {n: '4', text: 'fabric-supply-f32 → foundry-supply-agents: Foundry agents consume data products via Foundry IQ'}
 - {n: '5', text: 'users → pview-enterprise: discover and request data products'}
-- {n: '6', text: 'fabric-sales-f64 → users: Power BI'}
+- {n: '6', text: 'fabric-sales-f64 → pbi-sales-dashboards: dashboards and AI model training'}

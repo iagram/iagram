@@ -10,26 +10,22 @@ tags:
 - serverless
 image: https://docs.aws.amazon.com/images/lambda/latest/dg/images/APIG_tut_resources.png
 source: https://docs.aws.amazon.com/lambda/latest/dg/services-apigateway-tutorial.html
-description: An API Gateway REST API exposes CRUD routes and proxies each request to a single Lambda function that reads and writes a DynamoDB table. IAM roles scope the function to the table, and CloudWatch
-  Logs captures execution and access logs, with no servers to manage at any tier.
+description: A client calls an API Gateway REST API that proxies each CRUD request to a single Lambda function, which reads and writes a DynamoDB users table. A permissions policy attached to the function's
+  execution role scopes it to the table and to CloudWatch Logs, with no servers to manage at any tier.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
 - {id: client, type: common.client, name: client, at: [1, 1]}
-- {id: mobile, type: common.mobile, name: mobile, at: [2, 1]}
-- {id: items-api, type: aws.res.aws_api_gateway_rest_api, name: items-api, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
-- {id: items-crud, type: aws.lambda_function, name: items-crud, parent: reg-us-east-1, at: [2, 2]}
-- {id: items-crud-role, type: aws.res.aws_iam_role, name: items-crud-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}, at: [1, 2]}
-- {id: items, type: aws.dynamodb_table, name: items, parent: reg-us-east-1, at: [2, 3]}
-- {id: items-crud-logs, type: aws.res.aws_cloudwatch_log_group, name: items-crud-logs, parent: reg-us-east-1, at: [3, 2]}
+- {id: rest-api, type: aws.res.aws_api_gateway_rest_api, name: rest-api, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
+- {id: crud-user-function, type: aws.lambda_function, name: crud-user-function, parent: reg-us-east-1, at: [2, 2]}
+- {id: permissions-policy, type: aws.res.aws_iam_policy, name: permissions-policy, parent: reg-us-east-1, props: {policy: changeme}, at: [1, 2]}
+- {id: users-table, type: aws.dynamodb_table, name: users-table, parent: reg-us-east-1, at: [2, 3]}
 edges:
-- {from: client, to: items-api, label: HTTPS GET/POST/PUT/DELETE /items, step: '1'}
-- {from: mobile, to: items-api, label: HTTPS, step: '1'}
-- {from: items-api, to: items-crud, label: Lambda proxy integration, step: '2'}
-- {from: items-crud, to: items, label: GetItem / PutItem / UpdateItem / DeleteItem, step: '3'}
-- {from: items-crud, to: items-crud-logs, label: logs}
-- {from: items-crud-role, to: items-crud, label: execution role}
+- {from: client, to: rest-api, label: HTTPS GET/POST/PUT/DELETE, step: '1'}
+- {from: rest-api, to: crud-user-function, label: Lambda proxy integration, step: '2'}
+- {from: crud-user-function, to: users-table, label: GetItem / PutItem / UpdateItem / DeleteItem, step: '3'}
+- {from: permissions-policy, to: crud-user-function, label: attached to the execution role}
 steps:
-- {n: '1', text: 'client → items-api: HTTPS GET/POST/PUT/DELETE /items'}
-- {n: '2', text: 'items-api → items-crud: Lambda proxy integration'}
-- {n: '3', text: 'items-crud → items: GetItem / PutItem / UpdateItem / DeleteItem'}
+- {n: '1', text: 'client → rest-api: HTTPS GET/POST/PUT/DELETE'}
+- {n: '2', text: 'rest-api → crud-user-function: Lambda proxy integration'}
+- {n: '3', text: 'crud-user-function → users-table: GetItem / PutItem / UpdateItem / DeleteItem'}

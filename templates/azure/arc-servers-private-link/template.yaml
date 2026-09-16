@@ -11,74 +11,87 @@ tags:
 - private dns
 image: https://learn.microsoft.com/en-us/azure/azure-arc/servers/media/private-link-security/private-link-topology.png
 source: https://learn.microsoft.com/en-us/azure/azure-arc/servers/private-link-security
-description: An Azure Arc Private Link Scope is attached to a private endpoint in the management virtual network so the Connected Machine agent on on-premises servers reaches Azure Arc over ExpressRoute
-  or site-to-site VPN instead of public endpoints. Private DNS zones for privatelink.his.arc.azure.com and privatelink.guestconfiguration.azure.com are linked to the network and resolved from on-premises
-  through a DNS forwarder, and Azure Monitor collection uses its own private link scope.
+description: An Azure Arc Private Link Scope is attached to a private endpoint in the management virtual network so the Connected Machine agent on on-premises servers reaches the Hybrid Compute and Guest
+  Configuration resource providers over ExpressRoute or site-to-site VPN instead of public endpoints, and Azure Monitor and Azure Automation use their own private endpoints in the same network. Authentication
+  with Microsoft Entra ID, control-plane calls to Azure Resource Manager and Azure Relay sessions still leave through the on-premises proxy or firewall on HTTPS 443.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 1, 1, 2]}
-- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [3, 2, 1, 2]}
+- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1, 1, 3]}
 - {id: rg-rg-arc-management, type: azure.resource_group, name: rg-arc-management, parent: sub-management, props: {location: westeurope}, at: [1, 1]}
-- {id: vpc-vnet-arc, type: azure.vnet, name: vnet-arc, parent: rg-rg-arc-management, props: {cidr: 10.0.0.0/16}, at: [2, 2]}
+- {id: vpc-vnet-arc, type: azure.vnet, name: vnet-arc, parent: rg-rg-arc-management, props: {cidr: 10.0.0.0/16}, at: [2, 1, 1, 2]}
 - {id: sub-arc-gatewaysubnet, type: azure.subnet, name: arc-GatewaySubnet, parent: vpc-vnet-arc, props: {cidr: 10.0.0.0/27}, at: [1, 1]}
 - {id: sub-snet-arc-endpoints, type: azure.subnet, name: snet-arc-endpoints, parent: vpc-vnet-arc, props: {cidr: 10.0.1.0/24}, at: [1, 2]}
 - {id: internet, type: common.internet, name: internet, at: [1, 1]}
-- {id: arc-private-link-scope, type: azure.res.azurerm_arc_private_link_scope, name: arc-private-link-scope, parent: rg-rg-arc-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 3]}
-- id: pe-arc
-  type: azure.res.azurerm_private_endpoint
-  name: pe-arc
-  parent: sub-snet-arc-endpoints
-  at: [1, 1]
-  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: pdz-arc-his, type: azure.res.azurerm_private_dns_zone, name: pdz-arc-his, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}, at: [1, 1]}
-- {id: pdz-guestconfiguration, type: azure.res.azurerm_private_dns_zone, name: pdz-guestconfiguration, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}, at: [1, 2]}
+- {id: azure-resource-manager, type: common.saas, name: Azure Resource Manager, at: [1, 2]}
+- {id: microsoft-entra-id, type: common.idp, name: Microsoft Entra ID, at: [1, 3]}
+- {id: proxy-or-firewall, type: common.server, name: Proxy or firewall, at: [3, 1]}
+- {id: relay-hybrid-connectivity, type: azure.res.azurerm_relay_namespace, name: relay-hybrid-connectivity, parent: rg-rg-arc-management, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}, at: [1, 1]}
+- {id: automation-arc, type: azure.res.azurerm_automation_account, name: automation-arc, parent: rg-rg-arc-management, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme},
+  at: [1, 2]}
+- {id: arc-private-link-scope, type: azure.res.azurerm_arc_private_link_scope, name: arc-private-link-scope, parent: rg-rg-arc-management, props: {location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [1, 3]}
 - id: ergw-arc
   type: azure.res.azurerm_virtual_network_gateway
   name: ergw-arc
   parent: sub-arc-gatewaysubnet
-  at: [1, 1]
-  props:
-    ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: changeme
-    type: changeme
-- id: er-circuit-arc
-  type: azure.res.azurerm_express_route_circuit
-  name: er-circuit-arc
-  parent: rg-rg-arc-management
-  at: [2, 1]
-  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
-- {id: vpc-rg-rg-arc-management, type: azure.vnet, name: main, parent: rg-rg-arc-management, props: {cidr: 10.200.0.0/16}, at: [3, 1, 1, 2]}
-- {id: sub-rg-rg-arc-management, type: azure.subnet, name: main, parent: vpc-rg-rg-arc-management, props: {cidr: 10.200.0.0/24}, at: [1, 1]}
-- {id: arc-server-01, type: azure.res.azurerm_arc_machine, name: arc-server-01, parent: sub-rg-rg-arc-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
-- {id: arc-server-02, type: azure.res.azurerm_arc_machine, name: arc-server-02, parent: sub-rg-rg-arc-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2]}
-- {id: ampls, type: azure.res.azurerm_monitor_private_link_scope, name: ampls, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}, at: [3, 3]}
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme, type: changeme}
+  at:
+  - 1
+  - 1
+- id: pe-arc
+  type: azure.res.azurerm_private_endpoint
+  name: pe-arc
+  parent: sub-snet-arc-endpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 1
+- id: pe-automation
+  type: azure.res.azurerm_private_endpoint
+  name: pe-automation
+  parent: sub-snet-arc-endpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 2
 - id: pe-monitor
   type: azure.res.azurerm_private_endpoint
   name: pe-monitor
   parent: sub-snet-arc-endpoints
-  at: [2, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 3
 - {id: law-arc, type: azure.res.azurerm_log_analytics_workspace, name: law-arc, parent: rg-rg-arc-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 3]}
+- {id: ampls, type: azure.res.azurerm_monitor_private_link_scope, name: ampls, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}, at: [3, 3]}
+- {id: arc-server-01, type: azure.res.azurerm_arc_machine, name: arc-server-01, parent: rg-rg-arc-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [3, 1]}
+- {id: arc-server-02, type: azure.res.azurerm_arc_machine, name: arc-server-02, parent: rg-rg-arc-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [3, 2]}
 edges:
-- {from: dc-on-premises, to: er-circuit-arc, label: ExpressRoute private peering, step: '1'}
-- {from: er-circuit-arc, to: ergw-arc, label: ExpressRoute connection}
-- {from: arc-server-01, to: pe-arc, label: Connected Machine agent to hybridcompute endpoint, step: '2'}
+- {from: internet, to: arc-server-01, label: setup scripts and installation packages}
+- {from: arc-server-01, to: proxy-or-firewall, label: agent traffic to public endpoints}
+- {from: proxy-or-firewall, to: microsoft-entra-id, label: 'authentication and authorization, HTTPS 443'}
+- {from: proxy-or-firewall, to: azure-resource-manager, label: HTTPS 443}
+- {from: azure-resource-manager, to: relay-hybrid-connectivity, label: Hybrid Connectivity and Azure Relay resource providers}
+- {from: relay-hybrid-connectivity, to: arc-server-01, label: 'Azure Relay session (SSH, Windows Admin Center)'}
+- {from: dc-on-premises, to: ergw-arc, label: ExpressRoute or VPN, step: '1'}
+- {from: arc-server-01, to: pe-arc, label: Connected Machine agent to Hybrid Compute and Guest Configuration resource providers, step: '2'}
 - {from: pe-arc, to: arc-private-link-scope, label: Private Link, step: '3'}
 - {from: arc-private-link-scope, to: arc-server-01, label: scope membership}
 - {from: arc-private-link-scope, to: arc-server-02, label: scope membership}
-- {from: pdz-arc-his, to: vpc-vnet-arc, label: privatelink.his.arc.azure.com, link: azurerm_private_dns_zone_virtual_network_link}
-- {from: pdz-guestconfiguration, to: vpc-vnet-arc, label: privatelink.guestconfiguration.azure.com, link: azurerm_private_dns_zone_virtual_network_link}
-- {from: dc-on-premises, to: pdz-arc-his, label: on-prem DNS forwards to Azure DNS}
 - {from: arc-server-01, to: pe-monitor, label: Azure Monitor Agent, step: '4'}
 - {from: pe-monitor, to: ampls, label: Private Link, step: '5'}
 - {from: ampls, to: law-arc, label: log ingestion, step: '6'}
-- {from: arc-server-01, to: internet, label: Entra ID and Resource Manager over public TCP 443}
+- {from: arc-server-01, to: pe-automation, label: Hybrid Runbook Worker, step: '7'}
+- {from: pe-automation, to: automation-arc, label: Private Link, step: '8'}
 steps:
-- {n: '1', text: 'datacenter → er-circuit-arc: ExpressRoute private peering'}
-- {n: '2', text: 'arc-server-01 → pe-arc: Connected Machine agent to hybridcompute endpoint'}
+- {n: '1', text: 'datacenter → ergw-arc: ExpressRoute or VPN'}
+- {n: '2', text: 'arc-server-01 → pe-arc: Connected Machine agent to Hybrid Compute and Guest Configuration resource providers'}
 - {n: '3', text: 'pe-arc → arc-private-link-scope: Private Link'}
 - {n: '4', text: 'arc-server-01 → pe-monitor: Azure Monitor Agent'}
 - {n: '5', text: 'pe-monitor → ampls: Private Link'}
 - {n: '6', text: 'ampls → law-arc: log ingestion'}
+- {n: '7', text: 'arc-server-01 → pe-automation: Hybrid Runbook Worker'}
+- {n: '8', text: 'pe-automation → automation-arc: Private Link'}

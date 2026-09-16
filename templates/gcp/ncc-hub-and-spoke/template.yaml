@@ -9,40 +9,35 @@ tags:
 - ha vpn
 image: https://docs.cloud.google.com/static/architecture/images/hub-spoke-architecture-ncc.svg
 source: https://docs.cloud.google.com/architecture/deploy-hub-spoke-vpc-network-topology
-description: A central hub VPC and per-workload spoke VPCs are attached as VPC spokes to a Network Connectivity Center hub, which exchanges subnet routes so all spokes reach each other with full bandwidth
-  and transitivity. On-premises connectivity terminates on HA VPN in the hub VPC and is attached as a hybrid spoke, so spokes reach the data center through the hub.
+description: In a single project a hub (routing) VPC and two workload spoke VPCs are attached as VPC spokes to a Network Connectivity Center hub, which exchanges subnet routes so the spokes reach each other
+  and the hub with full bandwidth and transitivity. Each VPC has a subnet with a Compute Engine VM and a Cloud NAT gateway for outbound internet access; the second spoke also hosts a GKE cluster.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1, 2, 1]}
-- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west1}, at: [1, 2, 1, 2]}
-- {id: vpc-hub-vpc, type: gcp.vpc, name: hub-vpc, parent: prj-net-hub, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west1}, at: [1, 1]}
+- {id: vpc-hub-vpc, type: gcp.vpc, name: hub-vpc, parent: prj-net-hub, props: {cidr: 10.0.0.0/16}, at: [1, 1, 1, 2]}
 - {id: sub-hub-ew1, type: gcp.subnetwork, name: hub-ew1, parent: vpc-hub-vpc, props: {cidr: 10.0.0.0/24, region: europe-west1}, at: [1, 1, 2, 1]}
-- {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: europe-west1}, at: [2, 2]}
-- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-workload-a, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-net-hub, props: {cidr: 10.1.0.0/16}, at: [3, 1]}
 - {id: sub-spoke-a-ew1, type: gcp.subnetwork, name: spoke-a-ew1, parent: vpc-spoke-a, props: {cidr: 10.1.0.0/24, region: europe-west1}, at: [1, 1]}
-- {id: prj-workload-b, type: gcp.project, name: workload-b, props: {project_id: workload-b-123456, project: changeme, region: europe-west1}, at: [2, 3]}
-- {id: vpc-spoke-b, type: gcp.vpc, name: spoke-b, parent: prj-workload-b, props: {cidr: 10.2.0.0/16}, at: [1, 1]}
+- {id: vpc-spoke-b, type: gcp.vpc, name: spoke-b, parent: prj-net-hub, props: {cidr: 10.2.0.0/16}, at: [3, 2]}
 - {id: sub-spoke-b-ew1, type: gcp.subnetwork, name: spoke-b-ew1, parent: vpc-spoke-b, props: {cidr: 10.2.0.0/24, region: europe-west1}, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [1, 2]}
 - {id: ncc-hub, type: gcp.res.google_network_connectivity_hub, name: ncc-hub, parent: prj-net-hub, at: [2, 1, 1, 2]}
-- {id: hub-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: hub-vpn-gw, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}, at: [1, 2]}
-- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}, at: [2, 2]}
-- {id: hub-tunnel-0, type: gcp.res.google_compute_vpn_tunnel, name: hub-tunnel-0, parent: vpc-hub-vpc, props: {name: changeme, shared_secret: changeme}, at: [1, 3]}
-- {id: hub-tunnel-1, type: gcp.res.google_compute_vpn_tunnel, name: hub-tunnel-1, parent: vpc-hub-vpc, props: {name: changeme, shared_secret: changeme}, at: [2, 3]}
-- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub, at: [1, 2]}
-- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}, at: [1, 1]}
-- {id: onprem-vpn-peer, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-vpn-peer, parent: sub-prj-net-hub, props: {name: changeme}, at: [1, 1]}
-- {id: hub-fw-policy, type: gcp.res.google_compute_network_firewall_policy, name: hub-fw-policy, parent: vpc-hub-vpc, props: {name: changeme}, at: [1, 4, 2, 1]}
+- {id: hub-vm, type: gcp.compute_instance, name: hub-vm, parent: sub-hub-ew1, at: [1, 1]}
+- {id: hub-nat, type: gcp.res.google_compute_router_nat, name: hub-nat, parent: vpc-hub-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [2, 2]}
 - {id: app-a, type: gcp.compute_instance, name: app-a, parent: sub-spoke-a-ew1, at: [1, 1]}
+- {id: spoke-a-nat, type: gcp.res.google_compute_router_nat, name: spoke-a-nat, parent: vpc-spoke-a, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [2, 1]}
 - {id: app-b, type: gcp.compute_instance, name: app-b, parent: sub-spoke-b-ew1, at: [1, 1]}
+- {id: gke-b, type: gcp.gke_cluster, name: gke-b, parent: sub-spoke-b-ew1, at: [2, 1]}
+- {id: spoke-b-nat, type: gcp.res.google_compute_router_nat, name: spoke-b-nat, parent: vpc-spoke-b, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [2, 1]}
 edges:
-- {from: ncc-hub, to: vpc-spoke-a, link: google_network_connectivity_spoke}
-- {from: ncc-hub, to: vpc-spoke-b, link: google_network_connectivity_spoke}
-- {from: ncc-hub, to: hub-tunnel-0, label: network connectivity spoke}
-- {from: onprem-vpn-peer, to: hub-vpn-gw, label: IPsec tunnels, step: '1'}
-- {from: hub-router, to: onprem-vpn-peer, label: BGP route exchange, step: '2'}
-- {from: app-a, to: app-b, label: inter-spoke traffic via NCC, step: '3'}
-- {from: app-a, to: onprem-vpn-peer, label: spoke to on-premises via hybrid spoke, step: '4'}
+- {from: ncc-hub, to: vpc-hub-vpc, label: hub VPC spoke, link: google_network_connectivity_spoke}
+- {from: ncc-hub, to: vpc-spoke-a, label: workload 1 VPC spoke, link: google_network_connectivity_spoke}
+- {from: ncc-hub, to: vpc-spoke-b, label: workload 2 VPC spoke, link: google_network_connectivity_spoke}
+- {from: app-a, to: app-b, label: inter-spoke traffic via the NCC hub, step: '1'}
+- {from: gke-b, to: hub-vm, label: spoke to hub traffic via the NCC hub, step: '2'}
+- {from: hub-nat, to: internet, label: outbound internet via Cloud NAT, step: '3'}
+- {from: spoke-a-nat, to: internet, label: outbound internet via Cloud NAT, step: '3'}
+- {from: spoke-b-nat, to: internet, label: outbound internet via Cloud NAT, step: '3'}
 steps:
-- {n: '1', text: 'onprem-vpn-peer → hub-vpn-gw: IPsec tunnels'}
-- {n: '2', text: 'hub-router → onprem-vpn-peer: BGP route exchange'}
-- {n: '3', text: 'app-a → app-b: inter-spoke traffic via NCC'}
-- {n: '4', text: 'app-a → onprem-vpn-peer: spoke to on-premises via hybrid spoke'}
+- {n: '1', text: 'app-a → app-b: inter-spoke traffic via the NCC hub'}
+- {n: '2', text: 'gke-b → hub-vm: spoke to hub traffic via the NCC hub'}
+- {n: '3', text: 'hub-nat → internet: outbound internet via Cloud NAT'}

@@ -3,44 +3,42 @@
   category: web
   tags: [global external application load balancer, managed instance group, cloud sql, memorystore, three tier, compute engine]
   source: https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-compute
-  description: A global forwarding rule on a reserved anycast IP hands HTTPS to a target HTTPS proxy holding a Google-managed certificate; the URL map routes to a backend service whose backends are regional managed instance groups built from an instance template and watched by an HTTP health check. The web tier reads session state from Memorystore for Redis and persists data in a regional Cloud SQL instance reached over private IP, while a Cloud NAT gateway gives the private VMs outbound access for package updates.
+  description: Internet clients reach the load balancer's global forwarding rule on a reserved IPv4 or IPv6 address, which hands HTTPS to a target HTTPS proxy holding a Google-managed SSL certificate; the URL map routes to a backend service whose backend is a managed instance group of web VMs in a zone of the web subnet. The web tier reads session state from Memorystore for Redis and persists data in a Cloud SQL instance reached over private IP in the same VPC.
   containers:
     - project: web-tier-prj
       region: europe-west1
+      account_at: [1, 2]
+      groups: [{label: load-balancer, at: [1, 1]}]
       vpcs:
         - name: web-vpc
           cidr: 10.10.0.0/16
+          at: [1, 2]
           subnets:
-            - {name: web-sub, cidr: 10.10.1.0/24, region: europe-west1}
-            - {name: data-sub, cidr: 10.10.2.0/24, region: europe-west1}
+            - {name: web-sub, cidr: 10.10.1.0/24, region: europe-west1, at: [1, 1, 2, 1]}
+            - {name: data-sub, cidr: 10.10.2.0/24, region: europe-west1, at: [1, 2]}
   elements:
-    - {tf: google_compute_global_address, name: web-ip, in: project:web-tier-prj}
-    - {tf: google_compute_global_forwarding_rule, name: web-https-rule, in: project:web-tier-prj}
-    - {tf: google_compute_target_https_proxy, name: web-https-proxy, in: project:web-tier-prj}
-    - {tf: google_compute_managed_ssl_certificate, name: web-cert, in: project:web-tier-prj}
-    - {tf: google_compute_url_map, name: web-url-map, in: project:web-tier-prj}
-    - {tf: google_compute_backend_service, name: web-backend, in: project:web-tier-prj}
-    - {tf: google_compute_health_check, name: web-hc, in: project:web-tier-prj}
-    - {tf: google_compute_instance_template, name: web-template, in: region}
-    - {tf: google_compute_region_instance_group_manager, name: web-mig, in: subnet:web-sub}
-    - {tf: google_redis_instance, name: session-cache, in: subnet:data-sub}
-    - {tf: google_sql_database_instance, name: app-db, in: subnet:data-sub}
-    - {tf: google_compute_router, name: web-router, in: vpc:web-vpc}
-    - {tf: google_compute_router_nat, name: web-nat, in: vpc:web-vpc}
-  actors: [users, internet]
+    - {tf: google_compute_global_address, name: web-ip, in: group:load-balancer, at: [2, 1]}
+    - {tf: google_compute_global_forwarding_rule, name: web-https-rule, in: group:load-balancer, at: [1, 1]}
+    - {tf: google_compute_target_https_proxy, name: web-https-proxy, in: group:load-balancer, at: [1, 2]}
+    - {tf: google_compute_managed_ssl_certificate, name: web-cert, in: group:load-balancer, at: [2, 2]}
+    - {tf: google_compute_url_map, name: web-url-map, in: group:load-balancer, at: [1, 3]}
+    - {tf: google_compute_backend_service, name: web-backend, in: group:load-balancer, at: [1, 4]}
+    - {tf: google_compute_instance_group_manager, name: web-mig, in: subnet:web-sub, at: [1, 1]}
+    - {tf: google_compute_instance, name: web-vm, in: subnet:web-sub, at: [2, 1]}
+    - {tf: google_redis_instance, name: session-cache, in: subnet:data-sub, at: [1, 1]}
+    - {tf: google_sql_database_instance, name: app-db, in: vpc:web-vpc, at: [2, 2]}
+  actors: [{type: internet, at: [1, 1]}]
   flows:
-    - {from: users, to: web-https-rule, label: HTTPS to anycast IP, step: 1}
+    - {from: internet, to: web-https-rule, label: HTTPS, step: 1}
+    - {from: web-ip, to: web-https-rule, label: IPv4 or IPv6 address}
     - {from: web-https-rule, to: web-https-proxy, step: 2}
-    - {from: web-cert, to: web-https-proxy, label: Google-managed certificate}
+    - {from: web-cert, to: web-https-proxy, label: SSL certificate}
     - {from: web-https-proxy, to: web-url-map, step: 3}
     - {from: web-url-map, to: web-backend, step: 4}
     - {from: web-backend, to: web-mig, label: HTTP to healthy instances, step: 5}
-    - {from: web-hc, to: web-mig, label: health checks}
-    - {from: web-template, to: web-mig, label: instance template}
-    - {from: web-mig, to: session-cache, label: Redis sessions, step: 6}
-    - {from: web-mig, to: app-db, label: private IP SQL, step: 7}
-    - {from: web-mig, to: web-nat, label: outbound updates}
-    - {from: web-nat, to: internet}
+    - {from: web-mig, to: web-vm, label: managed VMs in the zone}
+    - {from: web-vm, to: session-cache, label: Redis sessions, step: 6}
+    - {from: web-vm, to: app-db, label: private IP SQL, step: 7}
 
 - slug: static-site-backend-bucket-cloud-cdn
   title: Static website on Cloud Storage served through Cloud CDN and an HTTPS load balancer
@@ -75,27 +73,31 @@
   category: web
   tags: [cloud run, serverless neg, global external application load balancer, cloud armor, cloud cdn, multi-region]
   source: https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-serverless
-  description: Cloud Run services in two regions are registered in regional serverless network endpoint groups that are the backends of one global backend service, so a single anycast IP with a Google-managed certificate routes users to the nearest healthy region. A Cloud Armor security policy attached to the backend service filters traffic at the edge and Cloud CDN caches cacheable responses; ingress on the services is restricted to internal-and-load-balancer traffic.
+  description: Traffic from the internet reaches the global external Application Load Balancer's forwarding rule, target HTTPS proxy with a Google-managed certificate and URL map, then one global backend service whose backends are regional serverless network endpoint groups pointing at Cloud Run services in two regions, so a single anycast IP routes users to the nearest healthy region. A Cloud Armor security policy attached to the backend service filters traffic at the edge and Cloud CDN caches cacheable responses; ingress on the services is restricted to internal-and-load-balancer traffic.
   containers:
     - project: run-web-prj
       region: europe-west1
+      account_at: [1, 2]
+      groups:
+        - {label: external-application-load-balancer, at: [1, 1, 2, 1]}
+        - {label: region-europe-west1, at: [1, 2]}
+        - {label: region-europe-west4, at: [2, 2]}
   elements:
-    - {tf: google_compute_global_address, name: app-ip, in: project:run-web-prj}
-    - {tf: google_compute_global_forwarding_rule, name: app-https-rule, in: project:run-web-prj}
-    - {tf: google_compute_target_https_proxy, name: app-https-proxy, in: project:run-web-prj}
-    - {tf: google_compute_managed_ssl_certificate, name: app-cert, in: project:run-web-prj}
-    - {tf: google_compute_url_map, name: app-url-map, in: project:run-web-prj}
-    - {tf: google_compute_backend_service, name: app-backend, in: project:run-web-prj}
-    - {tf: google_compute_security_policy, name: app-edge-policy, in: project:run-web-prj}
-    - {tf: google_compute_region_network_endpoint_group, name: app-neg-ew1, in: project:run-web-prj}
-    - {tf: google_compute_region_network_endpoint_group, name: app-neg-ew4, in: project:run-web-prj}
-    - {tf: google_cloud_run_v2_service, name: app-ew1, in: project:run-web-prj}
-    - {tf: google_cloud_run_v2_service, name: app-ew4, in: project:run-web-prj}
-  actors: [users]
+    - {tf: google_compute_global_forwarding_rule, name: app-https-rule, in: group:external-application-load-balancer, at: [1, 1]}
+    - {tf: google_compute_target_https_proxy, name: app-https-proxy, in: group:external-application-load-balancer, at: [1, 2]}
+    - {tf: google_compute_managed_ssl_certificate, name: app-cert, in: group:external-application-load-balancer, at: [2, 2]}
+    - {tf: google_compute_url_map, name: app-url-map, in: group:external-application-load-balancer, at: [1, 3]}
+    - {tf: google_compute_backend_service, name: app-backend, in: group:external-application-load-balancer, at: [1, 4]}
+    - {tf: google_compute_security_policy, name: app-edge-policy, in: group:external-application-load-balancer, at: [2, 4]}
+    - {tf: google_compute_region_network_endpoint_group, name: app-neg-ew1, in: group:region-europe-west1, at: [1, 1]}
+    - {tf: google_cloud_run_v2_service, name: app-ew1, in: group:region-europe-west1, at: [1, 2]}
+    - {tf: google_compute_region_network_endpoint_group, name: app-neg-ew4, in: group:region-europe-west4, at: [1, 1]}
+    - {tf: google_cloud_run_v2_service, name: app-ew4, in: group:region-europe-west4, at: [1, 2]}
+  actors: [{type: internet, at: [1, 1]}]
   flows:
-    - {from: users, to: app-https-rule, label: HTTPS, step: 1}
+    - {from: internet, to: app-https-rule, label: HTTPS, step: 1}
     - {from: app-https-rule, to: app-https-proxy, step: 2}
-    - {from: app-cert, to: app-https-proxy}
+    - {from: app-cert, to: app-https-proxy, label: SSL certificate}
     - {from: app-https-proxy, to: app-url-map, step: 3}
     - {from: app-url-map, to: app-backend, label: Cloud CDN enabled, step: 4}
     - {from: app-edge-policy, to: app-backend, label: Cloud Armor rules}
@@ -273,38 +275,51 @@
   category: serverless
   tags: [apigee, private service connect, psc neg, global external application load balancer, cloud run, api management]
   source: https://docs.cloud.google.com/apigee/docs/api-platform/architecture/overview
-  description: The Apigee organization's runtime instance lives in a Google-managed tenant project and is reached from the customer VPC through a Private Service Connect service attachment; a PSC network endpoint group makes that attachment the backend of a global external Application Load Balancer with a managed certificate. API proxies deployed to the Apigee environment forward to target services such as a Cloud Run backend, and Cloud Armor on the backend service protects the public entry point.
+  description: The Apigee organization's runtime instance lives in a Google-managed Apigee X runtime project and in Google's VPC, and is reached from the customer project's VPC through a Private Service Connect service attachment; a PSC network endpoint group in the customer VPC makes that attachment the backend of a global external Application Load Balancer with a managed certificate. API consumers call the load balancer from the internet, API proxies deployed to the Apigee environment forward to target services such as a Cloud Run backend in the customer project, and Cloud Armor on the backend service protects the public entry point.
   containers:
     - project: apigee-prj
       region: europe-west1
+      account_at: [1, 2, 2, 1]
       vpcs:
-        - name: apigee-vpc
+        - name: customer-vpc
           cidr: 10.40.0.0/16
+          at: [1, 5, 2, 1]
           subnets:
-            - {name: psc-neg-sub, cidr: 10.40.1.0/24, region: europe-west1}
+            - {name: psc-neg-sub, cidr: 10.40.1.0/24, region: europe-west1, at: [1, 1]}
+    - project: apigee-runtime-prj
+      region: europe-west1
+      account_at: [1, 3, 2, 1]
+      vpcs:
+        - name: google-vpc
+          cidr: 10.50.0.0/16
+          at: [2, 1, 1, 2]
   elements:
-    - {tf: google_compute_global_address, name: api-ip, in: project:apigee-prj}
-    - {tf: google_compute_global_forwarding_rule, name: api-https-rule, in: project:apigee-prj}
-    - {tf: google_compute_target_https_proxy, name: api-https-proxy, in: project:apigee-prj}
-    - {tf: google_compute_managed_ssl_certificate, name: api-cert, in: project:apigee-prj}
-    - {tf: google_compute_url_map, name: api-url-map, in: project:apigee-prj}
-    - {tf: google_compute_backend_service, name: apigee-backend, in: project:apigee-prj}
-    - {tf: google_compute_security_policy, name: api-armor-policy, in: project:apigee-prj}
-    - {tf: google_compute_region_network_endpoint_group, name: apigee-psc-neg, in: subnet:psc-neg-sub}
-    - {tf: google_apigee_organization, name: apigee-org, in: project:apigee-prj}
-    - {tf: google_apigee_instance, name: apigee-runtime-ew1, in: project:apigee-prj}
-    - {tf: google_apigee_environment, name: prod-env, in: project:apigee-prj}
-    - {tf: google_cloud_run_v2_service, name: orders-backend, in: project:apigee-prj}
-  actors: [client]
+    - {tf: google_compute_global_address, name: api-ip, in: project:apigee-prj, at: [2, 1]}
+    - {tf: google_compute_global_forwarding_rule, name: api-https-rule, in: project:apigee-prj, at: [1, 1]}
+    - {tf: google_compute_target_https_proxy, name: api-https-proxy, in: project:apigee-prj, at: [1, 2]}
+    - {tf: google_compute_managed_ssl_certificate, name: api-cert, in: project:apigee-prj, at: [2, 2]}
+    - {tf: google_compute_url_map, name: api-url-map, in: project:apigee-prj, at: [1, 3]}
+    - {tf: google_compute_backend_service, name: apigee-backend, in: project:apigee-prj, at: [1, 4]}
+    - {tf: google_compute_security_policy, name: api-armor-policy, in: project:apigee-prj, at: [2, 4]}
+    - {tf: google_compute_region_network_endpoint_group, name: apigee-psc-neg, in: subnet:psc-neg-sub, at: [1, 1]}
+    - {tf: google_cloud_run_v2_service, name: orders-backend, in: project:apigee-prj, at: [2, 3]}
+    - {tf: google_apigee_organization, name: apigee-org, in: project:apigee-runtime-prj, at: [1, 1]}
+    - {tf: google_apigee_environment, name: prod-env, in: project:apigee-runtime-prj, at: [1, 2]}
+    - {tf: google_compute_service_attachment, name: apigee-psc-attachment, in: vpc:google-vpc, at: [1, 1]}
+    - {tf: google_apigee_instance, name: apigee-runtime-ew1, in: vpc:google-vpc, at: [1, 2]}
+  actors: [{type: client, name: api-consumers, at: [1, 1]}, {type: internet, at: [2, 1]}]
   flows:
-    - {from: client, to: api-https-rule, label: HTTPS API call, step: 1}
+    - {from: api-consumers, to: internet}
+    - {from: internet, to: api-https-rule, label: HTTPS API call, step: 1}
+    - {from: api-ip, to: api-https-rule}
     - {from: api-https-rule, to: api-https-proxy, step: 2}
     - {from: api-cert, to: api-https-proxy}
     - {from: api-https-proxy, to: api-url-map, step: 3}
     - {from: api-url-map, to: apigee-backend, step: 4}
     - {from: api-armor-policy, to: apigee-backend, label: Cloud Armor}
     - {from: apigee-backend, to: apigee-psc-neg, step: 5}
-    - {from: apigee-psc-neg, to: apigee-runtime-ew1, label: PSC service attachment, step: 6}
+    - {from: apigee-psc-neg, to: apigee-psc-attachment, label: Private Service Connect, step: 6}
+    - {from: apigee-psc-attachment, to: apigee-runtime-ew1}
     - {from: apigee-org, to: apigee-runtime-ew1}
     - {from: prod-env, to: apigee-runtime-ew1, label: environment attached to instance}
     - {from: apigee-runtime-ew1, to: orders-backend, label: proxy target endpoint, step: 7}
@@ -444,30 +459,28 @@
   category: serverless
   tags: [identity platform, cloud run, cloud sql, secret manager, end user auth, firebase sdk]
   source: https://docs.cloud.google.com/run/docs/tutorials/identity-platform
-  description: The browser client loaded from a Cloud Run service signs users in through Identity Platform with the Firebase SDK and obtains an ID token that it sends on each vote request; the service verifies the token with the Firebase Admin SDK before acting. The service uses its own least-privilege service account and a Secret Manager secret to connect to a Cloud SQL for PostgreSQL instance, keeping end-user identity separate from service-to-database credentials.
+  description: End users load the app from the Cloud Run server, which returns a login form built with the Firebase SDK; the form signs the user in with Google through Identity Platform, the authentication service and account store, and the resulting ID token is verified by the server with the Firebase Admin SDK on each vote request. The server reads its database credentials from a Secret Manager secret and stores votes in a Cloud SQL for PostgreSQL instance, keeping end-user identity separate from service-to-database credentials.
   containers:
     - project: idp-run-prj
       region: europe-west1
+      account_at: [1, 2, 2, 1]
+      vpcs:
+        - name: main
+          cidr: 10.90.0.0/16
+          at: [1, 2]
   elements:
-    - {tf: google_identity_platform_config, name: idp-config, in: project:idp-run-prj}
-    - {tf: google_cloud_run_v2_service, name: voting-service, in: project:idp-run-prj}
-    - {tf: google_service_account, name: voting-sa, in: project:idp-run-prj}
-    - {tf: google_secret_manager_secret, name: votes-db-credentials, in: project:idp-run-prj}
-    - {tf: google_sql_database_instance, name: votes-pg, in: project:idp-run-prj}
-    - {tf: google_artifact_registry_repository, name: voting-images, in: project:idp-run-prj}
-    - {tf: google_cloudbuild_trigger, name: voting-build, in: project:idp-run-prj}
-  actors: [users]
+    - {tf: google_cloud_run_v2_service, name: voting-service, in: project:idp-run-prj, at: [1, 1]}
+    - {tf: google_sql_database_instance, name: votes-pg, in: vpc:main, at: [1, 1]}
+    - {tf: google_identity_platform_config, name: idp-config, in: project:idp-run-prj, at: [2, 1]}
+    - {tf: google_secret_manager_secret, name: votes-db-credentials, in: project:idp-run-prj, at: [2, 2]}
+  actors: [{type: users, at: [1, 1]}, {type: client, name: login-form, at: [2, 1]}]
   flows:
-    - {from: users, to: voting-service, label: load client, step: 1}
-    - {from: users, to: idp-config, label: Google sign-in via Firebase SDK, step: 2}
-    - {from: idp-config, to: users, label: ID token, step: 3}
-    - {from: users, to: voting-service, label: "POST vote with Authorization: Bearer ID token", step: 4}
-    - {from: voting-service, to: idp-config, label: verify token with Admin SDK, step: 5}
-    - {from: voting-sa, to: voting-service, label: least-privilege identity}
+    - {from: users, to: voting-service, label: load app, step: 1}
+    - {from: voting-service, to: login-form, label: login form with Firebase SDK, step: 2}
+    - {from: login-form, to: idp-config, label: Google sign-in, step: 3}
+    - {from: idp-config, to: voting-service, label: ID token verified with Admin SDK, step: 4}
     - {from: voting-service, to: votes-db-credentials, label: read DB secret}
-    - {from: voting-service, to: votes-pg, label: Cloud SQL connector, step: 6}
-    - {from: voting-build, to: voting-images, label: build and push}
-    - {from: voting-images, to: voting-service, label: deploy image}
+    - {from: voting-service, to: votes-pg, label: Cloud SQL connector, step: 5}
 
 - slug: gke-autopilot-web-app-artifact-registry
   title: Containerized web app on GKE Autopilot deployed from Artifact Registry
@@ -537,74 +550,79 @@
   category: containers
   tags: [gke, multi-cluster gateway, fleet, config cluster, multi-cluster services, global external application load balancer]
   source: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-multi-cluster-gateways
-  description: Two GKE clusters in different regions are registered to a fleet with Multi-cluster Services and the multi-cluster Gateway controller enabled, and one of them acts as the config cluster where the Gateway and HTTPRoutes are applied. A Gateway of class gke-l7-global-external-managed-mc provisions a global external Application Load Balancer whose backends are ServiceImports spanning both clusters, so paths can pin to a region or balance across both by health and capacity.
+  description: Two GKE clusters in different regions are registered to a fleet with Multi-cluster Services and the multi-cluster Gateway controller enabled, and gke-west-1 acts as the config cluster where the external-http Gateway and HTTPRoutes are applied. The Gateway of class gke-l7-global-external-managed-mc provisions a global external Application Load Balancer whose backends are ServiceImports of the store Service in both clusters' store namespaces, so store.example.com/west and /east pin to a region while the default path balances across both by health and capacity.
   containers:
     - project: gke-fleet-prj
-      region: europe-west1
+      region: us-west1
+      account_at: [1, 2]
+      groups: [{label: external-http-gateway, at: [1, 1]}]
       vpcs:
         - name: fleet-vpc
           cidr: 10.70.0.0/16
+          at: [2, 1]
           subnets:
-            - {name: west-sub, cidr: 10.70.0.0/20, region: europe-west1}
-            - {name: east-sub, cidr: 10.70.16.0/20, region: europe-west4}
+            - {name: west-sub, cidr: 10.70.0.0/20, region: us-west1, at: [1, 1]}
+            - {name: east-sub, cidr: 10.70.16.0/20, region: us-east1, at: [1, 2]}
   elements:
-    - {tf: google_gke_hub_feature, name: multi-cluster-services, in: project:gke-fleet-prj}
-    - {tf: google_gke_hub_feature, name: multi-cluster-ingress, in: project:gke-fleet-prj}
-    - {tf: google_container_cluster, name: gke-west-1, in: subnet:west-sub}
-    - {tf: google_container_cluster, name: gke-east-1, in: subnet:east-sub}
-    - {tf: google_compute_global_forwarding_rule, name: store-external-http, in: project:gke-fleet-prj}
-    - {tf: google_compute_backend_service, name: store-serviceimport-backend, in: project:gke-fleet-prj}
-    - {tf: google_compute_health_check, name: store-hc, in: project:gke-fleet-prj}
-  actors: [users]
+    - {tf: google_compute_global_forwarding_rule, name: store-external-http, in: group:external-http-gateway, at: [1, 1]}
+    - {tf: google_container_cluster, name: gke-west-1, in: subnet:west-sub, at: [1, 1]}
+    - {tf: google_container_node_pool, name: store-pods-west, in: subnet:west-sub, at: [2, 1]}
+    - {tf: google_container_cluster, name: gke-east-1, in: subnet:east-sub, at: [1, 1]}
+    - {tf: google_container_node_pool, name: store-pods-east, in: subnet:east-sub, at: [2, 1]}
+  actors: [{type: client, name: internet-client, at: [1, 1]}]
   flows:
-    - {from: multi-cluster-services, to: gke-west-1, link: google_gke_hub_membership}
-    - {from: multi-cluster-services, to: gke-east-1, link: google_gke_hub_membership}
-    - {from: multi-cluster-ingress, to: gke-west-1, label: config cluster hosts Gateway and HTTPRoute}
-    - {from: users, to: store-external-http, label: HTTP to public IP, step: 1}
-    - {from: store-external-http, to: store-serviceimport-backend, label: Gateway-managed URL map, step: 2}
-    - {from: store-serviceimport-backend, to: gke-west-1, label: "/west and default", step: 3}
-    - {from: store-serviceimport-backend, to: gke-east-1, label: "/east and default", step: 4}
-    - {from: store-hc, to: store-serviceimport-backend, label: health checks}
+    - {from: internet-client, to: store-external-http, label: "store.example.com/* /west /east", step: 1}
+    - {from: gke-west-1, to: store-external-http, label: config cluster hosts Gateway and HTTPRoutes}
+    - {from: store-external-http, to: store-pods-west, label: "/west and default", step: 2}
+    - {from: store-external-http, to: store-pods-east, label: "/east and default", step: 2}
+    - {from: gke-west-1, to: store-pods-west, label: store namespace}
+    - {from: gke-east-1, to: store-pods-east, label: store namespace}
 
 - slug: gke-private-clusters-cloud-service-mesh
   title: Distributed services across private GKE clusters with Cloud Service Mesh and Multi Cluster Ingress
   category: containers
   tags: [gke, cloud service mesh, multi-cluster, private clusters, multi cluster ingress, cloud nat, bank of anthos]
   source: https://docs.cloud.google.com/architecture/distributed-services-on-gke-private-using-anthos-service-mesh
-  description: Two private GKE application clusters in separate regions run Cloud Service Mesh so a service with pods in both clusters is one distributed service with cross-cluster discovery and mTLS; each cluster's nodes use Cloud NAT for egress and authorized networks for control-plane access. A third small cluster is the Multi Cluster Ingress config cluster that programs a global external Application Load Balancer in front of the mesh ingress gateways in both application clusters.
+  description: Two private GKE application clusters in separate regions run Cloud Service Mesh, so the Bank of Anthos frontend with pods in both clusters' bank-of-anthos namespaces is one distributed service with cross-cluster discovery and mTLS, fronted by a mesh ingress gateway in each cluster's istio-system namespace. A third small cluster-ingress cluster is the Multi Cluster Ingress config cluster whose MultiClusterIngress and MultiClusterService program a global external Application Load Balancer that sends client traffic to the mesh ingress gateways in both application clusters.
   containers:
     - project: mesh-prj
       region: europe-west1
+      account_at: [2, 1]
       vpcs:
         - name: mesh-vpc
           cidr: 10.80.0.0/16
+          at: [2, 1]
           subnets:
-            - {name: app1-sub, cidr: 10.80.0.0/20, region: europe-west1}
-            - {name: app2-sub, cidr: 10.80.16.0/20, region: europe-west4}
-            - {name: ingress-config-sub, cidr: 10.80.32.0/22, region: europe-west3}
+            - {name: ingress-config-sub, cidr: 10.80.32.0/22, region: europe-west3, at: [1, 1, 1, 2]}
+            - {name: app1-sub, cidr: 10.80.0.0/20, region: europe-west1, at: [2, 1]}
+            - {name: app2-sub, cidr: 10.80.16.0/20, region: europe-west4, at: [2, 2]}
   elements:
-    - {tf: google_container_cluster, name: gke-central-priv, in: subnet:app1-sub}
-    - {tf: google_container_cluster, name: gke-west-priv, in: subnet:app2-sub}
-    - {tf: google_container_cluster, name: ingress-config, in: subnet:ingress-config-sub}
-    - {tf: google_gke_hub_feature, name: servicemesh, in: project:mesh-prj}
-    - {tf: google_gke_hub_feature, name: multiclusteringress, in: project:mesh-prj}
-    - {tf: google_compute_router, name: mesh-router, in: vpc:mesh-vpc}
-    - {tf: google_compute_router_nat, name: mesh-nat, in: vpc:mesh-vpc}
-    - {tf: google_compute_global_forwarding_rule, name: mci-frontend, in: project:mesh-prj}
-    - {tf: google_compute_backend_service, name: mci-ingress-backend, in: project:mesh-prj}
-  actors: [users, internet]
+    - {tf: google_compute_global_forwarding_rule, name: mci-frontend, in: project:mesh-prj, at: [1, 1]}
+    - {tf: google_container_cluster, name: ingress-config, in: subnet:ingress-config-sub, at: [1, 1]}
+    - {tf: google_gke_hub_feature, name: multiclusteringress, in: subnet:ingress-config-sub, at: [1, 2]}
+    - {tf: google_container_cluster, name: gke-central-priv, in: subnet:app1-sub, at: [1, 1]}
+    - {tf: google_container_node_pool, name: mesh-ingress-central, in: subnet:app1-sub, at: [2, 1]}
+    - {tf: google_container_node_pool, name: boa-frontend-central, in: subnet:app1-sub, at: [3, 1]}
+    - {tf: google_container_cluster, name: gke-west-priv, in: subnet:app2-sub, at: [1, 1]}
+    - {tf: google_container_node_pool, name: mesh-ingress-west, in: subnet:app2-sub, at: [2, 1]}
+    - {tf: google_container_node_pool, name: boa-frontend-west, in: subnet:app2-sub, at: [3, 1]}
+  actors: [{type: client, at: [1, 1]}]
   flows:
-    - {from: servicemesh, to: gke-central-priv, link: google_gke_hub_membership}
-    - {from: servicemesh, to: gke-west-priv, link: google_gke_hub_membership}
-    - {from: multiclusteringress, to: ingress-config, label: config cluster}
-    - {from: users, to: mci-frontend, label: HTTPS, step: 1}
-    - {from: mci-frontend, to: mci-ingress-backend, step: 2}
-    - {from: mci-ingress-backend, to: gke-central-priv, label: mesh ingress gateway, step: 3}
-    - {from: mci-ingress-backend, to: gke-west-priv, label: mesh ingress gateway}
-    - {from: gke-central-priv, to: gke-west-priv, label: cross-cluster mTLS service calls, step: 4}
-    - {from: gke-central-priv, to: mesh-nat, label: egress}
-    - {from: mesh-router, to: mesh-nat}
-    - {from: mesh-nat, to: internet}
+    - {from: client, to: mci-frontend, label: HTTPS, step: 1}
+    - {from: ingress-config, to: multiclusteringress, label: MultiClusterIngress and MultiClusterService}
+    - {from: multiclusteringress, to: mci-frontend, label: programs Cloud Load Balancing}
+    - {from: multiclusteringress, to: mesh-ingress-central, label: mesh ingress MultiClusterService}
+    - {from: mci-frontend, to: mesh-ingress-central, label: mesh ingress gateway, step: 2}
+    - {from: mci-frontend, to: mesh-ingress-west, label: mesh ingress gateway, step: 2}
+    - {from: gke-central-priv, to: mesh-ingress-central, label: istio-system namespace}
+    - {from: gke-west-priv, to: mesh-ingress-west, label: istio-system namespace}
+    - {from: mesh-ingress-central, to: boa-frontend-central, step: 3}
+    - {from: mesh-ingress-central, to: boa-frontend-west, label: cross-cluster}
+    - {from: mesh-ingress-west, to: boa-frontend-west, step: 3}
+    - {from: mesh-ingress-west, to: boa-frontend-central, label: cross-cluster}
+    - {from: boa-frontend-central, to: boa-frontend-west, label: bank of anthos frontend distributed service (mTLS), step: 4}
+    - {from: gke-central-priv, to: boa-frontend-central, label: bank of anthos namespace}
+    - {from: gke-west-priv, to: boa-frontend-west, label: bank of anthos namespace}
 
 - slug: gke-config-connector-managed-resources
   title: GKE cluster managing Google Cloud resources with Config Connector
@@ -866,30 +884,56 @@
   category: containers
   tags: [online boutique, microservices-demo, gke, grpc, memorystore, cloud service mesh, spanner]
   source: https://github.com/GoogleCloudPlatform/microservices-demo
-  description: Eleven microservices written in Go, C#, Node.js, Python and Java communicate over gRPC behind a Go frontend that is exposed by a LoadBalancer Service on a GKE cluster, with a load generator producing synthetic traffic. The default in-cluster Redis cart store can be swapped for Memorystore for Redis, the product catalog can move to Cloud Spanner or AlloyDB, and Kustomize variants add Cloud Service Mesh sidecars and an Artifact Registry image source.
+  description: Eleven microservices written in Go, C#, Node.js, Python and Java communicate over gRPC behind a Go frontend that is exposed by a LoadBalancer Service on a GKE cluster; the frontend calls the ad, recommendation, productcatalog, cart, shipping, currency and checkout services, checkout fans out to payment, email, productcatalog, cart, shipping and currency, and a load generator produces synthetic traffic. The cart service stores carts in an in-cluster Redis cache that can be swapped for Memorystore for Redis, the product catalog can move to Cloud Spanner or AlloyDB, and Kustomize variants add Cloud Service Mesh sidecars.
   containers:
     - project: boutique-prj
       region: europe-west1
+      account_at: [1, 2]
       vpcs:
         - name: boutique-vpc
           cidr: 10.160.0.0/16
+          at: [2, 1, 1, 2]
           subnets:
-            - {name: boutique-gke-sub, cidr: 10.160.0.0/20, region: europe-west1}
+            - {name: boutique-gke-sub, cidr: 10.160.0.0/20, region: europe-west1, at: [1, 1]}
   elements:
-    - {tf: google_container_cluster, name: online-boutique, in: subnet:boutique-gke-sub}
-    - {tf: google_compute_forwarding_rule, name: frontend-external, in: region}
-    - {tf: google_redis_instance, name: cart-redis, in: vpc:boutique-vpc}
-    - {tf: google_spanner_instance, name: product-catalog-spanner, in: project:boutique-prj}
-    - {tf: google_gke_hub_feature, name: servicemesh, in: project:boutique-prj}
-    - {tf: google_artifact_registry_repository, name: boutique-images, in: project:boutique-prj}
-  actors: [users]
+    - {tf: google_compute_forwarding_rule, name: frontend-external, in: region, at: [1, 1]}
+    - {tf: google_gke_hub_feature, name: servicemesh, in: project:boutique-prj, at: [1, 2]}
+    - {tf: google_container_cluster, name: online-boutique, in: subnet:boutique-gke-sub, at: [1, 1]}
+    - {tf: google_container_node_pool, name: loadgenerator, in: subnet:boutique-gke-sub, at: [1, 4]}
+    - {tf: google_container_node_pool, name: frontend, in: subnet:boutique-gke-sub, at: [2, 4]}
+    - {tf: google_container_node_pool, name: checkout, in: subnet:boutique-gke-sub, at: [2, 6]}
+    - {tf: google_container_node_pool, name: payment, in: subnet:boutique-gke-sub, at: [2, 7]}
+    - {tf: google_container_node_pool, name: ad, in: subnet:boutique-gke-sub, at: [3, 1]}
+    - {tf: google_container_node_pool, name: recommendation, in: subnet:boutique-gke-sub, at: [3, 2]}
+    - {tf: google_container_node_pool, name: email, in: subnet:boutique-gke-sub, at: [3, 7]}
+    - {tf: google_container_node_pool, name: productcatalog, in: subnet:boutique-gke-sub, at: [4, 2]}
+    - {tf: google_container_node_pool, name: cart, in: subnet:boutique-gke-sub, at: [4, 4]}
+    - {tf: google_container_node_pool, name: shipping, in: subnet:boutique-gke-sub, at: [4, 5]}
+    - {tf: google_container_node_pool, name: currency, in: subnet:boutique-gke-sub, at: [4, 6]}
+    - {tf: google_container_node_pool, name: redis-cache, in: subnet:boutique-gke-sub, at: [5, 4]}
+    - {tf: google_redis_instance, name: cart-redis, in: vpc:boutique-vpc, at: [2, 1]}
+  actors: [{type: users, at: [1, 1]}]
   flows:
     - {from: users, to: frontend-external, label: HTTP, step: 1}
-    - {from: frontend-external, to: online-boutique, label: frontend Service, step: 2}
-    - {from: online-boutique, to: cart-redis, label: cartservice to Memorystore, step: 3}
-    - {from: online-boutique, to: product-catalog-spanner, label: productcatalogservice to Spanner, step: 4}
-    - {from: servicemesh, to: online-boutique, link: google_gke_hub_membership}
-    - {from: boutique-images, to: online-boutique, label: image pull}
+    - {from: frontend-external, to: frontend, label: frontend LoadBalancer Service, step: 2}
+    - {from: servicemesh, to: online-boutique, label: fleet membership with mesh sidecars}
+    - {from: loadgenerator, to: frontend, label: synthetic traffic}
+    - {from: frontend, to: ad}
+    - {from: frontend, to: recommendation}
+    - {from: frontend, to: productcatalog}
+    - {from: frontend, to: cart}
+    - {from: frontend, to: shipping}
+    - {from: frontend, to: currency}
+    - {from: frontend, to: checkout, step: 3}
+    - {from: recommendation, to: productcatalog}
+    - {from: checkout, to: payment}
+    - {from: checkout, to: email}
+    - {from: checkout, to: productcatalog}
+    - {from: checkout, to: cart}
+    - {from: checkout, to: shipping}
+    - {from: checkout, to: currency}
+    - {from: cart, to: redis-cache, label: in-cluster Redis, step: 4}
+    - {from: cart, to: cart-redis, label: Memorystore option}
 
 - slug: iap-compute-engine-web-app
   title: Web app on Compute Engine protected by Identity-Aware Proxy behind an HTTPS load balancer
@@ -933,30 +977,28 @@
   category: security
   tags: [cloud armor, recaptcha, bot management, waf, action token, challenge page, global external application load balancer]
   source: https://docs.cloud.google.com/armor/docs/bot-management
-  description: reCAPTCHA WAF keys for action tokens, session tokens and a challenge page are created for the site and associated with a Cloud Armor security policy attached to the load balancer's backend service. Rules evaluate the reCAPTCHA token inline at the edge and allow, deny, rate-limit or redirect suspicious requests to the reCAPTCHA challenge page, while legitimate users pass through to the Cloud Run backends via a serverless NEG.
+  description: End users load an application frontend whose reCAPTCHA JavaScript asks reCAPTCHA Enterprise to assess the interaction and return a token, which the frontend attaches to requests sent to the global external Application Load Balancer. reCAPTCHA WAF keys for action tokens, session tokens and a challenge page are associated with a Cloud Armor security policy attached to the load balancer's backend service; the policy deciphers the token inline at the edge and allows, denies, rate-limits or redirects suspicious requests to the reCAPTCHA challenge page, while legitimate requests pass through to the Cloud Run backend via a serverless NEG.
   containers:
     - project: bot-mgmt-prj
       region: europe-west1
+      account_at: [1, 3]
   elements:
-    - {tf: google_recaptcha_enterprise_key, name: action-token-key, in: project:bot-mgmt-prj}
-    - {tf: google_recaptcha_enterprise_key, name: session-token-key, in: project:bot-mgmt-prj}
-    - {tf: google_recaptcha_enterprise_key, name: challenge-page-key, in: project:bot-mgmt-prj}
-    - {tf: google_compute_security_policy, name: bot-policy, in: project:bot-mgmt-prj}
-    - {tf: google_compute_global_forwarding_rule, name: shop-https-rule, in: project:bot-mgmt-prj}
-    - {tf: google_compute_target_https_proxy, name: shop-https-proxy, in: project:bot-mgmt-prj}
-    - {tf: google_compute_url_map, name: shop-url-map, in: project:bot-mgmt-prj}
-    - {tf: google_compute_backend_service, name: shop-backend, in: project:bot-mgmt-prj}
-    - {tf: google_compute_region_network_endpoint_group, name: shop-neg, in: project:bot-mgmt-prj}
-    - {tf: google_cloud_run_v2_service, name: shop-service, in: project:bot-mgmt-prj}
-  actors: [users]
+    - {tf: google_compute_global_forwarding_rule, name: shop-https-rule, in: project:bot-mgmt-prj, at: [1, 1]}
+    - {tf: google_recaptcha_enterprise_key, name: action-token-key, in: project:bot-mgmt-prj, at: [1, 4]}
+    - {tf: google_recaptcha_enterprise_key, name: session-token-key, in: project:bot-mgmt-prj, at: [2, 4]}
+    - {tf: google_recaptcha_enterprise_key, name: challenge-page-key, in: project:bot-mgmt-prj, at: [3, 4]}
+    - {tf: google_compute_security_policy, name: bot-policy, in: project:bot-mgmt-prj, at: [2, 1]}
+    - {tf: google_compute_backend_service, name: shop-backend, in: project:bot-mgmt-prj, at: [3, 1]}
+    - {tf: google_compute_region_network_endpoint_group, name: shop-neg, in: project:bot-mgmt-prj, at: [3, 2]}
+    - {tf: google_cloud_run_v2_service, name: shop-service, in: project:bot-mgmt-prj, at: [3, 3]}
+  actors: [{type: users, name: end-users, at: [1, 1]}, {type: client, name: app-frontend-recaptcha-js, at: [1, 2]}]
   flows:
-    - {from: users, to: shop-https-rule, label: "HTTPS with X-Recaptcha-Token", step: 1}
-    - {from: shop-https-rule, to: shop-https-proxy, step: 2}
-    - {from: shop-https-proxy, to: shop-url-map, step: 3}
-    - {from: shop-url-map, to: shop-backend, step: 4}
-    - {from: bot-policy, to: shop-backend, label: security policy attached}
-    - {from: action-token-key, to: bot-policy, label: token evaluated inline}
+    - {from: end-users, to: app-frontend-recaptcha-js, label: load application frontend, step: 1}
+    - {from: action-token-key, to: app-frontend-recaptcha-js, label: assess interaction and return reCAPTCHA token, step: 2}
+    - {from: app-frontend-recaptcha-js, to: shop-https-rule, label: attach the token with the request, step: 3}
+    - {from: shop-https-rule, to: bot-policy, label: decipher token and determine policy action, step: 4}
     - {from: session-token-key, to: bot-policy, label: session cookie scoring}
-    - {from: challenge-page-key, to: bot-policy, label: redirect suspicious traffic to challenge}
-    - {from: shop-backend, to: shop-neg, label: allowed requests, step: 5}
-    - {from: shop-neg, to: shop-service, step: 6}
+    - {from: bot-policy, to: challenge-page-key, label: redirect suspicious traffic to challenge page}
+    - {from: bot-policy, to: shop-backend, label: allow (deny or rate-limit otherwise), step: 5}
+    - {from: shop-backend, to: shop-neg, step: 6}
+    - {from: shop-neg, to: shop-service, step: 7}

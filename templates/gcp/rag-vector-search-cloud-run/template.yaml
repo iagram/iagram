@@ -10,36 +10,44 @@ tags:
 - gemini
 image: https://docs.cloud.google.com/static/architecture/images/gen-ai-rag-vertex-ai-vector-search-high-level-architecture.png
 source: https://docs.cloud.google.com/architecture/gen-ai-rag-vertex-ai-vector-search
-description: Document uploads to Cloud Storage publish Pub/Sub notifications that trigger a Cloud Run function to chunk the content, call the Vertex AI embeddings API and upsert vectors into a Vector Search
-  index deployed on an index endpoint. A frontend Cloud Run service forwards user queries to a backend service that embeds the query, retrieves grounding chunks from Vector Search, augments the prompt for
-  a Gemini model and applies safety filters before answering.
+description: Data engineers upload documents for RAG to Cloud Storage in the data ingestion subsystem, where a Cloud Run data preparation function chunks the content, generates embeddings with the Gemini
+  Enterprise Agent Platform and upserts the vectors into a Vector Search index deployed on an index endpoint. In the serving subsystem a frontend Cloud Run service forwards application user queries to a
+  backend service that embeds the query, retrieves grounding chunks from Vector Search, optimizes the prompt for a Gemini model and applies Responsible AI filters, while generative AI application developers
+  supply sample prompts and evaluation scores and deploy the services through a Cloud Build CI/CD pipeline.
 nodes:
-- {id: prj-rag-prj, type: gcp.project, name: rag-prj, props: {project_id: rag-prj-123456, project: changeme, region: europe-west1}, at: [2, 1, 1, 2]}
-- {id: grp-ingestion, type: common.group, name: ingestion, parent: prj-rag-prj, at: [1, 1]}
-- {id: grp-serving, type: common.group, name: serving, parent: prj-rag-prj, at: [1, 2]}
-- {id: users, type: common.users, name: users, at: [1, 2]}
-- {id: raw-docs-bucket, type: gcp.storage_bucket, name: raw-docs-bucket, parent: grp-ingestion, at: [1, 1]}
-- {id: doc-uploaded-topic, type: gcp.pubsub_topic, name: doc-uploaded-topic, parent: grp-ingestion, at: [2, 1]}
-- {id: embed-fn, type: gcp.res.google_cloudfunctions2_function, name: embed-fn, parent: grp-ingestion, props: {location: westeurope, name: changeme}, at: [3, 1]}
-- {id: docs-index, type: gcp.res.google_vertex_ai_index, name: docs-index, parent: grp-serving, props: {display_name: changeme}, at: [1, 1]}
-- {id: docs-index-endpoint, type: gcp.res.google_vertex_ai_index_endpoint, name: docs-index-endpoint, parent: grp-serving, props: {display_name: changeme}, at: [2, 1]}
-- {id: chat-frontend, type: gcp.cloud_run_service, name: chat-frontend, parent: grp-serving, at: [1, 2]}
-- {id: rag-backend, type: gcp.cloud_run_service, name: rag-backend, parent: grp-serving, at: [2, 2]}
-- {id: eval-scores, type: gcp.bigquery_dataset, name: eval-scores, parent: prj-rag-prj, at: [2, 1, 1, 2]}
+- {id: prj-rag-prj, type: gcp.project, name: rag-prj, props: {project_id: rag-prj-123456, project: changeme, region: europe-west1}, at: [2, 1, 1, 3]}
+- {id: grp-data-ingestion, type: common.group, name: data-ingestion, parent: prj-rag-prj, at: [1, 1]}
+- {id: grp-gemini-enterprise-agent-platform, type: common.group, name: gemini-enterprise-agent-platform, parent: prj-rag-prj, at: [1, 2]}
+- {id: grp-serving, type: common.group, name: serving, parent: prj-rag-prj, at: [1, 3]}
+- {id: data-engineers, type: common.users, name: data engineers, at: [1, 1]}
+- {id: application-users, type: common.users, name: application users, at: [1, 3]}
+- {id: gen-ai-application-developers, type: common.users, name: gen ai application developers, at: [3, 1, 1, 3]}
+- {id: raw-docs-bucket, type: gcp.storage_bucket, name: raw-docs-bucket, parent: grp-data-ingestion, at: [1, 1]}
+- {id: embed-fn, type: gcp.res.google_cloudfunctions2_function, name: embed-fn, parent: grp-data-ingestion, props: {location: westeurope, name: changeme}, at: [2, 1]}
+- {id: docs-index, type: gcp.res.google_vertex_ai_index, name: docs-index, parent: grp-gemini-enterprise-agent-platform, props: {display_name: changeme}, at: [1, 1]}
+- {id: docs-index-endpoint, type: gcp.res.google_vertex_ai_index_endpoint, name: docs-index-endpoint, parent: grp-gemini-enterprise-agent-platform, props: {display_name: changeme}, at: [2, 1]}
+- {id: chat-frontend, type: gcp.cloud_run_service, name: chat-frontend, parent: grp-serving, at: [1, 1]}
+- {id: rag-backend, type: gcp.cloud_run_service, name: rag-backend, parent: grp-serving, at: [2, 1]}
+- {id: app-ci-cd, type: gcp.res.google_cloudbuild_trigger, name: app-ci-cd, parent: prj-rag-prj, at: [2, 1, 1, 3]}
 edges:
-- {from: raw-docs-bucket, to: doc-uploaded-topic, label: object finalize notification, step: '1'}
-- {from: doc-uploaded-topic, to: embed-fn, label: push trigger, step: '2'}
-- {from: embed-fn, to: docs-index, label: chunk + embed + upsert, step: '3'}
+- {from: data-engineers, to: raw-docs-bucket, label: data for RAG, step: '1'}
+- {from: raw-docs-bucket, to: embed-fn, label: ingested data, step: '2'}
+- {from: embed-fn, to: docs-index, label: chunk + embeddings generation + upsert, step: '3'}
 - {from: docs-index, to: docs-index-endpoint, label: deployed index}
-- {from: users, to: chat-frontend, label: HTTPS prompt, step: '4'}
+- {from: application-users, to: chat-frontend, label: queries and responses, step: '4'}
 - {from: chat-frontend, to: rag-backend, label: query, step: '5'}
-- {from: rag-backend, to: docs-index-endpoint, label: nearest-neighbour lookup, step: '6'}
-- {from: rag-backend, to: eval-scores, label: response quality scores, step: '7'}
+- {from: rag-backend, to: docs-index-endpoint, label: 'vector search, responsible AI, prompt optimization', step: '6'}
+- {from: gen-ai-application-developers, to: docs-index-endpoint, label: sample prompts and evaluation scores}
+- {from: gen-ai-application-developers, to: app-ci-cd, label: push application code, step: '7'}
+- {from: app-ci-cd, to: embed-fn, label: deploy}
+- {from: app-ci-cd, to: rag-backend, label: deploy, step: '8'}
+- {from: app-ci-cd, to: chat-frontend, label: deploy}
 steps:
-- {n: '1', text: 'raw-docs-bucket → doc-uploaded-topic: object finalize notification'}
-- {n: '2', text: 'doc-uploaded-topic → embed-fn: push trigger'}
-- {n: '3', text: 'embed-fn → docs-index: chunk + embed + upsert'}
-- {n: '4', text: 'users → chat-frontend: HTTPS prompt'}
+- {n: '1', text: 'data engineers → raw-docs-bucket: data for RAG'}
+- {n: '2', text: 'raw-docs-bucket → embed-fn: ingested data'}
+- {n: '3', text: 'embed-fn → docs-index: chunk + embeddings generation + upsert'}
+- {n: '4', text: 'application users → chat-frontend: queries and responses'}
 - {n: '5', text: 'chat-frontend → rag-backend: query'}
-- {n: '6', text: 'rag-backend → docs-index-endpoint: nearest-neighbour lookup'}
-- {n: '7', text: 'rag-backend → eval-scores: response quality scores'}
+- {n: '6', text: 'rag-backend → docs-index-endpoint: vector search, responsible AI, prompt optimization'}
+- {n: '7', text: 'gen ai application developers → app-ci-cd: push application code'}
+- {n: '8', text: 'app-ci-cd → rag-backend: deploy'}

@@ -3,190 +3,197 @@
   category: ml
   tags: [rag, vector search, embeddings, cloud run, pub/sub, gemini]
   source: https://docs.cloud.google.com/architecture/gen-ai-rag-vertex-ai-vector-search
-  description: Document uploads to Cloud Storage publish Pub/Sub notifications that trigger a Cloud Run function to chunk the content, call the Vertex AI embeddings API and upsert vectors into a Vector Search index deployed on an index endpoint. A frontend Cloud Run service forwards user queries to a backend service that embeds the query, retrieves grounding chunks from Vector Search, augments the prompt for a Gemini model and applies safety filters before answering.
+  description: Data engineers upload documents for RAG to Cloud Storage in the data ingestion subsystem, where a Cloud Run data preparation function chunks the content, generates embeddings with the Gemini Enterprise Agent Platform and upserts the vectors into a Vector Search index deployed on an index endpoint. In the serving subsystem a frontend Cloud Run service forwards application user queries to a backend service that embeds the query, retrieves grounding chunks from Vector Search, optimizes the prompt for a Gemini model and applies Responsible AI filters, while generative AI application developers supply sample prompts and evaluation scores and deploy the services through a Cloud Build CI/CD pipeline.
   containers:
     - project: rag-prj
       region: europe-west1
-      groups: [{label: ingestion}, {label: serving}]
+      account_at: [2, 1, 1, 3]
+      groups: [{label: data-ingestion, at: [1, 1]}, {label: gemini-enterprise-agent-platform, at: [1, 2]}, {label: serving, at: [1, 3]}]
   elements:
-    - {tf: google_storage_bucket, name: raw-docs-bucket, in: group:ingestion}
-    - {tf: google_pubsub_topic, name: doc-uploaded-topic, in: group:ingestion}
-    - {tf: google_cloudfunctions2_function, name: embed-fn, in: group:ingestion}
-    - {tf: google_vertex_ai_index, name: docs-index, in: group:serving}
-    - {tf: google_vertex_ai_index_endpoint, name: docs-index-endpoint, in: group:serving}
-    - {tf: google_cloud_run_v2_service, name: chat-frontend, in: group:serving}
-    - {tf: google_cloud_run_v2_service, name: rag-backend, in: group:serving}
-    - {tf: google_bigquery_dataset, name: eval-scores, in: region}
-  actors: [users]
+    - {tf: google_storage_bucket, name: raw-docs-bucket, in: group:data-ingestion, at: [1, 1]}
+    - {tf: google_cloudfunctions2_function, name: embed-fn, in: group:data-ingestion, at: [2, 1]}
+    - {tf: google_vertex_ai_index, name: docs-index, in: group:gemini-enterprise-agent-platform, at: [1, 1]}
+    - {tf: google_vertex_ai_index_endpoint, name: docs-index-endpoint, in: group:gemini-enterprise-agent-platform, at: [2, 1]}
+    - {tf: google_cloud_run_v2_service, name: chat-frontend, in: group:serving, at: [1, 1]}
+    - {tf: google_cloud_run_v2_service, name: rag-backend, in: group:serving, at: [2, 1]}
+    - {tf: google_cloudbuild_trigger, name: app-ci-cd, in: region, at: [2, 1, 1, 3]}
+  actors: [{type: users, name: data engineers, at: [1, 1]}, {type: users, name: application users, at: [1, 3]}, {type: users, name: gen ai application developers, at: [3, 1, 1, 3]}]
   flows:
-    - {from: raw-docs-bucket, to: doc-uploaded-topic, label: object finalize notification, step: 1}
-    - {from: doc-uploaded-topic, to: embed-fn, label: push trigger, step: 2}
-    - {from: embed-fn, to: docs-index, label: chunk + embed + upsert, step: 3}
+    - {from: data engineers, to: raw-docs-bucket, label: data for RAG, step: 1}
+    - {from: raw-docs-bucket, to: embed-fn, label: ingested data, step: 2}
+    - {from: embed-fn, to: docs-index, label: chunk + embeddings generation + upsert, step: 3}
     - {from: docs-index, to: docs-index-endpoint, label: deployed index}
-    - {from: users, to: chat-frontend, label: HTTPS prompt, step: 4}
+    - {from: application users, to: chat-frontend, label: queries and responses, step: 4}
     - {from: chat-frontend, to: rag-backend, label: query, step: 5}
-    - {from: rag-backend, to: docs-index-endpoint, label: nearest-neighbour lookup, step: 6}
-    - {from: rag-backend, to: eval-scores, label: response quality scores, step: 7}
+    - {from: rag-backend, to: docs-index-endpoint, label: "vector search, responsible AI, prompt optimization", step: 6}
+    - {from: gen ai application developers, to: docs-index-endpoint, label: sample prompts and evaluation scores}
+    - {from: gen ai application developers, to: app-ci-cd, label: push application code, step: 7}
+    - {from: app-ci-cd, to: embed-fn, label: deploy}
+    - {from: app-ci-cd, to: rag-backend, label: deploy, step: 8}
+    - {from: app-ci-cd, to: chat-frontend, label: deploy}
 
 - slug: rag-alloydb-pgvector
   title: RAG infrastructure with AlloyDB for PostgreSQL as the vector store
   category: ml
   tags: [rag, alloydb, pgvector, embeddings, cloud run functions, evaluation]
   source: https://docs.cloud.google.com/architecture/rag-capable-gen-ai-app-using-vertex-ai
-  description: Uploaded data lands in Cloud Storage, a Pub/Sub message triggers a Cloud Run function that chunks the content and stores Vertex AI embeddings as pgvector columns in an AlloyDB cluster. The serving path embeds the user query, runs a semantic search in AlloyDB, builds a grounded prompt for the Vertex AI LLM, and an asynchronous evaluation function scores responses and loads the results into BigQuery.
+  description: Uploaded RAG data and evaluation prompts land in Cloud Storage in the data ingestion subsystem, a Pub/Sub message triggers a Cloud Run function that chunks the content and stores Vertex AI embeddings as pgvector columns in an AlloyDB cluster. The serving subsystem embeds the application user's query, runs a semantic search in AlloyDB and builds a grounded prompt for the Vertex AI LLM, while the quality evaluation subsystem, started by an evaluation trigger or by served responses, scores answers asynchronously and loads the results into BigQuery.
   containers:
     - project: rag-alloydb-prj
       region: europe-west4
+      account_at: [2, 2, 2, 2]
+      groups: [{label: data-ingestion, at: [1, 1, 1, 3]}, {label: quality-evaluation, at: [3, 1, 1, 3]}, {label: serving, at: [1, 4, 3, 1]}]
       vpcs:
         - name: rag-vpc
           cidr: 10.30.0.0/16
+          at: [2, 1, 1, 3]
           subnets:
-            - {name: db-sub, cidr: 10.30.1.0/24, region: europe-west4}
+            - {name: db-sub, cidr: 10.30.1.0/24, region: europe-west4, at: [1, 1]}
   elements:
-    - {tf: google_storage_bucket, name: source-data-bucket, in: region}
-    - {tf: google_pubsub_topic, name: ingest-topic, in: region}
-    - {tf: google_cloudfunctions2_function, name: chunk-embed-fn, in: region}
-    - {tf: google_alloydb_cluster, name: vector-store, in: subnet:db-sub}
-    - {tf: google_cloud_run_v2_service, name: rag-app, in: region}
-    - {tf: google_pubsub_topic, name: eval-topic, in: region}
-    - {tf: google_cloudfunctions2_function, name: eval-fn, in: region}
-    - {tf: google_bigquery_dataset, name: eval-dataset, in: region}
-    - {tf: google_secret_manager_secret, name: db-password, in: region}
-  actors: [users]
+    - {tf: google_storage_bucket, name: source-data-bucket, in: group:data-ingestion, at: [1, 1]}
+    - {tf: google_pubsub_topic, name: ingest-topic, in: group:data-ingestion, at: [1, 2]}
+    - {tf: google_cloudfunctions2_function, name: chunk-embed-fn, in: group:data-ingestion, at: [1, 3]}
+    - {tf: google_alloydb_cluster, name: vector-store, in: subnet:db-sub, at: [1, 1]}
+    - {tf: google_cloud_run_v2_service, name: rag-app, in: group:serving, at: [1, 1]}
+    - {tf: google_pubsub_topic, name: eval-topic, in: group:quality-evaluation, at: [1, 1]}
+    - {tf: google_cloudfunctions2_function, name: eval-fn, in: group:quality-evaluation, at: [1, 2]}
+    - {tf: google_bigquery_dataset, name: eval-dataset, in: group:quality-evaluation, at: [1, 3]}
+  actors: [{type: users, name: application users, at: [1, 3]}, {type: user, name: data upload, at: [2, 1]}, {type: client, name: evaluation trigger, at: [3, 1]}]
   flows:
-    - {from: source-data-bucket, to: ingest-topic, label: object notification, step: 1}
-    - {from: ingest-topic, to: chunk-embed-fn, label: trigger, step: 2}
-    - {from: chunk-embed-fn, to: vector-store, label: INSERT embeddings (pgvector), step: 3}
-    - {from: users, to: rag-app, label: HTTPS question, step: 4}
-    - {from: rag-app, to: vector-store, label: similarity search, step: 5}
-    - {from: rag-app, to: db-password, label: fetch credentials}
-    - {from: rag-app, to: eval-topic, label: publish response for scoring, step: 6}
-    - {from: eval-topic, to: eval-fn, label: trigger, step: 7}
-    - {from: eval-fn, to: eval-dataset, label: load evaluation scores, step: 8}
+    - {from: data upload, to: source-data-bucket, label: "upload RAG data, evaluation prompts", step: 1}
+    - {from: source-data-bucket, to: ingest-topic, label: object notification, step: 2}
+    - {from: ingest-topic, to: chunk-embed-fn, label: trigger, step: 3}
+    - {from: chunk-embed-fn, to: vector-store, label: INSERT embeddings (pgvector), step: 4}
+    - {from: application users, to: rag-app, label: request / response, step: 5}
+    - {from: rag-app, to: vector-store, label: similarity search, step: 6}
+    - {from: rag-app, to: eval-topic, label: publish response for scoring, step: 7}
+    - {from: evaluation trigger, to: eval-topic, label: evaluation trigger}
+    - {from: eval-topic, to: eval-fn, label: trigger, step: 8}
+    - {from: eval-fn, to: eval-dataset, label: load evaluation scores, step: 9}
 
 - slug: rag-vertex-ai-search-datastore
   title: RAG with a Vertex AI Search data store and Gemini Enterprise
   category: ml
   tags: [rag, vertex ai search, discovery engine, gemini enterprise, managed data store]
   source: https://docs.cloud.google.com/architecture/rag-genai-gemini-enterprise-vertexai
-  description: Raw documents uploaded to Cloud Storage trigger Cloud Run functions through Pub/Sub that generate metadata, after which a managed Vertex AI Search data store parses, chunks, embeds and indexes the content without a self-managed vector database. A Cloud Run frontend and backend forward user questions to the Gemini Enterprise API, which searches the data store, augments the prompt and returns a grounded answer.
+  description: Data engineers upload raw documents for RAG to Cloud Storage in the data ingestion subsystem, from where a Cloud Run data preparation function imports them into a managed Vertex AI Search data store that parses, chunks, embeds and indexes the content without a self-managed vector database. In the serving subsystem a Cloud Run frontend and backend forward application user questions to the Gemini Enterprise search app, which runs a vector semantic search over the data store, optimizes the prompt and returns a grounded answer.
   containers:
     - project: search-rag-prj
       region: europe-west1
-      groups: [{label: ingestion}, {label: serving}]
+      account_at: [2, 1, 1, 3]
+      groups: [{label: data-ingestion, at: [1, 1]}, {label: gemini-enterprise-and-vertex-ai, at: [1, 2]}, {label: serving, at: [1, 3]}]
   elements:
-    - {tf: google_storage_bucket, name: docs-bucket, in: group:ingestion}
-    - {tf: google_pubsub_topic, name: docs-topic, in: group:ingestion}
-    - {tf: google_cloudfunctions2_function, name: metadata-fn, in: group:ingestion}
-    - {tf: google_storage_bucket, name: metadata-bucket, in: group:ingestion}
-    - {tf: google_discovery_engine_data_store, name: enterprise-datastore, in: group:serving}
-    - {tf: google_discovery_engine_search_engine, name: enterprise-search-app, in: group:serving}
-    - {tf: google_cloud_run_v2_service, name: web-frontend, in: group:serving}
-    - {tf: google_cloud_run_v2_service, name: api-backend, in: group:serving}
-  actors: [users]
+    - {tf: google_storage_bucket, name: docs-bucket, in: group:data-ingestion, at: [1, 1]}
+    - {tf: google_cloudfunctions2_function, name: data-prep-fn, in: group:data-ingestion, at: [2, 1]}
+    - {tf: google_discovery_engine_data_store, name: enterprise-datastore, in: group:gemini-enterprise-and-vertex-ai, at: [1, 1]}
+    - {tf: google_discovery_engine_search_engine, name: enterprise-search-app, in: group:gemini-enterprise-and-vertex-ai, at: [2, 1]}
+    - {tf: google_cloud_run_v2_service, name: web-frontend, in: group:serving, at: [1, 1]}
+    - {tf: google_cloud_run_v2_service, name: api-backend, in: group:serving, at: [2, 1]}
+  actors: [{type: users, name: data engineers, at: [1, 1]}, {type: users, name: application users, at: [1, 3]}]
   flows:
-    - {from: docs-bucket, to: docs-topic, label: upload event, step: 1}
-    - {from: docs-topic, to: metadata-fn, label: trigger, step: 2}
-    - {from: metadata-fn, to: metadata-bucket, label: write JSONL metadata, step: 3}
-    - {from: metadata-bucket, to: enterprise-datastore, label: import + chunk + embed, step: 4}
+    - {from: data engineers, to: docs-bucket, label: data for RAG, step: 1}
+    - {from: docs-bucket, to: data-prep-fn, label: ingested data, step: 2}
+    - {from: data-prep-fn, to: enterprise-datastore, label: import + chunk + embed + index, step: 3}
     - {from: enterprise-datastore, to: enterprise-search-app, label: indexed content}
-    - {from: users, to: web-frontend, label: HTTPS question, step: 5}
-    - {from: web-frontend, to: api-backend, label: query, step: 6}
-    - {from: api-backend, to: enterprise-search-app, label: search + grounded generation, step: 7}
+    - {from: application users, to: web-frontend, label: queries and responses, step: 4}
+    - {from: web-frontend, to: api-backend, label: query, step: 5}
+    - {from: api-backend, to: enterprise-search-app, label: vector semantic search + prompt optimization, step: 6}
 
 - slug: single-agent-adk-cloud-run
   title: Single-agent AI system with ADK, MCP tools and Cloud Run
   category: ml
   tags: [agent, adk, function calling, mcp, cloud run, gemini]
   source: https://docs.cloud.google.com/architecture/single-agent-ai-system-adk-cloud-run
-  description: A frontend Cloud Run service forwards user prompts to an Agent Development Kit agent hosted on a second Cloud Run service, which reasons with a Gemini model on Vertex AI and decides which tools to call. Tool calls go through Model Context Protocol servers to enterprise data such as Firestore and BigQuery, session state is persisted, and logs and traces flow to Cloud Observability.
+  description: A frontend Cloud Run service forwards application user prompts to an Agent Development Kit agent whose runtime is a second Cloud Run service; the agent reasons with a Gemini model on Vertex AI and decides which tools to call. Tool calls go through built-in tools and Model Context Protocol servers to enterprise data such as BigQuery, session state is persisted in Firestore, and logs, traces and metrics flow to Google Cloud Observability.
   containers:
     - project: agent-prj
       region: europe-west1
+      account_at: [2, 1]
+      groups: [{label: agent, at: [2, 1, 1, 2]}]
   elements:
-    - {tf: google_cloud_run_v2_service, name: chat-frontend, in: region}
-    - {tf: google_cloud_run_v2_service, name: adk-agent, in: region}
-    - {tf: google_cloud_run_v2_service, name: mcp-tools-server, in: region}
-    - {tf: google_firestore_database, name: session-store, in: region}
-    - {tf: google_bigquery_dataset, name: enterprise-data, in: region}
-    - {tf: google_secret_manager_secret, name: tool-api-keys, in: region}
-    - {tf: google_artifact_registry_repository, name: agent-images, in: region}
-  actors: [users]
+    - {tf: google_cloud_run_v2_service, name: chat-frontend, in: region, at: [1, 1, 1, 2]}
+    - {tf: google_cloud_run_v2_service, name: adk-agent, in: group:agent, at: [1, 1]}
+    - {tf: google_cloud_run_v2_service, name: mcp-tools-server, in: group:agent, at: [1, 2]}
+    - {tf: google_vertex_ai_endpoint, name: gemini-model, in: region, at: [2, 3]}
+    - {tf: google_firestore_database, name: session-store, in: region, at: [3, 1]}
+    - {tf: google_bigquery_dataset, name: enterprise-data, in: region, at: [3, 2]}
+    - {tf: google_monitoring_dashboard, name: agent-observability, in: region, at: [4, 1, 1, 3]}
+  actors: [{type: users, name: application users, at: [1, 1]}]
   flows:
-    - {from: users, to: chat-frontend, label: HTTPS prompt, step: 1}
+    - {from: application users, to: chat-frontend, label: prompt, step: 1}
     - {from: chat-frontend, to: adk-agent, label: forward request, step: 2}
-    - {from: adk-agent, to: session-store, label: read/write session state, step: 3}
-    - {from: adk-agent, to: mcp-tools-server, label: tool call (MCP), step: 4}
-    - {from: mcp-tools-server, to: enterprise-data, label: query data, step: 5}
-    - {from: mcp-tools-server, to: tool-api-keys, label: fetch credentials}
-    - {from: adk-agent, to: chat-frontend, label: grounded response, step: 6}
-    - {from: agent-images, to: adk-agent, label: container image}
+    - {from: adk-agent, to: gemini-model, label: reasoning + tool selection, step: 3}
+    - {from: adk-agent, to: session-store, label: read/write session state, step: 4}
+    - {from: adk-agent, to: mcp-tools-server, label: tool call (MCP), step: 5}
+    - {from: mcp-tools-server, to: enterprise-data, label: query data, step: 6}
+    - {from: adk-agent, to: chat-frontend, label: grounded response, step: 7}
+    - {from: adk-agent, to: agent-observability, label: "logs, traces, metrics"}
 
 - slug: mlops-vertex-pipelines-cloud-build
   title: MLOps with Vertex AI Pipelines, Model Registry and Cloud Build
   category: ml
   tags: [mlops, vertex ai pipelines, model registry, cloud build, tfx, continuous training]
   source: https://docs.cloud.google.com/architecture/architecture-for-mlops-using-tfx-kubeflow-pipelines-and-cloud-build
-  description: Cloud Build runs CI on the pipeline source, builds component images into Artifact Registry and compiles the pipeline definition to Cloud Storage, from where Vertex AI Pipelines executes data validation, transformation with Dataflow, training and evaluation steps. Validated models are registered in Vertex AI Model Registry and deployed to an online endpoint, while Cloud Scheduler and Pub/Sub trigger continuous training runs on new data in BigQuery.
+  description: Cloud Build builds the pipeline component images into Artifact Registry and compiles the pipeline definition into the Cloud Storage pipeline root, from where Vertex AI Pipelines runs the ML workflow, extracting and validating data from BigQuery, transforming it with Dataflow or Managed Service for Apache Spark, then training and evaluating the model with lineage recorded in Vertex ML Metadata. Validated models are registered in Vertex AI Model Registry and deployed to an online prediction endpoint on the ML platform that clients call.
   containers:
     - project: mlops-prj
       region: us-central1
-      groups: [{label: ci-cd}, {label: training}, {label: serving}]
+      account_at: [1, 2]
+      groups: [{label: ci-cd, at: [1, 1, 1, 2]}, {label: ml-platform, at: [2, 1, 1, 2]}, {label: storage, at: [3, 1]}, {label: analytics, at: [3, 2]}]
   elements:
-    - {tf: google_sourcerepo_repository, name: pipeline-source, in: group:ci-cd}
-    - {tf: google_cloudbuild_trigger, name: pipeline-ci, in: group:ci-cd}
-    - {tf: google_artifact_registry_repository, name: component-images, in: group:ci-cd}
-    - {tf: google_storage_bucket, name: pipeline-root, in: group:training}
-    - {tf: google_bigquery_dataset, name: training-data, in: group:training}
-    - {tf: google_cloud_scheduler_job, name: retrain-schedule, in: group:training}
-    - {tf: google_pubsub_topic, name: pipeline-trigger, in: group:training}
-    - {tf: google_cloudfunctions2_function, name: submit-pipeline-fn, in: group:training}
-    - {tf: google_vertex_ai_endpoint, name: prod-endpoint, in: group:serving}
-  actors: [user, client]
+    - {tf: google_cloudbuild_trigger, name: pipeline-ci, in: group:ci-cd, at: [1, 1]}
+    - {tf: google_artifact_registry_repository, name: component-images, in: group:ci-cd, at: [1, 2]}
+    - {tf: google_vertex_ai_endpoint, name: prod-endpoint, in: group:ml-platform, at: [1, 1]}
+    - {tf: google_storage_bucket, name: pipeline-root, in: group:storage, at: [1, 1]}
+    - {tf: google_bigquery_dataset, name: training-data, in: group:analytics, at: [1, 1]}
+    - {tf: google_dataflow_job, name: transform-pipeline, in: group:analytics, at: [1, 2]}
+    - {tf: google_dataproc_batch, name: spark-feature-batch, in: group:analytics, at: [1, 3]}
+  actors: [{type: user, name: user, at: [1, 1]}, {type: client, name: client, at: [1, 3]}]
   flows:
-    - {from: user, to: pipeline-source, label: push pipeline code, step: 1}
-    - {from: pipeline-source, to: pipeline-ci, label: trigger build, step: 2}
-    - {from: pipeline-ci, to: component-images, label: push component images, step: 3}
-    - {from: pipeline-ci, to: pipeline-root, label: upload compiled pipeline, step: 4}
-    - {from: retrain-schedule, to: pipeline-trigger, label: cron message, step: 5}
-    - {from: pipeline-trigger, to: submit-pipeline-fn, label: trigger, step: 6}
-    - {from: submit-pipeline-fn, to: pipeline-root, label: run Vertex AI pipeline, step: 7}
-    - {from: training-data, to: pipeline-root, label: extract + validate + train, step: 8}
-    - {from: pipeline-root, to: prod-endpoint, label: register + deploy model, step: 9}
-    - {from: client, to: prod-endpoint, label: online prediction, step: 10}
+    - {from: user, to: pipeline-ci, label: push pipeline code, step: 1}
+    - {from: pipeline-ci, to: component-images, label: push component images, step: 2}
+    - {from: pipeline-ci, to: pipeline-root, label: upload compiled pipeline, step: 3}
+    - {from: component-images, to: pipeline-root, label: component images for pipeline steps}
+    - {from: pipeline-root, to: training-data, label: extract + validate data, step: 4}
+    - {from: pipeline-root, to: transform-pipeline, label: transform with Dataflow, step: 5}
+    - {from: pipeline-root, to: spark-feature-batch, label: feature processing with Spark, step: 5}
+    - {from: pipeline-root, to: prod-endpoint, label: register + deploy model, step: 6}
+    - {from: client, to: prod-endpoint, label: online prediction, step: 7}
 
 - slug: gke-gpu-tpu-training
   title: Distributed model training on GKE with GPU and TPU node pools
   category: ml
   tags: [gke, tpu, gpu, training, jobset, kueue, cloud storage fuse]
   source: https://docs.cloud.google.com/kubernetes-engine/docs/concepts/tpus
-  description: A GKE cluster provides accelerator node pools, either multi-host TPU slices or NVIDIA GPU nodes, on which JobSet and Kueue schedule distributed training jobs built from images in Artifact Registry. Training data and checkpoints live in Cloud Storage mounted through Cloud Storage FUSE, and the finished model artifacts are uploaded to Vertex AI Model Registry for serving.
+  description: A GKE cluster, whose Google-managed Kubernetes control plane (API server, scheduler, resource controllers and storage) is the cluster resource itself, schedules distributed training jobs submitted through JobSet and Kueue onto accelerator node pools. The multi-host TPU slice node pool runs ct5lp-hightpu-4t machines in a 4x4 topology whose TPU VMs exchange data over inter-chip interconnect (ICI) links, and an optional GPU node pool hosts NVIDIA workers.
   containers:
     - project: training-prj
       region: us-central2
+      account_at: [1, 2]
       vpcs:
         - name: train-vpc
           cidr: 10.50.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: accel-sub, cidr: 10.50.0.0/20, region: us-central2}
+            - {name: accel-sub, cidr: 10.50.0.0/20, region: us-central2, at: [1, 1]}
   elements:
-    - {tf: google_container_cluster, name: train-cluster, in: subnet:accel-sub}
-    - {tf: google_container_node_pool, name: tpu-slice-pool, in: subnet:accel-sub}
-    - {tf: google_container_node_pool, name: gpu-pool, in: subnet:accel-sub}
-    - {tf: google_storage_bucket, name: datasets-bucket, in: region}
-    - {tf: google_storage_bucket, name: checkpoints-bucket, in: region}
-    - {tf: google_artifact_registry_repository, name: training-images, in: region}
-    - {tf: google_vertex_ai_dataset, name: managed-dataset, in: region}
-  actors: [user]
+    - {tf: google_container_cluster, name: train-cluster, in: subnet:accel-sub, at: [1, 1]}
+    - {tf: google_container_node_pool, name: tpu-slice-pool, in: subnet:accel-sub, at: [1, 1, 1, 2]}
+    - {tf: google_container_node_pool, name: gpu-pool, in: subnet:accel-sub, at: [1, 3]}
+    - {tf: google_tpu_node, name: tpu-vm-1, in: train-cluster, at: [2, 1]}
+    - {tf: google_tpu_node, name: tpu-vm-2, in: train-cluster, at: [2, 2]}
+    - {tf: google_tpu_node, name: tpu-vm-3, in: train-cluster, at: [3, 1]}
+    - {tf: google_tpu_node, name: tpu-vm-4, in: train-cluster, at: [3, 2]}
+  actors: [{type: user, name: user, at: [1, 1]}]
   flows:
-    - {from: user, to: training-images, label: push training image, step: 1}
-    - {from: user, to: train-cluster, label: submit JobSet via Kueue, step: 2}
-    - {from: training-images, to: train-cluster, label: pull image, step: 3}
-    - {from: train-cluster, to: tpu-slice-pool, label: schedule multi-host workers, step: 4}
-    - {from: train-cluster, to: gpu-pool, label: schedule GPU workers, step: 4}
-    - {from: datasets-bucket, to: tpu-slice-pool, label: Cloud Storage FUSE reads, step: 5}
-    - {from: tpu-slice-pool, to: checkpoints-bucket, label: write checkpoints, step: 6}
-    - {from: managed-dataset, to: datasets-bucket, label: dataset source}
+    - {from: user, to: train-cluster, label: submit JobSet via Kueue, step: 1}
+    - {from: train-cluster, to: tpu-slice-pool, label: schedule multi-host TPU workers, step: 2}
+    - {from: train-cluster, to: gpu-pool, label: schedule GPU workers, step: 2}
+    - {from: tpu-slice-pool, to: tpu-vm-1, label: "ct5lp-hightpu-4t nodes, 4x4 topology", step: 3}
+    - {from: tpu-vm-1, to: tpu-vm-2, label: ICI}
+    - {from: tpu-vm-1, to: tpu-vm-3, label: ICI}
+    - {from: tpu-vm-2, to: tpu-vm-4, label: ICI}
+    - {from: tpu-vm-3, to: tpu-vm-4, label: ICI}
 
 - slug: batch-prediction-bigquery-workflows
   title: Scheduled batch prediction from BigQuery with Vertex AI and Workflows
@@ -340,28 +347,26 @@
   category: ml
   tags: [vision api, dataflow, image annotation, pub/sub, bigquery, edge cameras]
   source: https://docs.cloud.google.com/architecture/building-a-vision-analytics-solution
-  description: Cameras and client devices upload images to Cloud Storage, whose object notifications flow through Pub/Sub to a streaming Dataflow pipeline that batches file references and calls the Cloud Vision API for labels, objects and text. The annotations are written to BigQuery tables where analysts query them directly or train further models with BigQuery ML and Vertex AI.
+  description: Laptops, phones and cameras upload raw images to Cloud Storage, whose object notifications flow through Pub/Sub to a streaming Dataflow pipeline that batches the file references and calls the Cloud Vision API to annotate the images with labels, objects and text. The annotations are written to a BigQuery data warehouse where analysts store and query them directly.
   containers:
     - project: vision-prj
       region: us-central1
+      account_at: [1, 2, 2, 1]
+      groups: [{label: ingest-and-trigger, at: [1, 1]}, {label: process, at: [1, 2]}, {label: store-and-analyze, at: [1, 3]}]
   elements:
-    - {tf: google_storage_bucket, name: images-bucket, in: region}
-    - {tf: google_pubsub_topic, name: image-notifications, in: region}
-    - {tf: google_pubsub_subscription, name: dataflow-sub, in: region}
-    - {tf: google_dataflow_job, name: vision-annotate-pipeline, in: region}
-    - {tf: google_bigquery_dataset, name: vision-annotations, in: region}
-    - {tf: google_storage_bucket, name: dataflow-temp, in: region}
-    - {tf: google_vertex_ai_dataset, name: labelled-images, in: region}
-  actors: [device, users]
+    - {tf: google_storage_bucket, name: images-bucket, in: group:ingest-and-trigger, at: [1, 1]}
+    - {tf: google_pubsub_topic, name: image-notifications, in: group:ingest-and-trigger, at: [2, 1]}
+    - {tf: google_dataflow_job, name: vision-annotate-pipeline, in: group:process, at: [2, 1]}
+    - {tf: google_bigquery_dataset, name: vision-annotations, in: group:store-and-analyze, at: [1, 1, 2, 1]}
+  actors: [{type: device, name: laptop, at: [1, 1]}, {type: mobile, name: phone, at: [2, 1]}, {type: saas, name: Cloud Vision API, at: [1, 3]}]
   flows:
-    - {from: device, to: images-bucket, label: upload images, step: 1}
+    - {from: laptop, to: images-bucket, label: upload raw images, step: 1}
+    - {from: phone, to: images-bucket, label: upload raw images, step: 1}
     - {from: images-bucket, to: image-notifications, label: object finalize, step: 2}
-    - {from: image-notifications, to: dataflow-sub, label: subscription}
-    - {from: dataflow-sub, to: vision-annotate-pipeline, label: pull file references, step: 3}
-    - {from: vision-annotate-pipeline, to: dataflow-temp, label: staging}
-    - {from: vision-annotate-pipeline, to: vision-annotations, label: write annotations, step: 4}
-    - {from: vision-annotations, to: labelled-images, label: export training set, step: 5}
-    - {from: users, to: vision-annotations, label: SQL analysis, step: 6}
+    - {from: image-notifications, to: vision-annotate-pipeline, label: file references, step: 3}
+    - {from: vision-annotate-pipeline, to: Cloud Vision API, label: annotate image batch, step: 4}
+    - {from: Cloud Vision API, to: images-bucket, label: read raw images}
+    - {from: vision-annotate-pipeline, to: vision-annotations, label: write annotations, step: 5}
 
 - slug: feature-store-bigquery-online-serving
   title: Vertex AI Feature Store with BigQuery offline store and online serving

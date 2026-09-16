@@ -11,56 +11,96 @@ tags:
 - sagemaker
 image: https://docs.aws.amazon.com/images/reference-architecture-diagrams/latest/smart-farm-on-aws/images/smart-farm-on-aws.png
 source: https://docs.aws.amazon.com/architecture-diagrams/latest/smart-farm-on-aws/smart-farm-on-aws.html
-description: Field sensors and cameras send data through Greengrass stream manager into Kinesis Data Streams and Kinesis Video Streams; Managed Service for Apache Flink derives real-time insights and notifies
-  users through SNS, while S3, Glue, Athena and OpenSearch form the analytics layer. SageMaker trains edge-inference models and a Lambda importer forwards Device Defender reports to Security Hub.
+description: Third-party sensors, drones and FreeRTOS cameras and sensors send data to an IoT Greengrass gateway (with a Lambda protocol converter and a SageMaker edge model) that exports through stream
+  manager into Kinesis Data Streams and Kinesis Video Streams; Kinesis Data Firehose loads the S3 data lake continuously while Managed Service for Apache Flink derives real-time insights and notifies users
+  through SNS, and OpenSearch behind API Gateway serves queries to client, mobile and web users. Glue Data Catalog, Athena and QuickSight store, visualize and query the lake, SageMaker and Ground Truth
+  train the edge models, IoT Core Device Management and Device Defender manage the fleet with a Lambda importer forwarding Defender reports to Security Hub, and Direct Connect and PrivateLink bring in existing
+  on-premises data and third-party sensor data from S3.
 nodes:
-- {id: dc-farm, type: common.datacenter, name: farm, at: [1, 1]}
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1, at: [2, 2]}
-- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1, at: [1, 3, 2, 1]}
-- {id: grp-ml, type: common.group, name: ml, parent: reg-us-east-1, at: [1, 2]}
-- {id: device, type: common.device, name: device, at: [2, 1]}
-- {id: users, type: common.users, name: users, at: [1, 3, 2, 1]}
-- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}, at: [1, 1, 2, 1]}
-- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}, at: [2, 1]}
-- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: greengrass-gateway, type: aws.res.aws_iot_thing, name: greengrass-gateway, parent: sub-reg-us-east-1-a, props: {name: changeme}, at: [1, 1]}
-- {id: protocol-converter, type: aws.lambda_function, name: protocol-converter, parent: grp-ingestion, at: [1, 1, 2, 1]}
-- {id: sensor-stream, type: aws.res.aws_kinesis_stream, name: sensor-stream, parent: grp-ingestion, props: {name: changeme}, at: [2, 2]}
-- {id: field-camera-stream, type: aws.res.aws_kinesis_video_stream, name: field-camera-stream, parent: grp-ingestion, props: {name: changeme}, at: [1, 2]}
-- {id: flink-insights, type: aws.res.aws_kinesisanalyticsv2_application, name: flink-insights, parent: grp-analytics, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}, at: [3, 1]}
-- {id: farmer-alerts, type: aws.res.aws_sns_topic, name: farmer-alerts, parent: grp-analytics, at: [3, 3]}
-- {id: farm-search, type: aws.res.aws_opensearch_domain, name: farm-search, parent: grp-analytics, props: {domain_name: changeme}, at: [3, 2]}
-- {id: farm-data-lake, type: aws.s3_bucket, name: farm-data-lake, parent: grp-analytics, at: [2, 1]}
-- {id: lake-crawler, type: aws.res.aws_glue_crawler, name: lake-crawler, parent: grp-analytics, props: {database_name: changeme, name: changeme, role: changeme}, at: [1, 1]}
-- {id: farm-athena, type: aws.res.aws_athena_workgroup, name: farm-athena, parent: grp-analytics, props: {name: changeme}, at: [2, 2]}
-- {id: insights-api, type: aws.res.aws_api_gateway_rest_api, name: insights-api, parent: grp-analytics, props: {name: changeme}, at: [2, 3]}
-- {id: crop-model-endpoint, type: aws.res.aws_sagemaker_endpoint, name: crop-model-endpoint, parent: grp-ml, props: {endpoint_config_name: changeme}, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 2, 4, 1]}
+- {id: grp-aws-iot-greengrass, type: common.group, name: AWS IoT Greengrass, parent: reg-us-east-1, at: [2, 1, 2, 1]}
+- {id: grp-aws-iot-core, type: common.group, name: AWS IoT Core, parent: reg-us-east-1, at: [1, 3]}
+- {id: grp-streaming-data-acquisition-and-analytics, type: common.group, name: streaming data acquisition and analytics, parent: reg-us-east-1, at: [3, 2, 1, 5]}
+- {id: on-premises-database, type: common.database, name: on-premises database, at: [1, 1]}
+- {id: third-party-sensor-data-in-s3, type: common.saas, name: third-party sensor data in S3, at: [2, 1]}
+- {id: third-party-sensors-and-drones, type: common.device, name: third-party sensors and drones, at: [3, 1]}
+- {id: freertos-cameras-and-sensors, type: common.device, name: FreeRTOS cameras and sensors, at: [4, 1]}
+- {id: client, type: common.client, name: client, at: [1, 3]}
+- {id: mobile, type: common.mobile, name: mobile, at: [2, 3]}
+- {id: users, type: common.users, name: users, at: [3, 3]}
+- {id: onprem-dx, type: aws.res.aws_dx_connection, name: onprem-dx, parent: reg-us-east-1, props: {bandwidth: changeme, location: westeurope, name: changeme}, at: [1, 1]}
+- {id: third-party-privatelink, type: aws.res.aws_vpc_endpoint, name: third-party-privatelink, parent: reg-us-east-1, props: {vpc_id: changeme}, at: [1, 2]}
+- {id: greengrass-gateway, type: aws.res.aws_iot_thing, name: greengrass-gateway, parent: grp-aws-iot-greengrass, props: {name: changeme}, at: [1, 1]}
+- {id: edge-inference-model, type: aws.res.aws_sagemaker_model, name: edge-inference-model, parent: grp-aws-iot-greengrass, props: {execution_role_arn: changeme}, at: [2, 1]}
+- {id: protocol-converter, type: aws.lambda_function, name: protocol-converter, parent: grp-aws-iot-greengrass, at: [3, 1]}
+- {id: device-defender-audit, type: aws.res.aws_iot_logging_options, name: device-defender-audit, parent: grp-aws-iot-core, props: {default_log_level: changeme, role_arn: changeme}, at: [1, 1]}
+- {id: device-management-fleet-index, type: aws.res.aws_iot_indexing_configuration, name: device-management-fleet-index, parent: grp-aws-iot-core, at: [2, 1]}
+- {id: farm-security-hub, type: aws.res.aws_securityhub_account, name: farm-security-hub, parent: reg-us-east-1, at: [1, 4]}
+- {id: defender-report-importer, type: aws.lambda_function, name: defender-report-importer, parent: reg-us-east-1, at: [2, 4]}
+- {id: crop-model, type: aws.res.aws_sagemaker_model, name: crop-model, parent: reg-us-east-1, props: {execution_role_arn: changeme}, at: [2, 2]}
+- id: ground-truth-labeling
+  type: aws.res.aws_sagemaker_workteam
+  name: ground-truth-labeling
+  parent: reg-us-east-1
+  props: {description: changeme, member_definition: [], workteam_name: changeme}
+  at:
+  - 2
+  - 3
+- {id: farm-data-lake, type: aws.s3_bucket, name: farm-data-lake, parent: reg-us-east-1, at: [2, 5]}
+- {id: farm-data-catalog, type: aws.res.aws_glue_catalog_database, name: farm-data-catalog, parent: reg-us-east-1, props: {name: changeme}, at: [1, 5]}
+- {id: farm-athena, type: aws.res.aws_athena_workgroup, name: farm-athena, parent: reg-us-east-1, props: {name: changeme}, at: [2, 6]}
+- {id: farm-dashboards, type: aws.res.aws_quicksight_dashboard, name: farm-dashboards, parent: reg-us-east-1, props: {dashboard_id: changeme, name: changeme, version_description: changeme}, at: [1, 6]}
+- {id: field-camera-stream, type: aws.res.aws_kinesis_video_stream, name: field-camera-stream, parent: grp-streaming-data-acquisition-and-analytics, props: {name: changeme}, at: [1, 1]}
+- {id: sensor-stream, type: aws.res.aws_kinesis_stream, name: sensor-stream, parent: grp-streaming-data-acquisition-and-analytics, props: {name: changeme}, at: [2, 1]}
+- {id: lake-firehose, type: aws.res.aws_kinesis_firehose_delivery_stream, name: lake-firehose, parent: grp-streaming-data-acquisition-and-analytics, props: {destination: changeme, name: changeme}, at: [
+    1, 2]}
+- {id: flink-insights, type: aws.res.aws_kinesisanalyticsv2_application, name: flink-insights, parent: grp-streaming-data-acquisition-and-analytics, props: {name: changeme, runtime_environment: changeme,
+    service_execution_role: changeme}, at: [2, 2]}
+- {id: farm-search, type: aws.res.aws_opensearch_domain, name: farm-search, parent: grp-streaming-data-acquisition-and-analytics, props: {domain_name: changeme}, at: [1, 3]}
+- {id: farmer-alerts, type: aws.res.aws_sns_topic, name: farmer-alerts, parent: grp-streaming-data-acquisition-and-analytics, at: [2, 3]}
+- {id: insights-api, type: aws.res.aws_api_gateway_rest_api, name: insights-api, parent: grp-streaming-data-acquisition-and-analytics, props: {name: changeme}, at: [1, 4]}
 edges:
-- {from: device, to: protocol-converter, label: third-party sensors and drones, step: '1'}
-- {from: device, to: greengrass-gateway, label: FreeRTOS sensors and cameras, step: '2'}
+- {from: third-party-sensors-and-drones, to: protocol-converter, label: third-party protocols, step: '1'}
+- {from: protocol-converter, to: greengrass-gateway, label: protocol conversion}
+- {from: freertos-cameras-and-sensors, to: greengrass-gateway, label: FreeRTOS telemetry and video, step: '2'}
 - {from: greengrass-gateway, to: sensor-stream, label: stream manager export, step: '3'}
-- {from: greengrass-gateway, to: field-camera-stream, label: live video, step: '4'}
-- {from: protocol-converter, to: sensor-stream, label: normalised records}
-- {from: sensor-stream, to: flink-insights, label: real-time analytics, step: '5'}
+- {from: greengrass-gateway, to: field-camera-stream, label: live video}
+- {from: greengrass-gateway, to: device-management-fleet-index, label: fleet management}
+- {from: greengrass-gateway, to: device-defender-audit, label: security audit and detect}
+- {from: crop-model, to: edge-inference-model, label: enable ML and edge inference, step: '4'}
+- {from: ground-truth-labeling, to: crop-model, label: labelled training data}
+- {from: farm-data-lake, to: crop-model, label: training data}
+- {from: sensor-stream, to: flink-insights, label: streaming analytics}
+- {from: sensor-stream, to: lake-firehose, label: streaming data acquisition}
+- {from: field-camera-stream, to: farm-data-lake, label: video fragments}
+- {from: lake-firehose, to: farm-data-lake, label: prepare and load data continuously}
 - {from: flink-insights, to: farmer-alerts, label: threshold notifications, step: '5'}
-- {from: flink-insights, to: farm-search, label: indexed events, step: '6'}
-- {from: sensor-stream, to: farm-data-lake, label: raw archive, step: '6'}
-- {from: lake-crawler, to: farm-data-lake, label: infer schema on new objects, step: '11'}
-- {from: farm-athena, to: farm-data-lake, label: on-demand SQL}
-- {from: users, to: insights-api, label: insights and dashboards, step: '9'}
-- {from: farm-data-lake, to: crop-model-endpoint, label: labelled training data, step: '10'}
-- {from: crop-model-endpoint, to: greengrass-gateway, label: model deployed for edge inference}
+- {from: farmer-alerts, to: users, label: alerts}
+- {from: flink-insights, to: farm-search, label: indexed insights, step: '6'}
+- {from: farm-search, to: insights-api, label: search and insights}
+- {from: insights-api, to: client, label: insights}
+- {from: insights-api, to: mobile, label: insights}
+- {from: on-premises-database, to: onprem-dx, label: data enrichment, step: '7'}
+- {from: onprem-dx, to: farm-data-lake, label: integrate existing on-premises data}
+- {from: third-party-sensor-data-in-s3, to: third-party-privatelink, label: third-party sensor data, step: '8'}
+- {from: third-party-privatelink, to: farm-data-lake, label: utilize private connections}
+- {from: farm-dashboards, to: users, label: store, step: '9'}
+- {from: farm-athena, to: farm-data-lake, label: SQL queries, step: '10'}
+- {from: farm-athena, to: farm-dashboards, label: query results}
+- {from: farm-data-catalog, to: farm-data-lake, label: table schemas, step: '11'}
+- {from: device-defender-audit, to: defender-report-importer, label: Device Defender reports}
+- {from: defender-report-importer, to: farm-security-hub, label: findings import, step: '12'}
 steps:
-- {n: '1', text: 'device → protocol-converter: third-party sensors and drones'}
-- {n: '2', text: 'device → greengrass-gateway: FreeRTOS sensors and cameras'}
+- {n: '1', text: 'third-party sensors and drones → protocol-converter: third-party protocols'}
+- {n: '2', text: 'FreeRTOS cameras and sensors → greengrass-gateway: FreeRTOS telemetry and video'}
 - {n: '3', text: 'greengrass-gateway → sensor-stream: stream manager export'}
-- {n: '4', text: 'greengrass-gateway → field-camera-stream: live video'}
-- {n: '5', text: 'sensor-stream → flink-insights: real-time analytics'}
-- {n: '6', text: 'flink-insights → farm-search: indexed events'}
-- {n: '9', text: 'users → insights-api: insights and dashboards'}
-- {n: '10', text: 'farm-data-lake → crop-model-endpoint: labelled training data'}
-- {n: '11', text: 'lake-crawler → farm-data-lake: infer schema on new objects'}
+- {n: '4', text: 'crop-model → edge-inference-model: enable ML and edge inference'}
+- {n: '5', text: 'flink-insights → farmer-alerts: threshold notifications'}
+- {n: '6', text: 'flink-insights → farm-search: indexed insights'}
+- {n: '7', text: 'on-premises database → onprem-dx: data enrichment'}
+- {n: '8', text: 'third-party sensor data in S3 → third-party-privatelink: third-party sensor data'}
+- {n: '9', text: 'farm-dashboards → users: store'}
+- {n: '10', text: 'farm-athena → farm-data-lake: SQL queries'}
+- {n: '11', text: 'farm-data-catalog → farm-data-lake: table schemas'}
+- {n: '12', text: 'defender-report-importer → farm-security-hub: findings import'}

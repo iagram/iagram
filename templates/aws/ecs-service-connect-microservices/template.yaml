@@ -10,48 +10,45 @@ tags:
 - microservices
 image: https://d2908q01vomqb2.cloudfront.net/da4b9237bacccdf19c0760cab7aec4a8359010b0/2022/11/16/2022-ecs-service-connect-0.jpg
 source: https://aws.amazon.com/blogs/aws/new-amazon-ecs-service-connect-enabling-easy-communication-between-microservices/
-description: ECS Service Connect adds an ECS-managed Envoy proxy container to every task and registers each service under a logical name in a Cloud Map HTTP namespace, so the checkout service reaches orders
-  and catalog by short name with client-side load balancing, retries and outlier detection. Only the UI service is exposed through an ALB; all other traffic stays service to service, and Service Connect
-  publishes per-service request, error and latency metrics to CloudWatch.
+description: ECS Service Connect adds an ECS-managed Envoy proxy container to every task and registers each service under a logical name (ui, checkout, orders, catalog on port 80) in the svcconnect Cloud
+  Map namespace, so the checkout service reaches orders and catalog by short name with client-side load balancing, retries and outlier detection. Only the UI service is exposed through Elastic Load Balancing;
+  all other traffic stays service to service through the Service Connect proxies.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-main, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 1, 3, 1]}
-- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}, at: [2, 1]}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
-- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}, at: [2, 2]}
-- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-main-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [2, 1]}
-- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [2, 1]}
+- {id: grp-amazon-ecs, type: common.group, name: amazon-ecs, parent: reg-us-east-1, at: [1, 2]}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-main, at: [1, 1]}
-- {id: ui-alb, type: aws.alb, name: ui-alb, parent: vpc-main, at: [1, 2]}
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
-- {id: shop-cluster, type: aws.res.aws_ecs_cluster, name: shop-cluster, parent: vpc-main, props: {name: changeme}, at: [1, 3, 2, 1]}
-- {id: shop-namespace, type: aws.res.aws_service_discovery_http_namespace, name: shop-namespace, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
+- {id: ui-alb, type: aws.alb, name: ui-alb, parent: vpc-main, at: [1, 1]}
+- {id: shop-cluster, type: aws.res.aws_ecs_cluster, name: shop-cluster, parent: grp-amazon-ecs, props: {name: changeme}, at: [1, 1, 4, 1]}
 - {id: ui-service, type: aws.res.aws_ecs_service, name: ui-service, parent: shop-cluster, props: {name: changeme}, at: [1, 1]}
 - {id: checkout-service, type: aws.res.aws_ecs_service, name: checkout-service, parent: shop-cluster, props: {name: changeme}, at: [2, 1]}
 - {id: orders-service, type: aws.res.aws_ecs_service, name: orders-service, parent: shop-cluster, props: {name: changeme}, at: [3, 1]}
 - {id: catalog-service, type: aws.res.aws_ecs_service, name: catalog-service, parent: shop-cluster, props: {name: changeme}, at: [4, 1]}
-- {id: orders-table, type: aws.dynamodb_table, name: orders-table, parent: reg-us-east-1, at: [2, 2]}
-- {id: service-connect-logs, type: aws.res.aws_cloudwatch_log_group, name: service-connect-logs, parent: reg-us-east-1, at: [3, 2]}
+- {id: ui-svcconnect, type: aws.res.aws_service_discovery_service, name: ui-svcconnect, parent: grp-amazon-ecs, props: {name: changeme}, at: [1, 2]}
+- {id: checkout-svcconnect, type: aws.res.aws_service_discovery_service, name: checkout-svcconnect, parent: grp-amazon-ecs, props: {name: changeme}, at: [2, 2]}
+- {id: orders-svcconnect, type: aws.res.aws_service_discovery_service, name: orders-svcconnect, parent: grp-amazon-ecs, props: {name: changeme}, at: [3, 2]}
+- {id: catalog-svcconnect, type: aws.res.aws_service_discovery_service, name: catalog-svcconnect, parent: grp-amazon-ecs, props: {name: changeme}, at: [4, 2]}
+- {id: shop-namespace, type: aws.res.aws_service_discovery_http_namespace, name: shop-namespace, parent: reg-us-east-1, props: {name: changeme}, at: [1, 3]}
+- {id: sub-vpc-main-a, type: aws.subnet, name: private-a, parent: vpc-main, props: {cidr: 10.0.250.0/24, az: a, public: false}}
+- {id: sub-vpc-main-b, type: aws.subnet, name: private-b, parent: vpc-main, props: {cidr: 10.0.251.0/24, az: b, public: false}}
 edges:
-- {from: users, to: igw, label: HTTPS, step: '1'}
-- {from: igw, to: ui-alb, step: '2'}
-- {from: ui-alb, to: ui-service, label: 'HTTP :80', step: '3'}
-- {from: ui-service, to: checkout-service, label: 'http://checkout via Envoy proxy', step: '4'}
-- {from: checkout-service, to: orders-service, label: 'http://orders', step: '5'}
-- {from: checkout-service, to: catalog-service, label: 'http://catalog', step: '5'}
-- {from: orders-service, to: orders-table, label: PutItem, step: '6'}
-- {from: shop-cluster, to: shop-namespace, label: default Service Connect namespace}
-- {from: orders-service, to: shop-namespace, label: registers logical name orders}
-- {from: catalog-service, to: shop-namespace, label: registers logical name catalog}
-- {from: checkout-service, to: service-connect-logs, label: proxy access logs + metrics}
-- {from: catalog-service, to: nat-a, label: outbound}
+- {from: users, to: ui-alb, label: HTTPS, step: '1'}
+- {from: ui-alb, to: ui-service, label: 'HTTP :80', step: '2'}
+- {from: ui-service, to: ui-svcconnect, label: 'Service Connect proxy ui.svcconnect:80'}
+- {from: checkout-service, to: checkout-svcconnect, label: 'Service Connect proxy checkout.svcconnect:80'}
+- {from: orders-service, to: orders-svcconnect, label: 'Service Connect proxy orders.svcconnect:80'}
+- {from: catalog-service, to: catalog-svcconnect, label: 'Service Connect proxy catalog.svcconnect:80'}
+- {from: ui-service, to: checkout-service, label: 'http://checkout via Envoy proxy', step: '3'}
+- {from: checkout-service, to: orders-service, label: 'http://orders', step: '4'}
+- {from: checkout-service, to: catalog-service, label: 'http://catalog', step: '4'}
+- {from: shop-cluster, to: shop-namespace, label: default Service Connect namespace svcconnect}
+- {from: ui-svcconnect, to: shop-namespace, label: registers ui.svcconnect}
+- {from: checkout-svcconnect, to: shop-namespace, label: registers checkout.svcconnect}
+- {from: orders-svcconnect, to: shop-namespace, label: registers orders.svcconnect}
+- {from: catalog-svcconnect, to: shop-namespace, label: registers catalog.svcconnect}
 steps:
-- {n: '1', text: 'users → igw: HTTPS'}
-- {n: '2', text: igw → ui-alb}
-- {n: '3', text: 'ui-alb → ui-service: HTTP :80'}
-- {n: '4', text: 'ui-service → checkout-service: http://checkout via Envoy proxy'}
-- {n: '5', text: 'checkout-service → orders-service: http://orders'}
-- {n: '6', text: 'orders-service → orders-table: PutItem'}
+- {n: '1', text: 'users → ui-alb: HTTPS'}
+- {n: '2', text: 'ui-alb → ui-service: HTTP :80'}
+- {n: '3', text: 'ui-service → checkout-service: http://checkout via Envoy proxy'}
+- {n: '4', text: 'checkout-service → orders-service: http://orders'}

@@ -10,31 +10,35 @@ tags:
 - cognito
 image: https://d2908q01vomqb2.cloudfront.net/f1f836cb4ea6efb2a0b1b99f41ad8b103eff4b59/2024/09/23/image001-7.png
 source: https://aws.amazon.com/blogs/machine-learning/build-a-serverless-voice-based-contextual-chatbot-for-people-with-disabilities-using-amazon-bedrock/
-description: An Amplify-hosted web application obtains temporary credentials from a Cognito identity pool and streams microphone audio directly to Amazon Transcribe streaming. The transcript is sent to
-  a Bedrock model with conversation context and the reply is synthesized by Amazon Polly and played back; conversation history can be persisted in DynamoDB.
+description: A client browser loads the Amplify-hosted web application, signs in with a Cognito user pool and exchanges the token at a Cognito identity pool for temporary credentials of an IAM role, then
+  streams microphone audio directly to Amazon Transcribe streaming. The transcript is sent to a Bedrock model with conversation context and the reply is synthesized by Amazon Polly and played back in the
+  browser.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 3, 2, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: voice-assistant-web, type: aws.res.aws_amplify_app, name: voice-assistant-web, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1]}
-- {id: assistant-users, type: aws.res.aws_cognito_user_pool, name: assistant-users, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
-- {id: assistant-identity, type: aws.res.aws_cognito_identity_pool, name: assistant-identity, parent: reg-us-east-1, props: {identity_pool_name: changeme}, at: [1, 3]}
-- {id: domain-vocabulary, type: aws.res.aws_transcribe_vocabulary, name: domain-vocabulary, parent: reg-us-east-1, props: {language_code: changeme, vocabulary_name: changeme}, at: [4, 3]}
-- {id: assistant-guardrail, type: aws.res.aws_bedrock_guardrail, name: assistant-guardrail, parent: reg-us-east-1, props: {blocked_input_messaging: changeme, blocked_outputs_messaging: changeme, name: changeme}, at: [2, 3]}
-- {id: conversation-history, type: aws.dynamodb_table, name: conversation-history, parent: reg-us-east-1, at: [2, 2]}
-- {id: synthesized-audio, type: aws.s3_bucket, name: synthesized-audio, parent: reg-us-east-1, at: [3, 3]}
+- {id: grp-authentication, type: common.group, name: authentication, parent: reg-us-east-1, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [2, 1]}
+- {id: client, type: common.client, name: client, at: [2, 2]}
+- {id: voice-assistant-web, type: aws.res.aws_amplify_app, name: voice-assistant-web, parent: grp-authentication, props: {name: changeme}, at: [1, 1]}
+- {id: assistant-users, type: aws.res.aws_cognito_user_pool, name: assistant-users, parent: grp-authentication, props: {name: changeme}, at: [1, 2]}
+- {id: assistant-identity, type: aws.res.aws_cognito_identity_pool, name: assistant-identity, parent: grp-authentication, props: {identity_pool_name: changeme}, at: [1, 3]}
+- {id: assistant-role, type: aws.res.aws_iam_role, name: assistant-role, parent: grp-authentication, props: {assume_role_policy: changeme}, at: [1, 4]}
+- {id: assistant-model, type: aws.res.aws_bedrock_inference_profile, name: assistant-model, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
+- {id: synthesized-audio, type: aws.s3_bucket, name: synthesized-audio, parent: reg-us-east-1, at: [3, 1]}
+- {id: domain-vocabulary, type: aws.res.aws_transcribe_vocabulary, name: domain-vocabulary, parent: reg-us-east-1, props: {language_code: changeme, vocabulary_name: changeme}, at: [4, 1]}
 edges:
-- {from: users, to: voice-assistant-web, label: speak into browser, step: '1'}
-- {from: voice-assistant-web, to: assistant-users, label: sign in, step: '2'}
+- {from: user, to: client, label: speak into browser, step: '1'}
+- {from: client, to: voice-assistant-web, label: load web app}
+- {from: client, to: assistant-users, label: sign in, step: '2'}
 - {from: assistant-users, to: assistant-identity, label: identity token exchange, step: '3'}
-- {from: voice-assistant-web, to: domain-vocabulary, label: StartStreamTranscription over WebSocket, step: '4'}
-- {from: voice-assistant-web, to: assistant-guardrail, label: InvokeModel with transcript and history, step: '5'}
-- {from: voice-assistant-web, to: synthesized-audio, label: Polly SynthesizeSpeech output, step: '6'}
-- {from: voice-assistant-web, to: conversation-history, label: persist turns}
+- {from: assistant-identity, to: assistant-role, label: temporary credentials}
+- {from: client, to: domain-vocabulary, label: StartStreamTranscription over WebSocket, step: '4'}
+- {from: client, to: assistant-model, label: InvokeModel with transcript and history, step: '5'}
+- {from: client, to: synthesized-audio, label: Polly SynthesizeSpeech output, step: '6'}
 steps:
-- {n: '1', text: 'users → voice-assistant-web: speak into browser'}
-- {n: '2', text: 'voice-assistant-web → assistant-users: sign in'}
+- {n: '1', text: 'user → client: speak into browser'}
+- {n: '2', text: 'client → assistant-users: sign in'}
 - {n: '3', text: 'assistant-users → assistant-identity: identity token exchange'}
-- {n: '4', text: 'voice-assistant-web → domain-vocabulary: StartStreamTranscription over WebSocket'}
-- {n: '5', text: 'voice-assistant-web → assistant-guardrail: InvokeModel with transcript and history'}
-- {n: '6', text: 'voice-assistant-web → synthesized-audio: Polly SynthesizeSpeech output'}
+- {n: '4', text: 'client → domain-vocabulary: StartStreamTranscription over WebSocket'}
+- {n: '5', text: 'client → assistant-model: InvokeModel with transcript and history'}
+- {n: '6', text: 'client → synthesized-audio: Polly SynthesizeSpeech output'}

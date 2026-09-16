@@ -11,42 +11,22 @@ tags:
 - aks
 image: https://learn.microsoft.com/en-us/azure/container-registry/media/geo-replication/geo-replica-global-endpoint.png
 source: https://learn.microsoft.com/en-us/azure/container-registry/container-registry-geo-replication
-description: A Premium container registry in its home region is geo-replicated to additional regions so that a single global endpoint routes pushes and pulls to the nearest active-active replica, with content
-  synced across replicas under eventual consistency. ACR Tasks build images in the home region, webhooks fire per replica when replication completes, and AKS clusters in each region pull their images from
-  the local replica through the global or regional endpoint, optionally over private endpoints.
+description: A Premium container registry is geo-replicated so that clients such as regional AKS nodes address a single global endpoint (myregistry.azurecr.io, serving the auth and data plane APIs) and
+  Azure-managed routing sends each request to the geo-replica with the best network performance profile. The replica answers blob requests with a 307 redirect to its own data endpoint, backed by regional
+  blob storage or a dedicated data endpoint, so image layers are pulled from the nearest region.
 nodes:
 - {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1]}
-- {id: rg-rg-acr-global, type: azure.resource_group, name: rg-acr-global, parent: sub-workload, props: {location: westeurope}, at: [1, 1, 1, 2]}
-- {id: rg-rg-aks-westeurope, type: azure.resource_group, name: rg-aks-westeurope, parent: sub-workload, props: {location: westeurope}, at: [2, 1]}
-- {id: rg-rg-aks-eastus, type: azure.resource_group, name: rg-aks-eastus, parent: sub-workload, props: {location: eastus}, at: [2, 2]}
-- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: rg-rg-acr-global, type: azure.resource_group, name: rg-acr-global, parent: sub-workload, props: {location: westeurope}, at: [1, 1]}
+- {id: rg-rg-acr-replica-eastus, type: azure.resource_group, name: rg-acr-replica-eastus, parent: sub-workload, props: {location: eastus}, at: [2, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
 - {id: acr-premium-geo, type: azure.container_registry, name: acr-premium-geo, parent: rg-rg-acr-global, at: [1, 1]}
-- {id: kv-acr-cmk, type: azure.key_vault, name: kv-acr-cmk, parent: rg-rg-acr-global, at: [1, 2]}
-- {id: vpc-rg-rg-aks-westeurope, type: azure.vnet, name: main, parent: rg-rg-aks-westeurope, props: {cidr: 10.200.0.0/16}, at: [2, 1]}
-- {id: sub-rg-rg-aks-westeurope, type: azure.subnet, name: main, parent: vpc-rg-rg-aks-westeurope, props: {cidr: 10.200.0.0/24}}
-- {id: aks-westeurope, type: azure.aks_cluster, name: aks-westeurope, parent: sub-rg-rg-aks-westeurope}
-- id: pe-acr-westeurope
-  at: [1, 1]
-  type: azure.res.azurerm_private_endpoint
-  name: pe-acr-westeurope
-  parent: rg-rg-aks-westeurope
-  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: vpc-rg-rg-aks-eastus, type: azure.vnet, name: main, parent: rg-rg-aks-eastus, props: {cidr: 10.201.0.0/16}, at: [2, 1]}
-- {id: sub-rg-rg-aks-eastus, type: azure.subnet, name: main, parent: vpc-rg-rg-aks-eastus, props: {cidr: 10.201.0.0/24}}
-- {id: aks-eastus, type: azure.aks_cluster, name: aks-eastus, parent: sub-rg-rg-aks-eastus}
-- id: pe-acr-eastus
-  at: [1, 1]
-  type: azure.res.azurerm_private_endpoint
-  name: pe-acr-eastus
-  parent: rg-rg-aks-eastus
-  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+- {id: acr-replica-eastus, type: azure.container_registry, name: acr-replica-eastus, parent: rg-rg-acr-replica-eastus, at: [1, 1]}
+- {id: st-acr-data-eastus, type: azure.storage_account, name: st-acr-data-eastus, parent: rg-rg-acr-replica-eastus, at: [2, 1]}
 edges:
-- {from: acr-premium-geo, to: acr-premium-geo, label: replicate to eastus replica (eventual consistency), step: '3'}
-- {from: aks-westeurope, to: pe-acr-westeurope, label: pull myregistry.westeurope.geo.azurecr.io, step: '5'}
-- {from: pe-acr-westeurope, to: acr-premium-geo, label: private link to westeurope replica}
-- {from: aks-eastus, to: pe-acr-eastus, label: pull myregistry.eastus.geo.azurecr.io, step: '5'}
-- {from: pe-acr-eastus, to: acr-premium-geo, label: private link to eastus replica}
-- {from: acr-premium-geo, to: kv-acr-cmk, label: customer-managed key}
+- {from: client, to: acr-premium-geo, label: 'docker pull myregistry.azurecr.io (global endpoint: auth and data plane APIs)', step: '1'}
+- {from: acr-premium-geo, to: acr-replica-eastus, label: Azure-managed routing to the geo-replica with the best network performance profile, step: '2'}
+- {from: acr-replica-eastus, to: st-acr-data-eastus, label: 307 redirect to the geo-replica's data endpoint (blob storage or dedicated data endpoint), step: '3'}
 steps:
-- {n: '3', text: 'acr-premium-geo → acr-premium-geo: replicate to eastus replica (eventual consistency)'}
-- {n: '5', text: 'aks-westeurope → pe-acr-westeurope: pull myregistry.westeurope.geo.azurecr.io'}
+- {n: '1', text: 'client → acr-premium-geo: docker pull myregistry.azurecr.io (global endpoint: auth and data plane APIs)'}
+- {n: '2', text: 'acr-premium-geo → acr-replica-eastus: Azure-managed routing to the geo-replica with the best network performance profile'}
+- {n: '3', text: 'acr-replica-eastus → st-acr-data-eastus: 307 redirect to the geo-replica''s data endpoint (blob storage or dedicated data endpoint)'}

@@ -10,44 +10,110 @@ tags:
 - cognito
 image: https://d2908q01vomqb2.cloudfront.net/f1f836cb4ea6efb2a0b1b99f41ad8b103eff4b59/2024/10/28/image001-5.png
 source: https://aws.amazon.com/blogs/machine-learning/build-a-multi-tenant-generative-ai-environment-for-your-enterprise-on-aws/
-description: A central API Gateway and Lambda gateway authenticates tenants with Cognito, looks up tenant configuration in DynamoDB and routes requests to Bedrock models with a guardrail and tenant-scoped
-  knowledge base. Invocation logs and usage records land in S3 and are queried with Athena to allocate cost and enforce quotas per tenant.
+description: A shared generative AI environment exposes one HTTPS endpoint in front of an orchestrator and a playground UI; the orchestrator combines Bedrock and SageMaker models, application components
+  (agent, prompt catalog, prompt-chaining flow, hybrid-search knowledge base) and responsible AI components (guardrail, model monitoring, human review, model evaluation). Core services provide logging,
+  metering and auditing, a model registry for onboarding, tenant onboarding in DynamoDB and authentication and authorization, while each tenant keeps its own API layer, business logic, cache, vector store,
+  data sources and data pipelines and calls the endpoint with a tenant JWT.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1, 2, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-gateway, type: common.group, name: gateway, parent: reg-us-east-1, at: [1, 1]}
-- {id: grp-tenant-data, type: common.group, name: tenant-data, parent: reg-us-east-1, at: [1, 2, 2, 1]}
-- {id: grp-observability, type: common.group, name: observability, parent: reg-us-east-1, at: [2, 1]}
-- {id: users, type: common.users, name: users, at: [1, 2]}
-- {id: tenant-users, type: aws.res.aws_cognito_user_pool, name: tenant-users, parent: grp-gateway, props: {name: changeme}, at: [2, 1]}
-- {id: genai-gateway-api, type: aws.res.aws_api_gateway_rest_api, name: genai-gateway-api, parent: grp-gateway, props: {name: changeme}, at: [1, 1]}
-- {id: tenant-router-fn, type: aws.lambda_function, name: tenant-router-fn, parent: grp-gateway, at: [1, 2]}
-- {id: tenant-config, type: aws.dynamodb_table, name: tenant-config, parent: grp-gateway, at: [2, 2]}
-- {id: tenant-guardrail, type: aws.res.aws_bedrock_guardrail, name: tenant-guardrail, parent: grp-gateway, props: {blocked_input_messaging: changeme, blocked_outputs_messaging: changeme, name: changeme}, at: [1, 3]}
-- {id: tenant-a-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: tenant-a-kb, parent: grp-tenant-data, props: {name: changeme, role_arn: changeme}, at: [1, 1]}
-- {id: tenant-vectors, type: aws.res.aws_opensearchserverless_collection, name: tenant-vectors, parent: grp-tenant-data, props: {name: changeme}, at: [2, 1]}
-- {id: tenant-documents, type: aws.s3_bucket, name: tenant-documents, parent: grp-tenant-data, at: [3, 1]}
-- {id: usage-metering, type: aws.dynamodb_table, name: usage-metering, parent: grp-observability, at: [2, 1]}
-- {id: model-invocation-logs, type: aws.res.aws_cloudwatch_log_group, name: model-invocation-logs, parent: grp-observability, at: [1, 1]}
-- {id: invocation-log-archive, type: aws.s3_bucket, name: invocation-log-archive, parent: grp-observability, at: [1, 2]}
-- {id: cost-allocation, type: aws.res.aws_athena_workgroup, name: cost-allocation, parent: grp-observability, props: {name: changeme}, at: [2, 2]}
+- {id: grp-model-components, type: common.group, name: model-components, parent: reg-us-east-1, at: [1, 1]}
+- {id: grp-application-components, type: common.group, name: application-components, parent: reg-us-east-1, at: [1, 2]}
+- {id: grp-responsible-ai, type: common.group, name: responsible-ai, parent: reg-us-east-1, at: [1, 3]}
+- {id: grp-core-services, type: common.group, name: core-services, parent: reg-us-east-1, at: [2, 1, 1, 3]}
+- {id: grp-tenant, type: common.group, name: tenant, parent: reg-us-east-1, at: [1, 6, 2, 1]}
+- {id: admin, type: common.user, name: Admin, at: [1, 2]}
+- id: custom-models
+  type: aws.res.aws_bedrock_custom_model
+  name: custom-models
+  parent: grp-model-components
+  props: {base_model_identifier: changeme, custom_model_name: changeme, hyperparameters: {}, job_name: changeme, role_arn: changeme}
+  at:
+  - 1
+  - 1
+- {id: sagemaker-models, type: aws.res.aws_sagemaker_endpoint, name: sagemaker-models, parent: grp-model-components, props: {endpoint_config_name: changeme}, at: [1, 2]}
+- {id: agent, type: aws.res.aws_bedrockagent_agent, name: agent, parent: grp-application-components, props: {agent_name: changeme, agent_resource_role_arn: changeme, foundation_model: changeme}, at: [1,
+    1]}
+- {id: prompt-catalog, type: aws.res.aws_bedrockagent_prompt, name: prompt-catalog, parent: grp-application-components, props: {name: changeme}, at: [1, 2]}
+- {id: prompt-chaining, type: aws.res.aws_bedrockagent_flow, name: prompt-chaining, parent: grp-application-components, props: {execution_role_arn: changeme, name: changeme}, at: [2, 1]}
+- {id: tenant-a-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: tenant-a-kb, parent: grp-application-components, props: {name: changeme, role_arn: changeme}, at: [2, 2]}
+- {id: tenant-guardrail, type: aws.res.aws_bedrock_guardrail, name: tenant-guardrail, parent: grp-responsible-ai, props: {blocked_input_messaging: changeme, blocked_outputs_messaging: changeme, name: changeme},
+  at: [1, 1]}
+- id: model-monitoring
+  type: aws.res.aws_sagemaker_monitoring_schedule
+  name: model-monitoring
+  parent: grp-responsible-ai
+  props: {monitoring_schedule_config: {}}
+  at:
+  - 1
+  - 2
+- id: human-in-the-loop
+  type: aws.res.aws_sagemaker_flow_definition
+  name: human-in-the-loop
+  parent: grp-responsible-ai
+  props: {flow_definition_name: changeme, human_loop_config: {}, output_config: {}, role_arn: changeme}
+  at:
+  - 2
+  - 1
+- {id: model-evaluation, type: aws.res.aws_bedrock_evaluation_job, name: model-evaluation, parent: grp-responsible-ai, props: {job_name: changeme, role_arn: changeme}, at: [2, 2]}
+- {id: model-invocation-logs, type: aws.res.aws_cloudwatch_log_group, name: model-invocation-logs, parent: grp-core-services, at: [1, 1]}
+- {id: usage-metering, type: aws.dynamodb_table, name: usage-metering, parent: grp-core-services, at: [1, 2]}
+- {id: invocation-log-archive, type: aws.s3_bucket, name: invocation-log-archive, parent: grp-core-services, at: [1, 3]}
+- {id: cost-allocation, type: aws.res.aws_athena_workgroup, name: cost-allocation, parent: grp-core-services, props: {name: changeme}, at: [1, 4]}
+- {id: model-registry, type: aws.res.aws_sagemaker_model_package_group, name: model-registry, parent: grp-core-services, props: {model_package_group_name: changeme}, at: [2, 1]}
+- {id: tenant-config, type: aws.dynamodb_table, name: tenant-config, parent: grp-core-services, at: [2, 2]}
+- {id: tenant-users, type: aws.res.aws_cognito_user_pool, name: tenant-users, parent: grp-core-services, props: {name: changeme}, at: [2, 3]}
+- {id: authorization, type: aws.res.aws_verifiedpermissions_policy_store, name: authorization, parent: grp-core-services, at: [2, 4]}
+- {id: orchestrator, type: aws.lambda_function, name: orchestrator, parent: reg-us-east-1, at: [1, 4]}
+- {id: playground-ui, type: aws.res.aws_amplify_app, name: playground-ui, parent: reg-us-east-1, props: {name: changeme}, at: [2, 4]}
+- {id: genai-gateway-api, type: aws.res.aws_api_gateway_rest_api, name: genai-gateway-api, parent: reg-us-east-1, props: {name: changeme}, at: [1, 5, 2, 1]}
+- {id: tenant-api-layer, type: aws.res.aws_api_gateway_rest_api, name: tenant-api-layer, parent: grp-tenant, props: {name: changeme}, at: [1, 1, 1, 2]}
+- {id: tenant-business-logic, type: aws.lambda_function, name: tenant-business-logic, parent: grp-tenant, at: [2, 1]}
+- {id: application-cache, type: aws.res.aws_elasticache_serverless_cache, name: application-cache, parent: grp-tenant, props: {engine: changeme, name: changeme}, at: [2, 2]}
+- {id: tenant-vectors, type: aws.res.aws_opensearchserverless_collection, name: tenant-vectors, parent: grp-tenant, props: {name: changeme}, at: [3, 1]}
+- {id: tenant-documents, type: aws.s3_bucket, name: tenant-documents, parent: grp-tenant, at: [3, 2]}
+- id: data-pipelines
+  type: aws.res.aws_glue_job
+  name: data-pipelines
+  parent: grp-tenant
+  props: {command: {}, name: changeme, role_arn: changeme}
+  at:
+  - 4
+  - 1
 edges:
-- {from: users, to: genai-gateway-api, label: HTTPS with tenant JWT, step: '1'}
-- {from: genai-gateway-api, to: tenant-users, label: authorizer}
-- {from: genai-gateway-api, to: tenant-router-fn, step: '2'}
-- {from: tenant-router-fn, to: tenant-config, label: model, step: '3'}
-- {from: tenant-router-fn, to: tenant-guardrail, label: InvokeModel with guardrail, step: '4'}
-- {from: tenant-router-fn, to: tenant-a-kb, label: Retrieve with tenant metadata filter, step: '5'}
-- {from: tenant-a-kb, to: tenant-vectors, label: vector index}
-- {from: tenant-documents, to: tenant-a-kb, label: bedrockagent data source}
-- {from: tenant-router-fn, to: usage-metering, label: tokens per tenant, step: '6'}
-- {from: tenant-guardrail, to: model-invocation-logs, label: invocation logging}
+- {from: admin, to: genai-gateway-api, label: HTTPS, step: '1'}
+- {from: genai-gateway-api, to: orchestrator, step: '2'}
+- {from: genai-gateway-api, to: playground-ui}
+- {from: genai-gateway-api, to: tenant-users, label: authentication}
+- {from: genai-gateway-api, to: authorization, label: authorization}
+- {from: orchestrator, to: tenant-config, label: model, step: '3'}
+- {from: orchestrator, to: prompt-catalog, label: prompt lookup, step: '4'}
+- {from: orchestrator, to: agent}
+- {from: orchestrator, to: prompt-chaining}
+- {from: orchestrator, to: tenant-a-kb, label: hybrid search with tenant metadata filter, step: '5'}
+- {from: orchestrator, to: tenant-guardrail, label: apply guardrail, step: '6'}
+- {from: orchestrator, to: custom-models, label: InvokeModel, step: '7'}
+- {from: orchestrator, to: sagemaker-models, label: InvokeEndpoint}
+- {from: model-registry, to: sagemaker-models, label: model onboarding}
+- {from: model-monitoring, to: sagemaker-models, label: monitor}
+- {from: model-evaluation, to: custom-models, label: evaluate}
+- {from: human-in-the-loop, to: orchestrator, label: human review of flagged responses}
+- {from: orchestrator, to: usage-metering, label: tokens per tenant, step: '8'}
+- {from: custom-models, to: model-invocation-logs, label: invocation logging}
 - {from: model-invocation-logs, to: invocation-log-archive, label: S3 delivery}
 - {from: cost-allocation, to: invocation-log-archive, label: SQL over logs}
+- {from: tenant-api-layer, to: tenant-business-logic}
+- {from: tenant-business-logic, to: application-cache, label: application caching}
+- {from: tenant-business-logic, to: genai-gateway-api, label: HTTPS with tenant JWT}
+- {from: tenant-a-kb, to: tenant-vectors, label: vector index}
+- {from: tenant-documents, to: tenant-a-kb, label: bedrockagent data source}
+- {from: data-pipelines, to: tenant-documents, label: prepare tenant data}
 steps:
-- {n: '1', text: 'users → genai-gateway-api: HTTPS with tenant JWT'}
-- {n: '2', text: genai-gateway-api → tenant-router-fn}
-- {n: '3', text: 'tenant-router-fn → tenant-config: model'}
-- {n: '4', text: 'tenant-router-fn → tenant-guardrail: InvokeModel with guardrail'}
-- {n: '5', text: 'tenant-router-fn → tenant-a-kb: Retrieve with tenant metadata filter'}
-- {n: '6', text: 'tenant-router-fn → usage-metering: tokens per tenant'}
+- {n: '1', text: 'Admin → genai-gateway-api: HTTPS'}
+- {n: '2', text: genai-gateway-api → orchestrator}
+- {n: '3', text: 'orchestrator → tenant-config: model'}
+- {n: '4', text: 'orchestrator → prompt-catalog: prompt lookup'}
+- {n: '5', text: 'orchestrator → tenant-a-kb: hybrid search with tenant metadata filter'}
+- {n: '6', text: 'orchestrator → tenant-guardrail: apply guardrail'}
+- {n: '7', text: 'orchestrator → custom-models: InvokeModel'}
+- {n: '8', text: 'orchestrator → usage-metering: tokens per tenant'}

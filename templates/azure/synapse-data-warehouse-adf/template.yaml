@@ -11,48 +11,60 @@ tags:
 - data-lake-storage
 image: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/media/architecture-data-warehousing.svg
 source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/data-warehouse
-description: Updates from on-premises SQL Server and Oracle, Azure SQL Database, Table Storage and Azure Cosmos DB are exported to a staging area in Data Lake Storage, then Data Factory incrementally loads
-  and transforms them into Azure Synapse Analytics using PolyBase. An Azure Analysis Services tabular model is refreshed after each load and business analysts query it from Power BI, authenticated through
-  Microsoft Entra ID.
+description: Updates from on-premises SQL Server and other relational databases, Azure SQL Database, Table Storage and Azure Cosmos DB are exported to a staging area in Data Lake Storage, then Data Factory
+  incrementally loads and transforms them into an Azure Synapse Analytics dedicated SQL pool using PolyBase. An Azure Analysis Services tabular model is refreshed after each load and business analysts query
+  it from Power BI, authenticated through Microsoft Entra ID.
 nodes:
 - {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1]}
-- {id: sub-analytics, type: azure.subscription, name: analytics, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: sub-analytics, type: azure.subscription, name: analytics, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2, 2, 1]}
 - {id: rg-rg-synapse-dw, type: azure.resource_group, name: rg-synapse-dw, parent: sub-analytics, props: {location: westeurope}, at: [1, 1]}
 - {id: grp-sources, type: common.group, name: Sources, parent: rg-rg-synapse-dw, at: [1, 1]}
 - {id: grp-ingest, type: common.group, name: Ingest, parent: rg-rg-synapse-dw, at: [1, 2]}
 - {id: grp-warehouse, type: common.group, name: Warehouse, parent: rg-rg-synapse-dw, at: [1, 3]}
 - {id: grp-serve, type: common.group, name: Serve, parent: rg-rg-synapse-dw, at: [1, 4]}
+- {id: other-relational-databases, type: common.database, name: other relational databases, at: [2, 1]}
 - {id: users, type: common.users, name: users, at: [1, 3]}
-- {id: sql-sales-source, type: azure.res.azurerm_mssql_server, name: sql-sales-source, parent: grp-sources, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}, at: [1, 1]}
+- {id: microsoft-entra-id, type: common.idp, name: Microsoft Entra ID, at: [2, 3]}
+- {id: sql-sales-source, type: azure.res.azurerm_mssql_server, name: sql-sales-source, parent: grp-sources, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme},
+  at: [1, 1]}
+- {id: sttablestorage, type: azure.storage_account, name: sttablestorage, parent: grp-sources, at: [2, 1]}
 - id: cosmos-web-events
   type: azure.res.azurerm_cosmosdb_account
   name: cosmos-web-events
   parent: grp-sources
-  at: [3, 1]
-  props:
-    consistency_policy: {}
-    geo_location: []
-    location: westeurope
-    name: changeme
-    offer_type: changeme
-    resource_group_name: changeme
-- {id: sttablestorage, type: azure.storage_account, name: sttablestorage, parent: grp-sources, at: [2, 1]}
+  props: {consistency_policy: {}, geo_location: [], location: westeurope, name: changeme, offer_type: changeme, resource_group_name: changeme}
+  at:
+  - 3
+  - 1
 - {id: stdatalake-staging, type: azure.storage_account, name: stdatalake-staging, parent: grp-ingest, at: [1, 1]}
 - {id: adf-warehouse-load, type: azure.res.azurerm_data_factory, name: adf-warehouse-load, parent: grp-ingest, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
-- {id: synw-enterprise, type: azure.res.azurerm_synapse_workspace, name: synw-enterprise, parent: grp-warehouse, props: {location: westeurope, name: changeme, resource_group_name: changeme, storage_data_lake_gen2_filesystem_id: changeme}, at: [1, 1]}
-- {id: syndp-warehouse, type: azure.res.azurerm_synapse_sql_pool, name: syndp-warehouse, parent: grp-warehouse, props: {name: changeme, sku_name: changeme, storage_account_type: changeme, synapse_workspace_id: changeme}, at: [2, 1]}
-- {id: asazure-semantic, type: azure.res.azurerm_analysis_services_server, name: asazure-semantic, parent: grp-serve, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}, at: [1, 1]}
+- {id: syndp-warehouse, type: azure.res.azurerm_synapse_sql_pool, name: syndp-warehouse, parent: grp-warehouse, props: {name: changeme, sku_name: changeme, storage_account_type: changeme, synapse_workspace_id: changeme},
+  at: [1, 1]}
+- {id: asazure-semantic, type: azure.res.azurerm_analysis_services_server, name: asazure-semantic, parent: grp-serve, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme},
+  at: [1, 1]}
+- id: pbi-reports
+  type: azure.res.azurerm_powerbi_embedded
+  name: pbi-reports
+  parent: grp-serve
+  props: {administrators: [], location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}
+  at:
+  - 2
+  - 1
 edges:
-- {from: dc-on-premises, to: stdatalake-staging, label: SQL Server / Oracle exports, step: '1'}
+- {from: dc-on-premises, to: stdatalake-staging, label: SQL Server (on-premises) exports, step: '1'}
+- {from: other-relational-databases, to: stdatalake-staging, label: Oracle and other on-premises exports, step: '1'}
 - {from: sql-sales-source, to: stdatalake-staging, label: periodic export, step: '1'}
-- {from: cosmos-web-events, to: stdatalake-staging, label: periodic export, step: '1'}
 - {from: sttablestorage, to: stdatalake-staging, label: periodic export, step: '1'}
-- {from: adf-warehouse-load, to: stdatalake-staging, label: read staged files, step: '2'}
-- {from: adf-warehouse-load, to: syndp-warehouse, label: PolyBase incremental load, step: '2'}
+- {from: cosmos-web-events, to: stdatalake-staging, label: periodic export, step: '1'}
+- {from: adf-warehouse-load, to: stdatalake-staging, label: orchestrate staging}
+- {from: stdatalake-staging, to: syndp-warehouse, label: PolyBase incremental load, step: '2'}
+- {from: adf-warehouse-load, to: syndp-warehouse, label: orchestrate load and transforms}
 - {from: syndp-warehouse, to: asazure-semantic, label: tabular model refresh, step: '3'}
-- {from: users, to: asazure-semantic, label: Power BI (Entra ID auth), step: '4'}
+- {from: pbi-reports, to: asazure-semantic, label: live connection to the tabular model, step: '4'}
+- {from: users, to: pbi-reports, label: business analysts}
+- {from: microsoft-entra-id, to: asazure-semantic, label: authentication}
 steps:
-- {n: '1', text: 'datacenter → stdatalake-staging: SQL Server / Oracle exports'}
-- {n: '2', text: 'adf-warehouse-load → stdatalake-staging: read staged files'}
+- {n: '1', text: 'datacenter → stdatalake-staging: SQL Server (on-premises) exports'}
+- {n: '2', text: 'stdatalake-staging → syndp-warehouse: PolyBase incremental load'}
 - {n: '3', text: 'syndp-warehouse → asazure-semantic: tabular model refresh'}
-- {n: '4', text: 'users → asazure-semantic: Power BI (Entra ID auth)'}
+- {n: '4', text: 'pbi-reports → asazure-semantic: live connection to the tabular model'}

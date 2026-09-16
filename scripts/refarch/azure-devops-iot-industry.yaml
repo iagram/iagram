@@ -6,30 +6,41 @@
   category: devops
   tags: [azure pipelines, ci/cd, pull request, staging, artifacts, key vault]
   source: https://learn.microsoft.com/en-us/azure/devops/pipelines/architectures/devops-pipelines-baseline-architecture
-  description: A pull request pipeline runs lint, build and unit tests on Azure Repos Git; a merge triggers a CI pipeline that adds integration tests, pulls secrets from Key Vault and publishes build artifacts to Azure Artifacts feeds. The published artifact triggers a CD pipeline that deploys to staging, runs acceptance tests, waits for a manual validation and releases to production, while Azure Monitor, Application Insights and a Log Analytics workspace observe both environments.
+  description: A developer pushes to Azure Repos Git; a pull request pipeline runs code analysis, lint, security scanning, restore, build, unit tests and PR review, and a merge triggers a CI pipeline that gets secrets from Key Vault, restores packages from Azure Artifacts, runs integration tests and publishes build artifacts. The published artifact triggers a CD pipeline that deploys to a Staging environment of App Services and virtual machines, runs acceptance tests, waits for an optional manual intervention and releases to Production, while each pipeline reports its results back to the developer.
   containers:
     - subscription: workload
       resource_group: {name: rg-cicd-baseline, location: westeurope}
       groups:
-        - {label: Staging}
-        - {label: Production}
+        - {label: Staging, at: [1, 2]}
+        - {label: Production, at: [2, 2]}
   elements:
-    - {tf: azurerm_key_vault, name: kv-pipeline-secrets, in: resource_group:rg-cicd-baseline}
-    - {tf: azurerm_service_plan, name: plan-staging, in: group:Staging}
-    - {tf: azurerm_linux_web_app, name: app-staging, in: group:Staging}
-    - {tf: azurerm_service_plan, name: plan-prod, in: group:Production}
-    - {tf: azurerm_linux_web_app, name: app-prod, in: group:Production}
-    - {tf: azurerm_log_analytics_workspace, name: law-cicd, in: resource_group:rg-cicd-baseline}
-    - {tf: azurerm_application_insights, name: appi-cicd, in: resource_group:rg-cicd-baseline}
-  actors: [user, saas]
+    - {tf: azurerm_key_vault, name: kv-pipeline-secrets, in: resource_group:rg-cicd-baseline, at: [1, 1, 2, 1]}
+    - {tf: azurerm_linux_web_app, name: app-staging, in: group:Staging, at: [1, 1]}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-staging, in: group:Staging, at: [1, 2]}
+    - {tf: azurerm_linux_web_app, name: app-prod, in: group:Production, at: [1, 1]}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-prod, in: group:Production, at: [1, 2]}
+  actors:
+    - {type: user, name: Developer, at: [2, 1]}
+    - {type: saas, name: Azure Repos, at: [2, 2]}
+    - {type: saas, name: Azure Pipelines (PR), at: [2, 3]}
+    - {type: saas, name: Azure Pipelines (CI), at: [2, 4]}
+    - {type: saas, name: Azure Pipelines (CD), at: [2, 5]}
+    - {type: saas, name: Azure Artifacts, at: [1, 3, 1, 2]}
   flows:
-    - {from: user, to: saas, label: git push / pull request, step: 1}
-    - {from: saas, to: kv-pipeline-secrets, label: CI pipeline gets secrets, step: 2}
-    - {from: saas, to: app-staging, label: CD deploy + acceptance tests, step: 3}
-    - {from: saas, to: app-prod, label: release after manual validation, step: 4}
-    - {from: app-staging, to: appi-cicd, label: telemetry}
-    - {from: app-prod, to: appi-cicd, label: telemetry}
-    - {from: appi-cicd, to: law-cicd, label: workspace-based storage}
+    - {from: Developer, to: Azure Repos, label: git push}
+    - {from: Azure Repos, to: Azure Pipelines (PR), label: "pull request: code analysis, lint, security scanning, restore, build, unit tests, PR review", step: 1}
+    - {from: Azure Pipelines (PR), to: Azure Pipelines (CI), label: merge to main triggers CI, step: 2}
+    - {from: Azure Artifacts, to: Azure Pipelines (PR), label: package feed}
+    - {from: Azure Artifacts, to: Azure Pipelines (CI), label: package feed and published build artifacts}
+    - {from: kv-pipeline-secrets, to: Azure Pipelines (CI), label: get secrets}
+    - {from: Azure Pipelines (CI), to: Azure Pipelines (CD), label: published build artifact triggers CD, step: 3}
+    - {from: Azure Pipelines (CD), to: app-staging, label: deploy to staging and run acceptance tests, step: 4}
+    - {from: Azure Pipelines (CD), to: vmss-staging, label: deploy to staging}
+    - {from: Azure Pipelines (CD), to: app-prod, label: release after optional manual intervention, step: 5}
+    - {from: Azure Pipelines (CD), to: vmss-prod, label: release}
+    - {from: Azure Pipelines (PR), to: Developer, label: PR pipeline results}
+    - {from: Azure Pipelines (CI), to: Developer, label: CI pipeline results}
+    - {from: Azure Pipelines (CD), to: Developer, label: CD pipeline results}
 
 - slug: app-service-pipelines-slot-swap
   title: CI/CD for Azure Web Apps with deployment slot swap
@@ -228,35 +239,36 @@
   category: devops
   tags: [devsecops, infrastructure as code, bicep, azure verified modules, deployment stacks, github advanced security, defender for devops]
   source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/devsecops-infrastructure-as-code
-  description: Infrastructure definitions, tests and policy-as-code checks live in GitHub; pull requests run GitHub Actions workflows that generate deployment previews, GitHub Advanced Security scans secrets and dependencies, and the Microsoft Security DevOps action reports IaC misconfigurations to Defender for Cloud. The pipeline deploys Azure Verified Modules through Azure Resource Manager deployment stacks with deny settings, and Azure Policy, Defender for Cloud, Microsoft Sentinel and Azure Monitor detect drift or threats and open GitHub Issues through a Logic Apps workflow.
+  description: Infrastructure definitions, tests and policy-as-code checks are written with GitHub Copilot and committed to GitHub repositories; pull requests run GitHub Actions workflows that generate deployment previews, GitHub Advanced Security scans secrets and dependencies, and the Microsoft Security DevOps action reports IaC misconfigurations to DevOps security in Defender for Cloud. The workflow deploys Azure Verified Modules through Azure Resource Manager deployment stacks with deny settings, Azure Policy and Defender for Cloud evaluate the deployed resources, and a Logic Apps workflow opens GitHub Issues for configuration drifts and reconciliation.
   containers:
     - subscription: workload
       resource_group: {name: rg-iac-target, location: westeurope}
     - subscription: security
       resource_group: {name: rg-secops, location: westeurope}
   elements:
-    - {tf: azurerm_key_vault, name: kv-iac, in: resource_group:rg-iac-target}
-    - {tf: azurerm_storage_account, name: stiacstate, in: resource_group:rg-iac-target}
-    - {tf: azurerm_linux_web_app, name: app-provisioned, in: resource_group:rg-iac-target}
-    - {tf: azurerm_service_plan, name: plan-provisioned, in: resource_group:rg-iac-target}
-    - {tf: azurerm_log_analytics_workspace, name: law-sentinel, in: resource_group:rg-secops}
-    - {tf: azurerm_sentinel_log_analytics_workspace_onboarding, name: sentinel-onboarding, in: resource_group:rg-secops}
-    - {tf: azurerm_security_center_subscription_pricing, name: defender-cspm, in: resource_group:rg-secops}
-    - {tf: azurerm_monitor_action_group, name: ag-drift, in: resource_group:rg-secops}
-    - {tf: azurerm_logic_app_workflow, name: logic-create-github-issue, in: resource_group:rg-secops}
-  actors: [user, saas]
+    - {tf: azurerm_resource_group_template_deployment, name: arm-deployment-stack, in: resource_group:rg-iac-target, at: [1, 1]}
+    - {tf: azurerm_subscription_policy_assignment, name: policy-iac-guardrails, in: resource_group:rg-iac-target, at: [2, 1]}
+    - {tf: azurerm_security_center_subscription_pricing, name: defender-devops-security, in: resource_group:rg-secops, at: [1, 1]}
+    - {tf: azurerm_logic_app_workflow, name: logic-create-github-issue, in: resource_group:rg-secops, at: [2, 1]}
+  actors:
+    - {type: user, at: [1, 1]}
+    - {type: saas, name: GitHub Copilot, at: [1, 2]}
+    - {type: saas, name: GitHub repos, at: [1, 3]}
+    - {type: saas, name: GitHub Actions, at: [1, 4]}
+    - {type: saas, name: GitHub Advanced Security, at: [1, 5]}
+    - {type: saas, name: GitHub Issues, at: [2, 4, 1, 2]}
   flows:
-    - {from: user, to: saas, label: IaC + tests + policy as code (GitHub Copilot assisted), step: 1}
-    - {from: saas, to: saas, label: "PR: GitHub Actions preview, Advanced Security, MSDO scan", step: 2}
-    - {from: saas, to: defender-cspm, label: IaC findings to DevOps security in Defender, step: 3}
-    - {from: saas, to: app-provisioned, label: deployment stack (AVM, deny settings) via ARM, step: 4}
-    - {from: saas, to: kv-iac, label: provision}
-    - {from: saas, to: stiacstate, label: provision}
-    - {from: app-provisioned, to: law-sentinel, label: diagnostics}
-    - {from: defender-cspm, to: sentinel-onboarding, label: alerts correlated in Sentinel, step: 5}
-    - {from: sentinel-onboarding, to: ag-drift, label: automation rule / alert}
-    - {from: ag-drift, to: logic-create-github-issue, label: action group}
-    - {from: logic-create-github-issue, to: saas, label: GitHub Issue for drift reconciliation, step: 6}
+    - {from: user, to: GitHub Copilot, label: infrastructure as code and tests, policy as code, step: 1}
+    - {from: GitHub Copilot, to: GitHub repos, label: commit and pull request, step: 2}
+    - {from: GitHub repos, to: GitHub Actions, label: workflow run with deployment preview, step: 3}
+    - {from: GitHub Actions, to: GitHub Advanced Security, label: secret, dependency and code scanning, step: 4}
+    - {from: GitHub Actions, to: defender-devops-security, label: Microsoft Security DevOps IaC findings, step: 5}
+    - {from: GitHub Actions, to: arm-deployment-stack, label: Azure Verified Modules deployed as deployment stacks, step: 6}
+    - {from: arm-deployment-stack, to: policy-iac-guardrails, label: Azure Policy evaluates deployed resources, step: 7}
+    - {from: policy-iac-guardrails, to: defender-devops-security, label: compliance and drift findings}
+    - {from: defender-devops-security, to: logic-create-github-issue, label: misconfiguration or drift alert}
+    - {from: logic-create-github-issue, to: GitHub Issues, label: configuration drifts and reconciliation, step: 8}
+    - {from: GitHub Issues, to: GitHub repos, label: reconcile drift in code}
 
 - slug: devsecops-aks-github
   title: DevSecOps on Azure Kubernetes Service
@@ -301,39 +313,61 @@
   category: observability
   tags: [azure monitor, log analytics, azure monitor workspace, application insights, opentelemetry, prometheus, alerts, action groups, grafana]
   source: https://learn.microsoft.com/en-us/azure/azure-monitor/fundamentals/overview
-  description: Azure Monitor collects metrics, logs, traces and events from Azure resources, VMs, Kubernetes clusters and applications into two workspace types, a Log Analytics workspace for logs and traces queried with KQL and an Azure Monitor workspace for Prometheus and OpenTelemetry metrics queried with PromQL. Application Insights provides OpenTelemetry-based APM, workbooks and Grafana dashboards visualize the data, and alerts drive action groups that run Logic Apps or Automation runbooks and autoscale.
+  description: Azure Monitor collects metrics, logs and traces from applications and workloads, infrastructure, the Azure platform and custom sources into an Azure Monitor workspace for Prometheus metrics, a Log Analytics workspace for logs queried with KQL and Application Insights for distributed traces. Insights (Application, Kubernetes, VM, Network) curate that data, workbooks, Azure dashboards, Grafana and Power BI visualize it, Log Analytics query packs analyze it, and metric and log alerts drive action groups that notify or automate a response.
   containers:
     - subscription: platform
       resource_group: {name: rg-monitoring, location: westeurope}
       groups:
-        - {label: Data sources}
-        - {label: Data platform}
-        - {label: Consume and respond}
+        - {label: Data sources, at: [1, 1, 4, 1]}
+        - {label: Data platform, at: [1, 2, 4, 1]}
+        - {label: Insights, at: [1, 3]}
+        - {label: Visualize, at: [2, 3]}
+        - {label: Analyze, at: [3, 3]}
+        - {label: Respond, at: [4, 3]}
   elements:
-    - {tf: azurerm_linux_virtual_machine, name: vm-app-server, in: group:Data sources}
-    - {tf: azurerm_kubernetes_cluster, name: aks-workload, in: group:Data sources}
-    - {tf: azurerm_linux_web_app, name: app-web, in: group:Data sources}
-    - {tf: azurerm_application_insights, name: appi-web, in: group:Data platform}
-    - {tf: azurerm_log_analytics_workspace, name: law-central, in: group:Data platform}
-    - {tf: azurerm_monitor_workspace, name: amw-metrics, in: group:Data platform}
-    - {tf: azurerm_dashboard_grafana, name: grafana-central, in: group:Consume and respond}
-    - {tf: azurerm_monitor_action_group, name: ag-oncall, in: group:Consume and respond}
-    - {tf: azurerm_logic_app_workflow, name: logic-remediate, in: group:Consume and respond}
-    - {tf: azurerm_automation_account, name: aa-runbooks, in: group:Consume and respond}
-  actors: [user]
+    - {tf: azurerm_linux_web_app, name: app-workloads, in: group:Data sources, at: [1, 1]}
+    - {tf: azurerm_linux_virtual_machine_scale_set, name: vmss-infrastructure, in: group:Data sources, at: [2, 1]}
+    - {tf: azurerm_storage_account, name: st-azure-platform, in: group:Data sources, at: [3, 1]}
+    - {tf: azurerm_monitor_data_collection_endpoint, name: dce-custom-sources, in: group:Data sources, at: [4, 1]}
+    - {tf: azurerm_monitor_workspace, name: amw-metrics, in: group:Data platform, at: [1, 1]}
+    - {tf: azurerm_log_analytics_workspace, name: law-logs, in: group:Data platform, at: [2, 1]}
+    - {tf: azurerm_application_insights, name: appi-traces, in: group:Data platform, at: [3, 1]}
+    - {tf: azurerm_monitor_data_collection_rule, name: dcr-application-insights, in: group:Insights, at: [1, 1]}
+    - {tf: azurerm_monitor_data_collection_rule, name: dcr-container-insights, in: group:Insights, at: [1, 2]}
+    - {tf: azurerm_monitor_data_collection_rule, name: dcr-vm-insights, in: group:Insights, at: [1, 3]}
+    - {tf: azurerm_network_watcher, name: nw-network-insights, in: group:Insights, at: [1, 4]}
+    - {tf: azurerm_portal_dashboard, name: dashboard-workbooks, in: group:Visualize, at: [1, 1]}
+    - {tf: azurerm_portal_dashboard, name: dashboard-azure, in: group:Visualize, at: [1, 2]}
+    - {tf: azurerm_dashboard_grafana, name: grafana-central, in: group:Visualize, at: [1, 3]}
+    - {tf: azurerm_powerbi_embedded, name: pbi-reports, in: group:Visualize, at: [1, 4]}
+    - {tf: azurerm_monitor_metric_alert, name: alert-metric-explorer, in: group:Analyze, at: [1, 1]}
+    - {tf: azurerm_log_analytics_query_pack, name: qp-log-analytics, in: group:Analyze, at: [1, 2]}
+    - {tf: azurerm_monitor_scheduled_query_rules_alert, name: alert-log-search, in: group:Respond, at: [1, 1]}
+    - {tf: azurerm_monitor_action_group, name: ag-actions, in: group:Respond, at: [1, 2]}
+  actors: []
   flows:
-    - {from: vm-app-server, to: law-central, label: Azure Monitor Agent + data collection rules, step: 1}
-    - {from: aks-workload, to: amw-metrics, label: Managed Prometheus metrics, step: 1}
-    - {from: aks-workload, to: law-central, label: container logs}
-    - {from: app-web, to: appi-web, label: OpenTelemetry traces and requests, step: 1}
-    - {from: appi-web, to: law-central, label: workspace-based Application Insights}
-    - {from: law-central, to: grafana-central, label: KQL data source, step: 2}
+    - {from: app-workloads, to: appi-traces, label: OpenTelemetry traces, step: 1}
+    - {from: app-workloads, to: law-logs, label: application logs, step: 1}
+    - {from: vmss-infrastructure, to: amw-metrics, label: Prometheus and platform metrics, step: 1}
+    - {from: vmss-infrastructure, to: law-logs, label: Azure Monitor Agent logs, step: 1}
+    - {from: st-azure-platform, to: law-logs, label: resource logs and activity log via diagnostic settings, step: 1}
+    - {from: dce-custom-sources, to: law-logs, label: Logs Ingestion API, step: 1}
+    - {from: appi-traces, to: law-logs, label: workspace-based Application Insights}
+    - {from: law-logs, to: dcr-application-insights, label: Application Insights, step: 2}
+    - {from: law-logs, to: dcr-container-insights, label: Kubernetes (Container insights), step: 2}
+    - {from: law-logs, to: dcr-vm-insights, label: VM insights, step: 2}
+    - {from: law-logs, to: nw-network-insights, label: Network insights, step: 2}
+    - {from: law-logs, to: dashboard-workbooks, label: workbooks, step: 2}
+    - {from: law-logs, to: dashboard-azure, label: dashboards, step: 2}
     - {from: amw-metrics, to: grafana-central, label: PromQL data source, step: 2}
-    - {from: law-central, to: ag-oncall, label: log and metric alerts, step: 3}
-    - {from: ag-oncall, to: logic-remediate, label: no-code workflow}
-    - {from: ag-oncall, to: aa-runbooks, label: low-code runbook}
-    - {from: ag-oncall, to: user, label: email / SMS / push}
-    - {from: user, to: grafana-central, label: dashboards and workbooks}
+    - {from: law-logs, to: grafana-central, label: KQL data source, step: 2}
+    - {from: law-logs, to: pbi-reports, label: Power BI export, step: 2}
+    - {from: amw-metrics, to: alert-metric-explorer, label: metrics explorer, step: 2}
+    - {from: law-logs, to: qp-log-analytics, label: Log Analytics KQL queries, step: 2}
+    - {from: law-logs, to: alert-log-search, label: log search alerts, step: 3}
+    - {from: alert-metric-explorer, to: ag-actions, label: metric alert fires}
+    - {from: alert-log-search, to: ag-actions, label: alert fires}
+    - {from: ag-actions, to: app-workloads, label: actions (notify, automate, autoscale), step: 3}
 
 - slug: aks-managed-prometheus-grafana
   title: Monitor AKS with Managed Prometheus, Container insights and Managed Grafana
@@ -702,35 +736,31 @@
   category: industry
   tags: [financial services, risk modeling, monte carlo, big compute, azure batch, hpc, infiniband, burst]
   source: https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/big-compute
-  description: Big compute workloads such as financial risk modeling and Monte Carlo simulations split into thousands of finite tasks that a scheduler distributes across a burst-provisioned pool of compute-intensive VMs, which scale back to zero when the run finishes. Azure Batch provisions the pool, assigns tasks, monitors progress and autoscales, with input data and results in Azure Storage; tightly coupled tasks use RDMA-capable H-series VMs, and an on-premises HPC Pack head node can burst into Azure over ExpressRoute or VPN.
+  description: Big compute workloads such as financial risk modeling and Monte Carlo simulations split into thousands of finite tasks that a client submits through a job queue to a scheduler and coordinator, Azure Batch, which distributes them across burst-provisioned pools of compute-intensive VMs that scale back to zero when the run finishes. Embarrassingly parallel tasks each read their inputs from and write their results to Azure Storage independently, while tightly coupled tasks run on RDMA-capable H-series VMs in a pool that exchanges intermediate results over the network and shares one storage account.
   containers:
-    - datacenter: on-premises-hpc
     - subscription: risk
       resource_group: {name: rg-risk-grid, location: westeurope}
-      vnets:
-        - name: vnet-hpc
-          cidr: 10.90.0.0/16
-          subnets:
-            - {name: snet-batch-pool, cidr: 10.90.0.0/22}
-            - {name: GatewaySubnet, cidr: 10.90.255.0/27}
+      groups:
+        - {label: Parallel tasks, at: [1, 2]}
+        - {label: Tightly coupled tasks, at: [2, 2]}
   elements:
-    - {tf: azurerm_batch_account, name: batch-risk, in: resource_group:rg-risk-grid}
-    - {tf: azurerm_batch_pool, name: pool-hb-rdma, in: subnet:snet-batch-pool}
-    - {tf: azurerm_storage_account, name: striskdata, in: resource_group:rg-risk-grid}
-    - {tf: azurerm_key_vault, name: kv-batch, in: resource_group:rg-risk-grid}
-    - {tf: azurerm_virtual_network_gateway, name: vpngw-hpc, in: subnet:GatewaySubnet}
-    - {tf: azurerm_linux_virtual_machine, name: vm-hpc-head-node, in: datacenter}
-    - {tf: azurerm_log_analytics_workspace, name: law-batch, in: resource_group:rg-risk-grid}
-  actors: [user, datacenter]
+    - {tf: azurerm_batch_account, name: batch-risk, in: resource_group:rg-risk-grid, at: [1, 1, 2, 1]}
+    - {tf: azurerm_storage_account, name: st-task-inputs, in: group:Parallel tasks, at: [1, 1]}
+    - {tf: azurerm_batch_pool, name: pool-parallel, in: group:Parallel tasks, at: [1, 2]}
+    - {tf: azurerm_storage_account, name: st-task-results, in: group:Parallel tasks, at: [1, 3]}
+    - {tf: azurerm_storage_account, name: st-shared-data, in: group:Tightly coupled tasks, at: [1, 1]}
+    - {tf: azurerm_batch_pool, name: pool-hb-rdma, in: group:Tightly coupled tasks, at: [2, 1]}
+  actors:
+    - {type: client, name: Client, at: [1, 1]}
   flows:
-    - {from: user, to: striskdata, label: upload market data and application packages, step: 1}
-    - {from: user, to: batch-risk, label: submit job with Monte Carlo tasks, step: 2}
-    - {from: batch-risk, to: pool-hb-rdma, label: provision VMs, schedule tasks, autoscale, step: 3}
-    - {from: pool-hb-rdma, to: striskdata, label: read inputs, write results, step: 4}
-    - {from: batch-risk, to: kv-batch, label: customer-managed keys}
-    - {from: datacenter, to: vpngw-hpc, label: ExpressRoute / VPN}
-    - {from: vm-hpc-head-node, to: pool-hb-rdma, label: HPC Pack burst to Azure nodes}
-    - {from: batch-risk, to: law-batch, label: job and pool metrics}
+    - {from: Client, to: batch-risk, label: job queue (Monte Carlo tasks), step: 1}
+    - {from: Client, to: st-task-inputs, label: upload market data and application packages}
+    - {from: batch-risk, to: pool-parallel, label: schedule independent tasks, provision VMs, autoscale, step: 2}
+    - {from: batch-risk, to: pool-hb-rdma, label: schedule MPI tasks on RDMA-capable nodes, step: 2}
+    - {from: st-task-inputs, to: pool-parallel, label: read inputs, step: 3}
+    - {from: pool-parallel, to: st-task-results, label: write results, step: 4}
+    - {from: pool-hb-rdma, to: st-shared-data, label: shared input and results}
+    - {from: pool-hb-rdma, to: pool-hb-rdma, label: node-to-node InfiniBand exchange}
 
 - slug: health-data-fhir-dicom
   title: Health data platform with Azure Health Data Services (FHIR and DICOM)

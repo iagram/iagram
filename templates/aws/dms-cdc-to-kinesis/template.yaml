@@ -10,42 +10,67 @@ tags:
 - oracle
 image: https://d2908q01vomqb2.cloudfront.net/887309d048beef83ad3eabf2a79a64a389ab1c9f/2018/11/16/DMSKinesis1.jpg
 source: https://aws.amazon.com/blogs/database/use-the-aws-database-migration-service-to-stream-change-data-to-amazon-kinesis-data-streams/
-description: An AWS DMS replication instance reads the transaction log of a relational database such as Oracle on RDS and publishes insert, update and delete events to a Kinesis data stream as the target
-  endpoint. Consumers such as Lambda process the changes in near real time while a Firehose delivery stream archives them to S3 for analytics.
+description: AWS DMS reads the transaction logs of data producers such as RDS MySQL, Oracle, SQL Server and PostgreSQL, DynamoDB and an on-premises DB2 LUW database and publishes insert, update and delete
+  events to a Kinesis data stream as the target endpoint. A streaming layer of EMR Spark reads the raw stream and writes processed records to a second stream that feeds consumers such as Redshift, DynamoDB,
+  QuickSight, CloudSearch, Athena and Kinesis-enabled applications, while Firehose archives both streams to S3 as the persistent layer.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-data-vpc, type: aws.vpc, name: data-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 2, 3, 1]}
-- {id: az-data-vpc-a, type: aws.availability_zone, name: a, parent: vpc-data-vpc, props: {zone: a}, at: [1, 1]}
-- {id: sub-db-a, type: aws.subnet, name: db-a, parent: az-data-vpc-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-data-vpc-b, type: aws.availability_zone, name: b, parent: vpc-data-vpc, props: {zone: b}, at: [1, 2]}
-- {id: sub-db-b, type: aws.subnet, name: db-b, parent: az-data-vpc-b, props: {cidr: 10.0.2.0/24, az: b, public: false}, at: [1, 1]}
-- {id: client, type: common.client, name: client, at: [1, 1]}
-- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}, at: [1, 1, 3, 1]}
-- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}, at: [1, 2]}
-- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: source-oracle, type: aws.rds_instance, name: source-oracle, parent: sub-reg-us-east-1-a, at: [1, 1]}
-- {id: dms-replication, type: aws.res.aws_dms_replication_instance, name: dms-replication, parent: vpc-data-vpc, props: {replication_instance_class: changeme, replication_instance_id: changeme}, at: [2, 1, 1, 2]}
-- {id: kinesis-target, type: aws.res.aws_dms_endpoint, name: kinesis-target, parent: reg-us-east-1, props: {endpoint_id: changeme, endpoint_type: changeme, engine_name: changeme}, at: [1, 3]}
-- {id: cdc-stream, type: aws.res.aws_kinesis_stream, name: cdc-stream, parent: reg-us-east-1, props: {name: changeme}, at: [1, 4]}
-- {id: change-consumer, type: aws.lambda_function, name: change-consumer, parent: reg-us-east-1, at: [1, 5]}
-- {id: archive-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: archive-delivery, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [2, 4]}
-- {id: cdc-archive, type: aws.s3_bucket, name: cdc-archive, parent: reg-us-east-1, at: [3, 4]}
+- {id: grp-data-producers, type: common.group, name: data producers, parent: reg-us-east-1, at: [1, 1, 3, 1]}
+- {id: grp-streaming-layer, type: common.group, name: streaming layer, parent: reg-us-east-1, at: [1, 3, 1, 2]}
+- {id: grp-persistent-layer, type: common.group, name: persistent layer, parent: reg-us-east-1, at: [3, 3, 1, 2]}
+- {id: grp-data-consumers, type: common.group, name: data consumers, parent: reg-us-east-1, at: [1, 5, 3, 1]}
+- {id: db2-luw, type: common.database, name: DB2 LUW, at: [1, 1]}
+- {id: rds-mysql, type: aws.res.aws_rds_cluster, name: rds-mysql, parent: grp-data-producers, props: {engine: changeme}, at: [1, 1]}
+- {id: rds-oracle, type: aws.res.aws_rds_cluster, name: rds-oracle, parent: grp-data-producers, props: {engine: changeme}, at: [2, 1]}
+- {id: rds-mssql, type: aws.res.aws_rds_cluster, name: rds-mssql, parent: grp-data-producers, props: {engine: changeme}, at: [3, 1]}
+- {id: source-dynamodb, type: aws.dynamodb_table, name: source-dynamodb, parent: grp-data-producers, at: [4, 1]}
+- {id: rds-postgresql, type: aws.res.aws_rds_cluster, name: rds-postgresql, parent: grp-data-producers, props: {engine: changeme}, at: [5, 1]}
+- {id: dms-kinesis-target, type: aws.res.aws_dms_replication_instance, name: dms-kinesis-target, parent: reg-us-east-1, props: {replication_instance_class: changeme, replication_instance_id: changeme},
+  at: [1, 2]}
+- {id: cdc-stream, type: aws.res.aws_kinesis_stream, name: cdc-stream, parent: grp-streaming-layer, props: {name: changeme}, at: [1, 1]}
+- {id: emr-spark, type: aws.res.aws_emr_cluster, name: emr-spark, parent: grp-streaming-layer, props: {name: changeme, release_label: changeme, service_role: changeme}, at: [1, 2]}
+- {id: processed-stream, type: aws.res.aws_kinesis_stream, name: processed-stream, parent: grp-streaming-layer, props: {name: changeme}, at: [1, 3]}
+- {id: raw-archive-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: raw-archive-delivery, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [2, 3]}
+- {id: processed-archive-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: processed-archive-delivery, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [2, 4]}
+- {id: raw-archive, type: aws.s3_bucket, name: raw-archive, parent: grp-persistent-layer, at: [1, 1]}
+- {id: processed-archive, type: aws.s3_bucket, name: processed-archive, parent: grp-persistent-layer, at: [1, 2]}
+- {id: redshift-warehouse, type: aws.res.aws_redshift_cluster, name: redshift-warehouse, parent: grp-data-consumers, props: {cluster_identifier: changeme, node_type: changeme}, at: [1, 1]}
+- {id: consumer-dynamodb, type: aws.dynamodb_table, name: consumer-dynamodb, parent: grp-data-consumers, at: [2, 1]}
+- id: quicksight
+  type: aws.res.aws_quicksight_data_source
+  name: quicksight
+  parent: grp-data-consumers
+  props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+  at:
+  - 3
+  - 1
+- {id: cloudsearch, type: aws.res.aws_cloudsearch_domain, name: cloudsearch, parent: grp-data-consumers, props: {name: changeme}, at: [4, 1]}
+- {id: athena, type: aws.res.aws_athena_workgroup, name: athena, parent: grp-data-consumers, props: {name: changeme}, at: [5, 1]}
+- {id: kinesis-enabled-app, type: aws.lambda_function, name: kinesis-enabled-app, parent: grp-data-consumers, at: [6, 1]}
 edges:
-- {from: client, to: source-oracle, label: OLTP writes, step: '1'}
-- {from: source-oracle, to: dms-replication, label: transaction log CDC, step: '2'}
-- {from: dms-replication, to: kinesis-target, label: DMS task, step: '3'}
-- {from: kinesis-target, to: cdc-stream, label: PutRecords JSON, step: '4'}
-- {from: cdc-stream, to: change-consumer, step: '5', link: aws_lambda_event_source_mapping}
-- {from: cdc-stream, to: archive-delivery, label: Firehose source, step: '6'}
-- {from: archive-delivery, to: cdc-archive, label: archive, step: '7'}
+- {from: rds-mysql, to: dms-kinesis-target, label: transaction log CDC, step: '1'}
+- {from: rds-oracle, to: dms-kinesis-target, label: transaction log CDC}
+- {from: rds-mssql, to: dms-kinesis-target, label: transaction log CDC}
+- {from: source-dynamodb, to: dms-kinesis-target, label: CDC}
+- {from: rds-postgresql, to: dms-kinesis-target, label: transaction log CDC}
+- {from: db2-luw, to: dms-kinesis-target, label: on-premises CDC}
+- {from: dms-kinesis-target, to: cdc-stream, label: PutRecords JSON, step: '2'}
+- {from: cdc-stream, to: emr-spark, label: Spark streaming, step: '3'}
+- {from: emr-spark, to: processed-stream, label: processed records, step: '4'}
+- {from: cdc-stream, to: raw-archive-delivery, label: Firehose source}
+- {from: raw-archive-delivery, to: raw-archive, label: archive}
+- {from: processed-stream, to: processed-archive-delivery, label: Firehose source}
+- {from: processed-archive-delivery, to: processed-archive, label: archive}
+- {from: processed-stream, to: redshift-warehouse, label: load, step: '5'}
+- {from: processed-stream, to: consumer-dynamodb, label: materialize}
+- {from: processed-stream, to: quicksight, label: visualize}
+- {from: processed-stream, to: cloudsearch, label: index}
+- {from: processed-stream, to: athena, label: query}
+- {from: processed-stream, to: kinesis-enabled-app, link: aws_lambda_event_source_mapping}
 steps:
-- {n: '1', text: 'client → source-oracle: OLTP writes'}
-- {n: '2', text: 'source-oracle → dms-replication: transaction log CDC'}
-- {n: '3', text: 'dms-replication → kinesis-target: DMS task'}
-- {n: '4', text: 'kinesis-target → cdc-stream: PutRecords JSON'}
-- {n: '5', text: cdc-stream → change-consumer}
-- {n: '6', text: 'cdc-stream → archive-delivery: Firehose source'}
-- {n: '7', text: 'archive-delivery → cdc-archive: archive'}
+- {n: '1', text: 'rds-mysql → dms-kinesis-target: transaction log CDC'}
+- {n: '2', text: 'dms-kinesis-target → cdc-stream: PutRecords JSON'}
+- {n: '3', text: 'cdc-stream → emr-spark: Spark streaming'}
+- {n: '4', text: 'emr-spark → processed-stream: processed records'}
+- {n: '5', text: 'processed-stream → redshift-warehouse: load'}

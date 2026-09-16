@@ -11,57 +11,50 @@ tags:
 - redshift spectrum
 image: https://d2908q01vomqb2.cloudfront.net/b6692ea5df920cad691c20319a6fffd7a4a766b8/2021/05/25/bdb-991-data-lake-design-patterns-001.jpg
 source: https://aws.amazon.com/blogs/big-data/design-patterns-for-an-enterprise-data-lake-using-aws-lake-formation-cross-account-access/
-description: A central enterprise data lake account holds the shared S3 buckets, Glue Data Catalog and Lake Formation permissions; producer accounts write into it with Glue jobs, and consumer accounts read
-  through resource links with Athena, EMR or Redshift Spectrum. Lake Formation creates AWS RAM resource shares for every grant, so catalog changes are visible immediately in all accounts with no copy or
-  sync.
+description: A central enterprise data lake account holds the shared S3 buckets and Glue Data Catalog registered with Lake Formation as the hub; a producer account writes into it with Glue ETL jobs, and
+  a consumer account reads through Lake Formation grants with Athena, an EMR notebook, Redshift Spectrum, SageMaker and QuickSight. Lake Formation shares every grant across accounts, so catalog changes
+  are visible immediately with no copy or sync.
 nodes:
 - {id: acct-data-lake, type: aws.account, name: data-lake, at: [1, 1]}
 - {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-data-lake, props: {region: eu-west-1}, at: [1, 1, 1, 2]}
 - {id: acct-producer, type: aws.account, name: producer, at: [2, 1]}
-- {id: reg-eu-west-1-2, type: aws.region, name: eu-west-1, parent: acct-producer, props: {region: eu-west-1}, at: [2, 1, 1, 2]}
+- {id: reg-eu-west-1-2, type: aws.region, name: eu-west-1, parent: acct-producer, props: {region: eu-west-1}, at: [1, 1]}
 - {id: acct-consumer, type: aws.account, name: consumer, at: [1, 2, 2, 1]}
-- {id: reg-eu-west-1-3, type: aws.region, name: eu-west-1, parent: acct-consumer, props: {region: eu-west-1}, at: [3, 1, 1, 2]}
+- {id: reg-eu-west-1-3, type: aws.region, name: eu-west-1, parent: acct-consumer, props: {region: eu-west-1}, at: [1, 1, 1, 3]}
 - {id: users, type: common.users, name: users, at: [1, 3, 2, 1]}
 - {id: edla-raw, type: aws.s3_bucket, name: edla-raw, parent: reg-eu-west-1, at: [1, 1]}
 - {id: edla-curated, type: aws.s3_bucket, name: edla-curated, parent: reg-eu-west-1, at: [1, 2]}
-- {id: edla-location, type: aws.res.aws_lakeformation_resource, name: edla-location, parent: acct-data-lake, props: {arn: changeme}, at: [2, 1]}
-- {id: edla-catalog, type: aws.res.aws_glue_catalog_database, name: edla-catalog, parent: acct-data-lake, props: {name: changeme}, at: [2, 2]}
-- {id: edla-share, type: aws.res.aws_ram_resource_share, name: edla-share, parent: acct-data-lake, props: {name: changeme}, at: [3, 1, 1, 2]}
+- {id: edla-catalog, type: aws.res.aws_glue_catalog_database, name: edla-catalog, parent: acct-data-lake, props: {name: changeme}, at: [2, 1]}
+- {id: edla-location, type: aws.res.aws_lakeformation_resource, name: edla-location, parent: acct-data-lake, props: {arn: changeme}, at: [2, 2]}
 - id: producer-etl
   type: aws.res.aws_glue_job
   name: producer-etl
   parent: acct-producer
-  at: [1, 1]
   props: {command: {}, name: changeme, role_arn: changeme}
-- {id: producer-link, type: aws.res.aws_glue_catalog_database, name: producer-link, parent: acct-producer, props: {name: changeme}, at: [1, 2]}
-- {id: consumer-link, type: aws.res.aws_glue_catalog_database, name: consumer-link, parent: acct-consumer, props: {name: changeme}, at: [1, 1]}
-- {id: consumer-athena, type: aws.res.aws_athena_workgroup, name: consumer-athena, parent: acct-consumer, props: {name: changeme}, at: [2, 1]}
-- {id: consumer-redshift, type: aws.res.aws_redshift_cluster, name: consumer-redshift, parent: acct-consumer, props: {cluster_identifier: changeme, node_type: changeme}, at: [1, 2]}
-- id: consumer-quicksight
-  type: aws.res.aws_quicksight_data_source
-  name: consumer-quicksight
-  parent: acct-consumer
-  at: [2, 2]
-  props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+  at:
+  - 2
+  - 1
+- {id: consumer-sagemaker, type: aws.res.aws_sagemaker_notebook_instance, name: consumer-sagemaker, parent: acct-consumer, props: {instance_type: changeme, name: changeme, role_arn: changeme}, at: [2, 1]}
+- {id: consumer-emr-notebook, type: aws.res.aws_emr_cluster, name: consumer-emr-notebook, parent: acct-consumer, props: {name: changeme, release_label: changeme, service_role: changeme}, at: [2, 2]}
+- {id: consumer-redshift, type: aws.res.aws_redshift_cluster, name: consumer-redshift, parent: acct-consumer, props: {cluster_identifier: changeme, node_type: changeme}, at: [2, 3]}
+- {id: consumer-athena, type: aws.res.aws_athena_workgroup, name: consumer-athena, parent: acct-consumer, props: {name: changeme}, at: [3, 1]}
+- {id: consumer-quicksight, type: aws.res.aws_quicksight_dashboard, name: consumer-quicksight, parent: acct-consumer, props: {dashboard_id: changeme, name: changeme, version_description: changeme}, at: [
+    3, 3]}
 edges:
-- {from: edla-location, to: edla-raw, label: registered, step: '1'}
-- {from: edla-location, to: edla-curated, label: registered, step: '1'}
-- {from: edla-share, to: producer-link, label: write grant via RAM, step: '2'}
-- {from: producer-link, to: edla-catalog, label: resource link, step: '2'}
-- {from: producer-etl, to: edla-raw, label: read, step: '3'}
-- {from: producer-etl, to: edla-curated, label: write curated tables, step: '3'}
-- {from: producer-etl, to: producer-link, label: update catalog, step: '3'}
-- {from: edla-share, to: consumer-link, label: read grant via RAM, step: '4'}
-- {from: consumer-link, to: edla-catalog, label: resource link, step: '4'}
-- {from: consumer-athena, to: consumer-link, label: SELECT, step: '5'}
-- {from: consumer-redshift, to: consumer-link, label: Spectrum external schema, step: '5'}
-- {from: consumer-quicksight, to: consumer-athena, step: '6'}
-- {from: users, to: consumer-quicksight, step: '7'}
+- {from: edla-location, to: edla-raw, label: registered with Lake Formation, step: '1'}
+- {from: edla-location, to: edla-curated, label: registered with Lake Formation, step: '1'}
+- {from: producer-etl, to: edla-raw, label: read, step: '2'}
+- {from: producer-etl, to: edla-curated, label: write curated tables, step: '2'}
+- {from: producer-etl, to: edla-catalog, label: update catalog through cross-account grant, step: '2'}
+- {from: consumer-athena, to: edla-catalog, label: SELECT through resource link, step: '3'}
+- {from: consumer-emr-notebook, to: edla-catalog, label: Spark SQL notebook, step: '3'}
+- {from: consumer-redshift, to: edla-catalog, label: Spectrum external schema, step: '3'}
+- {from: consumer-sagemaker, to: edla-catalog, label: Data Wrangler or notebook SDK, step: '3'}
+- {from: consumer-quicksight, to: consumer-athena, step: '4'}
+- {from: users, to: consumer-quicksight, step: '5'}
 steps:
-- {n: '1', text: 'edla-location → edla-raw: registered'}
-- {n: '2', text: 'edla-share → producer-link: write grant via RAM'}
-- {n: '3', text: 'producer-etl → edla-raw: read'}
-- {n: '4', text: 'edla-share → consumer-link: read grant via RAM'}
-- {n: '5', text: 'consumer-athena → consumer-link: SELECT'}
-- {n: '6', text: consumer-quicksight → consumer-athena}
-- {n: '7', text: users → consumer-quicksight}
+- {n: '1', text: 'edla-location → edla-raw: registered with Lake Formation'}
+- {n: '2', text: 'producer-etl → edla-raw: read'}
+- {n: '3', text: 'consumer-athena → edla-catalog: SELECT through resource link'}
+- {n: '4', text: consumer-quicksight → consumer-athena}
+- {n: '5', text: users → consumer-quicksight}

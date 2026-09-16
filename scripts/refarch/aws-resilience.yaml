@@ -6,7 +6,7 @@
   category: resilience
   tags: [disaster recovery, backup and restore, aws backup, eventbridge, cloudformation, golden ami]
   source: https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architecture-on-aws-part-ii-backup-and-restore-with-rapid-recovery/
-  description: AWS Backup takes point-in-time recovery points of EBS, RDS, EFS and DynamoDB in the primary Region and copies them to a vault in the recovery Region. An EventBridge rule on CloudWatch alarms and AWS Health events triggers a Lambda function that redeploys the stack from CloudFormation and golden AMIs, then restores data from the copied recovery points.
+  description: AWS Backup takes point-in-time recovery points of EBS and RDS in the primary Region and copies them to a vault in the recovery Region. On recovery, CloudFormation redeploys the EC2 infrastructure while AWS Backup restores the EBS volume; the restore-job COMPLETED event on EventBridge creates a Systems Manager OpsItem in OpsCenter for operators and invokes a Lambda function that attaches the restored volume to the new instance.
   containers:
     - region: us-east-1
       label: primary
@@ -21,38 +21,41 @@
       vpcs:
         - name: prod-recovery
           cidr: 10.1.0.0/16
+          at: [1, 2]
           subnets:
             - {name: bp-rec-app-a, cidr: 10.1.1.0/24, az: a, public: false}
             - {name: bp-rec-db-a, cidr: 10.1.10.0/24, az: a, public: false}
   elements:
     - {tf: aws_instance, name: app-server, in: subnet:bp-app-a}
     - {tf: aws_db_instance, name: app-db, in: subnet:bp-db-a}
-    - {tf: aws_efs_file_system, name: app-files, in: vpc:prod-primary}
-    - {tf: aws_dynamodb_table, name: sessions, in: region:us-east-1}
-    - {tf: aws_backup_plan, name: daily-plan, in: region:us-east-1}
-    - {tf: aws_backup_vault, name: primary-vault, in: region:us-east-1}
-    - {tf: aws_backup_vault, name: recovery-vault, in: region:us-west-2}
-    - {tf: aws_cloudwatch_event_rule, name: disaster-detected, in: region:us-west-2}
-    - {tf: aws_lambda_function, name: recovery-orchestrator, in: region:us-west-2}
-    - {tf: aws_cloudformation_stack, name: workload-stack, in: region:us-west-2}
-    - {tf: aws_ami, name: golden-ami, in: region:us-west-2}
-    - {tf: aws_instance, name: restored-app-server, in: subnet:bp-rec-app-a}
+    - {tf: aws_backup_plan, name: daily-plan, in: region:us-east-1, at: [1, 1]}
+    - {tf: aws_backup_vault, name: primary-vault, in: region:us-east-1, at: [1, 2]}
+    - {tf: aws_backup_vault, name: recovery-vault, in: region:us-west-2, at: [1, 1]}
+    - {tf: aws_cloudformation_stack, name: workload-stack, in: region:us-west-2, at: [1, 3]}
+    - {tf: aws_cloudwatch_event_rule, name: restore-job-completed, in: region:us-west-2, at: [2, 1]}
+    - {tf: aws_lambda_function, name: reconnect-function, in: region:us-west-2, at: [2, 2]}
+    - {tf: aws_ssm_document, name: systems-manager-opsitem, in: region:us-west-2, at: [3, 1]}
+    - {tf: aws_ssmincidents_response_plan, name: opscenter, in: region:us-west-2, at: [3, 2]}
+    - {tf: aws_ebs_volume, name: restored-volume, in: subnet:bp-rec-app-a, at: [1, 1]}
+    - {tf: aws_instance, name: restored-app-server, in: subnet:bp-rec-app-a, at: [1, 2]}
     - {tf: aws_db_instance, name: restored-db, in: subnet:bp-rec-db-a}
-  actors: [users]
+  actors: [users, {type: users, name: operators, at: [2, 2]}]
   flows:
     - {from: daily-plan, to: app-server, label: EBS snapshot, step: 1}
     - {from: daily-plan, to: app-db, label: RDS snapshot}
-    - {from: daily-plan, to: app-files, label: EFS backup}
-    - {from: daily-plan, to: sessions, label: DynamoDB backup}
     - {from: daily-plan, to: primary-vault, label: recovery points, step: 2}
     - {from: primary-vault, to: recovery-vault, label: cross-Region copy job, step: 3}
-    - {from: disaster-detected, to: recovery-orchestrator, label: CloudWatch alarm / AWS Health event, step: 4}
-    - {from: recovery-orchestrator, to: workload-stack, label: deploy IaC, step: 5}
-    - {from: workload-stack, to: golden-ami, label: launch from pre-baked AMI}
-    - {from: workload-stack, to: restored-app-server, step: 6}
-    - {from: recovery-vault, to: restored-db, label: restore recovery point, step: 7}
-    - {from: recovery-vault, to: restored-app-server, label: attach restored EBS volume}
-    - {from: users, to: restored-app-server, label: traffic after DNS update, step: 8}
+    - {from: workload-stack, to: restored-app-server, label: deploy infrastructure, step: 4A}
+    - {from: recovery-vault, to: restored-volume, label: restore data from backup, step: 4B}
+    - {from: recovery-vault, to: restored-db, label: restore recovery point}
+    - {from: recovery-vault, to: restore-job-completed, label: restore job COMPLETED, step: 5}
+    - {from: restore-job-completed, to: systems-manager-opsitem, label: create OpsItem, step: 6A}
+    - {from: restore-job-completed, to: reconnect-function, label: invoke logic to reconnect, step: 6B}
+    - {from: systems-manager-opsitem, to: opscenter, label: OpsItem}
+    - {from: opscenter, to: operators, label: operators / developers}
+    - {from: reconnect-function, to: restored-app-server, label: reconnect infrastructure to data, step: 7}
+    - {from: restored-app-server, to: restored-volume, label: attach, step: 8}
+    - {from: users, to: restored-app-server, label: traffic after DNS update, step: 9}
 
 - slug: backup-cross-account-cross-region-vaults
   title: AWS Backup cross-account and cross-Region vault copies
@@ -155,116 +158,144 @@
   category: resilience
   tags: [disaster recovery, warm standby, auto scaling, dynamodb global tables, rds read replica, route 53]
   source: https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architecture-on-aws-part-iii-pilot-light-and-warm-standby/
-  description: A fully functional copy of the workload runs in the recovery Region with one instance per tier behind its own load balancer, continuously serving test traffic. DynamoDB global tables and a cross-Region RDS read replica keep data current; on failover Route 53 redirects users and the Auto Scaling group is raised to production capacity.
+  description: A fully functional but scaled-down copy of the workload runs in the recovery Region, with front end and application servers in Auto Scaling groups across two Availability Zones behind Elastic Load Balancing, while Route 53 keeps the secondary Region inactive for production traffic. An Aurora primary and replica share the cluster volume in the primary Region and Aurora Global Database replicates asynchronously to a replica in the recovery Region, where a cluster snapshot is also kept; on failover Route 53 redirects users and the Auto Scaling groups are raised to production capacity.
   containers:
     - region: eu-west-1
       label: primary
       vpcs:
         - name: ws-primary
           cidr: 10.30.0.0/16
+          at: [2, 1]
           subnets:
-            - {name: ws-p-public-a, cidr: 10.30.0.0/24, az: a, public: true}
-            - {name: ws-p-public-b, cidr: 10.30.1.0/24, az: b, public: true}
-            - {name: ws-p-db-a, cidr: 10.30.10.0/24, az: a, public: false}
+            - {name: ws-p-public-a, cidr: 10.30.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: ws-p-public-b, cidr: 10.30.1.0/24, az: b, public: true, at: [1, 1]}
+            - {name: ws-p-app-a, cidr: 10.30.10.0/24, az: a, public: false, at: [2, 1]}
+            - {name: ws-p-app-b, cidr: 10.30.11.0/24, az: b, public: false, at: [2, 1]}
+            - {name: ws-p-db-a, cidr: 10.30.20.0/24, az: a, public: false, at: [3, 1]}
+            - {name: ws-p-db-b, cidr: 10.30.21.0/24, az: b, public: false, at: [3, 1]}
     - region: eu-central-1
       label: secondary
       vpcs:
         - name: ws-standby
           cidr: 10.31.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: ws-s-public-a, cidr: 10.31.0.0/24, az: a, public: true}
-            - {name: ws-s-public-b, cidr: 10.31.1.0/24, az: b, public: true}
-            - {name: ws-s-db-a, cidr: 10.31.10.0/24, az: a, public: false}
+            - {name: ws-s-public-a, cidr: 10.31.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: ws-s-public-b, cidr: 10.31.1.0/24, az: b, public: true, at: [1, 1]}
+            - {name: ws-s-app-a, cidr: 10.31.10.0/24, az: a, public: false, at: [2, 1]}
+            - {name: ws-s-app-b, cidr: 10.31.11.0/24, az: b, public: false, at: [2, 1]}
+            - {name: ws-s-db-a, cidr: 10.31.20.0/24, az: a, public: false, at: [3, 1]}
+            - {name: ws-s-db-b, cidr: 10.31.21.0/24, az: b, public: false, at: [3, 1]}
   elements:
-    - {tf: aws_route53_zone, name: shop-zone, in: region:eu-west-1}
-    - {tf: aws_route53_health_check, name: shop-primary-check, in: region:eu-west-1}
-    - {tf: aws_lb, name: shop-primary-alb, in: vpc:ws-primary}
-    - {tf: aws_autoscaling_group, name: shop-primary-asg, in: vpc:ws-primary}
-    - {tf: aws_db_instance, name: catalog-primary, in: subnet:ws-p-db-a}
-    - {tf: aws_dynamodb_table, name: cart-eu-west-1, in: region:eu-west-1}
-    - {tf: aws_lb, name: shop-standby-alb, in: vpc:ws-standby}
-    - {tf: aws_autoscaling_group, name: shop-standby-asg, in: vpc:ws-standby}
-    - {tf: aws_db_instance, name: catalog-replica, in: subnet:ws-s-db-a}
-    - {tf: aws_dynamodb_table, name: cart-eu-central-1, in: region:eu-central-1}
-    - {tf: aws_cloudwatch_event_rule, name: failover-trigger, in: region:eu-central-1}
-    - {tf: aws_lambda_function, name: scale-up-standby, in: region:eu-central-1}
+    - {tf: aws_route53_zone, name: shop-zone, in: region:eu-west-1, at: [1, 1]}
+    - {tf: aws_lb, name: shop-primary-alb, in: vpc:ws-primary, at: [1, 1, 1, 3]}
+    - {tf: aws_instance, name: primary-front-end-a, in: subnet:ws-p-public-a, at: [1, 1]}
+    - {tf: aws_instance, name: primary-front-end-b, in: subnet:ws-p-public-b, at: [1, 1]}
+    - {tf: aws_autoscaling_group, name: primary-front-end-asg, in: vpc:ws-primary, at: [2, 2]}
+    - {tf: aws_instance, name: primary-app-server-a, in: subnet:ws-p-app-a, at: [1, 1]}
+    - {tf: aws_instance, name: primary-app-server-b, in: subnet:ws-p-app-b, at: [1, 1]}
+    - {tf: aws_autoscaling_group, name: primary-app-server-asg, in: vpc:ws-primary, at: [3, 2]}
+    - {tf: aws_rds_cluster, name: aurora-primary, in: subnet:ws-p-db-a, at: [1, 1]}
+    - {tf: aws_rds_cluster_instance, name: aurora-replica, in: subnet:ws-p-db-b, at: [1, 1]}
+    - {tf: aws_lb, name: shop-standby-alb, in: vpc:ws-standby, at: [1, 1, 1, 3]}
+    - {tf: aws_instance, name: standby-front-end-a, in: subnet:ws-s-public-a, at: [1, 1]}
+    - {tf: aws_instance, name: standby-front-end-b, in: subnet:ws-s-public-b, at: [1, 1]}
+    - {tf: aws_autoscaling_group, name: standby-front-end-asg, in: vpc:ws-standby, at: [2, 2]}
+    - {tf: aws_instance, name: standby-app-server-a, in: subnet:ws-s-app-a, at: [1, 1]}
+    - {tf: aws_instance, name: standby-app-server-b, in: subnet:ws-s-app-b, at: [1, 1]}
+    - {tf: aws_autoscaling_group, name: standby-app-server-asg, in: vpc:ws-standby, at: [3, 2]}
+    - {tf: aws_rds_cluster, name: aurora-secondary-replica, in: subnet:ws-s-db-a, at: [1, 1]}
+    - {tf: aws_db_cluster_snapshot, name: aurora-cluster-snapshot, in: subnet:ws-s-db-b, at: [1, 1]}
   actors: [users]
   flows:
     - {from: users, to: shop-zone, label: DNS, step: 1}
-    - {from: shop-zone, to: shop-primary-alb, label: PRIMARY record, step: 2}
-    - {from: shop-primary-check, to: shop-primary-alb, label: health check}
-    - {from: shop-primary-alb, to: shop-primary-asg, step: 3}
-    - {from: shop-primary-asg, to: catalog-primary, label: read/write}
-    - {from: shop-primary-asg, to: cart-eu-west-1, label: read/write}
-    - {from: catalog-primary, to: catalog-replica, label: cross-Region read replica (async)}
-    - {from: cart-eu-west-1, to: cart-eu-central-1, label: global table replication}
-    - {from: shop-zone, to: shop-standby-alb, label: SECONDARY record}
-    - {from: shop-standby-alb, to: shop-standby-asg, label: one instance per tier, serves test traffic}
-    - {from: shop-standby-asg, to: catalog-replica, label: reads; writes after promotion}
-    - {from: shop-standby-asg, to: cart-eu-central-1, label: read/write}
-    - {from: failover-trigger, to: scale-up-standby, label: health check alarm}
-    - {from: scale-up-standby, to: shop-standby-asg, label: raise desired capacity}
-    - {from: scale-up-standby, to: catalog-replica, label: promote read replica}
+    - {from: shop-zone, to: shop-primary-alb, label: Active, step: 2}
+    - {from: shop-zone, to: shop-standby-alb, label: inactive for production traffic}
+    - {from: shop-primary-alb, to: primary-front-end-a, step: 3}
+    - {from: shop-primary-alb, to: primary-front-end-b}
+    - {from: primary-front-end-a, to: primary-app-server-a, step: 4}
+    - {from: primary-front-end-b, to: primary-app-server-b}
+    - {from: primary-app-server-a, to: aurora-primary, label: read/write, step: 5}
+    - {from: primary-app-server-b, to: aurora-replica, label: reads}
+    - {from: aurora-primary, to: aurora-replica, label: shared cluster data volume}
+    - {from: aurora-primary, to: aurora-secondary-replica, label: asynchronous cross-Region replication (Aurora Global Database), step: 6}
+    - {from: aurora-secondary-replica, to: aurora-cluster-snapshot, label: cluster snapshot}
+    - {from: shop-standby-alb, to: standby-front-end-a, label: scaled-down, serves test traffic}
+    - {from: shop-standby-alb, to: standby-front-end-b}
+    - {from: standby-front-end-a, to: standby-app-server-a}
+    - {from: standby-front-end-b, to: standby-app-server-b}
+    - {from: standby-app-server-a, to: aurora-secondary-replica, label: reads; writes after promotion}
+    - {from: standby-app-server-b, to: aurora-secondary-replica}
 
 - slug: dr-multi-site-active-active
   title: Multi-site active/active across two Regions
   category: resilience
   tags: [disaster recovery, active-active, multi-region, route 53 latency, dynamodb global tables, aurora write forwarding, elasticache global datastore]
   source: https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architecture-on-aws-part-iv-multi-site-active-active/
-  description: Both Regions serve production traffic, with Route 53 latency-based records backed by health checks sending each user to the nearest healthy stack. Reads are local everywhere; DynamoDB global tables accept writes in both Regions (write-local), Aurora Global Database with write forwarding keeps a single write Region for relational data (write-global), and an ElastiCache Global Datastore replicates session state.
+  description: Both Regions serve production traffic, with Route 53 sending each user to the nearest healthy stack of Elastic Load Balancing, front end servers and application servers in Auto Scaling groups across two Availability Zones. DynamoDB global tables accept reads and writes locally in both Regions with automatic replication, and continuous backup protects each Regional table.
   containers:
     - region: us-east-1
       label: primary
       vpcs:
         - name: aa-east
           cidr: 10.40.0.0/16
+          at: [2, 1, 1, 2]
           subnets:
-            - {name: aa-e-public-a, cidr: 10.40.0.0/24, az: a, public: true}
-            - {name: aa-e-public-b, cidr: 10.40.1.0/24, az: b, public: true}
-            - {name: aa-e-data-a, cidr: 10.40.10.0/24, az: a, public: false}
+            - {name: aa-e-public-a, cidr: 10.40.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: aa-e-public-b, cidr: 10.40.1.0/24, az: b, public: true, at: [1, 1]}
+            - {name: aa-e-app-a, cidr: 10.40.10.0/24, az: a, public: false, at: [2, 1]}
+            - {name: aa-e-app-b, cidr: 10.40.11.0/24, az: b, public: false, at: [2, 1]}
     - region: eu-west-1
       label: secondary
       vpcs:
         - name: aa-west
           cidr: 10.41.0.0/16
+          at: [1, 1, 1, 2]
           subnets:
-            - {name: aa-w-public-a, cidr: 10.41.0.0/24, az: a, public: true}
-            - {name: aa-w-public-b, cidr: 10.41.1.0/24, az: b, public: true}
-            - {name: aa-w-data-a, cidr: 10.41.10.0/24, az: a, public: false}
+            - {name: aa-w-public-a, cidr: 10.41.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: aa-w-public-b, cidr: 10.41.1.0/24, az: b, public: true, at: [1, 1]}
+            - {name: aa-w-app-a, cidr: 10.41.10.0/24, az: a, public: false, at: [2, 1]}
+            - {name: aa-w-app-b, cidr: 10.41.11.0/24, az: b, public: false, at: [2, 1]}
   elements:
-    - {tf: aws_route53_zone, name: global-zone, in: region:us-east-1}
-    - {tf: aws_route53_health_check, name: east-check, in: region:us-east-1}
-    - {tf: aws_route53_health_check, name: west-check, in: region:us-east-1}
-    - {tf: aws_lb, name: east-alb, in: vpc:aa-east}
-    - {tf: aws_ecs_cluster, name: east-ecs, in: vpc:aa-east}
-    - {tf: aws_dynamodb_table, name: profiles-us-east-1, in: region:us-east-1}
-    - {tf: aws_rds_global_cluster, name: ledger-global, in: region:us-east-1}
-    - {tf: aws_rds_cluster, name: ledger-east, in: subnet:aa-e-data-a}
-    - {tf: aws_elasticache_global_replication_group, name: sessions-global, in: region:us-east-1}
-    - {tf: aws_elasticache_replication_group, name: sessions-east, in: subnet:aa-e-data-a}
-    - {tf: aws_lb, name: west-alb, in: vpc:aa-west}
-    - {tf: aws_ecs_cluster, name: west-ecs, in: vpc:aa-west}
-    - {tf: aws_dynamodb_table, name: profiles-eu-west-1, in: region:eu-west-1}
-    - {tf: aws_rds_cluster, name: ledger-west, in: subnet:aa-w-data-a}
+    - {tf: aws_route53_zone, name: global-zone, in: region:us-east-1, at: [1, 1, 1, 2]}
+    - {tf: aws_lb, name: east-alb, in: vpc:aa-east, at: [1, 1, 1, 3]}
+    - {tf: aws_instance, name: east-front-end-a, in: subnet:aa-e-public-a, at: [1, 1]}
+    - {tf: aws_instance, name: east-front-end-b, in: subnet:aa-e-public-b, at: [1, 1]}
+    - {tf: aws_autoscaling_group, name: east-front-end-asg, in: vpc:aa-east, at: [2, 2]}
+    - {tf: aws_instance, name: east-app-server-a, in: subnet:aa-e-app-a, at: [1, 1]}
+    - {tf: aws_instance, name: east-app-server-b, in: subnet:aa-e-app-b, at: [1, 1]}
+    - {tf: aws_autoscaling_group, name: east-app-server-asg, in: vpc:aa-east, at: [3, 2]}
+    - {tf: aws_backup_vault, name: profiles-us-east-1-continuous-backup, in: region:us-east-1, at: [3, 1]}
+    - {tf: aws_dynamodb_table, name: profiles-us-east-1, in: region:us-east-1, at: [3, 2]}
+    - {tf: aws_lb, name: west-alb, in: vpc:aa-west, at: [1, 1, 1, 3]}
+    - {tf: aws_instance, name: west-front-end-a, in: subnet:aa-w-public-a, at: [1, 1]}
+    - {tf: aws_instance, name: west-front-end-b, in: subnet:aa-w-public-b, at: [1, 1]}
+    - {tf: aws_autoscaling_group, name: west-front-end-asg, in: vpc:aa-west, at: [2, 2]}
+    - {tf: aws_instance, name: west-app-server-a, in: subnet:aa-w-app-a, at: [1, 1]}
+    - {tf: aws_instance, name: west-app-server-b, in: subnet:aa-w-app-b, at: [1, 1]}
+    - {tf: aws_autoscaling_group, name: west-app-server-asg, in: vpc:aa-west, at: [3, 2]}
+    - {tf: aws_dynamodb_table, name: profiles-eu-west-1, in: region:eu-west-1, at: [2, 1]}
+    - {tf: aws_backup_vault, name: profiles-eu-west-1-continuous-backup, in: region:eu-west-1, at: [2, 2]}
   actors: [users]
   flows:
     - {from: users, to: global-zone, label: DNS, step: 1}
-    - {from: global-zone, to: east-alb, label: latency record us-east-1, step: 2}
-    - {from: global-zone, to: west-alb, label: latency record eu-west-1}
-    - {from: east-check, to: east-alb, label: health check}
-    - {from: west-check, to: west-alb, label: health check}
-    - {from: east-alb, to: east-ecs, step: 3}
-    - {from: west-alb, to: west-ecs}
-    - {from: east-ecs, to: profiles-us-east-1, label: read-local / write-local, step: 4}
-    - {from: west-ecs, to: profiles-eu-west-1, label: read-local / write-local}
-    - {from: profiles-us-east-1, to: profiles-eu-west-1, label: global table replication, last writer wins}
-    - {from: ledger-global, to: ledger-east, label: primary (write) cluster}
-    - {from: ledger-global, to: ledger-west, label: secondary cluster}
-    - {from: east-ecs, to: ledger-east, label: read/write}
-    - {from: west-ecs, to: ledger-west, label: read-local; writes forwarded to primary}
-    - {from: ledger-east, to: ledger-west, label: storage replication < 1 s}
-    - {from: sessions-global, to: sessions-east, label: primary cluster}
-    - {from: east-ecs, to: sessions-east, label: session reads/writes}
+    - {from: global-zone, to: east-alb, label: Active, step: 2}
+    - {from: global-zone, to: west-alb, label: Active}
+    - {from: east-alb, to: east-front-end-a, step: 3}
+    - {from: east-alb, to: east-front-end-b}
+    - {from: east-front-end-a, to: east-app-server-a, step: 4}
+    - {from: east-front-end-b, to: east-app-server-b}
+    - {from: east-app-server-a, to: profiles-us-east-1, label: read-local / write-local, step: 5}
+    - {from: east-app-server-b, to: profiles-us-east-1}
+    - {from: profiles-us-east-1, to: profiles-us-east-1-continuous-backup, label: continuous backup}
+    - {from: west-alb, to: west-front-end-a}
+    - {from: west-alb, to: west-front-end-b}
+    - {from: west-front-end-a, to: west-app-server-a}
+    - {from: west-front-end-b, to: west-app-server-b}
+    - {from: west-app-server-a, to: profiles-eu-west-1, label: read-local / write-local}
+    - {from: west-app-server-b, to: profiles-eu-west-1}
+    - {from: profiles-eu-west-1, to: profiles-eu-west-1-continuous-backup, label: continuous backup}
+    - {from: profiles-us-east-1, to: profiles-eu-west-1, label: DynamoDB global tables automatic replication, step: 6}
 
 - slug: arc-routing-control-regional-failover
   title: Regional failover with Application Recovery Controller routing controls
@@ -401,38 +432,31 @@
   category: resilience
   tags: [s3, multi-region access point, cross-region replication, two-way replication, failover controls, global accelerator]
   source: https://docs.aws.amazon.com/AmazonS3/latest/userguide/MultiRegionAccessPoints.html
-  description: Applications in two Regions read and write through a single Multi-Region Access Point global endpoint, which routes over the AWS global network to the nearest bucket with an active routing status. Bidirectional Cross-Region Replication with replica modification sync keeps the two buckets in sync, and failover controls shift all S3 traffic to one Region within minutes.
+  description: A multi-Region application client reads and writes through a single Multi-Region Access Point global endpoint; requests from the internet, a VPC or PrivateLink are accelerated over the AWS Global Accelerator network to the bucket with the lowest latency among three Regions. Bidirectional Cross-Region Replication with replica modification sync keeps the buckets in sync, and failover controls shift all S3 traffic to one Region within minutes.
   containers:
     - region: us-west-2
       label: primary
-      vpcs:
-        - name: mrap-west
-          cidr: 10.70.0.0/16
-          subnets:
-            - {name: mrap-w-app-a, cidr: 10.70.1.0/24, az: a, public: false}
     - region: eu-central-1
       label: secondary
-      vpcs:
-        - name: mrap-eu
-          cidr: 10.71.0.0/16
-          subnets:
-            - {name: mrap-e-app-a, cidr: 10.71.1.0/24, az: a, public: false}
+    - region: ap-southeast-1
+      label: tertiary
+      at: [3, 1]
   elements:
-    - {tf: aws_s3control_multi_region_access_point, name: media-mrap, in: region:us-west-2}
-    - {tf: aws_s3_bucket, name: media-us-west-2, in: region:us-west-2}
-    - {tf: aws_s3_bucket, name: media-eu-central-1, in: region:eu-central-1}
-    - {tf: aws_ecs_cluster, name: uploader-west, in: subnet:mrap-w-app-a}
-    - {tf: aws_ecs_cluster, name: uploader-eu, in: subnet:mrap-e-app-a}
-    - {tf: aws_cloudfront_distribution, name: media-cdn, in: region:us-west-2}
-  actors: [users]
+    - {tf: aws_s3control_multi_region_access_point, name: media-mrap, in: region:us-west-2, at: [1, 1]}
+    - {tf: aws_globalaccelerator_accelerator, name: request-acceleration, in: region:us-west-2, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: media-us-west-2, in: region:us-west-2, at: [1, 3]}
+    - {tf: aws_s3_bucket, name: media-eu-central-1, in: region:eu-central-1, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: media-ap-southeast-1, in: region:ap-southeast-1, at: [1, 1]}
+  actors: [{type: client, name: multi-region-application-client, at: [1, 1]}]
   flows:
-    - {from: uploader-west, to: media-mrap, label: PUT/GET via global endpoint, step: 1}
-    - {from: uploader-eu, to: media-mrap, label: PUT/GET via global endpoint}
-    - {from: media-mrap, to: media-us-west-2, label: routed to closest active bucket, step: 2}
-    - {from: media-mrap, to: media-eu-central-1, label: routed to closest active bucket}
-    - {from: media-us-west-2, to: media-eu-central-1, label: two-way CRR with replica modification sync, step: 3}
-    - {from: users, to: media-cdn, label: HTTPS, step: 4}
-    - {from: media-cdn, to: media-mrap, label: origin}
+    - {from: multi-region-application-client, to: media-mrap, label: PUT/GET via global endpoint, step: 1}
+    - {from: media-mrap, to: request-acceleration, label: routed over the AWS global network, step: 2}
+    - {from: request-acceleration, to: media-us-west-2, label: bucket with the lowest latency, step: 3}
+    - {from: request-acceleration, to: media-eu-central-1}
+    - {from: request-acceleration, to: media-ap-southeast-1}
+    - {from: media-us-west-2, to: media-eu-central-1, label: two-way CRR with replica modification sync, step: 4}
+    - {from: media-eu-central-1, to: media-ap-southeast-1, label: two-way CRR}
+    - {from: media-us-west-2, to: multi-region-application-client, label: response from the lowest-latency Region, step: 5}
 
 - slug: elastic-disaster-recovery-onprem-to-aws
   title: Elastic Disaster Recovery from on-premises servers into AWS
@@ -486,12 +510,13 @@
   category: resilience
   tags: [well-architected, reliability, multi-az, auto scaling, rds multi-az, load balancer]
   source: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_fault_isolation_multiaz_region_system.html
-  description: Web and application tiers run in Auto Scaling groups spread over three Availability Zones behind an Application Load Balancer, while RDS Multi-AZ keeps a synchronous standby in a second zone and S3 and DynamoDB are Multi-AZ by design. Loss of any one zone leaves capacity and data intact and the load balancer stops routing to unreachable targets.
+  description: EC2 instances in an Auto Scaling group spread over three Availability Zones sit behind Elastic Load Balancing, with a NAT gateway per zone for egress, while RDS Multi-AZ keeps a synchronous standby in a second zone and S3 and DynamoDB are Multi-AZ by design. Loss of any one zone leaves capacity and data intact and the load balancer stops routing to unreachable targets.
   containers:
     - region: us-east-1
       vpcs:
         - name: three-tier
           cidr: 10.90.0.0/16
+          at: [1, 1, 2, 1]
           subnets:
             - {name: tt-public-a, cidr: 10.90.0.0/24, az: a, public: true}
             - {name: tt-public-b, cidr: 10.90.1.0/24, az: b, public: true}
@@ -502,63 +527,57 @@
             - {name: tt-db-a, cidr: 10.90.20.0/24, az: a, public: false}
             - {name: tt-db-b, cidr: 10.90.21.0/24, az: b, public: false}
   elements:
-    - {tf: aws_route53_zone, name: site-zone, in: region}
-    - {tf: aws_lb, name: web-alb, in: vpc:three-tier}
-    - {tf: aws_autoscaling_group, name: web-asg, in: vpc:three-tier}
-    - {tf: aws_lb, name: app-internal-alb, in: vpc:three-tier}
-    - {tf: aws_autoscaling_group, name: app-asg, in: vpc:three-tier}
+    - {tf: aws_lb, name: web-alb, in: vpc:three-tier, at: [1, 2]}
+    - {tf: aws_autoscaling_group, name: web-asg, in: vpc:three-tier, at: [2, 2]}
+    - {tf: aws_instance, name: web-a, in: subnet:tt-app-a, at: [1, 1]}
+    - {tf: aws_instance, name: web-b, in: subnet:tt-app-b, at: [1, 1]}
+    - {tf: aws_instance, name: web-c, in: subnet:tt-app-c, at: [1, 1]}
     - {tf: aws_db_instance, name: orders-db-primary, in: subnet:tt-db-a}
     - {tf: aws_db_instance, name: orders-db-standby, in: subnet:tt-db-b}
-    - {tf: aws_s3_bucket, name: static-assets, in: region}
-    - {tf: aws_dynamodb_table, name: session-table, in: region}
+    - {tf: aws_s3_bucket, name: static-assets, in: region, at: [1, 2]}
+    - {tf: aws_dynamodb_table, name: session-table, in: region, at: [2, 2]}
     - {tf: aws_nat_gateway, name: nat-a, in: subnet:tt-public-a}
     - {tf: aws_nat_gateway, name: nat-b, in: subnet:tt-public-b}
     - {tf: aws_nat_gateway, name: nat-c, in: subnet:tt-public-c}
   actors: [users]
   flows:
-    - {from: users, to: site-zone, label: DNS (alias, short TTL), step: 1}
-    - {from: site-zone, to: web-alb, step: 2}
-    - {from: web-alb, to: web-asg, label: targets in 3 AZs, step: 3}
-    - {from: web-asg, to: app-internal-alb, step: 4}
-    - {from: app-internal-alb, to: app-asg, label: targets in 3 AZs, step: 5}
-    - {from: app-asg, to: orders-db-primary, label: read/write, step: 6}
+    - {from: users, to: web-alb, label: HTTPS, step: 1}
+    - {from: web-alb, to: web-a, label: targets in 3 AZs, step: 2}
+    - {from: web-alb, to: web-b}
+    - {from: web-alb, to: web-c}
+    - {from: web-asg, to: web-a, label: Auto Scaling group spans 3 AZs}
+    - {from: web-asg, to: web-b}
+    - {from: web-asg, to: web-c}
+    - {from: web-a, to: orders-db-primary, label: read/write, step: 3}
     - {from: orders-db-primary, to: orders-db-standby, label: synchronous Multi-AZ standby, automatic failover}
-    - {from: app-asg, to: session-table, label: Multi-AZ by default}
-    - {from: web-asg, to: static-assets, label: Multi-AZ by default}
-    - {from: app-asg, to: nat-a, label: per-AZ egress}
-    - {from: app-asg, to: nat-b}
-    - {from: app-asg, to: nat-c}
+    - {from: web-a, to: session-table, label: Multi-AZ by default}
+    - {from: web-a, to: static-assets, label: Multi-AZ by default}
+    - {from: web-a, to: nat-a, label: per-AZ egress}
+    - {from: web-b, to: nat-b}
+    - {from: web-c, to: nat-c}
 
 - slug: static-stability-overprovisioned-azs
   title: Static stability with pre-provisioned capacity across Availability Zones
   category: resilience
   tags: [static stability, builders library, availability zones, overprovisioning, control plane, data plane]
   source: https://aws.amazon.com/builders-library/static-stability-using-availability-zones/
-  description: The fleet is overprovisioned so that the instances in any two of three Availability Zones can carry full load; an AZ impairment therefore requires no new launches and no dependency on EC2 or Auto Scaling control planes. Golden AMIs and launch templates are pre-baked, the database runs active-standby across zones, and cross-zone traffic is kept zone-local where possible.
+  description: An Application Load Balancer fronts an Auto Scaling group whose EC2 instances are spread over three Availability Zones and overprovisioned so that the instances in any two zones can carry full load. An AZ impairment therefore requires no new launches and no dependency on the EC2 or Auto Scaling control planes; the load balancer simply stops routing to the impaired zone.
   containers:
     - region: us-west-2
       vpcs:
         - name: ss-fleet
           cidr: 10.100.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: ss-public-a, cidr: 10.100.0.0/24, az: a, public: true}
-            - {name: ss-public-b, cidr: 10.100.1.0/24, az: b, public: true}
-            - {name: ss-public-c, cidr: 10.100.2.0/24, az: c, public: true}
-            - {name: ss-app-a, cidr: 10.100.10.0/24, az: a, public: false}
-            - {name: ss-app-b, cidr: 10.100.11.0/24, az: b, public: false}
-            - {name: ss-app-c, cidr: 10.100.12.0/24, az: c, public: false}
-            - {name: ss-db-a, cidr: 10.100.20.0/24, az: a, public: false}
-            - {name: ss-db-b, cidr: 10.100.21.0/24, az: b, public: false}
+            - {name: ss-app-a, cidr: 10.100.10.0/24, az: a, public: false, at: [1, 1]}
+            - {name: ss-app-b, cidr: 10.100.11.0/24, az: b, public: false, at: [1, 1]}
+            - {name: ss-app-c, cidr: 10.100.12.0/24, az: c, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_lb, name: fleet-alb, in: vpc:ss-fleet}
-    - {tf: aws_autoscaling_group, name: fleet-asg-150pct, in: vpc:ss-fleet}
-    - {tf: aws_launch_template, name: fleet-launch-template, in: region}
-    - {tf: aws_ami, name: fleet-golden-ami, in: region}
-    - {tf: aws_instance, name: fleet-a, in: subnet:ss-app-a}
-    - {tf: aws_instance, name: fleet-b, in: subnet:ss-app-b}
-    - {tf: aws_instance, name: fleet-c, in: subnet:ss-app-c}
-    - {tf: aws_db_instance, name: state-db-active, in: subnet:ss-db-a}
-    - {tf: aws_db_instance, name: state-db-standby, in: subnet:ss-db-b}
+    - {tf: aws_lb, name: fleet-alb, in: vpc:ss-fleet, at: [1, 1, 1, 3]}
+    - {tf: aws_autoscaling_group, name: fleet-asg-150pct, in: vpc:ss-fleet, at: [2, 1, 1, 3]}
+    - {tf: aws_instance, name: fleet-a, in: subnet:ss-app-a, at: [1, 1]}
+    - {tf: aws_instance, name: fleet-b, in: subnet:ss-app-b, at: [1, 1]}
+    - {tf: aws_instance, name: fleet-c, in: subnet:ss-app-c, at: [1, 1]}
   actors: [users]
   flows:
     - {from: users, to: fleet-alb, label: HTTPS, step: 1}
@@ -568,49 +587,40 @@
     - {from: fleet-asg-150pct, to: fleet-a, label: 50% headroom per AZ, no launch needed on AZ loss}
     - {from: fleet-asg-150pct, to: fleet-b}
     - {from: fleet-asg-150pct, to: fleet-c}
-    - {from: fleet-launch-template, to: fleet-golden-ami, label: pre-baked image, no build at recovery time}
-    - {from: fleet-asg-150pct, to: fleet-launch-template, label: replacement only, not on the critical path}
-    - {from: fleet-a, to: state-db-active, label: writes, step: 3}
-    - {from: state-db-active, to: state-db-standby, label: warm standby in another AZ, DNS repoint on failover}
 
 - slug: fis-chaos-experiment-az-impairment
   title: Chaos engineering with Fault Injection Service simulating an AZ impairment
   category: resilience
   tags: [fault injection service, chaos engineering, experiment template, stop condition, availability zone, cloudwatch alarm]
   source: https://docs.aws.amazon.com/fis/latest/userguide/what-is.html
-  description: An FIS experiment template defines actions (for example stopping instances or disrupting network connectivity in one Availability Zone), targets selected by tag, and stop conditions tied to CloudWatch alarms on the application's error rate. Running the experiment against the multi-AZ stack validates that the load balancer, Auto Scaling group and Multi-AZ database recover as designed, with automatic rollback if the guardrail alarm fires.
+  description: Two FIS experiment templates each define targets, actions and stop conditions. Template A targets specific EC2 instances with two actions (stop instances, disrupt network connectivity in one Availability Zone) and stops on a single CloudWatch alarm; template B targets EC2 instances selected by tag with three actions and stops when either of two CloudWatch alarms fires, rolling the experiment back automatically.
   containers:
     - region: eu-west-1
       vpcs:
         - name: fis-target
           cidr: 10.110.0.0/16
+          at: [1, 1, 1, 3]
           subnets:
-            - {name: fis-public-a, cidr: 10.110.0.0/24, az: a, public: true}
-            - {name: fis-public-b, cidr: 10.110.1.0/24, az: b, public: true}
-            - {name: fis-app-a, cidr: 10.110.10.0/24, az: a, public: false}
-            - {name: fis-app-b, cidr: 10.110.11.0/24, az: b, public: false}
-            - {name: fis-db-a, cidr: 10.110.20.0/24, az: a, public: false}
+            - {name: fis-app-a, cidr: 10.110.10.0/24, az: a, public: false, at: [1, 1]}
+            - {name: fis-app-b, cidr: 10.110.11.0/24, az: b, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_fis_experiment_template, name: az-a-impairment, in: region}
-    - {tf: aws_cloudwatch_metric_alarm, name: error-rate-guardrail, in: region}
-    - {tf: aws_sns_topic, name: experiment-notifications, in: region}
-    - {tf: aws_lb, name: target-alb, in: vpc:fis-target}
-    - {tf: aws_autoscaling_group, name: target-asg, in: vpc:fis-target}
-    - {tf: aws_instance, name: target-az-a, in: subnet:fis-app-a}
-    - {tf: aws_instance, name: target-az-b, in: subnet:fis-app-b}
-    - {tf: aws_db_instance, name: target-db-multi-az, in: subnet:fis-db-a}
-  actors: [users]
+    - {tf: aws_instance, name: target-az-a-1, in: subnet:fis-app-a, at: [1, 1]}
+    - {tf: aws_instance, name: target-az-a-2, in: subnet:fis-app-a, at: [1, 2]}
+    - {tf: aws_instance, name: tagged-target-az-b, in: subnet:fis-app-b, at: [1, 1]}
+    - {tf: aws_fis_experiment_template, name: experiment-template-a, in: region, at: [2, 1]}
+    - {tf: aws_fis_experiment_template, name: experiment-template-b, in: region, at: [2, 2, 1, 2]}
+    - {tf: aws_cloudwatch_metric_alarm, name: template-a-stop-alarm, in: region, at: [3, 1]}
+    - {tf: aws_cloudwatch_metric_alarm, name: template-b-error-rate-alarm, in: region, at: [3, 2]}
+    - {tf: aws_cloudwatch_metric_alarm, name: template-b-latency-alarm, in: region, at: [3, 3]}
   flows:
-    - {from: az-a-impairment, to: target-az-a, label: action aws:ec2:stop-instances on tag az=a, step: 1}
-    - {from: az-a-impairment, to: target-asg, label: action aws:network:disrupt-connectivity (AZ a)}
-    - {from: error-rate-guardrail, to: az-a-impairment, label: stop condition, step: 2}
-    - {from: az-a-impairment, to: experiment-notifications, label: experiment state changes}
-    - {from: users, to: target-alb, label: synthetic load during experiment, step: 3}
-    - {from: target-alb, to: target-az-b, label: traffic shifts to healthy AZ, step: 4}
-    - {from: target-alb, to: target-az-a, label: unhealthy targets removed}
-    - {from: target-asg, to: target-az-a, label: replaces stopped instances, step: 5}
-    - {from: target-az-b, to: target-db-multi-az, label: Multi-AZ failover observed}
-    - {from: target-alb, to: error-rate-guardrail, label: 5xx metric}
+    - {from: experiment-template-a, to: target-az-a-1, label: 'action 1: aws:ec2:stop-instances (specific instances)', step: 1}
+    - {from: experiment-template-a, to: target-az-a-2, label: 'action 2: aws:network:disrupt-connectivity (AZ a)'}
+    - {from: template-a-stop-alarm, to: experiment-template-a, label: stop condition, step: 2}
+    - {from: experiment-template-b, to: tagged-target-az-b, label: 'action 1: aws:ec2:stop-instances (by tag)', step: 3}
+    - {from: experiment-template-b, to: tagged-target-az-b, label: 'action 2: aws:ssm:send-command (CPU stress)'}
+    - {from: experiment-template-b, to: vpc:fis-target, label: 'action 3: aws:network:disrupt-connectivity (AZ b)'}
+    - {from: template-b-error-rate-alarm, to: experiment-template-b, label: stop condition, step: 4}
+    - {from: template-b-latency-alarm, to: experiment-template-b, label: stop condition}
 
 - slug: cell-based-architecture
   title: Cell-based architecture with a thin cell router
@@ -800,45 +810,28 @@
   category: migration
   tags: [datasync, nfs, smb, s3, efs, direct connect, vpc endpoint, online data transfer]
   source: https://docs.aws.amazon.com/datasync/latest/userguide/how-datasync-transfer-works.html
-  description: A DataSync agent deployed as a VM next to the on-premises file servers reads the NFS and SMB locations and transfers data over TLS to a DataSync VPC service endpoint reached through Direct Connect. Separate tasks write the file shares to an S3 bucket and an EFS file system, verifying checksums and running on a schedule to copy only changed data until cutover.
+  description: A DataSync agent deployed as a VM next to the source file servers (on-premises or in another cloud) reads the NFS and SMB shares and transfers data over TLS to the DataSync service in the AWS Region. DataSync tasks write the files to the AWS storage services (S3 bucket, EFS file system, FSx for Windows File Server, FSx for Lustre, FSx for OpenZFS and FSx for NetApp ONTAP), verifying checksums and running on a schedule to copy only changed data until cutover.
   containers:
-    - datacenter: on-premises
     - region: eu-west-1
-      vpcs:
-        - name: datasync-landing
-          cidr: 10.160.0.0/16
-          subnets:
-            - {name: ds-private-a, cidr: 10.160.1.0/24, az: a, public: false}
-            - {name: ds-private-b, cidr: 10.160.2.0/24, az: b, public: false}
+      groups: [{label: AWS storage services, at: [1, 2]}]
   elements:
-    - {tf: aws_datasync_agent, name: onprem-agent, in: datacenter}
-    - {tf: aws_customer_gateway, name: ds-dc-router, in: datacenter}
-    - {tf: aws_dx_connection, name: ds-dx, in: region}
-    - {tf: aws_vpc_endpoint, name: datasync-endpoint, in: subnet:ds-private-a}
-    - {tf: aws_datasync_location_nfs, name: nfs-share, in: region}
-    - {tf: aws_datasync_location_smb, name: smb-share, in: region}
-    - {tf: aws_datasync_location_s3, name: archive-location, in: region}
-    - {tf: aws_datasync_location_efs, name: home-dirs-location, in: region}
-    - {tf: aws_datasync_task, name: nfs-to-s3, in: region}
-    - {tf: aws_datasync_task, name: smb-to-efs, in: region}
-    - {tf: aws_s3_bucket, name: archive-bucket, in: region}
-    - {tf: aws_efs_file_system, name: home-dirs, in: vpc:datasync-landing}
-  actors: [server]
+    - {tf: aws_datasync_task, name: datasync-service, in: region, at: [1, 1]}
+    - {tf: aws_efs_file_system, name: efs-file-system, in: group:AWS storage services, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: s3-bucket, in: group:AWS storage services, at: [1, 2]}
+    - {tf: aws_fsx_windows_file_system, name: fsx-windows-file-server, in: group:AWS storage services, at: [2, 1]}
+    - {tf: aws_fsx_lustre_file_system, name: fsx-lustre, in: group:AWS storage services, at: [2, 2]}
+    - {tf: aws_fsx_openzfs_file_system, name: fsx-openzfs, in: group:AWS storage services, at: [3, 1]}
+    - {tf: aws_fsx_ontap_file_system, name: fsx-netapp-ontap, in: group:AWS storage services, at: [3, 2]}
+  actors: [{type: server, name: source-file-storage, at: [1, 1]}, {type: server, name: datasync-agent, at: [1, 2]}]
   flows:
-    - {from: server, to: onprem-agent, label: NFS / SMB reads, step: 1}
-    - {from: nfs-share, to: server, label: source location}
-    - {from: smb-share, to: server, label: source location}
-    - {from: ds-dc-router, to: ds-dx, label: Direct Connect, step: 2}
-    - {from: ds-dx, to: vpc:datasync-landing, link: aws_dx_gateway_association}
-    - {from: onprem-agent, to: datasync-endpoint, label: TLS transfer via VPC service endpoint, step: 3}
-    - {from: nfs-to-s3, to: nfs-share, label: source}
-    - {from: nfs-to-s3, to: archive-location, label: destination}
-    - {from: archive-location, to: archive-bucket}
-    - {from: smb-to-efs, to: smb-share, label: source}
-    - {from: smb-to-efs, to: home-dirs-location, label: destination}
-    - {from: home-dirs-location, to: home-dirs}
-    - {from: datasync-endpoint, to: archive-bucket, label: scheduled incremental copies with verification, step: 4}
-    - {from: datasync-endpoint, to: home-dirs, label: scheduled incremental copies}
+    - {from: source-file-storage, to: datasync-agent, label: NFS / SMB reads, step: 1}
+    - {from: datasync-agent, to: datasync-service, label: TLS, step: 2}
+    - {from: datasync-service, to: efs-file-system, label: scheduled incremental copies with verification, step: 3}
+    - {from: datasync-service, to: s3-bucket}
+    - {from: datasync-service, to: fsx-windows-file-server}
+    - {from: datasync-service, to: fsx-lustre}
+    - {from: datasync-service, to: fsx-openzfs}
+    - {from: datasync-service, to: fsx-netapp-ontap}
 
 - slug: storage-gateway-s3-file-gateway-hybrid
   title: Hybrid file storage with S3 File Gateway

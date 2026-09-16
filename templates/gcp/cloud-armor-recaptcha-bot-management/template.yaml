@@ -11,37 +11,37 @@ tags:
 - global external application load balancer
 image: https://docs.cloud.google.com/static/armor/images/enforce-recaptcha-token.svg
 source: https://docs.cloud.google.com/armor/docs/bot-management
-description: reCAPTCHA WAF keys for action tokens, session tokens and a challenge page are created for the site and associated with a Cloud Armor security policy attached to the load balancer's backend
-  service. Rules evaluate the reCAPTCHA token inline at the edge and allow, deny, rate-limit or redirect suspicious requests to the reCAPTCHA challenge page, while legitimate users pass through to the Cloud
-  Run backends via a serverless NEG.
+description: End users load an application frontend whose reCAPTCHA JavaScript asks reCAPTCHA Enterprise to assess the interaction and return a token, which the frontend attaches to requests sent to the
+  global external Application Load Balancer. reCAPTCHA WAF keys for action tokens, session tokens and a challenge page are associated with a Cloud Armor security policy attached to the load balancer's backend
+  service; the policy deciphers the token inline at the edge and allows, denies, rate-limits or redirects suspicious requests to the reCAPTCHA challenge page, while legitimate requests pass through to the
+  Cloud Run backend via a serverless NEG.
 nodes:
-- {id: prj-bot-mgmt-prj, type: gcp.project, name: bot-mgmt-prj, props: {project_id: bot-mgmt-prj-123456, project: changeme, region: europe-west1}, at: [1, 2]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: prj-bot-mgmt-prj, type: gcp.project, name: bot-mgmt-prj, props: {project_id: bot-mgmt-prj-123456, project: changeme, region: europe-west1}, at: [1, 3]}
+- {id: end-users, type: common.users, name: end-users, at: [1, 1]}
+- {id: app-frontend-recaptcha-js, type: common.client, name: app-frontend-recaptcha-js, at: [1, 2]}
+- {id: shop-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: shop-https-rule, parent: prj-bot-mgmt-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
 - {id: action-token-key, type: gcp.res.google_recaptcha_enterprise_key, name: action-token-key, parent: prj-bot-mgmt-prj, props: {display_name: changeme}, at: [1, 4]}
 - {id: session-token-key, type: gcp.res.google_recaptcha_enterprise_key, name: session-token-key, parent: prj-bot-mgmt-prj, props: {display_name: changeme}, at: [2, 4]}
 - {id: challenge-page-key, type: gcp.res.google_recaptcha_enterprise_key, name: challenge-page-key, parent: prj-bot-mgmt-prj, props: {display_name: changeme}, at: [3, 4]}
-- {id: bot-policy, type: gcp.res.google_compute_security_policy, name: bot-policy, parent: prj-bot-mgmt-prj, props: {name: changeme}, at: [2, 3]}
-- {id: shop-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: shop-https-rule, parent: prj-bot-mgmt-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
-- {id: shop-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: shop-https-proxy, parent: prj-bot-mgmt-prj, props: {name: changeme, url_map: changeme}, at: [1, 2]}
-- {id: shop-url-map, type: gcp.res.google_compute_url_map, name: shop-url-map, parent: prj-bot-mgmt-prj, props: {name: changeme}, at: [1, 3]}
-- {id: shop-backend, type: gcp.res.google_compute_backend_service, name: shop-backend, parent: prj-bot-mgmt-prj, props: {name: changeme}, at: [3, 3]}
+- {id: bot-policy, type: gcp.res.google_compute_security_policy, name: bot-policy, parent: prj-bot-mgmt-prj, props: {name: changeme}, at: [2, 1]}
+- {id: shop-backend, type: gcp.res.google_compute_backend_service, name: shop-backend, parent: prj-bot-mgmt-prj, props: {name: changeme}, at: [3, 1]}
 - {id: shop-neg, type: gcp.res.google_compute_region_network_endpoint_group, name: shop-neg, parent: prj-bot-mgmt-prj, props: {name: changeme, region: eu-west-1}, at: [3, 2]}
-- {id: shop-service, type: gcp.cloud_run_service, name: shop-service, parent: prj-bot-mgmt-prj, at: [3, 1]}
+- {id: shop-service, type: gcp.cloud_run_service, name: shop-service, parent: prj-bot-mgmt-prj, at: [3, 3]}
 edges:
-- {from: users, to: shop-https-rule, label: HTTPS with X-Recaptcha-Token, step: '1'}
-- {from: shop-https-rule, to: shop-https-proxy, step: '2'}
-- {from: shop-https-proxy, to: shop-url-map, step: '3'}
-- {from: shop-url-map, to: shop-backend, step: '4'}
-- {from: bot-policy, to: shop-backend, label: security policy attached}
-- {from: action-token-key, to: bot-policy, label: token evaluated inline}
+- {from: end-users, to: app-frontend-recaptcha-js, label: load application frontend, step: '1'}
+- {from: action-token-key, to: app-frontend-recaptcha-js, label: assess interaction and return reCAPTCHA token, step: '2'}
+- {from: app-frontend-recaptcha-js, to: shop-https-rule, label: attach the token with the request, step: '3'}
+- {from: shop-https-rule, to: bot-policy, label: decipher token and determine policy action, step: '4'}
 - {from: session-token-key, to: bot-policy, label: session cookie scoring}
-- {from: challenge-page-key, to: bot-policy, label: redirect suspicious traffic to challenge}
-- {from: shop-backend, to: shop-neg, label: allowed requests, step: '5'}
-- {from: shop-neg, to: shop-service, step: '6'}
+- {from: bot-policy, to: challenge-page-key, label: redirect suspicious traffic to challenge page}
+- {from: bot-policy, to: shop-backend, label: allow (deny or rate-limit otherwise), step: '5'}
+- {from: shop-backend, to: shop-neg, step: '6'}
+- {from: shop-neg, to: shop-service, step: '7'}
 steps:
-- {n: '1', text: 'users → shop-https-rule: HTTPS with X-Recaptcha-Token'}
-- {n: '2', text: shop-https-rule → shop-https-proxy}
-- {n: '3', text: shop-https-proxy → shop-url-map}
-- {n: '4', text: shop-url-map → shop-backend}
-- {n: '5', text: 'shop-backend → shop-neg: allowed requests'}
-- {n: '6', text: shop-neg → shop-service}
+- {n: '1', text: 'end-users → app-frontend-recaptcha-js: load application frontend'}
+- {n: '2', text: 'action-token-key → app-frontend-recaptcha-js: assess interaction and return reCAPTCHA token'}
+- {n: '3', text: 'app-frontend-recaptcha-js → shop-https-rule: attach the token with the request'}
+- {n: '4', text: 'shop-https-rule → bot-policy: decipher token and determine policy action'}
+- {n: '5', text: 'bot-policy → shop-backend: allow (deny or rate-limit otherwise)'}
+- {n: '6', text: shop-backend → shop-neg}
+- {n: '7', text: shop-neg → shop-service}

@@ -9,59 +9,103 @@ tags:
 - data products
 image: https://docs.cloud.google.com/static/architecture/images/data-mesh-architecture.svg
 source: https://docs.cloud.google.com/architecture/data-mesh
-description: Domain teams own producer projects where they ingest and curate data products in BigQuery, while a central governance project runs Dataplex to catalog, classify and apply policies across domains.
-  Consumer projects query authorized views and shared datasets without copying data, and a platform team provides the common infrastructure and Pub/Sub ingestion.
+description: Domain teams own producer projects where operational sources such as Cloud Spanner and raw files in Cloud Storage are curated into data products stored natively in BigQuery or as BigLake tables,
+  and exposed through authorized datasets as the product interface. A central services project provides management (IAM access control, Dataplex policy tags, BigQuery reservations) and discovery (Dataplex
+  catalog, a Cloud Run search UI, documentation in Google Drive), while consumer projects run BigQuery SQL for reports in Looker, data science in Vertex AI Workbench and Spark jobs on Dataproc without copying
+  data.
 nodes:
-- {id: prj-sales-domain, type: gcp.project, name: sales-domain, props: {project_id: sales-domain-123456, project: changeme, region: europe-west1}, at: [2, 2]}
-- {id: prj-marketing-domain, type: gcp.project, name: marketing-domain, props: {project_id: marketing-domain-123456, project: changeme, region: europe-west1}, at: [3, 2]}
-- {id: prj-central-governance, type: gcp.project, name: central-governance, props: {project_id: central-governance-123456, project: changeme, region: europe-west1}, at: [1, 1, 1, 4]}
+- {id: prj-central-governance, type: gcp.project, name: central-governance, props: {project_id: central-governance-123456, project: changeme, region: europe-west1}, at: [1, 1, 1, 3]}
+- {id: grp-management, type: common.group, name: management, parent: prj-central-governance, at: [1, 1]}
+- {id: grp-discovery, type: common.group, name: discovery, parent: prj-central-governance, at: [1, 2]}
+- {id: prj-sales-domain, type: gcp.project, name: sales-domain, props: {project_id: sales-domain-123456, project: changeme, region: europe-west1}, at: [2, 1, 1, 2]}
+- {id: grp-domain-1-sources, type: common.group, name: domain-1-sources, parent: prj-sales-domain, at: [1, 1]}
+- {id: grp-domain-1-product, type: common.group, name: domain-1-product, parent: prj-sales-domain, at: [1, 2]}
+- {id: prj-marketing-domain, type: gcp.project, name: marketing-domain, props: {project_id: marketing-domain-123456, project: changeme, region: europe-west1}, at: [3, 1, 1, 2]}
+- {id: grp-domain-2-curation, type: common.group, name: domain-2-curation, parent: prj-marketing-domain, at: [1, 1]}
+- {id: grp-domain-2-sources, type: common.group, name: domain-2-sources, parent: prj-marketing-domain, at: [2, 1]}
+- {id: grp-domain-2-product, type: common.group, name: domain-2-product, parent: prj-marketing-domain, at: [1, 2, 2, 1]}
 - {id: prj-consumer-analytics, type: gcp.project, name: consumer-analytics, props: {project_id: consumer-analytics-123456, project: changeme, region: europe-west1}, at: [2, 3, 2, 1]}
-- {id: users, type: common.users, name: users, at: [2, 4, 2, 1]}
-- {id: device, type: common.device, name: device, at: [2, 1]}
-- {id: sales-events-topic, type: gcp.pubsub_topic, name: sales-events-topic, parent: prj-sales-domain, at: [1, 1]}
-- {id: sales-ingest-job, type: gcp.res.google_dataflow_job, name: sales-ingest-job, parent: prj-sales-domain, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}, at: [1, 2]}
-- {id: sales-product-dataset, type: gcp.bigquery_dataset, name: sales-product-dataset, parent: prj-sales-domain, at: [1, 3]}
-- {id: marketing-raw-bucket, type: gcp.storage_bucket, name: marketing-raw-bucket, parent: prj-marketing-domain, at: [1, 1]}
-- {id: marketing-product-dataset, type: gcp.bigquery_dataset, name: marketing-product-dataset, parent: prj-marketing-domain, at: [1, 2]}
-- {id: mesh-catalog-lake, type: gcp.res.google_dataplex_lake, name: mesh-catalog-lake, parent: prj-central-governance, props: {location: westeurope, name: changeme}, at: [1, 1]}
-- id: sales-product-asset
-  type: gcp.res.google_dataplex_asset
-  name: sales-product-asset
-  parent: prj-central-governance
-  at: [1, 2]
-  props: {dataplex_zone: changeme, discovery_spec: {}, lake: changeme, location: westeurope, name: changeme, resource_spec: {}}
-- id: marketing-product-asset
-  type: gcp.res.google_dataplex_asset
-  name: marketing-product-asset
-  parent: prj-central-governance
-  at: [1, 3]
-  props: {dataplex_zone: changeme, discovery_spec: {}, lake: changeme, location: westeurope, name: changeme, resource_spec: {}}
-- {id: consumer-views-dataset, type: gcp.bigquery_dataset, name: consumer-views-dataset, parent: prj-consumer-analytics, at: [1, 1]}
+- {id: grp-reports-consumer, type: common.group, name: reports-consumer, parent: prj-consumer-analytics, at: [1, 1]}
+- {id: grp-data-science-consumer, type: common.group, name: data-science-consumer, parent: prj-consumer-analytics, at: [2, 1]}
+- {id: grp-data-analytics-consumer, type: common.group, name: data-analytics-consumer, parent: prj-consumer-analytics, at: [3, 1]}
+- {id: google-drive-docs, type: common.saas, name: Google Drive docs, at: [1, 4]}
+- id: mesh-access-control
+  type: gcp.res.google_iam_deny_policy
+  name: mesh-access-control
+  parent: grp-management
+  props: {name: changeme, parent: changeme, rules: []}
+  at:
+  - 1
+  - 1
+- {id: mesh-access-policies, type: gcp.res.google_data_catalog_taxonomy, name: mesh-access-policies, parent: grp-management, props: {display_name: changeme}, at: [1, 2]}
+- {id: mesh-bigquery-reservation, type: gcp.res.google_bigquery_reservation, name: mesh-bigquery-reservation, parent: grp-management, props: {name: changeme, slot_capacity: 1}, at: [1, 3]}
+- {id: mesh-catalog-lake, type: gcp.res.google_dataplex_lake, name: mesh-catalog-lake, parent: grp-discovery, props: {location: westeurope, name: changeme}, at: [1, 1]}
+- {id: mesh-search-ui, type: gcp.cloud_run_service, name: mesh-search-ui, parent: grp-discovery, at: [1, 2]}
+- {id: inventory-spanner, type: gcp.res.google_spanner_instance, name: inventory-spanner, parent: grp-domain-1-sources, props: {config: changeme, display_name: changeme}, at: [1, 1]}
+- {id: sales-curated-dataset, type: gcp.bigquery_dataset, name: sales-curated-dataset, parent: grp-domain-1-product, at: [1, 1]}
+- {id: sales-authorized-dataset, type: gcp.bigquery_dataset, name: sales-authorized-dataset, parent: grp-domain-1-product, at: [1, 2]}
+- id: marketing-curation-zone
+  type: gcp.res.google_dataplex_zone
+  name: marketing-curation-zone
+  parent: grp-domain-2-curation
+  props: {discovery_spec: {}, lake: changeme, location: westeurope, name: changeme, resource_spec: {}, type: changeme}
+  at:
+  - 1
+  - 1
+- {id: marketing-raw-bucket, type: gcp.storage_bucket, name: marketing-raw-bucket, parent: grp-domain-2-sources, at: [1, 1]}
+- {id: marketing-biglake-table, type: gcp.res.google_bigquery_table, name: marketing-biglake-table, parent: grp-domain-2-product, props: {dataset_id: changeme, table_id: changeme}, at: [1, 1]}
+- {id: marketing-authorized-dataset, type: gcp.bigquery_dataset, name: marketing-authorized-dataset, parent: grp-domain-2-product, at: [1, 2]}
+- {id: marketing-curated-dataset, type: gcp.bigquery_dataset, name: marketing-curated-dataset, parent: grp-domain-2-product, at: [2, 1]}
+- {id: reports-sql-engine, type: gcp.res.google_bigquery_job, name: reports-sql-engine, parent: grp-reports-consumer, props: {job_id: changeme}, at: [1, 1]}
 - id: consumer-looker
   type: gcp.res.google_looker_instance
   name: consumer-looker
-  parent: prj-consumer-analytics
-  at: [1, 2]
+  parent: grp-reports-consumer
   props: {name: changeme, oauth_config: {}}
+  at:
+  - 1
+  - 2
+- {id: data-science-sql-engine, type: gcp.res.google_bigquery_job, name: data-science-sql-engine, parent: grp-data-science-consumer, props: {job_id: changeme}, at: [1, 1]}
+- {id: data-science-workbench, type: gcp.res.google_notebooks_instance, name: data-science-workbench, parent: grp-data-science-consumer, props: {location: westeurope, machine_type: changeme, name: changeme},
+  at: [1, 2]}
+- {id: analytics-sql-engine, type: gcp.res.google_bigquery_job, name: analytics-sql-engine, parent: grp-data-analytics-consumer, props: {job_id: changeme}, at: [1, 1]}
+- id: analytics-spark-job
+  type: gcp.res.google_dataproc_job
+  name: analytics-spark-job
+  parent: grp-data-analytics-consumer
+  props: {placement: {}}
+  at:
+  - 1
+  - 2
 edges:
-- {from: device, to: sales-events-topic, label: events, step: '1'}
-- {from: sales-events-topic, to: sales-ingest-job, label: stream, step: '2'}
-- {from: sales-ingest-job, to: sales-product-dataset, label: write product tables, step: '3'}
-- {from: marketing-raw-bucket, to: marketing-product-dataset, label: load, step: '4'}
-- {from: sales-product-asset, to: sales-product-dataset, label: catalog, step: '5'}
-- {from: marketing-product-asset, to: marketing-product-dataset, label: catalog, step: '6'}
-- {from: consumer-views-dataset, to: sales-product-dataset, label: authorized views, step: '7'}
-- {from: consumer-views-dataset, to: marketing-product-dataset, label: authorized views, step: '8'}
-- {from: consumer-looker, to: consumer-views-dataset, label: query, step: '9'}
-- {from: users, to: consumer-looker, label: explore, step: '10'}
+- {from: inventory-spanner, to: sales-curated-dataset, label: curate operational data, step: '1'}
+- {from: sales-curated-dataset, to: sales-authorized-dataset, label: authorized views, step: '2'}
+- {from: marketing-raw-bucket, to: marketing-biglake-table, label: BigLake table over raw files, step: '3'}
+- {from: marketing-raw-bucket, to: marketing-curated-dataset, label: load curated data, step: '4'}
+- {from: marketing-biglake-table, to: marketing-authorized-dataset, label: authorized views, step: '5'}
+- {from: marketing-curated-dataset, to: marketing-authorized-dataset, label: authorized views, step: '6'}
+- {from: reports-sql-engine, to: sales-authorized-dataset, label: query interface, step: '7'}
+- {from: reports-sql-engine, to: marketing-authorized-dataset, label: query interface, step: '8'}
+- {from: data-science-sql-engine, to: marketing-authorized-dataset, label: query interface, step: '9'}
+- {from: analytics-sql-engine, to: marketing-authorized-dataset, label: query interface, step: '10'}
+- {from: analytics-spark-job, to: marketing-curated-dataset, label: Storage Read API, step: '11'}
+- {from: consumer-looker, to: reports-sql-engine, label: reports, step: '12'}
+- {from: data-science-workbench, to: data-science-sql-engine, label: notebooks, step: '13'}
+- {from: mesh-search-ui, to: mesh-catalog-lake, label: search data products, step: '14'}
+- {from: mesh-search-ui, to: google-drive-docs, label: link documentation, step: '15'}
 steps:
-- {n: '1', text: 'device → sales-events-topic: events'}
-- {n: '2', text: 'sales-events-topic → sales-ingest-job: stream'}
-- {n: '3', text: 'sales-ingest-job → sales-product-dataset: write product tables'}
-- {n: '4', text: 'marketing-raw-bucket → marketing-product-dataset: load'}
-- {n: '5', text: 'sales-product-asset → sales-product-dataset: catalog'}
-- {n: '6', text: 'marketing-product-asset → marketing-product-dataset: catalog'}
-- {n: '7', text: 'consumer-views-dataset → sales-product-dataset: authorized views'}
-- {n: '8', text: 'consumer-views-dataset → marketing-product-dataset: authorized views'}
-- {n: '9', text: 'consumer-looker → consumer-views-dataset: query'}
-- {n: '10', text: 'users → consumer-looker: explore'}
+- {n: '1', text: 'inventory-spanner → sales-curated-dataset: curate operational data'}
+- {n: '2', text: 'sales-curated-dataset → sales-authorized-dataset: authorized views'}
+- {n: '3', text: 'marketing-raw-bucket → marketing-biglake-table: BigLake table over raw files'}
+- {n: '4', text: 'marketing-raw-bucket → marketing-curated-dataset: load curated data'}
+- {n: '5', text: 'marketing-biglake-table → marketing-authorized-dataset: authorized views'}
+- {n: '6', text: 'marketing-curated-dataset → marketing-authorized-dataset: authorized views'}
+- {n: '7', text: 'reports-sql-engine → sales-authorized-dataset: query interface'}
+- {n: '8', text: 'reports-sql-engine → marketing-authorized-dataset: query interface'}
+- {n: '9', text: 'data-science-sql-engine → marketing-authorized-dataset: query interface'}
+- {n: '10', text: 'analytics-sql-engine → marketing-authorized-dataset: query interface'}
+- {n: '11', text: 'analytics-spark-job → marketing-curated-dataset: Storage Read API'}
+- {n: '12', text: 'consumer-looker → reports-sql-engine: reports'}
+- {n: '13', text: 'data-science-workbench → data-science-sql-engine: notebooks'}
+- {n: '14', text: 'mesh-search-ui → mesh-catalog-lake: search data products'}
+- {n: '15', text: 'mesh-search-ui → Google Drive docs: link documentation'}

@@ -6,39 +6,60 @@
   category: data
   tags: [databricks, delta-lake, medallion, data-lake-storage, event-hubs, mlflow, unity-catalog, power-bi]
   source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/azure-databricks-modern-analytics-architecture
-  description: Azure Databricks ingests streaming data from Event Hubs with Lakeflow declarative pipelines while Data Factory lands batch data in Data Lake Storage, then organises Delta Lake tables into Bronze, Silver and Gold layers. MLflow tracks models served through Azure Machine Learning, Databricks SQL warehouses feed Power BI, and Unity Catalog, Microsoft Purview, Key Vault and Azure Monitor provide governance and operations.
+  description: Azure Databricks ingests streaming data from Event Hubs with Lakeflow declarative pipelines while Fabric Data Factory lands batch data in Data Lake Storage, then Apache Spark organises Delta Lake tables into Bronze, Silver and Gold layers. MLflow hands models to Azure Machine Learning, Databricks SQL warehouses query the gold layer for Power BI, the gold tables are shared with Microsoft Fabric, and Unity Catalog and Microsoft Purview govern the estate on a platform of Microsoft Entra ID, Cost Management, Key Vault, Azure Monitor, Azure DevOps and GitHub.
   containers:
     - subscription: data-platform
       resource_group: {name: rg-databricks-analytics, location: westeurope}
       groups:
-        - {label: Ingest}
-        - {label: Lakehouse}
-        - {label: Serve}
-        - {label: Platform}
+        - {label: Sources, at: [1, 1, 2, 1]}
+        - {label: Process, at: [1, 2]}
+        - {label: Store, at: [2, 2]}
+        - {label: Serve, at: [1, 3, 2, 1]}
+        - {label: Discover and govern, at: [3, 1, 1, 3]}
+        - {label: Platform, at: [4, 1, 1, 3]}
   elements:
-    - {tf: azurerm_eventhub_namespace, name: evhns-stream-ingest, in: group:Ingest}
-    - {tf: azurerm_data_factory, name: adf-batch-ingest, in: group:Ingest}
-    - {tf: azurerm_storage_account, name: stdatalake, in: group:Lakehouse}
-    - {tf: azurerm_databricks_workspace, name: dbw-medallion, in: group:Lakehouse}
-    - {tf: azurerm_machine_learning_workspace, name: mlw-model-serving, in: group:Serve}
-    - {tf: azurerm_kubernetes_cluster, name: aks-inference, in: group:Serve}
-    - {tf: azurerm_purview_account, name: pview-catalog, in: group:Platform}
-    - {tf: azurerm_key_vault, name: kv-secrets, in: group:Platform}
-    - {tf: azurerm_log_analytics_workspace, name: law-platform, in: group:Platform}
-  actors: [device, database, users]
+    - {tf: azurerm_eventhub_namespace, name: evhns-stream-ingest, in: group:Sources, at: [1, 1]}
+    - {tf: azurerm_data_factory, name: adf-batch-ingest, in: group:Sources, at: [2, 1]}
+    - {tf: azurerm_databricks_workspace, name: dbw-medallion, in: group:Process, at: [1, 1]}
+    - {tf: azurerm_storage_data_lake_gen2_filesystem, name: lake-bronze, in: group:Store, at: [1, 1]}
+    - {tf: azurerm_storage_data_lake_gen2_filesystem, name: lake-silver, in: group:Store, at: [1, 2]}
+    - {tf: azurerm_storage_data_lake_gen2_filesystem, name: lake-gold, in: group:Store, at: [1, 3]}
+    - {tf: azurerm_storage_account, name: stdatalake, in: group:Store, at: [2, 1, 1, 3]}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-model-serving, in: group:Serve, at: [1, 1]}
+    - {tf: azurerm_powerbi_embedded, name: pbi-analytics-reports, in: group:Serve, at: [2, 1]}
+    - {tf: azurerm_fabric_capacity, name: fabric-onelake, in: group:Serve, at: [3, 1]}
+    - {tf: azurerm_databricks_access_connector, name: unity-catalog-access-connector, in: group:Discover and govern, at: [1, 1]}
+    - {tf: azurerm_purview_account, name: pview-catalog, in: group:Discover and govern, at: [1, 2]}
+    - {tf: azurerm_key_vault, name: kv-secrets, in: group:Platform, at: [1, 1]}
+    - {tf: azurerm_log_analytics_workspace, name: law-platform, in: group:Platform, at: [1, 2]}
+  actors:
+    - {type: device, at: [1, 1]}
+    - {type: database, at: [2, 1]}
+    - {type: idp, name: Microsoft Entra ID, at: [3, 2]}
+    - {type: saas, name: Microsoft Cost Management, at: [3, 3]}
+    - {type: saas, name: Azure DevOps, at: [3, 4]}
+    - {type: saas, name: GitHub, at: [3, 5]}
   flows:
-    - {from: device, to: evhns-stream-ingest, label: raw events, step: 1}
-    - {from: evhns-stream-ingest, to: dbw-medallion, label: Lakeflow streaming pipeline, step: 2}
-    - {from: database, to: adf-batch-ingest, label: batch extract, step: 1}
-    - {from: adf-batch-ingest, to: stdatalake, label: raw batch load, step: 2}
-    - {from: dbw-medallion, to: stdatalake, label: "Delta Lake: bronze / silver / gold", step: 3}
-    - {from: dbw-medallion, to: mlw-model-serving, label: MLflow model registry, step: 4}
-    - {from: mlw-model-serving, to: aks-inference, label: Kubernetes online endpoint, step: 5}
-    - {from: dbw-medallion, to: users, label: SQL warehouse to Power BI (Direct Lake), step: 6}
+    - {from: device, to: evhns-stream-ingest, label: raw events}
+    - {from: database, to: adf-batch-ingest, label: batch extract}
+    - {from: evhns-stream-ingest, to: dbw-medallion, label: Lakeflow streaming pipeline, step: 1}
+    - {from: adf-batch-ingest, to: lake-bronze, label: batch load into bronze, step: 2}
+    - {from: dbw-medallion, to: lake-bronze, label: Apache Spark reads and writes bronze, step: 3}
+    - {from: dbw-medallion, to: lake-silver, label: Apache Spark cleanses into silver, step: 4}
+    - {from: lake-bronze, to: lake-silver, label: Delta Lake}
+    - {from: lake-silver, to: lake-gold, label: Delta Lake}
+    - {from: dbw-medallion, to: mlw-model-serving, label: MLflow models to Azure Machine Learning, step: 5}
+    - {from: lake-gold, to: dbw-medallion, label: Databricks SQL warehouses query gold, step: 6}
+    - {from: lake-gold, to: fabric-onelake, label: gold tables shared with Microsoft Fabric, step: 7}
+    - {from: dbw-medallion, to: pbi-analytics-reports, label: SQL warehouse to Power BI, step: 8}
+    - {from: unity-catalog-access-connector, to: stdatalake, label: Unity Catalog governs the lake, step: 9}
     - {from: pview-catalog, to: stdatalake, label: scan, classify, lineage}
     - {from: dbw-medallion, to: kv-secrets, label: Key Vault-backed secret scope}
-    - {from: dbw-medallion, to: law-platform, label: diagnostics}
-
+    - {from: dbw-medallion, to: law-platform, label: diagnostics to Azure Monitor}
+    - {from: Microsoft Entra ID, to: dbw-medallion, label: single sign-on and SCIM provisioning}
+    - {from: Microsoft Cost Management, to: dbw-medallion, label: cluster cost monitoring}
+    - {from: Azure DevOps, to: dbw-medallion, label: CI/CD pipelines}
+    - {from: GitHub, to: dbw-medallion, label: Git folders for notebooks}
 - slug: databricks-stream-processing-cosmos
   title: Stream processing with Azure Databricks
   category: data
@@ -81,36 +102,43 @@
   category: data
   tags: [synapse, dedicated-sql-pool, data-factory, polybase, analysis-services, power-bi, data-lake-storage]
   source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/data/data-warehouse
-  description: Updates from on-premises SQL Server and Oracle, Azure SQL Database, Table Storage and Azure Cosmos DB are exported to a staging area in Data Lake Storage, then Data Factory incrementally loads and transforms them into Azure Synapse Analytics using PolyBase. An Azure Analysis Services tabular model is refreshed after each load and business analysts query it from Power BI, authenticated through Microsoft Entra ID.
+  description: Updates from on-premises SQL Server and other relational databases, Azure SQL Database, Table Storage and Azure Cosmos DB are exported to a staging area in Data Lake Storage, then Data Factory incrementally loads and transforms them into an Azure Synapse Analytics dedicated SQL pool using PolyBase. An Azure Analysis Services tabular model is refreshed after each load and business analysts query it from Power BI, authenticated through Microsoft Entra ID.
   containers:
     - datacenter: on-premises
     - subscription: analytics
       resource_group: {name: rg-synapse-dw, location: westeurope}
       groups:
-        - {label: Sources}
-        - {label: Ingest}
-        - {label: Warehouse}
-        - {label: Serve}
+        - {label: Sources, at: [1, 1]}
+        - {label: Ingest, at: [1, 2]}
+        - {label: Warehouse, at: [1, 3]}
+        - {label: Serve, at: [1, 4]}
   elements:
-    - {tf: azurerm_mssql_server, name: sql-sales-source, in: group:Sources}
-    - {tf: azurerm_cosmosdb_account, name: cosmos-web-events, in: group:Sources}
-    - {tf: azurerm_storage_account, name: sttablestorage, in: group:Sources}
-    - {tf: azurerm_storage_account, name: stdatalake-staging, in: group:Ingest}
-    - {tf: azurerm_data_factory, name: adf-warehouse-load, in: group:Ingest}
-    - {tf: azurerm_synapse_workspace, name: synw-enterprise, in: group:Warehouse}
-    - {tf: azurerm_synapse_sql_pool, name: syndp-warehouse, in: group:Warehouse}
-    - {tf: azurerm_analysis_services_server, name: asazure-semantic, in: group:Serve}
-  actors: [datacenter, users]
+    - {tf: azurerm_mssql_server, name: sql-sales-source, in: group:Sources, at: [1, 1]}
+    - {tf: azurerm_storage_account, name: sttablestorage, in: group:Sources, at: [2, 1]}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-web-events, in: group:Sources, at: [3, 1]}
+    - {tf: azurerm_storage_account, name: stdatalake-staging, in: group:Ingest, at: [1, 1]}
+    - {tf: azurerm_data_factory, name: adf-warehouse-load, in: group:Ingest, at: [2, 1]}
+    - {tf: azurerm_synapse_sql_pool, name: syndp-warehouse, in: group:Warehouse, at: [1, 1]}
+    - {tf: azurerm_analysis_services_server, name: asazure-semantic, in: group:Serve, at: [1, 1]}
+    - {tf: azurerm_powerbi_embedded, name: pbi-reports, in: group:Serve, at: [2, 1]}
+  actors:
+    - datacenter
+    - {type: database, name: other relational databases, at: [2, 1]}
+    - {type: users, at: [1, 3]}
+    - {type: idp, name: Microsoft Entra ID, at: [2, 3]}
   flows:
-    - {from: datacenter, to: stdatalake-staging, label: SQL Server / Oracle exports, step: 1}
+    - {from: datacenter, to: stdatalake-staging, label: SQL Server (on-premises) exports, step: 1}
+    - {from: other relational databases, to: stdatalake-staging, label: Oracle and other on-premises exports, step: 1}
     - {from: sql-sales-source, to: stdatalake-staging, label: periodic export, step: 1}
-    - {from: cosmos-web-events, to: stdatalake-staging, label: periodic export, step: 1}
     - {from: sttablestorage, to: stdatalake-staging, label: periodic export, step: 1}
-    - {from: adf-warehouse-load, to: stdatalake-staging, label: read staged files, step: 2}
-    - {from: adf-warehouse-load, to: syndp-warehouse, label: PolyBase incremental load, step: 2}
+    - {from: cosmos-web-events, to: stdatalake-staging, label: periodic export, step: 1}
+    - {from: adf-warehouse-load, to: stdatalake-staging, label: orchestrate staging}
+    - {from: stdatalake-staging, to: syndp-warehouse, label: PolyBase incremental load, step: 2}
+    - {from: adf-warehouse-load, to: syndp-warehouse, label: orchestrate load and transforms}
     - {from: syndp-warehouse, to: asazure-semantic, label: tabular model refresh, step: 3}
-    - {from: users, to: asazure-semantic, label: Power BI (Entra ID auth), step: 4}
-
+    - {from: pbi-reports, to: asazure-semantic, label: live connection to the tabular model, step: 4}
+    - {from: users, to: pbi-reports, label: business analysts}
+    - {from: Microsoft Entra ID, to: asazure-semantic, label: authentication}
 - slug: synapse-near-real-time-lakehouse-cdc
   title: Near real-time lakehouse processing with Azure Synapse Analytics
   category: data
@@ -185,81 +213,132 @@
   category: data
   tags: [fabric, onelake, mirroring, eventstream, eventhouse, data-warehouse, purview, machine-learning, power-bi]
   source: https://learn.microsoft.com/en-us/azure/architecture/example-scenario/dataplate2e/data-platform-end-to-end
-  description: OneLake is the single store for a Fabric platform that mirrors Azure SQL Database, Azure Databricks and Snowflake sources, ingests files with Data Factory pipelines and streams events into eventhouses through eventstreams. Lakehouses, warehouses and KQL databases serve Power BI, Fabric data agents and GraphQL APIs, while Azure Machine Learning shares the same Data Lake Storage via shortcuts and Microsoft Purview, Key Vault, Entra ID and Azure Policy govern the estate.
+  description: OneLake is the single store for a Fabric provider tenant that mirrors Azure SQL Database, Azure Cosmos DB, Azure Database for PostgreSQL, Azure Databricks and Snowflake sources, ingests on-premises, AWS and Google Cloud data with Data Factory pipelines and streams IoT Hub and Event Hubs events into eventhouses through eventstreams. Lakehouses, warehouses and eventhouses serve Power BI, data agents and a consumer tenant, Data Lake Storage and Blob storage are attached as zero-copy shortcuts, and Microsoft Purview, Key Vault, Microsoft Entra ID, Cost Management and GitHub govern the platform.
   containers:
+    - {datacenter: on-premises, at: [1, 1]}
     - subscription: data-platform
       resource_group: {name: rg-fabric-e2e, location: westeurope}
       groups:
-        - {label: Sources}
-        - {label: Ingest}
-        - {label: Fabric}
-        - {label: Enrich and govern}
+        - {label: Sources, at: [1, 1]}
+        - {label: Streaming data, at: [2, 1]}
+        - {label: Ingest, at: [1, 2, 2, 1]}
+        - {label: Fabric, at: [1, 3, 2, 1]}
+        - {label: Serve, at: [1, 4, 2, 1]}
+        - {label: Shortcuts, at: [3, 1, 1, 2]}
+        - {label: Enrich and govern, at: [3, 3, 1, 2]}
   elements:
-    - {tf: azurerm_mssql_server, name: sql-operational-db, in: group:Sources}
-    - {tf: azurerm_databricks_workspace, name: dbw-unity-catalog, in: group:Sources}
-    - {tf: azurerm_storage_account, name: stadls-shortcuts, in: group:Sources}
-    - {tf: azurerm_eventhub_namespace, name: evhns-realtime, in: group:Ingest}
-    - {tf: azurerm_fabric_capacity, name: fabric-onelake, in: group:Fabric}
-    - {tf: azurerm_machine_learning_workspace, name: mlw-batch-endpoints, in: group:Enrich and govern}
-    - {tf: azurerm_purview_account, name: pview-unified-catalog, in: group:Enrich and govern}
-    - {tf: azurerm_key_vault, name: kv-gateway-credentials, in: group:Enrich and govern}
-  actors: [saas, device, users]
+    - {tf: azurerm_mssql_server, name: sql-operational-db, in: group:Sources, at: [1, 1]}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-operational, in: group:Sources, at: [1, 2]}
+    - {tf: azurerm_postgresql_flexible_server, name: pg-operational, in: group:Sources, at: [2, 1]}
+    - {tf: azurerm_databricks_workspace, name: dbw-unity-catalog, in: group:Sources, at: [2, 2]}
+    - {tf: azurerm_iothub, name: iot-telemetry, in: group:Streaming data, at: [1, 1]}
+    - {tf: azurerm_eventhub_namespace, name: evhns-realtime, in: group:Streaming data, at: [1, 2]}
+    - {tf: azurerm_data_factory, name: adf-pipelines, in: group:Ingest, at: [1, 1]}
+    - {tf: azurerm_fabric_capacity, name: fabric-onelake, in: group:Fabric, at: [1, 1]}
+    - {tf: azurerm_powerbi_embedded, name: pbi-reports, in: group:Serve, at: [1, 1]}
+    - {tf: azurerm_storage_account, name: stadls-shortcuts, in: group:Shortcuts, at: [1, 1]}
+    - {tf: azurerm_storage_account, name: stblob-shortcuts, in: group:Shortcuts, at: [1, 2]}
+    - {tf: azurerm_purview_account, name: pview-unified-catalog, in: group:Enrich and govern, at: [1, 1]}
+    - {tf: azurerm_key_vault, name: kv-gateway-credentials, in: group:Enrich and govern, at: [1, 2]}
+  actors:
+    - datacenter
+    - {type: saas, name: Snowflake, at: [2, 1]}
+    - {type: saas, name: Amazon Web Services, at: [3, 1]}
+    - {type: saas, name: Google Cloud, at: [4, 1]}
+    - {type: users, at: [1, 3]}
+    - {type: saas, name: consumer tenant OneLake, at: [2, 3]}
+    - {type: idp, name: Microsoft Entra ID, at: [5, 1]}
+    - {type: saas, name: Microsoft Cost Management, at: [5, 2]}
+    - {type: saas, name: GitHub, at: [5, 3]}
   flows:
     - {from: sql-operational-db, to: fabric-onelake, label: mirroring (CDC to Delta), step: 1}
+    - {from: cosmos-operational, to: fabric-onelake, label: mirroring, step: 1}
+    - {from: pg-operational, to: fabric-onelake, label: mirroring, step: 1}
     - {from: dbw-unity-catalog, to: fabric-onelake, label: Databricks mirroring / shortcuts, step: 1}
-    - {from: saas, to: fabric-onelake, label: Data Factory pipelines and Dataflow Gen2, step: 2}
-    - {from: stadls-shortcuts, to: fabric-onelake, label: OneLake shortcuts (zero copy), step: 2}
-    - {from: device, to: evhns-realtime, label: telemetry, step: 3}
-    - {from: evhns-realtime, to: fabric-onelake, label: eventstream to eventhouse, step: 4}
-    - {from: fabric-onelake, to: mlw-batch-endpoints, label: shared Data Lake Storage for training}
-    - {from: fabric-onelake, to: users, label: Power BI, data agents, GraphQL API, step: 5}
+    - {from: Snowflake, to: fabric-onelake, label: mirroring, step: 1}
+    - {from: datacenter, to: adf-pipelines, label: on-premises structured and semistructured data, step: 2}
+    - {from: Amazon Web Services, to: adf-pipelines, label: AWS sources, step: 2}
+    - {from: Google Cloud, to: adf-pipelines, label: Google Cloud sources, step: 2}
+    - {from: adf-pipelines, to: fabric-onelake, label: Data Factory pipelines and notebooks to lakehouse and warehouse, step: 2}
+    - {from: iot-telemetry, to: fabric-onelake, label: eventstream to eventhouse, step: 3}
+    - {from: evhns-realtime, to: fabric-onelake, label: eventstream to eventhouse, step: 3}
+    - {from: stadls-shortcuts, to: fabric-onelake, label: OneLake shortcut (zero copy), step: 4}
+    - {from: stblob-shortcuts, to: fabric-onelake, label: OneLake shortcut (zero copy), step: 4}
+    - {from: Amazon Web Services, to: fabric-onelake, label: Amazon S3 shortcut}
+    - {from: Google Cloud, to: fabric-onelake, label: Google Cloud Storage shortcut}
+    - {from: fabric-onelake, to: pbi-reports, label: Power BI Direct Lake, step: 5}
+    - {from: pbi-reports, to: users, label: reports, data agents, GraphQL API, step: 5}
+    - {from: fabric-onelake, to: consumer tenant OneLake, label: OneLake external data sharing, step: 6}
     - {from: pview-unified-catalog, to: fabric-onelake, label: scan, lineage, sensitivity labels}
     - {from: fabric-onelake, to: kv-gateway-credentials, label: Key Vault references}
-
+    - {from: Microsoft Entra ID, to: fabric-onelake, label: identity and workspace access}
+    - {from: Microsoft Cost Management, to: fabric-onelake, label: capacity cost monitoring}
+    - {from: GitHub, to: fabric-onelake, label: Git integration of workspaces}
 - slug: adf-medallion-landing-zone-baseline
   title: Azure Data Factory baseline architecture in an Azure landing zone
   category: data
   tags: [data-factory, self-hosted-integration-runtime, medallion, databricks, azure-sql, purview, private-link, landing-zone]
   source: https://learn.microsoft.com/en-us/azure/architecture/databases/architecture/azure-data-factory-on-azure-landing-zones-baseline
-  description: Data Factory with a self-hosted integration runtime on Azure VMs ingests an on-premises finance system nightly into Data Lake Storage and orchestrates Azure Databricks notebooks that build bronze, silver and gold Delta Lake tables. Azure SQL Database hosts the conformed enterprise model for Power BI, Microsoft Purview catalogs the platform, Key Vault and Private Link secure access, and Site Recovery protects the SHIR VMs.
+  description: Data Factory with a self-hosted integration runtime on Azure VMs ingests an on-premises finance system nightly into the bronze layer of Data Lake Storage, and Azure Databricks notebooks refine the data through bronze, silver and gold Delta Lake tables. The gold layer loads the conformed enterprise model into Azure SQL Database, Power BI serves dashboards from SQL and Databricks, and a monitor-and-govern layer of Azure DevOps, Microsoft Entra ID, Key Vault, Azure Monitor, Cost Management, Microsoft Purview and Site Recovery (protecting the SHIR VMs, reached over Private Link) surrounds the platform.
   containers:
     - datacenter: on-premises
     - subscription: data-landing-zone
       resource_group: {name: rg-adf-baseline, location: westeurope}
+      groups:
+        - {label: Ingest, at: [1, 1, 2, 1]}
+        - {label: Process, at: [1, 2]}
+        - {label: Store, at: [2, 2]}
+        - {label: Serve, at: [1, 3, 2, 1]}
+        - {label: Monitor and govern, at: [4, 1, 1, 3]}
       vnets:
         - name: vnet-data
           cidr: 10.20.0.0/16
+          at: [3, 1, 1, 3]
           subnets:
-            - {name: snet-shir, cidr: 10.20.1.0/24}
-            - {name: snet-private-endpoints, cidr: 10.20.2.0/24}
-            - {name: snet-databricks-public, cidr: 10.20.3.0/24}
-            - {name: snet-databricks-private, cidr: 10.20.4.0/24}
+            - {name: snet-shir, cidr: 10.20.1.0/24, at: [1, 1]}
+            - {name: snet-private-endpoints, cidr: 10.20.2.0/24, at: [1, 2]}
   elements:
-    - {tf: azurerm_data_factory, name: adf-finance, in: resource_group:rg-adf-baseline}
-    - {tf: azurerm_windows_virtual_machine, name: vm-shir-01, in: subnet:snet-shir}
-    - {tf: azurerm_storage_account, name: stfinancelake, in: resource_group:rg-adf-baseline}
-    - {tf: azurerm_private_endpoint, name: pe-datalake, in: subnet:snet-private-endpoints}
-    - {tf: azurerm_databricks_workspace, name: dbw-finance, in: subnet:snet-databricks-private}
-    - {tf: azurerm_mssql_server, name: sql-enterprise-model, in: resource_group:rg-adf-baseline}
-    - {tf: azurerm_purview_account, name: pview-finance, in: resource_group:rg-adf-baseline}
-    - {tf: azurerm_key_vault, name: kv-adf-secrets, in: resource_group:rg-adf-baseline}
-    - {tf: azurerm_recovery_services_vault, name: rsv-shir-protection, in: resource_group:rg-adf-baseline}
-    - {tf: azurerm_log_analytics_workspace, name: law-data-platform, in: resource_group:rg-adf-baseline}
-  actors: [datacenter, users]
+    - {tf: azurerm_data_factory, name: adf-finance, in: group:Ingest, at: [1, 1]}
+    - {tf: azurerm_windows_virtual_machine, name: vm-shir-01, in: subnet:snet-shir, at: [1, 1]}
+    - {tf: azurerm_databricks_workspace, name: dbw-finance, in: group:Process, at: [1, 1]}
+    - {tf: azurerm_storage_data_lake_gen2_filesystem, name: lake-bronze, in: group:Store, at: [1, 1]}
+    - {tf: azurerm_storage_data_lake_gen2_filesystem, name: lake-silver, in: group:Store, at: [1, 2]}
+    - {tf: azurerm_storage_data_lake_gen2_filesystem, name: lake-gold, in: group:Store, at: [1, 3]}
+    - {tf: azurerm_storage_account, name: stfinancelake, in: group:Store, at: [2, 1, 1, 3]}
+    - {tf: azurerm_private_endpoint, name: pe-datalake, in: subnet:snet-private-endpoints, at: [1, 1]}
+    - {tf: azurerm_powerbi_embedded, name: pbi-finance-dashboards, in: group:Serve, at: [1, 1]}
+    - {tf: azurerm_mssql_server, name: sql-enterprise-model, in: group:Serve, at: [2, 1]}
+    - {tf: azurerm_key_vault, name: kv-adf-secrets, in: group:Monitor and govern, at: [1, 1]}
+    - {tf: azurerm_log_analytics_workspace, name: law-data-platform, in: group:Monitor and govern, at: [1, 2]}
+    - {tf: azurerm_purview_account, name: pview-finance, in: group:Monitor and govern, at: [1, 3]}
+    - {tf: azurerm_recovery_services_vault, name: rsv-shir-protection, in: group:Monitor and govern, at: [1, 4]}
+  actors:
+    - datacenter
+    - {type: saas, name: Azure DevOps, at: [2, 2]}
+    - {type: idp, name: Microsoft Entra ID, at: [2, 3]}
+    - {type: saas, name: Microsoft Cost Management, at: [2, 4]}
   flows:
     - {from: datacenter, to: vm-shir-01, label: nightly batch over private connectivity, step: 1}
-    - {from: vm-shir-01, to: adf-finance, label: self-hosted integration runtime, step: 1}
-    - {from: adf-finance, to: pe-datalake, label: copy to bronze via private endpoint, step: 2}
+    - {from: vm-shir-01, to: adf-finance, label: self-hosted integration runtime}
+    - {from: adf-finance, to: lake-bronze, label: copy raw finance data to bronze, step: 1}
+    - {from: adf-finance, to: pe-datalake, label: private endpoint to the data lake}
     - {from: pe-datalake, to: stfinancelake, label: Private Link}
-    - {from: adf-finance, to: dbw-finance, label: orchestrate notebooks, step: 3}
-    - {from: dbw-finance, to: stfinancelake, label: silver / gold Delta tables, step: 3}
-    - {from: adf-finance, to: sql-enterprise-model, label: load conformed hierarchies, step: 4}
-    - {from: sql-enterprise-model, to: users, label: Power BI management dashboards, step: 5}
+    - {from: adf-finance, to: dbw-finance, label: orchestrate notebooks}
+    - {from: dbw-finance, to: lake-bronze, label: Apache Spark reads bronze, step: 2}
+    - {from: dbw-finance, to: lake-silver, label: Apache Spark writes silver, step: 2}
+    - {from: dbw-finance, to: lake-gold, label: Apache Spark writes gold, step: 2}
+    - {from: lake-bronze, to: lake-silver, label: cleanse and conform (Delta Lake)}
+    - {from: lake-silver, to: lake-gold, label: aggregate (Delta Lake)}
+    - {from: lake-gold, to: sql-enterprise-model, label: load conformed enterprise model, step: 3}
+    - {from: dbw-finance, to: pbi-finance-dashboards, label: Databricks connector, step: 4}
+    - {from: sql-enterprise-model, to: pbi-finance-dashboards, label: management dashboards}
+    - {from: rsv-shir-protection, to: vm-shir-01, label: Site Recovery replication, step: 5}
     - {from: pview-finance, to: stfinancelake, label: catalog and lineage}
     - {from: adf-finance, to: kv-adf-secrets, label: linked service secrets}
-    - {from: rsv-shir-protection, to: vm-shir-01, label: Site Recovery replication}
-    - {from: adf-finance, to: law-data-platform, label: pipeline diagnostics}
-
+    - {from: adf-finance, to: law-data-platform, label: pipeline diagnostics (Azure Monitor)}
+    - {from: Azure DevOps, to: adf-finance, label: CI/CD of pipelines and notebooks}
+    - {from: Microsoft Entra ID, to: adf-finance, label: managed identity and RBAC}
+    - {from: Microsoft Cost Management, to: dbw-finance, label: cluster cost monitoring}
 - slug: stream-analytics-taxi-pipeline
   title: Stream processing with Azure Stream Analytics
   category: data
@@ -331,34 +410,30 @@
   category: observability
   tags: [azure-monitor, log-analytics, data-export, event-hubs, azure-data-explorer, long-term-retention, kql]
   source: https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-data-export
-  description: Log Analytics data export rules continuously copy selected workspace tables to a storage account and an Event Hubs namespace as records arrive, decoupling long-term retention and downstream analytics from Azure Monitor pricing tiers. An Azure Data Explorer cluster consumes the event hubs for cross-source KQL analysis over years of logs, and the storage account keeps immutable archives for compliance.
+  description: Incoming data enters the Azure Monitor ingestion pipeline, which writes it to Log Analytics workspace tables while data export rules continuously copy selected tables to a storage account and an Event Hubs namespace as records arrive, decoupling long-term retention and downstream analytics from Azure Monitor pricing tiers. An Azure Data Explorer cluster consumes the event hubs for cross-source KQL analysis over years of logs, and the storage account keeps immutable archives for compliance.
   containers:
     - subscription: platform-observability
       resource_group: {name: rg-log-export, location: westeurope}
       groups:
-        - {label: Sources}
-        - {label: Azure Monitor}
-        - {label: Export destinations}
-        - {label: Analytics}
+        - {label: Azure Monitor, at: [1, 1]}
+        - {label: Export destinations, at: [1, 2]}
+        - {label: Analytics, at: [1, 3]}
   elements:
-    - {tf: azurerm_kubernetes_cluster, name: aks-workload, in: group:Sources}
-    - {tf: azurerm_linux_function_app, name: func-api, in: group:Sources}
-    - {tf: azurerm_log_analytics_workspace, name: law-central, in: group:Azure Monitor}
-    - {tf: azurerm_storage_account, name: stlogarchive, in: group:Export destinations}
-    - {tf: azurerm_eventhub_namespace, name: evhns-log-export, in: group:Export destinations}
-    - {tf: azurerm_eventhub, name: evh-am-containerlog, in: group:Export destinations}
-    - {tf: azurerm_kusto_cluster, name: adx-log-analytics, in: group:Analytics}
-    - {tf: azurerm_kusto_database, name: adxdb-logs, in: group:Analytics}
-  actors: [users]
+    - {tf: azurerm_monitor_data_collection_endpoint, name: dce-ingestion-pipeline, in: group:Azure Monitor, at: [1, 1]}
+    - {tf: azurerm_log_analytics_workspace, name: law-central, in: group:Azure Monitor, at: [1, 2]}
+    - {tf: azurerm_storage_account, name: stlogarchive, in: group:Export destinations, at: [1, 1, 1, 2]}
+    - {tf: azurerm_eventhub_namespace, name: evhns-log-export, in: group:Export destinations, at: [2, 1]}
+    - {tf: azurerm_eventhub, name: evh-am-containerlog, in: group:Export destinations, at: [2, 2]}
+    - {tf: azurerm_kusto_cluster, name: adx-log-analytics, in: group:Analytics, at: [1, 1]}
+    - {tf: azurerm_kusto_database, name: adxdb-logs, in: group:Analytics, at: [1, 2]}
+  actors: [{type: server, name: incoming data, at: [1, 1]}]
   flows:
-    - {from: aks-workload, to: law-central, label: container insights / diagnostics, step: 1}
-    - {from: func-api, to: law-central, label: application logs, step: 1}
-    - {from: law-central, to: stlogarchive, link: azurerm_log_analytics_data_export_rule, label: export selected tables (hourly blobs), step: 2}
-    - {from: law-central, to: evh-am-containerlog, link: azurerm_log_analytics_data_export_rule, label: export selected tables (near real time), step: 2}
+    - {from: incoming data, to: dce-ingestion-pipeline, label: logs and metrics, step: 1}
+    - {from: dce-ingestion-pipeline, to: law-central, label: ingestion pipeline writes workspace tables, step: 1}
+    - {from: dce-ingestion-pipeline, to: stlogarchive, label: export selected tables (hourly blobs), step: 2}
+    - {from: dce-ingestion-pipeline, to: evh-am-containerlog, label: export selected tables (near real time), step: 2}
     - {from: evh-am-containerlog, to: adxdb-logs, link: azurerm_kusto_eventhub_data_connection, label: Event Hubs data connection, step: 3}
     - {from: stlogarchive, to: adxdb-logs, label: historical ingestion (LightIngest)}
-    - {from: users, to: adx-log-analytics, label: KQL over long-term logs, step: 4}
-
 - slug: iot-analytics-adx-cosmos
   title: IoT analytics with Azure Data Explorer and IoT Hub
   category: iot
@@ -505,12 +580,13 @@
   category: data
   tags: [data-mesh, data-domains, data-products, fabric, onelake, purview, databricks, landing-zones]
   source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/data/architecture-fabric-data-lake-unify-data-platform
-  description: Each data domain owns Fabric workspaces and a Fabric capacity hosted in a data management landing zone, producing governed data products in OneLake with Fabric and Azure Databricks while Microsoft Purview provides the shared catalog, lineage and governance domains. Copilot, Foundry agents, Power BI and data science tools consume the products, and region, disaster recovery and workspace ownership are set as central platform decisions.
+  description: Microsoft Entra ID, Agent 365, Purview and Defender govern the whole organization while a platform landing zone with management groups, Azure Policy and Azure Monitor hosts application landing zones per data domain, each owning Fabric capacities, Azure Databricks or Foundry agents that publish governed data products to OneLake. Azure databases are mirrored into Fabric, Foundry agents consume data products through Foundry IQ, and Power BI, data science tools, Copilot Studio and Microsoft 365 Copilot consume them from the OneLake catalog.
   containers:
     - subscription: data-management-landing-zone
       resource_group: {name: rg-data-governance, location: westeurope}
       groups:
-        - {label: Shared governance}
+        - {label: Shared governance, at: [1, 1]}
+        - {label: Platform landing zone, at: [1, 2]}
     - subscription: data-domain-sales
       resource_group: {name: rg-domain-sales, location: westeurope}
       groups:
@@ -520,28 +596,41 @@
       groups:
         - {label: Supply chain data products}
   elements:
-    - {tf: azurerm_purview_account, name: pview-enterprise, in: group:Shared governance}
-    - {tf: azurerm_key_vault, name: kv-platform, in: group:Shared governance}
-    - {tf: azurerm_log_analytics_workspace, name: law-data-platform, in: group:Shared governance}
-    - {tf: azurerm_fabric_capacity, name: fabric-sales-f64, in: group:Sales data products}
-    - {tf: azurerm_storage_account, name: stsales-raw, in: group:Sales data products}
-    - {tf: azurerm_fabric_capacity, name: fabric-supply-f32, in: group:Supply chain data products}
-    - {tf: azurerm_databricks_workspace, name: dbw-supply-engineering, in: group:Supply chain data products}
-    - {tf: azurerm_storage_account, name: stsupply-raw, in: group:Supply chain data products}
-  actors: [database, saas, users]
+    - {tf: azurerm_purview_account, name: pview-enterprise, in: group:Shared governance, at: [1, 1]}
+    - {tf: azurerm_security_center_subscription_pricing, name: defender-for-cloud, in: group:Shared governance, at: [1, 2]}
+    - {tf: azurerm_management_group, name: mg-platform, in: group:Platform landing zone, at: [1, 1]}
+    - {tf: azurerm_management_group, name: mg-landing-zones, in: group:Platform landing zone, at: [1, 2]}
+    - {tf: azurerm_policy_definition, name: policy-platform-guardrails, in: group:Platform landing zone, at: [2, 1]}
+    - {tf: azurerm_log_analytics_workspace, name: law-data-platform, in: group:Platform landing zone, at: [2, 2]}
+    - {tf: azurerm_mssql_server, name: sql-sales-mirrored, in: group:Sales data products, at: [1, 1]}
+    - {tf: azurerm_fabric_capacity, name: fabric-sales-f64, in: group:Sales data products, at: [2, 1]}
+    - {tf: azurerm_powerbi_embedded, name: pbi-sales-dashboards, in: group:Sales data products, at: [3, 1]}
+    - {tf: azurerm_databricks_workspace, name: dbw-supply-engineering, in: group:Supply chain data products, at: [1, 1]}
+    - {tf: azurerm_fabric_capacity, name: fabric-supply-f32, in: group:Supply chain data products, at: [2, 1]}
+    - {tf: azurerm_ai_foundry, name: foundry-supply-agents, in: group:Supply chain data products, at: [3, 1]}
+  actors:
+    - {type: idp, name: Microsoft Entra ID, at: [2, 1]}
+    - {type: saas, name: Microsoft Agent 365, at: [3, 1]}
+    - {type: users, at: [2, 4]}
+    - {type: saas, name: Microsoft Copilot Studio, at: [4, 2]}
+    - {type: saas, name: Microsoft 365 Copilot, at: [4, 3]}
   flows:
-    - {from: database, to: stsales-raw, label: source extracts, step: 1}
-    - {from: stsales-raw, to: fabric-sales-f64, label: OneLake shortcut / pipelines, step: 2}
-    - {from: saas, to: stsupply-raw, label: supplier feeds, step: 1}
-    - {from: stsupply-raw, to: dbw-supply-engineering, label: Delta engineering, step: 2}
-    - {from: dbw-supply-engineering, to: fabric-supply-f32, label: mirror Unity Catalog tables to OneLake, step: 3}
-    - {from: fabric-sales-f64, to: fabric-supply-f32, label: cross-domain data product sharing (shortcuts), step: 4}
+    - {from: sql-sales-mirrored, to: fabric-sales-f64, label: Azure databases mirrored to Fabric OneLake, step: 1}
+    - {from: dbw-supply-engineering, to: fabric-supply-f32, label: mirror Unity Catalog tables to OneLake, step: 2}
+    - {from: fabric-sales-f64, to: fabric-supply-f32, label: cross-domain data product sharing (OneLake shortcuts), step: 3}
+    - {from: fabric-supply-f32, to: foundry-supply-agents, label: Foundry agents consume data products via Foundry IQ, step: 4}
+    - {from: Microsoft Agent 365, to: foundry-supply-agents, label: control all agents}
     - {from: pview-enterprise, to: fabric-sales-f64, label: scan, lineage, governance domain}
     - {from: pview-enterprise, to: fabric-supply-f32, label: scan, lineage, governance domain}
     - {from: pview-enterprise, to: dbw-supply-engineering, label: Unity Catalog metadata}
+    - {from: policy-platform-guardrails, to: mg-landing-zones, label: Azure Policy assignments}
+    - {from: mg-platform, to: law-data-platform, label: Azure Monitor for the platform}
+    - {from: Microsoft Entra ID, to: mg-platform, label: identity for the whole organization}
     - {from: users, to: pview-enterprise, label: discover and request data products, step: 5}
-    - {from: fabric-sales-f64, to: users, label: Power BI, Copilot, data agents, step: 6}
-
+    - {from: fabric-sales-f64, to: pbi-sales-dashboards, label: dashboards and AI model training, step: 6}
+    - {from: pbi-sales-dashboards, to: users, label: Power BI and data science}
+    - {from: fabric-sales-f64, to: Microsoft Copilot Studio, label: OneLake catalog data products}
+    - {from: fabric-supply-f32, to: Microsoft 365 Copilot, label: OneLake catalog data products (Work IQ)}
 - slug: hdinsight-etl-at-scale
   title: Extract, transform and load at scale with Azure HDInsight
   category: data

@@ -10,39 +10,31 @@ tags:
 - cors
 image: https://d2908q01vomqb2.cloudfront.net/fc074d501302eb2b93e2554793fcaf50b3bf7291/2018/06/19/contact-arch-1.png
 source: https://aws.amazon.com/blogs/architecture/create-dynamic-contact-forms-for-s3-static-websites-using-aws-lambda-amazon-api-gateway-and-amazon-ses/
-description: A static marketing site hosted on S3 and served through CloudFront embeds a contact form whose JavaScript posts the fields to an API Gateway endpoint with CORS enabled. A Lambda function validates
-  the payload, stores the enquiry in DynamoDB, and sends an email to the site owner through a verified SES domain identity.
+description: A static marketing site hosted on S3 under a Route 53 domain embeds a contact form whose JavaScript posts the fields to an API Gateway endpoint with CORS enabled. A Lambda function validates
+  the payload and sends an email through Amazon SES, which relays it via the recipient's third-party mail server to the business owner.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1, at: [2, 1]}
-- {id: grp-form-backend, type: common.group, name: form backend, parent: reg-us-east-1, at: [3, 1, 1, 2]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: user, type: common.user, name: user, at: [1, 3]}
+- {id: third-party-mail-server, type: common.server, name: third-party-mail-server, at: [1, 3]}
+- {id: business-owner, type: common.user, name: business-owner, at: [1, 4]}
 - {id: site-zone, type: aws.route53_zone, name: site-zone, parent: reg-us-east-1, props: {domain: example.com}, at: [1, 1]}
-- {id: site-cert, type: aws.res.aws_acm_certificate, name: site-cert, parent: reg-us-east-1, at: [1, 2]}
-- {id: site-cdn, type: aws.cloudfront_distribution, name: site-cdn, parent: grp-global-edge, at: [1, 1]}
-- {id: site-bucket, type: aws.s3_bucket, name: site-bucket, parent: reg-us-east-1, at: [2, 2]}
-- {id: contact-api, type: aws.res.aws_api_gateway_rest_api, name: contact-api, parent: grp-form-backend, props: {name: changeme}, at: [1, 1]}
-- {id: contact-handler, type: aws.lambda_function, name: contact-handler, parent: grp-form-backend, at: [1, 2]}
-- {id: enquiries, type: aws.dynamodb_table, name: enquiries, parent: grp-form-backend, at: [2, 2]}
-- {id: mail-domain, type: aws.res.aws_ses_domain_identity, name: mail-domain, parent: grp-form-backend, props: {domain: example.com}, at: [1, 3]}
+- {id: site-bucket, type: aws.s3_bucket, name: site-bucket, parent: reg-us-east-1, at: [1, 2]}
+- {id: contact-api, type: aws.res.aws_api_gateway_rest_api, name: contact-api, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
+- {id: contact-handler, type: aws.lambda_function, name: contact-handler, parent: reg-us-east-1, at: [2, 2]}
+- {id: mail-domain, type: aws.res.aws_ses_domain_identity, name: mail-domain, parent: reg-us-east-1, props: {domain: example.com}, at: [2, 3]}
 edges:
-- {from: users, to: site-zone, label: DNS, step: '1'}
-- {from: users, to: site-cdn, label: HTTPS page load, step: '2'}
-- {from: site-cert, to: site-cdn, label: TLS certificate}
-- {from: site-cdn, to: site-bucket, label: static origin via OAC, step: '3'}
-- {from: users, to: contact-api, label: POST /contact (CORS), step: '4'}
-- {from: contact-api, to: contact-handler, label: Lambda proxy integration, step: '5'}
-- {from: contact-handler, to: enquiries, label: PutItem, step: '6'}
-- {from: contact-handler, to: mail-domain, label: SendEmail, step: '7'}
-- {from: mail-domain, to: user, label: notification email to site owner, step: '8'}
+- {from: users, to: site-zone, label: DNS for the static site and the form API, step: '1'}
+- {from: site-zone, to: site-bucket, label: static website hosting}
+- {from: users, to: contact-api, label: HTTP POST request from the contact form (CORS), step: '2'}
+- {from: contact-api, to: contact-handler, label: Lambda proxy integration, step: '3'}
+- {from: contact-handler, to: mail-domain, label: SendEmail, step: '4'}
+- {from: mail-domain, to: third-party-mail-server, label: SMTP delivery, step: '5'}
+- {from: third-party-mail-server, to: business-owner, label: notification email, step: '6'}
 steps:
-- {n: '1', text: 'users → site-zone: DNS'}
-- {n: '2', text: 'users → site-cdn: HTTPS page load'}
-- {n: '3', text: 'site-cdn → site-bucket: static origin via OAC'}
-- {n: '4', text: 'users → contact-api: POST /contact (CORS)'}
-- {n: '5', text: 'contact-api → contact-handler: Lambda proxy integration'}
-- {n: '6', text: 'contact-handler → enquiries: PutItem'}
-- {n: '7', text: 'contact-handler → mail-domain: SendEmail'}
-- {n: '8', text: 'mail-domain → user: notification email to site owner'}
+- {n: '1', text: 'users → site-zone: DNS for the static site and the form API'}
+- {n: '2', text: 'users → contact-api: HTTP POST request from the contact form (CORS)'}
+- {n: '3', text: 'contact-api → contact-handler: Lambda proxy integration'}
+- {n: '4', text: 'contact-handler → mail-domain: SendEmail'}
+- {n: '5', text: 'mail-domain → third-party-mail-server: SMTP delivery'}
+- {n: '6', text: 'third-party-mail-server → business-owner: notification email'}

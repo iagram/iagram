@@ -11,43 +11,62 @@ tags:
 - cloud deploy
 image: https://github.com/googleforgames/global-multiplayer-demo/raw/main/images/architecture.png
 source: https://github.com/googleforgames/global-multiplayer-demo
-description: Dedicated game servers run as Agones fleets on GKE clusters while backend microservices (frontend, profile, ping discovery, Open Match director and match function) run on GKE Autopilot with
-  Memorystore for Redis backing Open Match state. Player profiles and in-game data live in Spanner, and Cloud Build builds images into Artifact Registry that Cloud Deploy rolls out to the clusters.
+description: Players reach regional Cloud Load Balancers in us-central1, europe-west1 and asia-east1; in us-central1 a GKE Autopilot cluster runs the frontend (authenticating players with Google OAuth),
+  the profile service and the Open Match components (core, match functions, director) with Memorystore for Redis backing Open Match state, while dedicated game servers run as Agones fleets (with allocator
+  and ping services) on GKE clusters in all three regions, connected through Anthos Service Mesh. Player profiles and in-game data live in a globally replicated Spanner instance, and Cloud Build builds
+  images into Artifact Registry that Cloud Deploy rolls out to the clusters.
 nodes:
-- {id: prj-game-prj, type: gcp.project, name: game-prj, props: {project_id: game-prj-123456, project: changeme, region: europe-west1}, at: [1, 2, 2, 1]}
-- {id: vpc-game-vpc, type: gcp.vpc, name: game-vpc, parent: prj-game-prj, props: {cidr: 10.80.0.0/16}, at: [1, 2, 1, 3]}
-- {id: sub-gameservers-sub, type: gcp.subnetwork, name: gameservers-sub, parent: vpc-game-vpc, props: {cidr: 10.80.1.0/24, region: europe-west1}, at: [2, 1]}
-- {id: sub-backend-sub, type: gcp.subnetwork, name: backend-sub, parent: vpc-game-vpc, props: {cidr: 10.80.2.0/24, region: europe-west1}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: user, type: common.user, name: user, at: [2, 1]}
-- {id: game-frontend-glb, type: gcp.res.google_compute_global_forwarding_rule, name: game-frontend-glb, parent: prj-game-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
-- {id: agones-gameservers-gke, type: gcp.gke_cluster, name: agones-gameservers-gke, parent: sub-gameservers-sub, at: [1, 1]}
-- {id: backend-autopilot-gke, type: gcp.gke_cluster, name: backend-autopilot-gke, parent: sub-backend-sub, at: [1, 1]}
-- {id: open-match-redis, type: gcp.res.google_redis_instance, name: open-match-redis, parent: vpc-game-vpc, props: {memory_size_gb: 1, name: changeme}, at: [1, 2]}
-- {id: player-spanner, type: gcp.res.google_spanner_instance, name: player-spanner, parent: prj-game-prj, props: {config: changeme, display_name: changeme}, at: [1, 5]}
-- {id: game-images, type: gcp.res.google_artifact_registry_repository, name: game-images, parent: prj-game-prj, props: {format: changeme, repository_id: changeme}, at: [2, 3]}
-- {id: game-build-trigger, type: gcp.res.google_cloudbuild_trigger, name: game-build-trigger, parent: prj-game-prj, at: [2, 2]}
-- {id: game-delivery-pipeline, type: gcp.res.google_clouddeploy_delivery_pipeline, name: game-delivery-pipeline, parent: prj-game-prj, props: {location: westeurope, name: changeme}, at: [2, 4]}
+- {id: prj-game-prj, type: gcp.project, name: game-prj, props: {project_id: game-prj-123456, project: changeme, region: us-central1}, at: [2, 2]}
+- {id: grp-ci-cd, type: common.group, name: ci-cd, parent: prj-game-prj, at: [2, 1, 1, 3]}
+- {id: vpc-game-vpc, type: gcp.vpc, name: game-vpc, parent: prj-game-prj, props: {cidr: 10.80.0.0/16}, at: [1, 1, 1, 3]}
+- {id: sub-autopilot-sub, type: gcp.subnetwork, name: autopilot-sub, parent: vpc-game-vpc, props: {cidr: 10.80.1.0/24, region: us-central1}, at: [1, 2]}
+- {id: sub-agones-us-central1, type: gcp.subnetwork, name: agones-us-central1, parent: vpc-game-vpc, props: {cidr: 10.80.2.0/24, region: us-central1}, at: [2, 2]}
+- {id: sub-agones-europe-west1, type: gcp.subnetwork, name: agones-europe-west1, parent: vpc-game-vpc, props: {cidr: 10.80.3.0/24, region: europe-west1}, at: [3, 2]}
+- {id: sub-agones-asia-east1, type: gcp.subnetwork, name: agones-asia-east1, parent: vpc-game-vpc, props: {cidr: 10.80.4.0/24, region: asia-east1}, at: [4, 2]}
+- {id: players, type: common.users, name: players, at: [2, 1]}
+- {id: google-oauth, type: common.idp, name: Google OAuth, at: [1, 2]}
+- {id: lb-us-central1, type: gcp.res.google_compute_forwarding_rule, name: lb-us-central1, parent: vpc-game-vpc, props: {name: changeme}, at: [1, 1, 2, 1]}
+- {id: lb-europe-west1, type: gcp.res.google_compute_forwarding_rule, name: lb-europe-west1, parent: vpc-game-vpc, props: {name: changeme}, at: [3, 1]}
+- {id: lb-asia-east1, type: gcp.res.google_compute_forwarding_rule, name: lb-asia-east1, parent: vpc-game-vpc, props: {name: changeme}, at: [4, 1]}
+- {id: backend-autopilot-gke, type: gcp.gke_cluster, name: backend-autopilot-gke, parent: sub-autopilot-sub, at: [1, 1]}
+- {id: agones-gke-us-central1, type: gcp.gke_cluster, name: agones-gke-us-central1, parent: sub-agones-us-central1, at: [1, 1]}
+- {id: agones-gke-europe-west1, type: gcp.gke_cluster, name: agones-gke-europe-west1, parent: sub-agones-europe-west1, at: [1, 1]}
+- {id: agones-gke-asia-east1, type: gcp.gke_cluster, name: agones-gke-asia-east1, parent: sub-agones-asia-east1, at: [1, 1]}
+- {id: open-match-redis, type: gcp.res.google_redis_instance, name: open-match-redis, parent: vpc-game-vpc, props: {memory_size_gb: 1, name: changeme}, at: [1, 3]}
+- {id: player-spanner, type: gcp.res.google_spanner_instance, name: player-spanner, parent: prj-game-prj, props: {config: changeme, display_name: changeme}, at: [1, 4]}
+- {id: anthos-service-mesh, type: gcp.res.google_network_services_mesh, name: anthos-service-mesh, parent: prj-game-prj, props: {name: changeme}, at: [2, 4]}
+- {id: game-build-trigger, type: gcp.res.google_cloudbuild_trigger, name: game-build-trigger, parent: grp-ci-cd, at: [1, 1]}
+- {id: game-images, type: gcp.res.google_artifact_registry_repository, name: game-images, parent: grp-ci-cd, props: {format: changeme, repository_id: changeme}, at: [1, 2]}
+- {id: game-delivery-pipeline, type: gcp.res.google_clouddeploy_delivery_pipeline, name: game-delivery-pipeline, parent: grp-ci-cd, props: {location: westeurope, name: changeme}, at: [1, 3]}
 edges:
-- {from: users, to: game-frontend-glb, label: login and matchmaking HTTPS, step: '1'}
-- {from: game-frontend-glb, to: backend-autopilot-gke, label: frontend service, step: '2'}
-- {from: backend-autopilot-gke, to: player-spanner, label: player profile read/write, step: '3'}
-- {from: backend-autopilot-gke, to: open-match-redis, label: Open Match tickets, step: '4'}
-- {from: backend-autopilot-gke, to: agones-gameservers-gke, label: allocate game server, step: '5'}
-- {from: users, to: agones-gameservers-gke, label: UDP game traffic, step: '6'}
-- {from: agones-gameservers-gke, to: player-spanner, label: in-game state, step: '7'}
-- {from: user, to: game-build-trigger, label: developer git push, step: '8'}
+- {from: players, to: lb-us-central1, label: login and matchmaking HTTPS, step: '1'}
+- {from: lb-us-central1, to: backend-autopilot-gke, label: frontend service, step: '2'}
+- {from: backend-autopilot-gke, to: google-oauth, label: player sign-in, step: '3'}
+- {from: backend-autopilot-gke, to: player-spanner, label: profile service read/write, step: '4'}
+- {from: backend-autopilot-gke, to: open-match-redis, label: Open Match core state, step: '5'}
+- {from: backend-autopilot-gke, to: agones-gke-us-central1, label: match director allocates game server, step: '6'}
+- {from: players, to: lb-europe-west1, label: ping and UDP game traffic, step: '7'}
+- {from: players, to: lb-asia-east1, label: ping and UDP game traffic, step: '7'}
+- {from: lb-us-central1, to: agones-gke-us-central1, label: ping and game servers}
+- {from: lb-europe-west1, to: agones-gke-europe-west1, label: ping and game servers}
+- {from: lb-asia-east1, to: agones-gke-asia-east1, label: ping and game servers}
+- {from: anthos-service-mesh, to: agones-gke-europe-west1, label: allocator service via service mesh}
+- {from: anthos-service-mesh, to: agones-gke-asia-east1, label: allocator service via service mesh}
+- {from: backend-autopilot-gke, to: anthos-service-mesh, label: cross-region allocation, step: '8'}
 - {from: game-build-trigger, to: game-images, label: push image, step: '9'}
-- {from: game-delivery-pipeline, to: agones-gameservers-gke, label: rollout, step: '10'}
+- {from: game-images, to: game-delivery-pipeline, label: release}
 - {from: game-delivery-pipeline, to: backend-autopilot-gke, label: rollout, step: '10'}
+- {from: game-delivery-pipeline, to: agones-gke-us-central1, label: rollout, step: '10'}
+- {from: game-delivery-pipeline, to: agones-gke-europe-west1, label: rollout, step: '10'}
+- {from: game-delivery-pipeline, to: agones-gke-asia-east1, label: rollout, step: '10'}
 steps:
-- {n: '1', text: 'users → game-frontend-glb: login and matchmaking HTTPS'}
-- {n: '2', text: 'game-frontend-glb → backend-autopilot-gke: frontend service'}
-- {n: '3', text: 'backend-autopilot-gke → player-spanner: player profile read/write'}
-- {n: '4', text: 'backend-autopilot-gke → open-match-redis: Open Match tickets'}
-- {n: '5', text: 'backend-autopilot-gke → agones-gameservers-gke: allocate game server'}
-- {n: '6', text: 'users → agones-gameservers-gke: UDP game traffic'}
-- {n: '7', text: 'agones-gameservers-gke → player-spanner: in-game state'}
-- {n: '8', text: 'user → game-build-trigger: developer git push'}
+- {n: '1', text: 'players → lb-us-central1: login and matchmaking HTTPS'}
+- {n: '2', text: 'lb-us-central1 → backend-autopilot-gke: frontend service'}
+- {n: '3', text: 'backend-autopilot-gke → Google OAuth: player sign-in'}
+- {n: '4', text: 'backend-autopilot-gke → player-spanner: profile service read/write'}
+- {n: '5', text: 'backend-autopilot-gke → open-match-redis: Open Match core state'}
+- {n: '6', text: 'backend-autopilot-gke → agones-gke-us-central1: match director allocates game server'}
+- {n: '7', text: 'players → lb-europe-west1: ping and UDP game traffic'}
+- {n: '8', text: 'backend-autopilot-gke → anthos-service-mesh: cross-region allocation'}
 - {n: '9', text: 'game-build-trigger → game-images: push image'}
-- {n: '10', text: 'game-delivery-pipeline → agones-gameservers-gke: rollout'}
+- {n: '10', text: 'game-delivery-pipeline → backend-autopilot-gke: rollout'}

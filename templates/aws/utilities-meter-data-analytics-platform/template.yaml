@@ -12,67 +12,93 @@ tags:
 - forecasting
 image: https://docs.aws.amazon.com/images/solutions/meter-data-analytics-on-aws/images/meter-data-analytics-on-aws-1.png
 source: https://docs.aws.amazon.com/solutions/meter-data-analytics-on-aws/
-description: Guidance for Meter Data Analytics on AWS ingests interval reads from meter data management or head-end systems through Transfer Family SFTP for batch files and Kinesis for streaming, stores
-  time series in Timestream and raw data in S3. Glue and EMR run ETL into a curated data lake catalogued in the Glue Data Catalog, Athena and Redshift serve SQL analytics, Grafana publishes dashboards and
-  SageMaker models detect grid anomalies and forecast demand.
+description: Guidance for Meter Data Analytics on AWS ingests data from a customer information system, weather feeds, the metering head-end and the MDMS through a custom Lambda adapter, Transfer Family
+  SFTP and Storage Gateway for batch files, and Kinesis with SQS and SNS for streaming, then stores time series in Timestream and raw data in S3 with Glacier archival. Glue and EMR run ETL into a cleaned
+  S3 bucket governed by Lake Formation and catalogued in the Glue Data Catalog; EMR, Athena and Redshift serve analytics, Managed Grafana and QuickSight publish dashboards to enterprise applications, and
+  SageMaker predictions drive proactive customer engagement through Pinpoint.
 nodes:
 - {id: dc-utility-head-end, type: common.datacenter, name: utility-head-end, at: [1, 1]}
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 4, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1, at: [1, 1]}
-- {id: grp-storage, type: common.group, name: storage, parent: reg-us-east-1, at: [1, 2]}
-- {id: grp-processing, type: common.group, name: processing, parent: reg-us-east-1, at: [1, 3]}
-- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1, at: [1, 4]}
-- {id: users, type: common.users, name: users, at: [1, 3]}
-- {id: mdms-sftp, type: aws.res.aws_transfer_server, name: mdms-sftp, parent: grp-ingestion, at: [2, 1]}
-- {id: meter-reads-stream, type: aws.res.aws_kinesis_stream, name: meter-reads-stream, parent: grp-ingestion, props: {name: changeme}, at: [3, 1]}
-- {id: read-adapter, type: aws.lambda_function, name: read-adapter, parent: grp-ingestion, at: [1, 1]}
-- {id: interval-reads, type: aws.res.aws_timestreamwrite_database, name: interval-reads, parent: grp-storage, props: {database_name: changeme}, at: [1, 1]}
-- {id: raw-meter-data, type: aws.s3_bucket, name: raw-meter-data, parent: grp-storage, at: [2, 1]}
+- {id: grp-ingest, type: common.group, name: ingest, parent: reg-us-east-1, at: [1, 1]}
+- {id: grp-transform-and-store, type: common.group, name: transform-and-store, parent: reg-us-east-1, at: [1, 2]}
+- {id: grp-serve-and-consume, type: common.group, name: serve-and-consume, parent: reg-us-east-1, at: [1, 3]}
+- {id: customer-information-system, type: common.server, name: customer-information-system, at: [2, 1]}
+- {id: weather-data, type: common.saas, name: weather-data, at: [3, 1]}
+- {id: mdms, type: common.database, name: mdms, at: [4, 1]}
+- {id: enterprise-applications, type: common.server, name: enterprise-applications, at: [1, 3]}
+- {id: users, type: common.users, name: users, at: [2, 3]}
+- {id: read-adapter, type: aws.lambda_function, name: read-adapter, parent: grp-ingest, at: [1, 1, 1, 2]}
+- {id: mdms-sftp, type: aws.res.aws_transfer_server, name: mdms-sftp, parent: grp-ingest, at: [2, 1]}
+- {id: file-gateway, type: aws.res.aws_storagegateway_gateway, name: file-gateway, parent: grp-ingest, props: {gateway_name: changeme, gateway_timezone: changeme}, at: [2, 2]}
+- {id: meter-reads-stream, type: aws.res.aws_kinesis_stream, name: meter-reads-stream, parent: grp-ingest, props: {name: changeme}, at: [3, 1, 1, 2]}
+- {id: meter-events-queue, type: aws.sqs_queue, name: meter-events-queue, parent: grp-ingest, at: [4, 1]}
+- {id: meter-events-topic, type: aws.res.aws_sns_topic, name: meter-events-topic, parent: grp-ingest, at: [4, 2]}
+- {id: interval-reads, type: aws.res.aws_timestreamwrite_database, name: interval-reads, parent: grp-transform-and-store, props: {database_name: changeme}, at: [1, 1, 1, 2]}
+- {id: raw-meter-data, type: aws.s3_bucket, name: raw-meter-data, parent: grp-transform-and-store, at: [2, 1]}
 - id: curate-reads-etl
   type: aws.res.aws_glue_job
   name: curate-reads-etl
-  parent: grp-processing
-  at: [1, 1]
+  parent: grp-transform-and-store
   props: {command: {}, name: changeme, role_arn: changeme}
-- {id: meter-analytics-emr, type: aws.res.aws_emr_cluster, name: meter-analytics-emr, parent: grp-processing, props: {name: changeme, release_label: changeme, service_role: changeme}, at: [2, 1]}
-- {id: curated-data-lake, type: aws.s3_bucket, name: curated-data-lake, parent: grp-storage, at: [3, 1]}
-- {id: meter-catalog, type: aws.res.aws_glue_catalog_database, name: meter-catalog, parent: grp-storage, props: {name: changeme}, at: [4, 1]}
-- {id: meter-queries, type: aws.res.aws_athena_workgroup, name: meter-queries, parent: grp-analytics, props: {name: changeme}, at: [1, 1]}
-- {id: utility-warehouse, type: aws.res.aws_redshift_cluster, name: utility-warehouse, parent: grp-analytics, props: {cluster_identifier: changeme, node_type: changeme}, at: [2, 1]}
+  at:
+  - 2
+  - 2
+- {id: meter-analytics-emr, type: aws.res.aws_emr_cluster, name: meter-analytics-emr, parent: grp-transform-and-store, props: {name: changeme, release_label: changeme, service_role: changeme}, at: [2, 3]}
+- {id: raw-meter-archive, type: aws.res.aws_glacier_vault, name: raw-meter-archive, parent: grp-transform-and-store, props: {name: changeme}, at: [3, 1]}
+- {id: curated-data-lake, type: aws.s3_bucket, name: curated-data-lake, parent: grp-transform-and-store, at: [3, 2]}
+- {id: curated-data-permissions, type: aws.res.aws_lakeformation_resource, name: curated-data-permissions, parent: grp-transform-and-store, props: {arn: changeme}, at: [3, 3]}
+- {id: meter-catalog, type: aws.res.aws_glue_catalog_database, name: meter-catalog, parent: grp-transform-and-store, props: {name: changeme}, at: [4, 2]}
+- {id: analytics-emr, type: aws.res.aws_emr_cluster, name: analytics-emr, parent: grp-serve-and-consume, props: {name: changeme, release_label: changeme, service_role: changeme}, at: [1, 1]}
+- {id: meter-queries, type: aws.res.aws_athena_workgroup, name: meter-queries, parent: grp-serve-and-consume, props: {name: changeme}, at: [1, 2]}
+- {id: utility-warehouse, type: aws.res.aws_redshift_cluster, name: utility-warehouse, parent: grp-serve-and-consume, props: {cluster_identifier: changeme, node_type: changeme}, at: [2, 1]}
 - id: grid-dashboards
   type: aws.res.aws_grafana_workspace
   name: grid-dashboards
-  parent: grp-analytics
-  at: [1, 2, 3, 1]
-  props:
-    account_access_type: changeme
-    authentication_providers: []
-    permission_type: changeme
-- {id: demand-forecast, type: aws.res.aws_sagemaker_endpoint, name: demand-forecast, parent: grp-analytics, props: {endpoint_config_name: changeme}, at: [3, 1]}
+  parent: grp-serve-and-consume
+  props: {account_access_type: changeme, authentication_providers: [], permission_type: changeme}
+  at:
+  - 2
+  - 2
+- {id: demand-forecast, type: aws.res.aws_sagemaker_endpoint, name: demand-forecast, parent: grp-serve-and-consume, props: {endpoint_config_name: changeme}, at: [3, 1]}
+- {id: meter-dashboards, type: aws.res.aws_quicksight_dashboard, name: meter-dashboards, parent: grp-serve-and-consume, props: {dashboard_id: changeme, name: changeme, version_description: changeme}, at: [
+    3, 2]}
+- {id: customer-engagement, type: aws.res.aws_pinpoint_app, name: customer-engagement, parent: grp-serve-and-consume, at: [4, 1, 1, 2]}
 edges:
-- {from: dc-utility-head-end, to: mdms-sftp, label: batch interval files, step: '1'}
+- {from: dc-utility-head-end, to: read-adapter, label: metering head-end reads, step: '1'}
 - {from: dc-utility-head-end, to: meter-reads-stream, label: streaming reads, step: '1'}
-- {from: mdms-sftp, to: raw-meter-data, label: SFTP to S3}
-- {from: meter-reads-stream, to: read-adapter, step: '2', link: aws_lambda_event_source_mapping}
-- {from: read-adapter, to: interval-reads, label: WriteRecords, step: '3'}
-- {from: read-adapter, to: raw-meter-data, label: raw archive}
-- {from: raw-meter-data, to: curate-reads-etl, label: ETL source, step: '4'}
+- {from: mdms, to: mdms-sftp, label: batch interval files, step: '1'}
+- {from: customer-information-system, to: file-gateway, label: customer master data, step: '1'}
+- {from: weather-data, to: meter-reads-stream, label: weather feeds, step: '1'}
+- {from: meter-reads-stream, to: meter-events-queue, label: buffered events}
+- {from: meter-events-queue, to: meter-events-topic, label: fan-out notifications}
+- {from: meter-reads-stream, to: read-adapter, link: aws_lambda_event_source_mapping}
+- {from: read-adapter, to: interval-reads, label: WriteRecords, step: '2'}
+- {from: mdms-sftp, to: raw-meter-data, label: SFTP to S3, step: '2'}
+- {from: file-gateway, to: raw-meter-data, label: file share to S3}
+- {from: meter-reads-stream, to: raw-meter-data, label: raw archive}
+- {from: raw-meter-data, to: raw-meter-archive, label: lifecycle to Glacier}
+- {from: raw-meter-data, to: curate-reads-etl, label: ETL source}
 - {from: raw-meter-data, to: meter-analytics-emr, label: value-add processing}
-- {from: curate-reads-etl, to: curated-data-lake, label: curated datasets, step: '5'}
-- {from: curated-data-lake, to: meter-catalog, label: metadata}
-- {from: meter-catalog, to: meter-queries, label: SQL, step: '6'}
-- {from: curated-data-lake, to: utility-warehouse, label: COPY, step: '7'}
-- {from: utility-warehouse, to: grid-dashboards, label: dashboards, step: '8'}
-- {from: curated-data-lake, to: demand-forecast, label: training and inference, step: '9'}
-- {from: users, to: grid-dashboards, label: grid analytics}
+- {from: curate-reads-etl, to: curated-data-lake, label: cleaned data, step: '3'}
+- {from: curated-data-lake, to: curated-data-permissions, label: curated data governance}
+- {from: curated-data-permissions, to: meter-catalog, label: metadata, step: '4'}
+- {from: meter-catalog, to: analytics-emr, label: Spark analytics, step: '5'}
+- {from: meter-catalog, to: meter-queries, label: SQL, step: '5'}
+- {from: curated-data-lake, to: utility-warehouse, label: COPY, step: '6'}
+- {from: utility-warehouse, to: grid-dashboards, label: dashboards, step: '7'}
+- {from: utility-warehouse, to: meter-dashboards, label: dashboards, step: '7'}
+- {from: curated-data-lake, to: demand-forecast, label: training and inference}
+- {from: demand-forecast, to: customer-engagement, label: predictions, step: '8'}
+- {from: grid-dashboards, to: enterprise-applications, label: enterprise applications and processes}
+- {from: meter-queries, to: enterprise-applications, label: query results}
+- {from: customer-engagement, to: users, label: proactive customer engagement}
 steps:
-- {n: '1', text: 'datacenter → mdms-sftp: batch interval files'}
-- {n: '2', text: meter-reads-stream → read-adapter}
-- {n: '3', text: 'read-adapter → interval-reads: WriteRecords'}
-- {n: '4', text: 'raw-meter-data → curate-reads-etl: ETL source'}
-- {n: '5', text: 'curate-reads-etl → curated-data-lake: curated datasets'}
-- {n: '6', text: 'meter-catalog → meter-queries: SQL'}
-- {n: '7', text: 'curated-data-lake → utility-warehouse: COPY'}
-- {n: '8', text: 'utility-warehouse → grid-dashboards: dashboards'}
-- {n: '9', text: 'curated-data-lake → demand-forecast: training and inference'}
+- {n: '1', text: 'datacenter → read-adapter: metering head-end reads'}
+- {n: '2', text: 'read-adapter → interval-reads: WriteRecords'}
+- {n: '3', text: 'curate-reads-etl → curated-data-lake: cleaned data'}
+- {n: '4', text: 'curated-data-permissions → meter-catalog: metadata'}
+- {n: '5', text: 'meter-catalog → analytics-emr: Spark analytics'}
+- {n: '6', text: 'curated-data-lake → utility-warehouse: COPY'}
+- {n: '7', text: 'utility-warehouse → grid-dashboards: dashboards'}
+- {n: '8', text: 'demand-forecast → customer-engagement: predictions'}

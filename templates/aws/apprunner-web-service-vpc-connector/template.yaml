@@ -10,53 +10,47 @@ tags:
 - serverless containers
 image: https://d2908q01vomqb2.cloudfront.net/fe2ef495a1152561572949784c16bf23abb28057/2023/09/08/Solution-overview.png
 source: https://aws.amazon.com/blogs/containers/deploy-and-scale-django-applications-on-aws-app-runner/
-description: App Runner builds and runs the web application in an AWS-managed VPC, terminating TLS, load balancing and scaling instances on concurrent requests. A VPC connector creates Hyperplane ENIs in
-  the customer's private subnets so outbound calls reach an RDS for PostgreSQL instance that has no public endpoint, and the service's instance role reads the database credentials from Secrets Manager.
+description: App Runner deploys the web application from a GitHub repository and runs it in an AWS-managed VPC, terminating TLS, load balancing and scaling instances on concurrent requests. A VPC connector
+  attaches the service to the customer VPC through AWS PrivateLink (Hyperplane ENIs in the private subnet) so outbound calls reach an RDS for PostgreSQL instance that has no public endpoint, and the database
+  credentials are injected from Secrets Manager.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-data, type: aws.vpc, name: data, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 3, 3, 1]}
-- {id: az-data-a, type: aws.availability_zone, name: a, parent: vpc-data, props: {zone: a}, at: [1, 2]}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-data-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-data-b, type: aws.availability_zone, name: b, parent: vpc-data, props: {zone: b}, at: [2, 2]}
-- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-data-b, props: {cidr: 10.0.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: vpc-app-runner, type: aws.vpc, name: app-runner, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: vpc-customer, type: aws.vpc, name: customer, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 3]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: vpc-customer, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: user, type: common.user, name: user, at: [2, 1]}
+- {id: github-repository, type: common.saas, name: github-repository, at: [2, 1]}
 - id: web-app
   type: aws.res.aws_apprunner_service
   name: web-app
-  parent: reg-us-east-1
-  at: [1, 2]
+  parent: vpc-app-runner
   props: {service_name: changeme, source_configuration: {}}
+  at:
+  - 1
+  - 1
+- {id: privatelink-endpoint, type: aws.res.aws_vpc_endpoint, name: privatelink-endpoint, parent: reg-us-east-1, props: {vpc_id: changeme}, at: [1, 2]}
 - id: data-vpc-connector
   type: aws.res.aws_apprunner_vpc_connector
   name: data-vpc-connector
-  parent: vpc-data
-  at: [1, 1, 2, 1]
-  props:
-    security_groups: []
-    subnets: []
-    vpc_connector_name: changeme
-- {id: web-app-image, type: aws.res.aws_ecr_repository, name: web-app-image, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1]}
+  parent: vpc-customer
+  props: {security_groups: [], subnets: [], vpc_connector_name: changeme}
+  at:
+  - 1
+  - 1
 - {id: app-postgres, type: aws.rds_instance, name: app-postgres, parent: sub-private-a, at: [1, 1]}
-- {id: db-credentials, type: aws.res.aws_secretsmanager_secret, name: db-credentials, parent: reg-us-east-1, at: [2, 2]}
-- {id: apprunner-instance-role, type: aws.res.aws_iam_role, name: apprunner-instance-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}, at: [2, 1]}
-- {id: static-assets, type: aws.s3_bucket, name: static-assets, parent: reg-us-east-1, at: [3, 1]}
-- {id: apprunner-logs, type: aws.res.aws_cloudwatch_log_group, name: apprunner-logs, parent: reg-us-east-1, at: [3, 2]}
+- {id: db-credentials, type: aws.res.aws_secretsmanager_secret, name: db-credentials, parent: reg-us-east-1, at: [2, 1]}
+- {id: sub-vpc-customer-b, type: aws.subnet, name: private-b, parent: vpc-customer, props: {cidr: 10.0.251.0/24, az: b, public: false}}
 edges:
-- {from: user, to: web-app-image, label: push image (or connect source repo), step: '1'}
-- {from: web-app-image, to: web-app, label: auto deploy on new image, step: '2'}
-- {from: users, to: web-app, label: HTTPS to App Runner domain, step: '3'}
-- {from: web-app, to: db-credentials, label: GetSecretValue, step: '4'}
-- {from: apprunner-instance-role, to: web-app, label: instance role}
-- {from: web-app, to: data-vpc-connector, label: outbound VPC traffic, step: '5'}
-- {from: data-vpc-connector, to: app-postgres, label: 'PostgreSQL :5432 via Hyperplane ENI', step: '6'}
-- {from: web-app, to: static-assets, label: static files}
-- {from: web-app, to: apprunner-logs, label: application and service logs}
+- {from: users, to: web-app, label: HTTPS to App Runner domain, step: '1'}
+- {from: github-repository, to: web-app, label: source code deploy on push, step: '2'}
+- {from: db-credentials, to: web-app, label: database credentials as runtime secret}
+- {from: web-app, to: privatelink-endpoint, label: outbound VPC traffic, step: '3'}
+- {from: privatelink-endpoint, to: data-vpc-connector, label: Hyperplane ENI in customer VPC, step: '4'}
+- {from: data-vpc-connector, to: app-postgres, label: 'PostgreSQL :5432', step: '5'}
 steps:
-- {n: '1', text: 'user → web-app-image: push image (or connect source repo)'}
-- {n: '2', text: 'web-app-image → web-app: auto deploy on new image'}
-- {n: '3', text: 'users → web-app: HTTPS to App Runner domain'}
-- {n: '4', text: 'web-app → db-credentials: GetSecretValue'}
-- {n: '5', text: 'web-app → data-vpc-connector: outbound VPC traffic'}
-- {n: '6', text: 'data-vpc-connector → app-postgres: PostgreSQL :5432 via Hyperplane ENI'}
+- {n: '1', text: 'users → web-app: HTTPS to App Runner domain'}
+- {n: '2', text: 'github-repository → web-app: source code deploy on push'}
+- {n: '3', text: 'web-app → privatelink-endpoint: outbound VPC traffic'}
+- {n: '4', text: 'privatelink-endpoint → data-vpc-connector: Hyperplane ENI in customer VPC'}
+- {n: '5', text: 'data-vpc-connector → app-postgres: PostgreSQL :5432'}

@@ -11,71 +11,68 @@ tags:
 - any-to-any
 image: https://learn.microsoft.com/en-us/azure/virtual-wan/media/virtual-wan-global-transit-network-architecture/hub-spoke.png
 source: https://learn.microsoft.com/en-us/azure/virtual-wan/virtual-wan-global-transit-network-architecture
-description: Microsoft-managed Virtual WAN hubs in two regions provide any-to-any transit between spoke virtual networks, branch sites connected by site-to-site VPN or ExpressRoute, and remote users connected
-  by User VPN (point-to-site). Hubs in the same Virtual WAN are automatically interconnected over the Microsoft global network, giving branch-to-VNet, branch-to-branch, user-to-VNet and VNet-to-VNet paths
-  across regions without customer-managed transit.
+description: Microsoft-managed Virtual WAN hubs in two regions form a global transit network with any-to-any connectivity between four spoke virtual networks, a headquarters datacenter connected by ExpressRoute,
+  three branch sites connected by site-to-site VPN, remote users connected by User VPN (point-to-site) and internet breakout through the hub. Hubs in the same Virtual WAN are automatically interconnected
+  over the Microsoft global network, giving branch-to-VNet, branch-to-branch, user-to-VNet and VNet-to-VNet paths across regions without customer-managed transit.
 nodes:
-- {id: dc-branch-emea, type: common.datacenter, name: branch-emea, at: [3, 1]}
-- {id: dc-branch-apac, type: common.datacenter, name: branch-apac, at: [3, 2]}
-- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1, 1, 2]}
+- {id: dc-hq-dc, type: common.datacenter, name: hq-dc, at: [3, 1]}
+- {id: dc-branch-emea, type: common.datacenter, name: branch-emea, at: [3, 2]}
+- {id: dc-branch-apac, type: common.datacenter, name: branch-apac, at: [3, 3]}
+- {id: dc-branch-anz, type: common.datacenter, name: branch-anz, at: [3, 4]}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1, 1, 4]}
 - {id: rg-rg-vwan-global, type: azure.resource_group, name: rg-vwan-global, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
-- {id: sub-landing-zone-emea, type: azure.subscription, name: landing-zone-emea, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1]}
+- {id: sub-landing-zone-emea, type: azure.subscription, name: landing-zone-emea, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1, 1, 2]}
 - {id: rg-rg-lz-emea, type: azure.resource_group, name: rg-lz-emea, parent: sub-landing-zone-emea, props: {location: westeurope}, at: [1, 1]}
 - {id: vpc-vnet-emea, type: azure.vnet, name: vnet-emea, parent: rg-rg-lz-emea, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
 - {id: sub-snet-emea, type: azure.subnet, name: snet-emea, parent: vpc-vnet-emea, props: {cidr: 10.1.0.0/24}, at: [1, 1]}
-- {id: sub-landing-zone-apac, type: azure.subscription, name: landing-zone-apac, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: vpc-vnet-emea-2, type: azure.vnet, name: vnet-emea-2, parent: rg-rg-lz-emea, props: {cidr: 10.3.0.0/16}, at: [1, 2]}
+- {id: sub-snet-emea-2, type: azure.subnet, name: snet-emea-2, parent: vpc-vnet-emea-2, props: {cidr: 10.3.0.0/24}, at: [1, 1]}
+- {id: sub-landing-zone-apac, type: azure.subscription, name: landing-zone-apac, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 3, 1, 2]}
 - {id: rg-rg-lz-apac, type: azure.resource_group, name: rg-lz-apac, parent: sub-landing-zone-apac, props: {location: southeastasia}, at: [1, 1]}
 - {id: vpc-vnet-apac, type: azure.vnet, name: vnet-apac, parent: rg-rg-lz-apac, props: {cidr: 10.2.0.0/16}, at: [1, 1]}
 - {id: sub-snet-apac, type: azure.subnet, name: snet-apac, parent: vpc-vnet-apac, props: {cidr: 10.2.0.0/24}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [3, 3]}
+- {id: vpc-vnet-apac-2, type: azure.vnet, name: vnet-apac-2, parent: rg-rg-lz-apac, props: {cidr: 10.4.0.0/16}, at: [1, 2]}
+- {id: sub-snet-apac-2, type: azure.subnet, name: snet-apac-2, parent: vpc-vnet-apac-2, props: {cidr: 10.4.0.0/24}, at: [1, 1]}
+- {id: remote-users, type: common.users, name: remote-users, at: [3, 5]}
+- {id: internet, type: common.internet, name: internet, at: [2, 5]}
 - {id: vwan-global, type: azure.res.azurerm_virtual_wan, name: vwan-global, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1, 1, 4]}
 - {id: vhub-weu, type: azure.res.azurerm_virtual_hub, name: vhub-weu, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1, 1, 3]}
 - {id: vhub-sea, type: azure.res.azurerm_virtual_hub, name: vhub-sea, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 4]}
-- {id: s2s-gw-weu, type: azure.res.azurerm_vpn_gateway, name: s2s-gw-weu, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_hub_id: changeme}, at: [3, 2]}
-- {id: s2s-gw-sea, type: azure.res.azurerm_vpn_gateway, name: s2s-gw-sea, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_hub_id: changeme}, at: [3, 4]}
 - {id: er-gw-weu, type: azure.res.azurerm_express_route_gateway, name: er-gw-weu, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme, scale_units: 1,
     virtual_hub_id: changeme}, at: [3, 1]}
-- id: er-circuit-emea
-  type: azure.res.azurerm_express_route_circuit
-  name: er-circuit-emea
-  parent: rg-rg-vwan-global
-  at: [4, 1]
-  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+- {id: s2s-gw-weu, type: azure.res.azurerm_vpn_gateway, name: s2s-gw-weu, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_hub_id: changeme},
+  at: [3, 2]}
 - id: p2s-gw-weu
   type: azure.res.azurerm_point_to_site_vpn_gateway
   name: p2s-gw-weu
   parent: rg-rg-vwan-global
-  at: [3, 3]
-  props:
-    connection_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    scale_unit: 1
-    virtual_hub_id: changeme
-    vpn_server_configuration_id: changeme
-- {id: vpn-site-emea, type: azure.res.azurerm_vpn_site, name: vpn-site-emea, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_wan_id: changeme}, at: [4, 2]}
-- {id: vpn-site-apac, type: azure.res.azurerm_vpn_site, name: vpn-site-apac, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_wan_id: changeme}, at: [4, 4]}
+  props: {connection_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, scale_unit: 1, virtual_hub_id: changeme, vpn_server_configuration_id: changeme}
+  at:
+  - 3
+  - 3
+- {id: s2s-gw-sea, type: azure.res.azurerm_vpn_gateway, name: s2s-gw-sea, parent: rg-rg-vwan-global, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_hub_id: changeme},
+  at: [3, 4]}
 - {id: vm-emea, type: azure.virtual_machine, name: vm-emea, parent: sub-snet-emea, at: [1, 1]}
 - {id: vm-apac, type: azure.virtual_machine, name: vm-apac, parent: sub-snet-apac, at: [1, 1]}
 edges:
-- {from: dc-branch-emea, to: er-circuit-emea, label: ExpressRoute private peering, step: '1'}
-- {from: er-circuit-emea, to: er-gw-weu, label: ExpressRoute connection to hub, step: '2'}
-- {from: dc-branch-emea, to: vpn-site-emea, label: SD-WAN CPE / IPsec}
-- {from: vpn-site-emea, to: s2s-gw-weu, label: site-to-site VPN connection}
-- {from: dc-branch-apac, to: vpn-site-apac, label: IPsec}
-- {from: vpn-site-apac, to: s2s-gw-sea, label: site-to-site VPN connection}
+- {from: dc-hq-dc, to: er-gw-weu, label: ExpressRoute private peering, step: '1'}
+- {from: dc-branch-emea, to: s2s-gw-weu, label: site-to-site VPN (SD-WAN CPE / IPsec), step: '2'}
+- {from: dc-branch-apac, to: s2s-gw-sea, label: site-to-site VPN (IPsec)}
+- {from: dc-branch-anz, to: s2s-gw-sea, label: site-to-site VPN (IPsec)}
 - {from: vhub-weu, to: vpc-vnet-emea, label: VNet connection, link: azurerm_virtual_hub_connection}
+- {from: vhub-weu, to: vpc-vnet-emea-2, label: VNet connection, link: azurerm_virtual_hub_connection}
 - {from: vhub-sea, to: vpc-vnet-apac, label: VNet connection, link: azurerm_virtual_hub_connection}
+- {from: vhub-sea, to: vpc-vnet-apac-2, label: VNet connection, link: azurerm_virtual_hub_connection}
 - {from: vhub-weu, to: vhub-sea, label: hub-to-hub (Microsoft global network)}
-- {from: users, to: p2s-gw-weu, label: User VPN (point-to-site), step: '3'}
+- {from: remote-users, to: p2s-gw-weu, label: User VPN (point-to-site), step: '3'}
 - {from: p2s-gw-weu, to: vm-emea, label: remote user to VNet, step: '4'}
 - {from: vm-emea, to: vm-apac, label: VNet to VNet cross-region via hubs, step: '5'}
+- {from: vhub-weu, to: internet, label: internet breakout}
 - {from: vwan-global, to: vhub-weu, label: hub in WAN}
 - {from: vwan-global, to: vhub-sea, label: hub in WAN}
 steps:
-- {n: '1', text: 'datacenter:branch-emea → er-circuit-emea: ExpressRoute private peering'}
-- {n: '2', text: 'er-circuit-emea → er-gw-weu: ExpressRoute connection to hub'}
-- {n: '3', text: 'users → p2s-gw-weu: User VPN (point-to-site)'}
+- {n: '1', text: 'datacenter:hq-dc → er-gw-weu: ExpressRoute private peering'}
+- {n: '2', text: 'datacenter:branch-emea → s2s-gw-weu: site-to-site VPN (SD-WAN CPE / IPsec)'}
+- {n: '3', text: 'remote-users → p2s-gw-weu: User VPN (point-to-site)'}
 - {n: '4', text: 'p2s-gw-weu → vm-emea: remote user to VNet'}
 - {n: '5', text: 'vm-emea → vm-apac: VNet to VNet cross-region via hubs'}

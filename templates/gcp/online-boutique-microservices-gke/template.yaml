@@ -11,29 +11,54 @@ tags:
 - spanner
 image: https://github.com/GoogleCloudPlatform/microservices-demo/raw/main/docs/img/architecture-diagram.png
 source: https://github.com/GoogleCloudPlatform/microservices-demo
-description: Eleven microservices written in Go, C#, Node.js, Python and Java communicate over gRPC behind a Go frontend that is exposed by a LoadBalancer Service on a GKE cluster, with a load generator
-  producing synthetic traffic. The default in-cluster Redis cart store can be swapped for Memorystore for Redis, the product catalog can move to Cloud Spanner or AlloyDB, and Kustomize variants add Cloud
-  Service Mesh sidecars and an Artifact Registry image source.
+description: Eleven microservices written in Go, C#, Node.js, Python and Java communicate over gRPC behind a Go frontend that is exposed by a LoadBalancer Service on a GKE cluster; the frontend calls the
+  ad, recommendation, productcatalog, cart, shipping, currency and checkout services, checkout fans out to payment, email, productcatalog, cart, shipping and currency, and a load generator produces synthetic
+  traffic. The cart service stores carts in an in-cluster Redis cache that can be swapped for Memorystore for Redis, the product catalog can move to Cloud Spanner or AlloyDB, and Kustomize variants add
+  Cloud Service Mesh sidecars.
 nodes:
 - {id: prj-boutique-prj, type: gcp.project, name: boutique-prj, props: {project_id: boutique-prj-123456, project: changeme, region: europe-west1}, at: [1, 2]}
 - {id: vpc-boutique-vpc, type: gcp.vpc, name: boutique-vpc, parent: prj-boutique-prj, props: {cidr: 10.160.0.0/16}, at: [2, 1, 1, 2]}
 - {id: sub-boutique-gke-sub, type: gcp.subnetwork, name: boutique-gke-sub, parent: vpc-boutique-vpc, props: {cidr: 10.160.0.0/20, region: europe-west1}, at: [1, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: online-boutique, type: gcp.gke_cluster, name: online-boutique, parent: sub-boutique-gke-sub, at: [1, 1]}
 - {id: frontend-external, type: gcp.res.google_compute_forwarding_rule, name: frontend-external, parent: prj-boutique-prj, props: {name: changeme}, at: [1, 1]}
-- {id: cart-redis, type: gcp.res.google_redis_instance, name: cart-redis, parent: vpc-boutique-vpc, props: {memory_size_gb: 1, name: changeme}, at: [2, 1]}
-- {id: product-catalog-spanner, type: gcp.res.google_spanner_instance, name: product-catalog-spanner, parent: prj-boutique-prj, props: {config: changeme, display_name: changeme}, at: [2, 3]}
 - {id: servicemesh, type: gcp.res.google_gke_hub_feature, name: servicemesh, parent: prj-boutique-prj, props: {location: westeurope}, at: [1, 2]}
-- {id: boutique-images, type: gcp.res.google_artifact_registry_repository, name: boutique-images, parent: prj-boutique-prj, props: {format: changeme, repository_id: changeme}, at: [1, 3]}
+- {id: online-boutique, type: gcp.gke_cluster, name: online-boutique, parent: sub-boutique-gke-sub, at: [1, 1]}
+- {id: loadgenerator, type: gcp.res.google_container_node_pool, name: loadgenerator, parent: online-boutique, props: {cluster: changeme}, at: [1, 4]}
+- {id: frontend, type: gcp.res.google_container_node_pool, name: frontend, parent: online-boutique, props: {cluster: changeme}, at: [2, 4]}
+- {id: checkout, type: gcp.res.google_container_node_pool, name: checkout, parent: online-boutique, props: {cluster: changeme}, at: [2, 6]}
+- {id: payment, type: gcp.res.google_container_node_pool, name: payment, parent: online-boutique, props: {cluster: changeme}, at: [2, 7]}
+- {id: ad, type: gcp.res.google_container_node_pool, name: ad, parent: online-boutique, props: {cluster: changeme}, at: [3, 1]}
+- {id: recommendation, type: gcp.res.google_container_node_pool, name: recommendation, parent: online-boutique, props: {cluster: changeme}, at: [3, 2]}
+- {id: email, type: gcp.res.google_container_node_pool, name: email, parent: online-boutique, props: {cluster: changeme}, at: [3, 7]}
+- {id: productcatalog, type: gcp.res.google_container_node_pool, name: productcatalog, parent: online-boutique, props: {cluster: changeme}, at: [4, 2]}
+- {id: cart, type: gcp.res.google_container_node_pool, name: cart, parent: online-boutique, props: {cluster: changeme}, at: [4, 4]}
+- {id: shipping, type: gcp.res.google_container_node_pool, name: shipping, parent: online-boutique, props: {cluster: changeme}, at: [4, 5]}
+- {id: currency, type: gcp.res.google_container_node_pool, name: currency, parent: online-boutique, props: {cluster: changeme}, at: [4, 6]}
+- {id: redis-cache, type: gcp.res.google_container_node_pool, name: redis-cache, parent: online-boutique, props: {cluster: changeme}, at: [5, 4]}
+- {id: cart-redis, type: gcp.res.google_redis_instance, name: cart-redis, parent: vpc-boutique-vpc, props: {memory_size_gb: 1, name: changeme}, at: [2, 1]}
 edges:
 - {from: users, to: frontend-external, label: HTTP, step: '1'}
-- {from: frontend-external, to: online-boutique, label: frontend Service, step: '2'}
-- {from: online-boutique, to: cart-redis, label: cartservice to Memorystore, step: '3'}
-- {from: online-boutique, to: product-catalog-spanner, label: productcatalogservice to Spanner, step: '4'}
-- {from: servicemesh, to: online-boutique, label: gke hub membership}
-- {from: boutique-images, to: online-boutique, label: image pull}
+- {from: frontend-external, to: frontend, label: frontend LoadBalancer Service, step: '2'}
+- {from: servicemesh, to: online-boutique, label: fleet membership with mesh sidecars}
+- {from: loadgenerator, to: frontend, label: synthetic traffic}
+- {from: frontend, to: ad}
+- {from: frontend, to: recommendation}
+- {from: frontend, to: productcatalog}
+- {from: frontend, to: cart}
+- {from: frontend, to: shipping}
+- {from: frontend, to: currency}
+- {from: frontend, to: checkout, step: '3'}
+- {from: recommendation, to: productcatalog}
+- {from: checkout, to: payment}
+- {from: checkout, to: email}
+- {from: checkout, to: productcatalog}
+- {from: checkout, to: cart}
+- {from: checkout, to: shipping}
+- {from: checkout, to: currency}
+- {from: cart, to: redis-cache, label: in-cluster Redis, step: '4'}
+- {from: cart, to: cart-redis, label: Memorystore option}
 steps:
 - {n: '1', text: 'users → frontend-external: HTTP'}
-- {n: '2', text: 'frontend-external → online-boutique: frontend Service'}
-- {n: '3', text: 'online-boutique → cart-redis: cartservice to Memorystore'}
-- {n: '4', text: 'online-boutique → product-catalog-spanner: productcatalogservice to Spanner'}
+- {n: '2', text: 'frontend-external → frontend: frontend LoadBalancer Service'}
+- {n: '3', text: frontend → checkout}
+- {n: '4', text: 'cart → redis-cache: in-cluster Redis'}

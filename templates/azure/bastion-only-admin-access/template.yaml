@@ -12,52 +12,45 @@ tags:
 - hub-spoke
 image: https://learn.microsoft.com/en-us/azure/bastion/media/private-only-deployment/private-only-architecture.png
 source: https://learn.microsoft.com/en-us/azure/bastion/bastion-overview
-description: Azure Bastion is deployed in the hub's AzureBastionSubnet with a single public IP and brokers RDP and SSH over TLS on port 443 from the Azure portal or native clients to VMs in peered spoke
-  networks, so no VM needs a public IP, agent or open management port. Entra ID authentication with MFA and just-in-time role activation gate access, SSH keys come from Key Vault, and Bastion audit logs
-  and Premium session recordings provide the compliance trail.
+description: Azure Bastion is deployed in the AzureBastionSubnet of the hub virtual network and, in this private-only deployment, is reached on its private IP address over TLS on port 443 from the Azure
+  portal or a native client; it brokers RDP and SSH (ports 3389/22) to the private IP addresses of VMs in the peered spoke subnets, so no VM needs a public IP, agent or open management port. Network security
+  groups on the Bastion subnet and on the target VM subnets limit traffic to the Bastion control plane and to remote-protocol ports from AzureBastionSubnet, and Entra ID authentication with MFA and just-in-time
+  role activation gate access.
 nodes:
 - {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
 - {id: rg-rg-hub, type: azure.resource_group, name: rg-hub, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
-- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.0.0.0/16}, at: [2, 1, 1, 3]}
-- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-hub, props: {cidr: 10.0.4.0/26}, at: [1, 1]}
+- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-hub, props: {cidr: 10.0.4.0/26}, at: [1, 2]}
 - {id: sub-landing-zone-prod, type: azure.subscription, name: landing-zone-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 3]}
 - {id: rg-rg-prod, type: azure.resource_group, name: rg-prod, parent: sub-landing-zone-prod, props: {location: westeurope}, at: [1, 1]}
 - {id: vpc-spoke-prod, type: azure.vnet, name: spoke-prod, parent: rg-rg-prod, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-spoke-prod, props: {cidr: 10.1.1.0/24}, at: [1, 1]}
-- {id: sub-snet-data, type: azure.subnet, name: snet-data, parent: vpc-spoke-prod, props: {cidr: 10.1.2.0/24}, at: [1, 2]}
+- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-spoke-prod, props: {cidr: 10.1.1.0/24}, at: [1, 2]}
+- {id: sub-snet-data, type: azure.subnet, name: snet-data, parent: vpc-spoke-prod, props: {cidr: 10.1.2.0/24}, at: [2, 2]}
 - {id: user, type: common.user, name: user, at: [1, 1]}
-- {id: internet, type: common.internet, name: internet, at: [2, 3]}
+- {id: portal-or-native-client, type: common.client, name: portal or native client, at: [2, 1]}
+- {id: nsg-bastion, type: azure.network_security_group, name: nsg-bastion, parent: vpc-hub, at: [1, 1]}
 - {id: bastion-hub, type: azure.res.azurerm_bastion_host, name: bastion-hub, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
-- {id: vpc-rg-rg-hub, type: azure.vnet, name: main, parent: rg-rg-hub, props: {cidr: 10.200.0.0/16}, at: [1, 1]}
-- {id: nsg-bastion, type: azure.network_security_group, name: nsg-bastion, parent: vpc-rg-rg-hub, at: [1, 1]}
-- {id: ddos-hub, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-hub, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2, 1, 2]}
-- {id: kv-admin-ssh-keys, type: azure.key_vault, name: kv-admin-ssh-keys, parent: rg-rg-hub, at: [3, 1]}
-- {id: law-hub, type: azure.res.azurerm_log_analytics_workspace, name: law-hub, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 2]}
-- {id: st-session-recordings, type: azure.storage_account, name: st-session-recordings, parent: rg-rg-hub, at: [3, 3]}
+- {id: nsg-target-vms, type: azure.network_security_group, name: nsg-target-vms, parent: vpc-spoke-prod, at: [1, 1, 2, 1]}
 - {id: vm-app-1, type: azure.virtual_machine, name: vm-app-1, parent: sub-snet-app, at: [1, 1]}
+- {id: vm-app-2, type: azure.virtual_machine, name: vm-app-2, parent: sub-snet-app, at: [1, 2]}
 - id: vm-sql-1
   type: azure.res.azurerm_windows_virtual_machine
   name: vm-sql-1
   parent: sub-snet-data
-  at: [1, 1]
-  props:
-    location: westeurope
-    name: changeme
-    network_interface_ids: []
-    os_disk: {}
-    resource_group_name: changeme
-    size: changeme
+  props: {location: westeurope, name: changeme, network_interface_ids: [], os_disk: {}, resource_group_name: changeme, size: changeme}
+  at:
+  - 1
+  - 1
 edges:
-- {from: nsg-bastion, to: bastion-hub, label: allow 443 in}
-- {from: ddos-hub, to: vpc-hub, label: protects Bastion public IP}
+- {from: user, to: portal-or-native-client, label: TLS}
+- {from: portal-or-native-client, to: bastion-hub, label: 'TLS to the Bastion private IP address, port 443', step: '1'}
+- {from: nsg-bastion, to: sub-azurebastionsubnet, label: allow 443 in and 3389/22 out to the VNet}
 - {from: vpc-hub, to: vpc-spoke-prod, label: hub-spoke peering, link: azurerm_virtual_network_peering}
-- {from: kv-admin-ssh-keys, to: bastion-hub, label: SSH private key from Key Vault, step: '2'}
-- {from: bastion-hub, to: vm-app-1, label: SSH 22 to private IP, step: '3'}
-- {from: bastion-hub, to: vm-sql-1, label: RDP 3389 to private IP, step: '3'}
-- {from: internet, to: vm-app-1, label: no public IP; 22/3389 closed}
-- {from: bastion-hub, to: law-hub, label: BastionAuditLogs, step: '4'}
-- {from: bastion-hub, to: st-session-recordings, label: session recording (Premium)}
+- {from: bastion-hub, to: vm-app-1, label: 'remote protocol (SSH) to private IP address, port 22', step: '2'}
+- {from: bastion-hub, to: vm-app-2, label: 'remote protocol (SSH) to private IP address, port 22', step: '2'}
+- {from: bastion-hub, to: vm-sql-1, label: 'remote protocol (RDP) to private IP address, port 3389', step: '2'}
+- {from: nsg-target-vms, to: sub-snet-app, label: allow 3389/22 from AzureBastionSubnet only}
+- {from: nsg-target-vms, to: sub-snet-data, label: allow 3389/22 from AzureBastionSubnet only}
 steps:
-- {n: '2', text: 'kv-admin-ssh-keys → bastion-hub: SSH private key from Key Vault'}
-- {n: '3', text: 'bastion-hub → vm-app-1: SSH 22 to private IP'}
-- {n: '4', text: 'bastion-hub → law-hub: BastionAuditLogs'}
+- {n: '1', text: 'portal or native client → bastion-hub: TLS to the Bastion private IP address, port 443'}
+- {n: '2', text: 'bastion-hub → vm-app-1: remote protocol (SSH) to private IP address, port 22'}

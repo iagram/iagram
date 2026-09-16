@@ -10,32 +10,32 @@ tags:
 - edge cameras
 image: https://docs.cloud.google.com/static/architecture/images/building-a-vision-analytics-solution-architecture.svg
 source: https://docs.cloud.google.com/architecture/building-a-vision-analytics-solution
-description: Cameras and client devices upload images to Cloud Storage, whose object notifications flow through Pub/Sub to a streaming Dataflow pipeline that batches file references and calls the Cloud
-  Vision API for labels, objects and text. The annotations are written to BigQuery tables where analysts query them directly or train further models with BigQuery ML and Vertex AI.
+description: Laptops, phones and cameras upload raw images to Cloud Storage, whose object notifications flow through Pub/Sub to a streaming Dataflow pipeline that batches the file references and calls the
+  Cloud Vision API to annotate the images with labels, objects and text. The annotations are written to a BigQuery data warehouse where analysts store and query them directly.
 nodes:
-- {id: prj-vision-prj, type: gcp.project, name: vision-prj, props: {project_id: vision-prj-123456, project: changeme, region: us-central1}, at: [1, 2]}
-- {id: device, type: common.device, name: device, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 3]}
-- {id: images-bucket, type: gcp.storage_bucket, name: images-bucket, parent: prj-vision-prj, at: [1, 1]}
-- {id: image-notifications, type: gcp.pubsub_topic, name: image-notifications, parent: prj-vision-prj, at: [2, 1]}
-- {id: dataflow-sub, type: gcp.res.google_pubsub_subscription, name: dataflow-sub, parent: prj-vision-prj, props: {name: changeme, topic: changeme}, at: [3, 1]}
-- {id: vision-annotate-pipeline, type: gcp.res.google_dataflow_job, name: vision-annotate-pipeline, parent: prj-vision-prj, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}, at: [2, 2, 2, 1]}
-- {id: vision-annotations, type: gcp.bigquery_dataset, name: vision-annotations, parent: prj-vision-prj, at: [1, 3]}
-- {id: dataflow-temp, type: gcp.storage_bucket, name: dataflow-temp, parent: prj-vision-prj, at: [1, 2]}
-- {id: labelled-images, type: gcp.res.google_vertex_ai_dataset, name: labelled-images, parent: prj-vision-prj, props: {display_name: changeme, metadata_schema_uri: changeme}, at: [2, 3]}
+- {id: prj-vision-prj, type: gcp.project, name: vision-prj, props: {project_id: vision-prj-123456, project: changeme, region: us-central1}, at: [1, 2, 2, 1]}
+- {id: grp-ingest-and-trigger, type: common.group, name: ingest-and-trigger, parent: prj-vision-prj, at: [1, 1]}
+- {id: grp-process, type: common.group, name: process, parent: prj-vision-prj, at: [1, 2]}
+- {id: grp-store-and-analyze, type: common.group, name: store-and-analyze, parent: prj-vision-prj, at: [1, 3]}
+- {id: laptop, type: common.device, name: laptop, at: [1, 1]}
+- {id: phone, type: common.mobile, name: phone, at: [2, 1]}
+- {id: cloud-vision-api, type: common.saas, name: Cloud Vision API, at: [1, 3]}
+- {id: images-bucket, type: gcp.storage_bucket, name: images-bucket, parent: grp-ingest-and-trigger, at: [1, 1]}
+- {id: image-notifications, type: gcp.pubsub_topic, name: image-notifications, parent: grp-ingest-and-trigger, at: [2, 1]}
+- {id: vision-annotate-pipeline, type: gcp.res.google_dataflow_job, name: vision-annotate-pipeline, parent: grp-process, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme},
+  at: [2, 1]}
+- {id: vision-annotations, type: gcp.bigquery_dataset, name: vision-annotations, parent: grp-store-and-analyze, at: [1, 1, 2, 1]}
 edges:
-- {from: device, to: images-bucket, label: upload images, step: '1'}
+- {from: laptop, to: images-bucket, label: upload raw images, step: '1'}
+- {from: phone, to: images-bucket, label: upload raw images, step: '1'}
 - {from: images-bucket, to: image-notifications, label: object finalize, step: '2'}
-- {from: image-notifications, to: dataflow-sub, label: subscription}
-- {from: dataflow-sub, to: vision-annotate-pipeline, label: pull file references, step: '3'}
-- {from: vision-annotate-pipeline, to: dataflow-temp, label: staging}
-- {from: vision-annotate-pipeline, to: vision-annotations, label: write annotations, step: '4'}
-- {from: vision-annotations, to: labelled-images, label: export training set, step: '5'}
-- {from: users, to: vision-annotations, label: SQL analysis, step: '6'}
+- {from: image-notifications, to: vision-annotate-pipeline, label: file references, step: '3'}
+- {from: vision-annotate-pipeline, to: cloud-vision-api, label: annotate image batch, step: '4'}
+- {from: cloud-vision-api, to: images-bucket, label: read raw images}
+- {from: vision-annotate-pipeline, to: vision-annotations, label: write annotations, step: '5'}
 steps:
-- {n: '1', text: 'device → images-bucket: upload images'}
+- {n: '1', text: 'laptop → images-bucket: upload raw images'}
 - {n: '2', text: 'images-bucket → image-notifications: object finalize'}
-- {n: '3', text: 'dataflow-sub → vision-annotate-pipeline: pull file references'}
-- {n: '4', text: 'vision-annotate-pipeline → vision-annotations: write annotations'}
-- {n: '5', text: 'vision-annotations → labelled-images: export training set'}
-- {n: '6', text: 'users → vision-annotations: SQL analysis'}
+- {n: '3', text: 'image-notifications → vision-annotate-pipeline: file references'}
+- {n: '4', text: 'vision-annotate-pipeline → Cloud Vision API: annotate image batch'}
+- {n: '5', text: 'vision-annotate-pipeline → vision-annotations: write annotations'}

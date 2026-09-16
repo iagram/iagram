@@ -303,40 +303,54 @@
   category: devops
   tags: [devsecops, codepipeline, codebuild, security hub, sast, dast, sca, elastic beanstalk]
   source: https://aws.amazon.com/blogs/devops/building-end-to-end-aws-devsecops-ci-cd-pipeline-with-open-source-sca-sast-and-dast-tools/
-  description: A CodeCommit push starts a CodePipeline in which CodeBuild projects run OWASP Dependency-Check (SCA) and SonarQube or PHPStan (SAST) in parallel; a Lambda function converts findings to the AWS Security Finding Format and imports them into Security Hub, failing the stage when vulnerabilities exceed the threshold. Clean builds are deployed by CodeDeploy to an Elastic Beanstalk staging environment where OWASP ZAP runs DAST, and after a manual approval the release is promoted to production while EventBridge, SNS and Parameter Store handle notifications and secrets.
+  description: A CodeCommit push starts a CodePipeline in which CodeBuild projects run OWASP Dependency-Check (SCA) and SonarQube or PHPStan (SAST) in parallel, reading scanner secrets from Parameter Store; a Lambda function converts the scan reports to the AWS Security Finding Format and imports them into Security Hub, failing the stage when vulnerabilities exceed the threshold. Clean builds are deployed by CodeDeploy to an Elastic Beanstalk staging application where a CodeBuild project runs OWASP ZAP (DAST), and after a manual approval a second CodeDeploy stage promotes the release to production; EventBridge rules publish pipeline state changes to an SNS topic that emails the team, CloudWatch Logs keeps the build logs, and IAM roles, CloudTrail and AWS Config provide audit and governance.
   containers:
     - region: us-east-1
-      groups: [{label: pipeline}, {label: security}, {label: environments}]
+      groups: [{label: pipeline, at: [2, 1, 1, 4]}, {label: security, at: [3, 2, 1, 3]}, {label: environments, at: [1, 5, 2, 1]}, {label: audit and governance, at: [3, 1]}]
   elements:
-    - {tf: aws_codecommit_repository, name: app-repo, in: group:pipeline}
-    - {tf: aws_codepipeline, name: devsecops-pipeline, in: group:pipeline}
-    - {tf: aws_codebuild_project, name: sca-dependency-check, in: group:pipeline}
-    - {tf: aws_codebuild_project, name: sast-sonarqube, in: group:pipeline}
-    - {tf: aws_codebuild_project, name: dast-owasp-zap, in: group:pipeline}
-    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline}
-    - {tf: aws_lambda_function, name: findings-importer, in: group:security}
-    - {tf: aws_securityhub_account, name: security-hub, in: group:security}
-    - {tf: aws_ssm_parameter, name: scanner-credentials, in: group:security}
-    - {tf: aws_elastic_beanstalk_environment, name: staging-env, in: group:environments}
-    - {tf: aws_elastic_beanstalk_environment, name: prod-env, in: group:environments}
-    - {tf: aws_cloudwatch_event_rule, name: build-state-rule, in: region}
-    - {tf: aws_sns_topic, name: pipeline-notifications, in: region}
-  actors: [user]
+    - {tf: aws_sns_topic, name: pipeline-notifications, in: region, at: [1, 1]}
+    - {tf: aws_cloudwatch_event_rule, name: build-state-rule, in: region, at: [1, 2]}
+    - {tf: aws_cloudwatch_log_group, name: build-logs, in: region, at: [1, 3]}
+    - {tf: aws_ssm_parameter, name: scanner-credentials, in: region, at: [1, 4]}
+    - {tf: aws_codepipeline, name: devsecops-pipeline, in: group:pipeline, at: [1, 1, 1, 6]}
+    - {tf: aws_codecommit_repository, name: app-repo, in: group:pipeline, at: [2, 1]}
+    - {tf: aws_codebuild_project, name: sca-dependency-check, in: group:pipeline, at: [2, 2]}
+    - {tf: aws_codebuild_project, name: sast-sonarqube, in: group:pipeline, at: [2, 3]}
+    - {tf: aws_codedeploy_app, name: deploy-staging, in: group:pipeline, at: [2, 4]}
+    - {tf: aws_codebuild_project, name: dast-owasp-zap, in: group:pipeline, at: [2, 5]}
+    - {tf: aws_codedeploy_app, name: deploy-production, in: group:pipeline, at: [2, 6]}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline, at: [3, 1]}
+    - {tf: aws_lambda_function, name: findings-importer, in: group:security, at: [1, 1]}
+    - {tf: aws_securityhub_account, name: security-hub, in: group:security, at: [1, 2]}
+    - {tf: aws_elastic_beanstalk_application, name: staging-app, in: group:environments, at: [1, 1]}
+    - {tf: aws_elastic_beanstalk_application, name: production-app, in: group:environments, at: [2, 1]}
+    - {tf: aws_iam_role, name: pipeline-roles, in: group:audit and governance, at: [1, 1]}
+    - {tf: aws_cloudtrail, name: audit-trail, in: group:audit and governance, at: [2, 1]}
+    - {tf: aws_config_configuration_recorder, name: config-recorder, in: group:audit and governance, at: [3, 1]}
+  actors: [{type: users, at: [1, 1]}]
   flows:
-    - {from: user, to: app-repo, label: git push, step: 1}
-    - {from: app-repo, to: devsecops-pipeline, label: source stage, step: 2}
-    - {from: devsecops-pipeline, to: sca-dependency-check, label: SCA scan, step: 3}
+    - {from: users, to: app-repo, label: git commit, step: 1}
+    - {from: app-repo, to: devsecops-pipeline, label: source stage}
+    - {from: app-repo, to: pipeline-artifacts, label: source artifacts}
+    - {from: scanner-credentials, to: sast-sonarqube, label: scanner secrets, step: 2}
+    - {from: devsecops-pipeline, to: sca-dependency-check, label: build + test (SCA), step: 3}
     - {from: devsecops-pipeline, to: sast-sonarqube, label: SAST scan (parallel), step: 3}
     - {from: sca-dependency-check, to: findings-importer, label: scan report, step: 4}
     - {from: sast-sonarqube, to: findings-importer, label: scan report, step: 4}
-    - {from: findings-importer, to: security-hub, label: BatchImportFindings (ASFF), step: 5}
-    - {from: scanner-credentials, to: sast-sonarqube, label: SonarQube token}
-    - {from: devsecops-pipeline, to: staging-env, label: CodeDeploy to staging, step: 6}
-    - {from: dast-owasp-zap, to: staging-env, label: DAST against staging URL, step: 7}
-    - {from: dast-owasp-zap, to: findings-importer, label: ZAP report, step: 8}
-    - {from: devsecops-pipeline, to: prod-env, label: manual approval then deploy, step: 9}
-    - {from: build-state-rule, to: pipeline-notifications, link: aws_cloudwatch_event_target}
-    - {from: devsecops-pipeline, to: pipeline-artifacts, label: artifacts}
+    - {from: pipeline-artifacts, to: findings-importer, label: stored scan reports}
+    - {from: findings-importer, to: security-hub, label: BatchImportFindings (ASFF)}
+    - {from: devsecops-pipeline, to: deploy-staging, label: deploy stage}
+    - {from: deploy-staging, to: staging-app, label: deploy to staging, step: 5}
+    - {from: dast-owasp-zap, to: findings-importer, label: ZAP report, step: 6}
+    - {from: dast-owasp-zap, to: staging-app, label: OWASP ZAP DAST against staging URL, step: 7}
+    - {from: deploy-staging, to: deploy-production, label: manual approval, step: 8}
+    - {from: deploy-production, to: production-app, label: deploy to production, step: 9}
+    - {from: build-state-rule, to: pipeline-notifications, link: aws_cloudwatch_event_target, label: pipeline state change, step: 10}
+    - {from: pipeline-notifications, to: users, label: email}
+    - {from: devsecops-pipeline, to: build-logs, label: build logs}
+    - {from: pipeline-roles, to: devsecops-pipeline, label: IAM roles, step: 11}
+    - {from: config-recorder, to: devsecops-pipeline, label: AWS Config compliance, step: 12}
+    - {from: audit-trail, to: devsecops-pipeline, label: API audit trail}
 
 - slug: ecr-build-publish-container-image-pipeline
   title: Container image pipeline with the ECRBuildAndPublish action and ECS deploy
@@ -375,32 +389,25 @@
   category: devops
   tags: [terraform, codepipeline, codebuild, checkov, terraform test, infrastructure testing]
   source: https://aws.amazon.com/blogs/devops/terraform-ci-cd-and-testing-on-aws-with-the-new-terraform-test-framework/
-  description: Pushes to a CodeCommit repository trigger a CodePipeline whose first CodeBuild project runs Checkov static analysis against the Terraform module and whose second project runs terraform init, terraform validate and terraform test to create, assert and destroy ephemeral resources. Test runs use a CodeBuild service role scoped to the resources under test, and pipeline artifacts and test reports are stored in S3 so a failing check blocks promotion of the module.
+  description: Pushes to a CodeCommit repository holding a Terraform module trigger a CodePipeline that stores the source in an artifacts S3 bucket and runs two CodeBuild projects, the first pulling the bridgecrew/checkov image from Docker Hub to run Checkov static analysis and the second pulling the hashicorp/terraform image to run terraform init, terraform validate and terraform test, which creates, asserts and destroys ephemeral resources. Test state is managed by Terraform for the duration of the run, and a failing check blocks promotion of the module.
   containers:
     - region: us-east-1
-      groups: [{label: pipeline}, {label: ephemeral test resources}]
+      groups: [{label: pipeline, at: [1, 1]}]
   elements:
-    - {tf: aws_codecommit_repository, name: terraform-module-repo, in: group:pipeline}
-    - {tf: aws_codepipeline, name: terraform-ci-pipeline, in: group:pipeline}
-    - {tf: aws_codebuild_project, name: checkov-static-analysis, in: group:pipeline}
-    - {tf: aws_codebuild_project, name: terraform-test-runner, in: group:pipeline}
-    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline}
-    - {tf: aws_cloudwatch_log_group, name: codebuild-logs, in: group:pipeline}
-    - {tf: aws_iam_role, name: terraform-test-role, in: region}
-    - {tf: aws_s3_bucket, name: module-under-test-bucket, in: group:ephemeral test resources}
-    - {tf: aws_sns_topic, name: ci-notifications, in: region}
-  actors: [user]
+    - {tf: aws_codecommit_repository, name: terraform-module-repo, in: group:pipeline, at: [1, 1, 2, 1]}
+    - {tf: aws_codepipeline, name: terraform-ci-pipeline, in: group:pipeline, at: [1, 2, 1, 2]}
+    - {tf: aws_s3_bucket, name: pipeline-artifacts, in: group:pipeline, at: [1, 4]}
+    - {tf: aws_codebuild_project, name: checkov-static-analysis, in: group:pipeline, at: [2, 2]}
+    - {tf: aws_codebuild_project, name: terraform-test-runner, in: group:pipeline, at: [2, 3]}
+  actors: [{type: user, name: developer, at: [1, 1]}, {type: saas, name: Docker Hub checkov image, at: [2, 2]}, {type: saas, name: Docker Hub terraform image, at: [2, 3]}]
   flows:
-    - {from: user, to: terraform-module-repo, label: git push module + tests/*.tftest.hcl, step: 1}
+    - {from: developer, to: terraform-module-repo, label: git push module + tests/*.tftest.hcl, step: 1}
     - {from: terraform-module-repo, to: terraform-ci-pipeline, label: source action, step: 2}
+    - {from: terraform-ci-pipeline, to: pipeline-artifacts, label: artifacts}
     - {from: terraform-ci-pipeline, to: checkov-static-analysis, label: checkov -d ., step: 3}
     - {from: terraform-ci-pipeline, to: terraform-test-runner, label: terraform init / validate / test, step: 4}
-    - {from: terraform-test-runner, to: module-under-test-bucket, label: apply, assert, destroy, step: 5}
-    - {from: terraform-test-role, to: terraform-test-runner, label: scoped service role}
-    - {from: terraform-test-runner, to: pipeline-artifacts, label: test reports}
-    - {from: checkov-static-analysis, to: codebuild-logs, label: logs}
-    - {from: terraform-test-runner, to: codebuild-logs, label: logs}
-    - {from: terraform-ci-pipeline, to: ci-notifications, label: pipeline state change notification}
+    - {from: Docker Hub checkov image, to: checkov-static-analysis, label: pull bridgecrew/checkov image}
+    - {from: Docker Hub terraform image, to: terraform-test-runner, label: pull hashicorp/terraform image}
 
 - slug: ssm-patch-policy-quick-setup-organization
   title: Organization-wide EC2 patching with Systems Manager patch policies
@@ -587,45 +594,47 @@
   category: observability
   tags: [opensearch, fluent bit, kinesis, lambda, centralized logging, solutions library]
   source: https://docs.aws.amazon.com/solutions/latest/centralized-logging-with-opensearch/application-log-analytics-pipeline.html
-  description: Fluent Bit agents installed on EC2 instances and EKS nodes by Systems Manager ship application logs to a Kinesis Data Streams log buffer; a Log Processor Lambda function triggered by the buffer parses the records and bulk-indexes them into an Amazon OpenSearch Service domain, writing failed batches to an S3 backup bucket. A separate service log pipeline loads AWS service logs (ALB, CloudFront, CloudTrail, WAF) from S3 through SQS notifications, and the solution console built on CloudFront, AppSync, Cognito and DynamoDB provisions each pipeline on demand with Step Functions.
+  description: Fluent Bit agents on EC2 instances (with the SSM Agent) and EKS nodes in a sources VPC upload application logs over a VPC peering connection and interface endpoints into a log buffer in the main account, either a Kinesis Data Streams stream or an S3 log bucket. In option (a) the stream emits events through Amazon EventBridge that trigger the Log Processor Lambda function, which reads the logs and bulk-uploads them into the Amazon OpenSearch Service domain; in option (b) S3 notifications on an SQS queue feed an OpenSearch Ingestion Service pipeline that reads the bucket and bulk-uploads to the same domain, and both paths write failed records to an S3 backup bucket.
   containers:
     - region: us-east-1
-      groups: [{label: solution console}, {label: log pipelines}]
+      groups: [{label: log buffer, at: [1, 3]}, {label: log processing, at: [1, 4]}]
       vpcs:
+        - name: sources
+          cidr: 10.71.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: app, cidr: 10.71.1.0/24, az: a, public: false, at: [1, 1]}
         - name: logging
           cidr: 10.70.0.0/16
+          at: [1, 5]
           subnets:
-            - {name: private-a, cidr: 10.70.1.0/24, az: a, public: false}
-            - {name: private-b, cidr: 10.70.2.0/24, az: b, public: false}
+            - {name: private-a, cidr: 10.70.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: private-b, cidr: 10.70.2.0/24, az: b, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_cloudfront_distribution, name: console-cdn, in: group:solution console}
-    - {tf: aws_appsync_graphql_api, name: console-api, in: group:solution console}
-    - {tf: aws_dynamodb_table, name: pipeline-metadata, in: group:solution console}
-    - {tf: aws_sfn_state_machine, name: pipeline-provisioner, in: group:solution console}
-    - {tf: aws_instance, name: app-server-fluent-bit, in: subnet:private-a}
-    - {tf: aws_eks_cluster, name: app-cluster-fluent-bit, in: subnet:private-b}
-    - {tf: aws_kinesis_stream, name: app-log-buffer, in: group:log pipelines}
-    - {tf: aws_lambda_function, name: log-processor, in: group:log pipelines}
-    - {tf: aws_s3_bucket, name: service-log-bucket, in: group:log pipelines}
-    - {tf: aws_sqs_queue, name: service-log-notifications, in: group:log pipelines}
-    - {tf: aws_s3_bucket, name: failed-records-backup, in: group:log pipelines}
-    - {tf: aws_opensearch_domain, name: central-logs, in: vpc:logging}
-    - {tf: aws_ssm_document, name: install-fluent-bit, in: region}
-  actors: [user]
+    - {tf: aws_instance, name: app-server-fluent-bit, in: subnet:app, at: [1, 1]}
+    - {tf: aws_eks_cluster, name: app-cluster-fluent-bit, in: subnet:app, at: [1, 2]}
+    - {tf: aws_vpc_endpoint, name: log-buffer-endpoints, in: vpc:sources, at: [2, 1]}
+    - {tf: aws_kinesis_stream, name: app-log-buffer, in: group:log buffer, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: app-log-bucket, in: group:log buffer, at: [2, 1]}
+    - {tf: aws_cloudwatch_event_rule, name: log-event-rule, in: group:log processing, at: [1, 1]}
+    - {tf: aws_lambda_function, name: log-processor, in: group:log processing, at: [1, 2]}
+    - {tf: aws_sqs_queue, name: log-queue, in: group:log processing, at: [2, 1, 1, 2]}
+    - {tf: aws_opensearch_domain, name: central-logs, in: vpc:logging, at: [2, 1, 1, 2]}
+    - {tf: aws_s3_bucket, name: failed-records-backup, in: region, at: [2, 5]}
   flows:
-    - {from: user, to: console-cdn, label: create log pipeline, step: 1}
-    - {from: console-cdn, to: console-api, label: GraphQL}
-    - {from: console-api, to: pipeline-provisioner, label: deploy pipeline stack, step: 2}
-    - {from: install-fluent-bit, to: app-server-fluent-bit, label: SSM installs and configures Fluent Bit, step: 3}
-    - {from: app-server-fluent-bit, to: app-log-buffer, label: Fluent Bit kinesis output, step: 4}
-    - {from: app-cluster-fluent-bit, to: app-log-buffer, label: Fluent Bit DaemonSet, step: 4}
-    - {from: app-log-buffer, to: log-processor, link: aws_lambda_event_source_mapping, step: 5}
-    - {from: log-processor, to: central-logs, label: _bulk index, step: 6}
-    - {from: log-processor, to: failed-records-backup, label: failed records}
-    - {from: service-log-bucket, to: service-log-notifications, label: S3 event notification}
-    - {from: service-log-notifications, to: log-processor, link: aws_lambda_event_source_mapping}
-    - {from: console-api, to: pipeline-metadata, label: pipeline state}
-    - {from: user, to: central-logs, label: OpenSearch Dashboards}
+    - {from: app-server-fluent-bit, to: app-log-buffer, label: Upload logs (Fluent Bit), step: 1}
+    - {from: app-cluster-fluent-bit, to: app-log-buffer, label: Upload logs (Fluent Bit DaemonSet), step: 1}
+    - {from: app-server-fluent-bit, to: app-log-bucket, label: Upload logs (S3 buffer), step: 1}
+    - {from: vpc:sources, to: vpc:logging, link: aws_vpc_peering_connection}
+    - {from: log-buffer-endpoints, to: app-log-buffer, label: interface endpoints}
+    - {from: app-log-buffer, to: log-event-rule, label: Send events, step: 2}
+    - {from: log-event-rule, to: log-processor, link: aws_cloudwatch_event_target, label: Trigger, step: 3}
+    - {from: log-processor, to: app-log-buffer, label: Read logs, step: 4}
+    - {from: log-processor, to: central-logs, label: Bulk upload, step: 5}
+    - {from: log-processor, to: failed-records-backup, label: Failed records, step: 6}
+    - {from: app-log-bucket, to: log-queue, label: Send events (S3 notification), step: 2}
+    - {from: log-queue, to: central-logs, label: OpenSearch Ingestion pipeline bulk upload, step: 5}
+    - {from: log-queue, to: failed-records-backup, label: Failed logs, step: 6}
 
 - slug: cloudwatch-synthetics-canary-endpoint-monitoring
   title: Endpoint and user-journey monitoring with CloudWatch Synthetics canaries

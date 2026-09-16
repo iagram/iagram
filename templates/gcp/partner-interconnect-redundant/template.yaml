@@ -9,30 +9,35 @@ tags:
 - redundancy
 image: https://docs.cloud.google.com/static/network-connectivity/docs/interconnect/images/layer2-basic.svg
 source: https://docs.cloud.google.com/network-connectivity/docs/interconnect/concepts/partner-overview
-description: On-premises connects to Google Cloud through a supported service provider; two Partner Interconnect VLAN attachments in separate edge availability domains terminate on a Cloud Router in the
-  VPC. For Layer 3 partners the provider's routers peer with the Cloud Router; for Layer 2 partners the customer's on-premises router runs BGP directly to Google.
+description: On-premises connects to Google Cloud through a supported service provider whose peering edge meets the Google peering edge in a colocation facility; two Partner Interconnect VLAN attachments
+  in separate edge availability domains terminate on a Cloud Router in the VPC region. For Layer 3 partners the provider's routers peer with the Cloud Router; for Layer 2 partners the customer's on-premises
+  router runs BGP directly to the Cloud Router.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 3]}
-- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west3}, at: [1, 1]}
-- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-net-hub, props: {cidr: 10.50.0.0/16}, at: [1, 1]}
-- {id: sub-hybrid-ew3, type: gcp.subnetwork, name: hybrid-ew3, parent: vpc-hybrid-vpc, props: {cidr: 10.50.0.0/24, region: europe-west3}, at: [1, 1, 1, 2]}
-- {id: saas, type: common.saas, name: saas, at: [1, 2]}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west3}, at: [1, 1, 2, 1]}
+- {id: grp-colocation-facility, type: common.group, name: Colocation facility, parent: prj-net-hub, at: [2, 2]}
+- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-net-hub, props: {cidr: 10.50.0.0/16}, at: [1, 1, 2, 1]}
+- {id: sub-hybrid-ew3, type: gcp.subnetwork, name: hybrid-ew3, parent: vpc-hybrid-vpc, props: {cidr: 10.50.0.0/24, region: europe-west3}, at: [1, 1, 1, 3]}
+- {id: service-provider-peering-edge-provider-side, type: common.saas, name: service provider peering edge (provider side), at: [1, 2]}
+- {id: service-provider-peering-edge-colocation, type: common.saas, name: service provider peering edge (colocation), at: [2, 2]}
+- {id: on-premises-subnet, type: common.client, name: on-premises subnet, at: [1, 3]}
+- {id: on-premises-router, type: common.server, name: on-premises router, at: [2, 3]}
 - {id: partner-router, type: gcp.res.google_compute_router, name: partner-router, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}, at: [2, 1]}
 - {id: partner-vlan-ead1, type: gcp.res.google_compute_interconnect_attachment, name: partner-vlan-ead1, parent: vpc-hybrid-vpc, props: {name: changeme, router: changeme}, at: [2, 2]}
 - {id: partner-vlan-ead2, type: gcp.res.google_compute_interconnect_attachment, name: partner-vlan-ead2, parent: vpc-hybrid-vpc, props: {name: changeme, router: changeme}, at: [2, 3]}
-- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-hybrid-ew3, at: [1, 1]}
-- {id: allow-onprem-ingress, type: gcp.firewall_rule, name: allow-onprem-ingress, parent: vpc-hybrid-vpc, at: [1, 3]}
-- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub, at: [1, 2]}
-- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}, at: [1, 1]}
-- {id: onprem-router, type: gcp.res.google_compute_router, name: onprem-router, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}, at: [1, 1]}
+- {id: google-peering-edge, type: gcp.res.google_compute_interconnect, name: google-peering-edge, parent: grp-colocation-facility, props: {interconnect_type: changeme, link_type: changeme, location: westeurope,
+    name: changeme, requested_link_count: 1}, at: [1, 1]}
 edges:
-- {from: onprem-router, to: saas, label: circuit to service provider, step: '1'}
-- {from: saas, to: partner-vlan-ead1, label: partner VLAN attachment primary, step: '2'}
-- {from: saas, to: partner-vlan-ead2, label: partner VLAN attachment redundant, step: '2'}
-- {from: partner-router, to: onprem-router, label: BGP, step: '3'}
-- {from: app-vm, to: onprem-router, label: private traffic, step: '4'}
+- {from: on-premises-subnet, to: on-premises-router, label: on-premises traffic}
+- {from: on-premises-router, to: service-provider-peering-edge-provider-side, label: circuit to the service provider network, step: '1'}
+- {from: service-provider-peering-edge-provider-side, to: service-provider-peering-edge-colocation, label: service provider network, step: '2'}
+- {from: service-provider-peering-edge-colocation, to: google-peering-edge, label: cross-connect in the colocation facility, step: '3'}
+- {from: google-peering-edge, to: partner-vlan-ead1, label: partner VLAN attachment EAD 1, step: '4'}
+- {from: google-peering-edge, to: partner-vlan-ead2, label: partner VLAN attachment EAD 2, step: '4'}
+- {from: partner-router, to: on-premises-router, label: Border Gateway Protocol, step: '5'}
+- {from: sub-hybrid-ew3, to: partner-router, label: routes to on-premises}
 steps:
-- {n: '1', text: 'onprem-router → saas: circuit to service provider'}
-- {n: '2', text: 'saas → partner-vlan-ead1: partner VLAN attachment primary'}
-- {n: '3', text: 'partner-router → onprem-router: BGP'}
-- {n: '4', text: 'app-vm → onprem-router: private traffic'}
+- {n: '1', text: 'on-premises router → service provider peering edge (provider side): circuit to the service provider network'}
+- {n: '2', text: 'service provider peering edge (provider side) → service provider peering edge (colocation): service provider network'}
+- {n: '3', text: 'service provider peering edge (colocation) → google-peering-edge: cross-connect in the colocation facility'}
+- {n: '4', text: 'google-peering-edge → partner-vlan-ead1: partner VLAN attachment EAD 1'}
+- {n: '5', text: 'partner-router → on-premises router: Border Gateway Protocol'}

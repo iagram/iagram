@@ -11,64 +11,87 @@ tags:
 - cloud adoption framework
 image: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/media/azure-landing-zone-conceptual-architecture.svg
 source: https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/
-description: A platform landing zone (management group hierarchy plus centralized management, connectivity and identity subscriptions) provides governance and shared services for application landing zone
-  subscriptions placed under Corp, Online or Sandbox management groups. Azure Policy assigned at management group scope is inherited by every subscription, while the connectivity hub (firewall, gateways,
-  DDoS) and the central Log Analytics workspace serve all workloads.
+description: In the Cloud Adoption Framework conceptual architecture a platform landing zone (the management group hierarchy with its Azure Policy guardrails plus the centralized management, connectivity
+  and identity subscriptions) provides governance and centralized resources for application landing zone subscriptions that each host one Azure workload, and Microsoft Foundry with Foundry IQ can be added
+  to any workload. Unified identity, security and governance come from Microsoft Entra, Microsoft Defender and Microsoft Agent 365 above the landing zone, while the central Log Analytics workspace and the
+  hub firewall are shared by every workload.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1]}
-- {id: sub-prod, type: azure.subscription, name: prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
-- {id: rg-rg-prod, type: azure.resource_group, name: rg-prod, parent: sub-prod, props: {location: westeurope}, at: [1, 1]}
-- {id: internet, type: common.internet, name: internet, at: [1, 3]}
-- {id: mg-platform, type: azure.res.azurerm_management_group, name: mg-platform, parent: rg-rg-prod, at: [1, 1]}
-- {id: mg-landing-zones, type: azure.res.azurerm_management_group, name: mg-landing-zones, parent: rg-rg-prod, at: [1, 2, 1, 2]}
-- {id: mg-sandbox, type: azure.res.azurerm_management_group, name: mg-sandbox, parent: rg-rg-prod, at: [1, 4]}
-- {id: alz-guardrails, type: azure.res.azurerm_management_group_policy_assignment, name: alz-guardrails, parent: rg-rg-prod, props: {management_group_id: changeme, name: changeme, policy_definition_id: changeme}, at: [1, 5]}
-- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: rg-rg-prod, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 4]}
-- {id: hub-fw, type: azure.res.azurerm_firewall, name: hub-fw, parent: rg-rg-prod, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [2, 2]}
-- id: hub-ergw
-  type: azure.res.azurerm_virtual_network_gateway
-  name: hub-ergw
-  parent: rg-rg-prod
-  at: [2, 1]
-  props:
-    ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: changeme
-    type: changeme
-- {id: ddos-plan, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-plan, parent: rg-rg-prod, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 3]}
+- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1]}
+- {id: rg-rg-management, type: azure.resource_group, name: rg-management, parent: sub-management, props: {location: westeurope}, at: [1, 1]}
+- {id: grp-management-groups, type: common.group, name: management-groups, parent: rg-rg-management, at: [1, 1]}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 2]}
+- {id: rg-rg-connectivity, type: azure.resource_group, name: rg-connectivity, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-connectivity, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub, props: {cidr: 10.0.1.0/26}, at: [1, 1]}
+- {id: sub-identity, type: azure.subscription, name: identity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 3]}
+- {id: rg-rg-identity, type: azure.resource_group, name: rg-identity, parent: sub-identity, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-vnet-identity, type: azure.vnet, name: vnet-identity, parent: rg-rg-identity, props: {cidr: 10.10.0.0/24}, at: [1, 1]}
+- {id: sub-snet-adds, type: azure.subnet, name: snet-adds, parent: vpc-vnet-identity, props: {cidr: 10.10.0.0/26}, at: [1, 1]}
+- {id: sub-corp-app-1, type: azure.subscription, name: corp-app-1, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [3, 1]}
+- {id: rg-rg-corp-app-1, type: azure.resource_group, name: rg-corp-app-1, parent: sub-corp-app-1, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-vnet-corp-app-1, type: azure.vnet, name: vnet-corp-app-1, parent: rg-rg-corp-app-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: sub-snet-corp-app, type: azure.subnet, name: snet-corp-app, parent: vpc-vnet-corp-app-1, props: {cidr: 10.1.1.0/24}, at: [1, 1]}
+- {id: sub-online-app-1, type: azure.subscription, name: online-app-1, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [3, 2]}
+- {id: rg-rg-online-app-1, type: azure.resource_group, name: rg-online-app-1, parent: sub-online-app-1, props: {location: westeurope}, at: [1, 1]}
+- {id: sub-sandbox-1, type: azure.subscription, name: sandbox-1, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [3, 3]}
+- {id: rg-rg-sandbox, type: azure.resource_group, name: rg-sandbox, parent: sub-sandbox-1, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-vnet-sandbox, type: azure.vnet, name: vnet-sandbox, parent: rg-rg-sandbox, props: {cidr: 10.2.0.0/16}, at: [1, 1]}
+- {id: sub-snet-sandbox, type: azure.subnet, name: snet-sandbox, parent: vpc-vnet-sandbox, props: {cidr: 10.2.1.0/24}, at: [1, 1]}
+- {id: sub-ai-foundry, type: azure.subscription, name: ai-foundry, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [4, 2]}
+- {id: rg-rg-ai-foundry, type: azure.resource_group, name: rg-ai-foundry, parent: sub-ai-foundry, props: {location: westeurope}, at: [1, 1]}
+- {id: microsoft-agent-365, type: common.saas, name: Microsoft Agent 365, at: [1, 1]}
+- {id: microsoft-defender, type: common.saas, name: Microsoft Defender, at: [1, 2]}
+- {id: microsoft-entra-id, type: common.idp, name: Microsoft Entra ID, at: [1, 3]}
+- {id: mg-platform, type: azure.res.azurerm_management_group, name: mg-platform, parent: grp-management-groups, at: [1, 1]}
+- {id: mg-landing-zones, type: azure.res.azurerm_management_group, name: mg-landing-zones, parent: grp-management-groups, at: [1, 2]}
+- {id: mg-sandbox, type: azure.res.azurerm_management_group, name: mg-sandbox, parent: grp-management-groups, at: [1, 3]}
+- {id: alz-guardrails, type: azure.res.azurerm_management_group_policy_assignment, name: alz-guardrails, parent: grp-management-groups, props: {management_group_id: changeme, name: changeme, policy_definition_id: changeme},
+  at: [1, 4]}
+- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: rg-rg-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
+- {id: hub-fw, type: azure.res.azurerm_firewall, name: hub-fw, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme},
+  at: [1, 1]}
 - id: adds-dc-1
   type: azure.res.azurerm_windows_virtual_machine
   name: adds-dc-1
-  parent: rg-rg-prod
-  at: [2, 5]
-  props:
-    location: westeurope
-    name: changeme
-    network_interface_ids: []
-    os_disk: {}
-    resource_group_name: changeme
-    size: changeme
-- {id: vpc-rg-rg-prod, type: azure.vnet, name: main, parent: rg-rg-prod, props: {cidr: 10.200.0.0/16}, at: [3, 1, 1, 3]}
-- {id: sub-rg-rg-prod, type: azure.subnet, name: main, parent: vpc-rg-rg-prod, props: {cidr: 10.200.0.0/24}, at: [1, 1]}
-- {id: vm-corp-app, type: azure.virtual_machine, name: vm-corp-app, parent: sub-rg-rg-prod, at: [1, 1]}
+  parent: sub-snet-adds
+  props: {location: westeurope, name: changeme, network_interface_ids: [], os_disk: {}, resource_group_name: changeme, size: changeme}
+  at:
+  - 1
+  - 1
+- {id: vm-corp-app, type: azure.virtual_machine, name: vm-corp-app, parent: sub-snet-corp-app, at: [1, 1]}
 - id: web-online-app
   type: azure.res.azurerm_linux_web_app
   name: web-online-app
-  parent: rg-rg-prod
-  at: [3, 4, 1, 2]
+  parent: rg-rg-online-app-1
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
-- {id: vm-sandbox, type: azure.virtual_machine, name: vm-sandbox, parent: sub-rg-rg-prod, at: [1, 2]}
+  at:
+  - 1
+  - 1
+- {id: vm-sandbox, type: azure.virtual_machine, name: vm-sandbox, parent: sub-snet-sandbox, at: [1, 1]}
+- id: foundry
+  type: azure.res.azurerm_ai_foundry
+  name: foundry
+  parent: rg-rg-ai-foundry
+  props: {identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+  at:
+  - 1
+  - 1
+- {id: foundry-iq, type: azure.res.azurerm_search_service, name: foundry-iq, parent: rg-rg-ai-foundry, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}, at: [
+    1, 2]}
 edges:
-- {from: dc-on-premises, to: hub-ergw, label: ExpressRoute / VPN, step: '1'}
-- {from: vm-corp-app, to: hub-fw, label: 0.0.0.0/0 via UDR, step: '2'}
-- {from: hub-fw, to: internet, label: SNAT egress, step: '3'}
-- {from: vm-corp-app, to: adds-dc-1, label: domain authentication, step: '4'}
+- {from: microsoft-entra-id, to: mg-platform, label: unified identity}
+- {from: microsoft-defender, to: law-central, label: unified security}
+- {from: microsoft-agent-365, to: foundry, label: control agents}
+- {from: alz-guardrails, to: sub-corp-app-1, label: policy inheritance}
+- {from: alz-guardrails, to: sub-online-app-1, label: policy inheritance}
+- {from: alz-guardrails, to: sub-sandbox-1, label: policy inheritance}
+- {from: vpc-hub, to: vpc-vnet-corp-app-1, label: hub-spoke peering, link: azurerm_virtual_network_peering}
+- {from: vpc-hub, to: vpc-vnet-identity, label: hub-spoke peering, link: azurerm_virtual_network_peering}
+- {from: vm-corp-app, to: hub-fw, label: 0.0.0.0/0 via UDR}
+- {from: vm-corp-app, to: adds-dc-1, label: domain authentication}
 - {from: hub-fw, to: law-central, label: diagnostics}
 - {from: web-online-app, to: law-central, label: diagnostics}
-steps:
-- {n: '1', text: 'datacenter → hub-ergw: ExpressRoute / VPN'}
-- {n: '2', text: 'vm-corp-app → hub-fw: 0.0.0.0/0 via UDR'}
-- {n: '3', text: 'hub-fw → internet: SNAT egress'}
-- {n: '4', text: 'vm-corp-app → adds-dc-1: domain authentication'}
+- {from: foundry, to: sub-corp-app-1, label: add Foundry to the workload}
+- {from: foundry, to: sub-online-app-1, label: add Foundry to the workload}
+- {from: foundry, to: sub-sandbox-1, label: add Foundry to the workload}
+- {from: foundry-iq, to: foundry, label: Foundry IQ knowledge}

@@ -11,13 +11,13 @@ tags:
 - cloud map
 image: https://user-images.githubusercontent.com/879348/86045951-39762880-ba01-11ea-9a47-fc9278600154.png
 source: https://aws.github.io/copilot-cli/docs/concepts/services/
-description: Copilot provisions an environment (VPC with public and private subnets, an ECS cluster, a Cloud Map namespace and an ALB) and then deploys a Load Balanced Web Service that receives internet
-  traffic through the ALB plus a Backend Service that is reachable only by service discovery name inside the environment. A storage addon adds an Aurora Serverless v2 PostgreSQL cluster whose credentials
-  are injected into the backend as a secret, each service gets its own ECR repository, and a Copilot pipeline can build and deploy on every push.
+description: Copilot provisions an environment (a VPC with a public and a private subnet in each of two Availability Zones, an ECS cluster and an ALB) and deploys a Load Balanced Web Service whose Fargate
+  tasks run in the public subnet of every zone; the ALB listener rule forwards internet traffic to a target group that fans out to the tasks in both zones. A Backend Service reachable only by its service
+  discovery name inside the environment completes the application tier, and a storage addon adds an Aurora Serverless v2 PostgreSQL cluster in the private subnets.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-copilot-env, type: aws.vpc, name: copilot-env, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 2, 4, 1]}
+- {id: vpc-copilot-env, type: aws.vpc, name: copilot-env, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
 - {id: az-copilot-env-a, type: aws.availability_zone, name: a, parent: vpc-copilot-env, props: {zone: a}, at: [1, 1, 4, 1]}
 - {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-copilot-env-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
 - {id: az-copilot-env-b, type: aws.availability_zone, name: b, parent: vpc-copilot-env, props: {zone: b}, at: [1, 3, 4, 1]}
@@ -25,47 +25,26 @@ nodes:
 - {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-copilot-env-a, props: {cidr: 10.0.2.0/24, az: a, public: false}, at: [2, 1]}
 - {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-copilot-env-b, props: {cidr: 10.0.3.0/24, az: b, public: false}, at: [2, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: user, type: common.user, name: user, at: [2, 1]}
-- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-copilot-env, at: [1, 2]}
-- {id: env-alb, type: aws.alb, name: env-alb, parent: vpc-copilot-env, at: [2, 2]}
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
+- {id: env-alb, type: aws.alb, name: env-alb, parent: vpc-copilot-env, at: [1, 2]}
+- {id: web-target-group, type: aws.res.aws_lb_target_group, name: web-target-group, parent: vpc-copilot-env, at: [2, 2]}
 - {id: env-cluster, type: aws.res.aws_ecs_cluster, name: env-cluster, parent: vpc-copilot-env, props: {name: changeme}, at: [3, 2]}
-- {id: env-namespace, type: aws.res.aws_service_discovery_private_dns_namespace, name: env-namespace, parent: vpc-copilot-env, props: {name: changeme, vpc: changeme}, at: [4, 2]}
 - {id: frontend-lb-web-service, type: aws.res.aws_ecs_service, name: frontend-lb-web-service, parent: env-cluster, props: {name: changeme}, at: [1, 1]}
 - {id: api-backend-service, type: aws.res.aws_ecs_service, name: api-backend-service, parent: env-cluster, props: {name: changeme}, at: [2, 1]}
+- {id: web-task-a, type: aws.res.aws_ecs_task_definition, name: web-task-a, parent: sub-public-a, props: {container_definitions: changeme, family: changeme}, at: [1, 1]}
+- {id: web-task-b, type: aws.res.aws_ecs_task_definition, name: web-task-b, parent: sub-public-b, props: {container_definitions: changeme, family: changeme}, at: [1, 1]}
 - {id: api-aurora-serverless, type: aws.res.aws_rds_cluster, name: api-aurora-serverless, parent: sub-private-b, props: {engine: changeme}, at: [1, 1]}
-- {id: api-aurora-secret, type: aws.res.aws_secretsmanager_secret, name: api-aurora-secret, parent: reg-us-east-1, at: [4, 1]}
-- {id: frontend-image, type: aws.res.aws_ecr_repository, name: frontend-image, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
-- {id: api-image, type: aws.res.aws_ecr_repository, name: api-image, parent: reg-us-east-1, props: {name: changeme}, at: [3, 1]}
-- id: copilot-pipeline
-  type: aws.res.aws_codepipeline
-  name: copilot-pipeline
-  parent: reg-us-east-1
-  at: [1, 1]
-  props:
-    artifact_store: []
-    name: changeme
-    role_arn: changeme
-    stage: []
 edges:
-- {from: user, to: copilot-pipeline, label: git push (copilot pipeline deploy), step: '1'}
-- {from: copilot-pipeline, to: frontend-image, label: build and push, step: '2'}
-- {from: copilot-pipeline, to: api-image, label: build and push, step: '2'}
-- {from: users, to: igw, label: HTTPS, step: '3'}
-- {from: igw, to: env-alb, step: '4'}
-- {from: env-alb, to: frontend-lb-web-service, label: path / to Load Balanced Web Service, step: '5'}
-- {from: frontend-lb-web-service, to: api-backend-service, label: 'http://api.<env>.<app>.local:8080', step: '6'}
-- {from: api-backend-service, to: env-namespace, label: service discovery registration}
-- {from: api-backend-service, to: api-aurora-secret, label: secret injected as env var}
-- {from: api-backend-service, to: api-aurora-serverless, label: PostgreSQL, step: '7'}
-- {from: frontend-image, to: frontend-lb-web-service, label: image pull}
-- {from: api-image, to: api-backend-service, label: image pull}
-- {from: api-backend-service, to: nat-a, label: outbound}
+- {from: users, to: env-alb, label: HTTPS, step: '1'}
+- {from: env-alb, to: web-target-group, label: 'listener rule: forward', step: '2'}
+- {from: web-target-group, to: web-task-a, label: 'HTTP :80', step: '3'}
+- {from: web-target-group, to: web-task-b, label: 'HTTP :80', step: '3'}
+- {from: frontend-lb-web-service, to: web-task-a, label: one Load Balanced Web Service task per AZ}
+- {from: frontend-lb-web-service, to: web-task-b, label: one Load Balanced Web Service task per AZ}
+- {from: frontend-lb-web-service, to: api-backend-service, label: 'http://api.<env>.<app>.local:8080', step: '4'}
+- {from: api-backend-service, to: api-aurora-serverless, label: PostgreSQL, step: '5'}
 steps:
-- {n: '1', text: 'user → copilot-pipeline: git push (copilot pipeline deploy)'}
-- {n: '2', text: 'copilot-pipeline → frontend-image: build and push'}
-- {n: '3', text: 'users → igw: HTTPS'}
-- {n: '4', text: igw → env-alb}
-- {n: '5', text: 'env-alb → frontend-lb-web-service: path / to Load Balanced Web Service'}
-- {n: '6', text: 'frontend-lb-web-service → api-backend-service: http://api.<env>.<app>.local:8080'}
-- {n: '7', text: 'api-backend-service → api-aurora-serverless: PostgreSQL'}
+- {n: '1', text: 'users → env-alb: HTTPS'}
+- {n: '2', text: 'env-alb → web-target-group: listener rule: forward'}
+- {n: '3', text: 'web-target-group → web-task-a: HTTP :80'}
+- {n: '4', text: 'frontend-lb-web-service → api-backend-service: http://api.<env>.<app>.local:8080'}
+- {n: '5', text: 'api-backend-service → api-aurora-serverless: PostgreSQL'}

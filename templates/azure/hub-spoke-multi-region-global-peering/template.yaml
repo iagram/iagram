@@ -10,19 +10,22 @@ tags:
 - gateway transit
 image: https://learn.microsoft.com/en-us/azure/virtual-network/media/virtual-networks-peering-overview/local-or-remote-gateway-in-peered-virual-network.png
 source: https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-peering-overview
-description: Two regional hubs each host an Azure Firewall and a virtual network gateway, with local spokes attached by regional peering using gateway transit. The hubs are joined by global virtual network
-  peering so spoke-to-spoke traffic between regions stays on the Microsoft backbone and is inspected by the firewall in each hub.
+description: Two regional hubs each host an Azure Firewall acting as the network virtual appliance, a workload subnet and a virtual network gateway, with local spokes attached by regional peering that allows
+  gateway transit while the spokes use the remote gateway. A user-defined route table on each spoke subnet sends traffic to the hub firewall, and the hubs are joined by global virtual network peering so
+  spoke-to-spoke traffic between regions stays on the Microsoft backbone and is inspected in each hub.
 nodes:
 - {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 2]}
 - {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1]}
 - {id: rg-rg-hub-weu, type: azure.resource_group, name: rg-hub-weu, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
-- {id: vpc-hub-weu, type: azure.vnet, name: hub-weu, parent: rg-rg-hub-weu, props: {cidr: 10.0.0.0/16}, at: [1, 1, 1, 2]}
+- {id: vpc-hub-weu, type: azure.vnet, name: hub-weu, parent: rg-rg-hub-weu, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
 - {id: sub-weu-azurefirewallsubnet, type: azure.subnet, name: weu-AzureFirewallSubnet, parent: vpc-hub-weu, props: {cidr: 10.0.0.0/26}, at: [1, 1]}
-- {id: sub-weu-gatewaysubnet, type: azure.subnet, name: weu-GatewaySubnet, parent: vpc-hub-weu, props: {cidr: 10.0.1.0/27}, at: [1, 2]}
+- {id: sub-snet-hub-weu, type: azure.subnet, name: snet-hub-weu, parent: vpc-hub-weu, props: {cidr: 10.0.2.0/24}, at: [1, 2]}
+- {id: sub-weu-gatewaysubnet, type: azure.subnet, name: weu-GatewaySubnet, parent: vpc-hub-weu, props: {cidr: 10.0.1.0/27}, at: [1, 3]}
 - {id: rg-rg-hub-neu, type: azure.resource_group, name: rg-hub-neu, parent: sub-connectivity, props: {location: northeurope}, at: [1, 2]}
 - {id: vpc-hub-neu, type: azure.vnet, name: hub-neu, parent: rg-rg-hub-neu, props: {cidr: 10.10.0.0/16}, at: [1, 1]}
 - {id: sub-neu-azurefirewallsubnet, type: azure.subnet, name: neu-AzureFirewallSubnet, parent: vpc-hub-neu, props: {cidr: 10.10.0.0/26}, at: [1, 1]}
-- {id: sub-neu-gatewaysubnet, type: azure.subnet, name: neu-GatewaySubnet, parent: vpc-hub-neu, props: {cidr: 10.10.1.0/27}, at: [1, 2]}
+- {id: sub-snet-hub-neu, type: azure.subnet, name: snet-hub-neu, parent: vpc-hub-neu, props: {cidr: 10.10.2.0/24}, at: [1, 2]}
+- {id: sub-neu-gatewaysubnet, type: azure.subnet, name: neu-GatewaySubnet, parent: vpc-hub-neu, props: {cidr: 10.10.1.0/27}, at: [1, 3]}
 - {id: sub-landing-zone, type: azure.subscription, name: landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1, 1, 2]}
 - {id: rg-rg-spoke-weu, type: azure.resource_group, name: rg-spoke-weu, parent: sub-landing-zone, props: {location: westeurope}, at: [1, 1]}
 - {id: vpc-spoke-weu, type: azure.vnet, name: spoke-weu, parent: rg-rg-spoke-weu, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
@@ -30,48 +33,48 @@ nodes:
 - {id: rg-rg-spoke-neu, type: azure.resource_group, name: rg-spoke-neu, parent: sub-landing-zone, props: {location: northeurope}, at: [1, 2]}
 - {id: vpc-spoke-neu, type: azure.vnet, name: spoke-neu, parent: rg-rg-spoke-neu, props: {cidr: 10.11.0.0/16}, at: [1, 1]}
 - {id: sub-snet-app-neu, type: azure.subnet, name: snet-app-neu, parent: vpc-spoke-neu, props: {cidr: 10.11.0.0/24}, at: [1, 1]}
-- {id: fw-weu, type: azure.res.azurerm_firewall, name: fw-weu, parent: sub-weu-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [1, 1]}
-- {id: fw-neu, type: azure.res.azurerm_firewall, name: fw-neu, parent: sub-neu-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [1, 1]}
+- {id: fw-weu, type: azure.res.azurerm_firewall, name: fw-weu, parent: sub-weu-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme},
+  at: [1, 1]}
+- {id: fw-neu, type: azure.res.azurerm_firewall, name: fw-neu, parent: sub-neu-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme},
+  at: [1, 1]}
+- {id: vm-hub-weu, type: azure.virtual_machine, name: vm-hub-weu, parent: sub-snet-hub-weu, at: [1, 1]}
+- {id: vm-hub-neu, type: azure.virtual_machine, name: vm-hub-neu, parent: sub-snet-hub-neu, at: [1, 1]}
 - id: gw-weu
   type: azure.res.azurerm_virtual_network_gateway
   name: gw-weu
   parent: sub-weu-gatewaysubnet
-  at: [1, 1]
-  props:
-    ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: changeme
-    type: changeme
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme, type: changeme}
+  at:
+  - 1
+  - 1
 - id: gw-neu
   type: azure.res.azurerm_virtual_network_gateway
   name: gw-neu
   parent: sub-neu-gatewaysubnet
-  at: [1, 1]
-  props:
-    ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: changeme
-    type: changeme
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme, type: changeme}
+  at:
+  - 1
+  - 1
 - {id: vm-weu, type: azure.virtual_machine, name: vm-weu, parent: sub-snet-app-weu, at: [1, 1]}
 - {id: vm-neu, type: azure.virtual_machine, name: vm-neu, parent: sub-snet-app-neu, at: [1, 1]}
-- {id: law-network, type: azure.res.azurerm_log_analytics_workspace, name: law-network, parent: rg-rg-hub-weu, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
-- {id: nw-weu, type: azure.res.azurerm_network_watcher, name: nw-weu, parent: rg-rg-hub-weu, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 2]}
+- {id: rt-spoke-weu, type: azure.res.azurerm_route_table, name: rt-spoke-weu, parent: rg-rg-spoke-weu, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2]}
+- {id: rt-spoke-neu, type: azure.res.azurerm_route_table, name: rt-spoke-neu, parent: rg-rg-spoke-neu, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2]}
 edges:
 - {from: vpc-hub-weu, to: vpc-hub-neu, label: global VNet peering (hub to hub), link: azurerm_virtual_network_peering}
-- {from: vpc-hub-weu, to: vpc-spoke-weu, label: regional peering (gateway transit), link: azurerm_virtual_network_peering}
-- {from: vpc-hub-neu, to: vpc-spoke-neu, label: regional peering (gateway transit), link: azurerm_virtual_network_peering}
-- {from: vm-weu, to: fw-weu, label: UDR to hub firewall, step: '1'}
+- {from: vpc-hub-weu, to: vpc-spoke-weu, label: regional peering (allow gateway transit), link: azurerm_virtual_network_peering}
+- {from: vpc-hub-neu, to: vpc-spoke-neu, label: regional peering (allow gateway transit), link: azurerm_virtual_network_peering}
+- {from: rt-spoke-weu, to: sub-snet-app-weu, label: UDR to the hub NVA}
+- {from: rt-spoke-neu, to: sub-snet-app-neu, label: UDR to the hub NVA}
+- {from: vm-weu, to: fw-weu, label: UDR to hub firewall (NVA), step: '1'}
 - {from: fw-weu, to: fw-neu, label: cross-region over global peering, step: '2'}
 - {from: fw-neu, to: vm-neu, label: inspected delivery, step: '3'}
-- {from: dc-on-premises, to: gw-weu, label: ExpressRoute (primary region)}
-- {from: dc-on-premises, to: gw-neu, label: ExpressRoute (secondary region)}
-- {from: fw-weu, to: law-network, label: firewall logs}
-- {from: nw-weu, to: vm-weu, label: connection troubleshoot / effective routes}
+- {from: fw-weu, to: vm-hub-weu, label: hub workload}
+- {from: fw-neu, to: vm-hub-neu, label: hub workload}
+- {from: vm-weu, to: gw-weu, label: use remote gateway}
+- {from: vm-neu, to: gw-neu, label: use remote gateway}
+- {from: gw-weu, to: dc-on-premises, label: to on-premises (primary region)}
+- {from: gw-neu, to: dc-on-premises, label: to on-premises (secondary region)}
 steps:
-- {n: '1', text: 'vm-weu → fw-weu: UDR to hub firewall'}
+- {n: '1', text: 'vm-weu → fw-weu: UDR to hub firewall (NVA)'}
 - {n: '2', text: 'fw-weu → fw-neu: cross-region over global peering'}
 - {n: '3', text: 'fw-neu → vm-neu: inspected delivery'}

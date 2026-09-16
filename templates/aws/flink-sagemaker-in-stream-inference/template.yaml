@@ -9,34 +9,43 @@ tags:
 - async io
 image: https://d2908q01vomqb2.cloudfront.net/fc074d501302eb2b93e2554793fcaf50b3bf7291/2020/11/23/architecture-for-the-solution-1-1024x535.png
 source: https://aws.amazon.com/blogs/architecture/realtime-in-stream-inference-kinesis-sagemaker-flink/
-description: Credit card transactions are ingested into Kinesis Data Streams with the Kinesis Producer Library and processed by a Managed Service for Apache Flink application. The Flink job uses asynchronous
-  I/O to call an API Gateway endpoint that fronts a SageMaker inference endpoint, so each transaction is scored for fraud in-stream instead of in batch.
+description: A producer on an EC2 instance writes credit card transactions into Kinesis Data Streams with the Kinesis Producer Library and a Managed Service for Apache Flink application processes them.
+  The Flink job uses asynchronous I/O to call an API Gateway endpoint backed by a Lambda function, or optionally a SageMaker inference endpoint, so each transaction is scored for fraud in-stream while CloudWatch
+  metrics and alarms monitor the application.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod, at: [1,2]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1,1]}
-- {id: grp-streaming, type: common.group, name: streaming, parent: reg-us-east-1, at: [2,1]}
-- {id: grp-inference, type: common.group, name: inference, parent: reg-us-east-1, at: [2,2]}
-- {id: client, type: common.client, name: client, at: [1,1]}
-- {id: transactions-stream, type: aws.res.aws_kinesis_stream, name: transactions-stream, parent: grp-streaming, props: {name: changeme}, at: [1,1]}
-- {id: fraud-flink-app, type: aws.res.aws_kinesisanalyticsv2_application, name: fraud-flink-app, parent: grp-streaming, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}, at: [1,2]}
-- {id: scored-transactions, type: aws.res.aws_kinesis_stream, name: scored-transactions, parent: grp-streaming, props: {name: changeme}, at: [1,3]}
-- {id: inference-api, type: aws.res.aws_api_gateway_rest_api, name: inference-api, parent: grp-inference, props: {name: changeme}, at: [1,1]}
-- {id: fraud-endpoint, type: aws.res.aws_sagemaker_endpoint, name: fraud-endpoint, parent: grp-inference, props: {endpoint_config_name: changeme}, at: [2,1]}
-- {id: model-artifacts, type: aws.s3_bucket, name: model-artifacts, parent: reg-us-east-1, at: [3,2]}
-- {id: flink-logs, type: aws.res.aws_cloudwatch_log_group, name: flink-logs, parent: reg-us-east-1, at: [1,1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-cloudwatch-console, type: common.group, name: CloudWatch console, parent: reg-us-east-1, at: [1, 2, 1, 2]}
+- {id: grp-options, type: common.group, name: options, parent: reg-us-east-1, at: [3, 4, 1, 2]}
+- id: transaction-producer
+  type: aws.res.aws_ec2_fleet
+  name: transaction-producer
+  parent: reg-us-east-1
+  props: {launch_template_config: [], target_capacity_specification: {}}
+  at:
+  - 2
+  - 1
+- {id: transactions-stream, type: aws.res.aws_kinesis_stream, name: transactions-stream, parent: reg-us-east-1, props: {name: changeme}, at: [2, 2]}
+- {id: fraud-flink-app, type: aws.res.aws_kinesisanalyticsv2_application, name: fraud-flink-app, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme},
+  at: [2, 3]}
+- {id: inference-api, type: aws.res.aws_api_gateway_rest_api, name: inference-api, parent: reg-us-east-1, props: {name: changeme}, at: [2, 4]}
+- {id: inference-function, type: aws.lambda_function, name: inference-function, parent: reg-us-east-1, at: [2, 5]}
+- {id: fraud-endpoint, type: aws.res.aws_sagemaker_endpoint, name: fraud-endpoint, parent: grp-options, props: {endpoint_config_name: changeme}, at: [1, 1]}
+- {id: flink-logs, type: aws.res.aws_cloudwatch_log_group, name: flink-logs, parent: grp-cloudwatch-console, at: [1, 1]}
+- {id: flink-alarms, type: aws.res.aws_cloudwatch_metric_alarm, name: flink-alarms, parent: grp-cloudwatch-console, props: {alarm_name: changeme}, at: [1, 2]}
 edges:
-- {from: client, to: transactions-stream, label: KPL PutRecords, step: '1'}
+- {from: transaction-producer, to: transactions-stream, label: KPL PutRecords, step: '1'}
 - {from: transactions-stream, to: fraud-flink-app, label: Flink Kinesis source, step: '2'}
 - {from: fraud-flink-app, to: inference-api, label: async HTTPS invoke, step: '3'}
-- {from: inference-api, to: fraud-endpoint, label: InvokeEndpoint, step: '4'}
-- {from: model-artifacts, to: fraud-endpoint, label: model artifact, step: '5'}
-- {from: fraud-flink-app, to: scored-transactions, label: enriched records, step: '6'}
-- {from: fraud-flink-app, to: flink-logs, label: logs, step: '7'}
+- {from: inference-api, to: inference-function, label: Lambda integration, step: '4'}
+- {from: inference-api, to: fraud-endpoint, label: 'option: InvokeEndpoint', step: '5'}
+- {from: fraud-flink-app, to: flink-logs, label: metrics and logs, step: '6'}
+- {from: flink-logs, to: flink-alarms, label: alarms, step: '7'}
 steps:
-- {n: '1', text: 'client → transactions-stream: KPL PutRecords'}
+- {n: '1', text: 'transaction-producer → transactions-stream: KPL PutRecords'}
 - {n: '2', text: 'transactions-stream → fraud-flink-app: Flink Kinesis source'}
 - {n: '3', text: 'fraud-flink-app → inference-api: async HTTPS invoke'}
-- {n: '4', text: 'inference-api → fraud-endpoint: InvokeEndpoint'}
-- {n: '5', text: 'model-artifacts → fraud-endpoint: model artifact'}
-- {n: '6', text: 'fraud-flink-app → scored-transactions: enriched records'}
-- {n: '7', text: 'fraud-flink-app → flink-logs: logs'}
+- {n: '4', text: 'inference-api → inference-function: Lambda integration'}
+- {n: '5', text: 'inference-api → fraud-endpoint: option: InvokeEndpoint'}
+- {n: '6', text: 'fraud-flink-app → flink-logs: metrics and logs'}
+- {n: '7', text: 'flink-logs → flink-alarms: alarms'}

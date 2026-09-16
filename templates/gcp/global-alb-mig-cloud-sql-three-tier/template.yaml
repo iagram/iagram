@@ -10,61 +10,49 @@ tags:
 - compute engine
 image: https://docs.cloud.google.com/static/load-balancing/images/https-load-balancer-simple-gxlb.svg
 source: https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-compute
-description: A global forwarding rule on a reserved anycast IP hands HTTPS to a target HTTPS proxy holding a Google-managed certificate; the URL map routes to a backend service whose backends are regional
-  managed instance groups built from an instance template and watched by an HTTP health check. The web tier reads session state from Memorystore for Redis and persists data in a regional Cloud SQL instance
-  reached over private IP, while a Cloud NAT gateway gives the private VMs outbound access for package updates.
+description: Internet clients reach the load balancer's global forwarding rule on a reserved IPv4 or IPv6 address, which hands HTTPS to a target HTTPS proxy holding a Google-managed SSL certificate; the
+  URL map routes to a backend service whose backend is a managed instance group of web VMs in a zone of the web subnet. The web tier reads session state from Memorystore for Redis and persists data in a
+  Cloud SQL instance reached over private IP in the same VPC.
 nodes:
 - {id: prj-web-tier-prj, type: gcp.project, name: web-tier-prj, props: {project_id: web-tier-prj-123456, project: changeme, region: europe-west1}, at: [1, 2]}
-- {id: vpc-web-vpc, type: gcp.vpc, name: web-vpc, parent: prj-web-tier-prj, props: {cidr: 10.10.0.0/16}, at: [1, 5, 2, 1]}
+- {id: grp-load-balancer, type: common.group, name: load-balancer, parent: prj-web-tier-prj, at: [1, 1]}
+- {id: vpc-web-vpc, type: gcp.vpc, name: web-vpc, parent: prj-web-tier-prj, props: {cidr: 10.10.0.0/16}, at: [1, 2]}
 - {id: sub-web-sub, type: gcp.subnetwork, name: web-sub, parent: vpc-web-vpc, props: {cidr: 10.10.1.0/24, region: europe-west1}, at: [1, 1, 2, 1]}
 - {id: sub-data-sub, type: gcp.subnetwork, name: data-sub, parent: vpc-web-vpc, props: {cidr: 10.10.2.0/24, region: europe-west1}, at: [1, 2]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: internet, type: common.internet, name: internet, at: [1, 3]}
-- {id: web-ip, type: gcp.res.google_compute_global_address, name: web-ip, parent: prj-web-tier-prj, props: {name: changeme}, at: [2, 1]}
-- {id: web-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: web-https-rule, parent: prj-web-tier-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
-- {id: web-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: web-https-proxy, parent: prj-web-tier-prj, props: {name: changeme, url_map: changeme}, at: [1, 2]}
-- {id: web-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: web-cert, parent: prj-web-tier-prj, at: [2, 2]}
-- {id: web-url-map, type: gcp.res.google_compute_url_map, name: web-url-map, parent: prj-web-tier-prj, props: {name: changeme}, at: [1, 3]}
-- {id: web-backend, type: gcp.res.google_compute_backend_service, name: web-backend, parent: prj-web-tier-prj, props: {name: changeme}, at: [1, 4]}
-- {id: web-hc, type: gcp.res.google_compute_health_check, name: web-hc, parent: prj-web-tier-prj, props: {name: changeme}, at: [2, 4]}
-- id: web-template
-  type: gcp.res.google_compute_instance_template
-  name: web-template
-  parent: prj-web-tier-prj
-  props:
-    disk: []
-    machine_type: changeme
-  at: [2, 3]
+- {id: internet, type: common.internet, name: internet, at: [1, 1]}
+- {id: web-ip, type: gcp.res.google_compute_global_address, name: web-ip, parent: grp-load-balancer, props: {name: changeme}, at: [2, 1]}
+- {id: web-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: web-https-rule, parent: grp-load-balancer, props: {name: changeme, target: changeme}, at: [1, 1]}
+- {id: web-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: web-https-proxy, parent: grp-load-balancer, props: {name: changeme, url_map: changeme}, at: [1, 2]}
+- {id: web-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: web-cert, parent: grp-load-balancer, at: [2, 2]}
+- {id: web-url-map, type: gcp.res.google_compute_url_map, name: web-url-map, parent: grp-load-balancer, props: {name: changeme}, at: [1, 3]}
+- {id: web-backend, type: gcp.res.google_compute_backend_service, name: web-backend, parent: grp-load-balancer, props: {name: changeme}, at: [1, 4]}
 - id: web-mig
-  type: gcp.res.google_compute_region_instance_group_manager
+  type: gcp.res.google_compute_instance_group_manager
   name: web-mig
   parent: sub-web-sub
-  props:
-    base_instance_name: changeme
-    name: changeme
-    version: []
-- {id: session-cache, type: gcp.res.google_redis_instance, name: session-cache, parent: sub-data-sub, props: {memory_size_gb: 1, name: changeme}}
+  props: {base_instance_name: changeme, name: changeme, version: []}
+  at:
+  - 1
+  - 1
+- {id: web-vm, type: gcp.compute_instance, name: web-vm, parent: sub-web-sub, at: [2, 1]}
+- {id: session-cache, type: gcp.res.google_redis_instance, name: session-cache, parent: sub-data-sub, props: {memory_size_gb: 1, name: changeme}, at: [1, 1]}
 - {id: app-db, type: gcp.cloud_sql_instance, name: app-db, parent: vpc-web-vpc, at: [2, 2]}
-- {id: web-router, type: gcp.res.google_compute_router, name: web-router, parent: vpc-web-vpc, props: {name: changeme, network: changeme}, at: [3, 1]}
-- {id: web-nat, type: gcp.res.google_compute_router_nat, name: web-nat, parent: vpc-web-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [3, 2]}
 edges:
-- {from: users, to: web-https-rule, label: HTTPS to anycast IP, step: '1'}
+- {from: internet, to: web-https-rule, label: HTTPS, step: '1'}
+- {from: web-ip, to: web-https-rule, label: IPv4 or IPv6 address}
 - {from: web-https-rule, to: web-https-proxy, step: '2'}
-- {from: web-cert, to: web-https-proxy, label: Google-managed certificate}
+- {from: web-cert, to: web-https-proxy, label: SSL certificate}
 - {from: web-https-proxy, to: web-url-map, step: '3'}
 - {from: web-url-map, to: web-backend, step: '4'}
 - {from: web-backend, to: web-mig, label: HTTP to healthy instances, step: '5'}
-- {from: web-hc, to: web-mig, label: health checks}
-- {from: web-template, to: web-mig, label: instance template}
-- {from: web-mig, to: session-cache, label: Redis sessions, step: '6'}
-- {from: web-mig, to: app-db, label: private IP SQL, step: '7'}
-- {from: web-mig, to: web-nat, label: outbound updates}
-- {from: web-nat, to: internet}
+- {from: web-mig, to: web-vm, label: managed VMs in the zone}
+- {from: web-vm, to: session-cache, label: Redis sessions, step: '6'}
+- {from: web-vm, to: app-db, label: private IP SQL, step: '7'}
 steps:
-- {n: '1', text: 'users → web-https-rule: HTTPS to anycast IP'}
+- {n: '1', text: 'internet → web-https-rule: HTTPS'}
 - {n: '2', text: web-https-rule → web-https-proxy}
 - {n: '3', text: web-https-proxy → web-url-map}
 - {n: '4', text: web-url-map → web-backend}
 - {n: '5', text: 'web-backend → web-mig: HTTP to healthy instances'}
-- {n: '6', text: 'web-mig → session-cache: Redis sessions'}
-- {n: '7', text: 'web-mig → app-db: private IP SQL'}
+- {n: '6', text: 'web-vm → session-cache: Redis sessions'}
+- {n: '7', text: 'web-vm → app-db: private IP SQL'}

@@ -11,8 +11,8 @@ tags:
 - quicksight
 image: https://d2908q01vomqb2.cloudfront.net/b6692ea5df920cad691c20319a6fffd7a4a766b8/2023/07/31/BDB-2503-image001.png
 source: https://aws.amazon.com/blogs/big-data/create-an-apache-hudi-based-near-real-time-transactional-data-lake-using-aws-dms-amazon-kinesis-aws-glue-streaming-etl-and-data-visualization-using-amazon-quicksight
-description: DMS captures changes from an RDS database and publishes them to a Kinesis data stream, where a Glue streaming job consumes them continuously and upserts into Apache Hudi tables on S3. The Hudi
-  tables are registered in the Glue Data Catalog so Athena queries and QuickSight dashboards reflect inserts and updates within minutes.
+description: DMS captures changes from an RDS MySQL database and publishes them to a Kinesis data stream, where a Glue streaming job using the Apache Hudi connector consumes them continuously and upserts
+  into Hudi tables on S3. The Hudi tables are registered in the Glue Data Catalog so Athena ad hoc queries and QuickSight dashboards reflect inserts and updates within minutes.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
@@ -27,8 +27,11 @@ nodes:
   type: aws.res.aws_glue_job
   name: hudi-streaming-job
   parent: reg-us-east-1
-  at: [2, 3]
   props: {command: {}, name: changeme, role_arn: changeme}
+  at:
+  - 2
+  - 3
+- {id: hudi-connector, type: aws.res.aws_glue_connection, name: hudi-connector, parent: reg-us-east-1, props: {name: changeme}, at: [3, 3]}
 - {id: hudi-lake, type: aws.s3_bucket, name: hudi-lake, parent: reg-us-east-1, at: [2, 4]}
 - {id: hudi-db, type: aws.res.aws_glue_catalog_database, name: hudi-db, parent: reg-us-east-1, props: {name: changeme}, at: [1, 3]}
 - {id: hudi-athena, type: aws.res.aws_athena_workgroup, name: hudi-athena, parent: reg-us-east-1, props: {name: changeme}, at: [1, 5]}
@@ -36,24 +39,29 @@ nodes:
   type: aws.res.aws_quicksight_data_source
   name: hudi-dashboards
   parent: reg-us-east-1
-  at: [2, 5]
   props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+  at:
+  - 2
+  - 5
 - {id: az-vpc-source-b, type: aws.availability_zone, name: b, parent: vpc-source, props: {zone: b}, at: [1, 2]}
 - {id: sub-vpc-source-b, type: aws.subnet, name: private-b, parent: az-vpc-source-b, props: {cidr: 10.120.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: source-rds, to: cdc-dms, label: transaction log CDC, step: '1'}
 - {from: cdc-dms, to: cdc-stream, label: change records, step: '2'}
 - {from: cdc-stream, to: hudi-streaming-job, label: Glue streaming consumer, step: '3'}
+- {from: hudi-connector, to: hudi-streaming-job, label: Apache Hudi connector, step: '3'}
 - {from: hudi-streaming-job, to: hudi-lake, label: Hudi upserts, step: '4'}
 - {from: hudi-streaming-job, to: hudi-db, label: register Hudi tables, step: '4'}
-- {from: hudi-athena, to: hudi-db, label: SQL, step: '5'}
-- {from: hudi-dashboards, to: hudi-athena, step: '6'}
-- {from: users, to: hudi-dashboards, step: '7'}
+- {from: hudi-db, to: hudi-athena, label: table metadata, step: '5'}
+- {from: hudi-lake, to: hudi-athena, label: query Hudi tables, step: '5'}
+- {from: hudi-athena, to: hudi-dashboards, label: dashboard, step: '6'}
+- {from: hudi-athena, to: users, label: ad hoc analysis, step: '7'}
+- {from: hudi-dashboards, to: users, label: dashboard, step: '7'}
 steps:
 - {n: '1', text: 'source-rds → cdc-dms: transaction log CDC'}
 - {n: '2', text: 'cdc-dms → cdc-stream: change records'}
 - {n: '3', text: 'cdc-stream → hudi-streaming-job: Glue streaming consumer'}
 - {n: '4', text: 'hudi-streaming-job → hudi-lake: Hudi upserts'}
-- {n: '5', text: 'hudi-athena → hudi-db: SQL'}
-- {n: '6', text: hudi-dashboards → hudi-athena}
-- {n: '7', text: users → hudi-dashboards}
+- {n: '5', text: 'hudi-db → hudi-athena: table metadata'}
+- {n: '6', text: 'hudi-athena → hudi-dashboards: dashboard'}
+- {n: '7', text: 'hudi-athena → users: ad hoc analysis'}

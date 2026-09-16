@@ -11,74 +11,71 @@ tags:
 - expressroute
 image: https://learn.microsoft.com/en-us/azure/architecture/networking/guide/images/private-link-hub-spoke-network-basic-hub-spoke-diagram.svg
 source: https://learn.microsoft.com/en-us/azure/architecture/networking/guide/private-link-hub-spoke-network
-description: PaaS services are reached only through private endpoints; shared endpoints used from on-premises or by several workloads live in a dedicated hub subnet behind the firewall, while single-application
-  endpoints sit in the spoke, and public endpoints are disabled. Centralized private DNS zones linked to every virtual network resolve the privatelink FQDNs, and a DNS Private Resolver inbound endpoint
-  lets on-premises resolvers answer the same names over ExpressRoute.
+description: On-premises VMs reach a storage account in the landing zone only through a private endpoint in the spoke virtual network, over the ExpressRoute circuit and the hub-spoke peering, with the storage
+  account's public endpoint disabled. The on-premises DNS servers conditionally forward privatelink.blob.core.windows.net to two DNS forwarder VMs in the hub, which forward to the Azure-provided DNS at
+  168.63.129.16 so that the Azure recursive resolver answers from the private DNS zone linked to the hub virtual network; a DNS Private Resolver inbound endpoint can replace the forwarder VMs.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1, 2, 1]}
-- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1]}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 2, 1, 2]}
 - {id: rg-rg-hub, type: azure.resource_group, name: rg-hub, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
-- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.0.0.0/16}, at: [2, 1, 1, 2]}
-- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-hub, props: {cidr: 10.0.0.0/27}, at: [1, 1]}
-- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub, props: {cidr: 10.0.1.0/26}, at: [1, 2]}
-- {id: sub-snet-hub-private-endpoints, type: azure.subnet, name: snet-hub-private-endpoints, parent: vpc-hub, props: {cidr: 10.0.2.0/24}, at: [2, 2]}
-- {id: sub-snet-dns-resolver-inbound, type: azure.subnet, name: snet-dns-resolver-inbound, parent: vpc-hub, props: {cidr: 10.0.3.0/28}, at: [2, 1]}
-- {id: sub-landing-zone-app, type: azure.subscription, name: landing-zone-app, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 2]}
+- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.100.0.0/16}, at: [2, 1, 1, 2]}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-hub, props: {cidr: 10.100.0.0/27}, at: [1, 1]}
+- {id: sub-snet-dns-forwarders, type: azure.subnet, name: snet-dns-forwarders, parent: vpc-hub, props: {cidr: 10.100.2.0/24}, at: [1, 2]}
+- {id: sub-landing-zone-app, type: azure.subscription, name: landing-zone-app, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [3, 2, 1, 2]}
 - {id: rg-rg-spoke, type: azure.resource_group, name: rg-spoke, parent: sub-landing-zone-app, props: {location: westeurope}, at: [1, 1]}
-- {id: vpc-spoke, type: azure.vnet, name: spoke, parent: rg-rg-spoke, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-spoke, props: {cidr: 10.1.1.0/24}, at: [1, 1]}
-- {id: sub-snet-spoke-private-endpoints, type: azure.subnet, name: snet-spoke-private-endpoints, parent: vpc-spoke, props: {cidr: 10.1.2.0/24}, at: [1, 2]}
+- {id: vpc-spoke, type: azure.vnet, name: spoke, parent: rg-rg-spoke, props: {cidr: 10.0.1.0/24}, at: [1, 1]}
+- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-spoke, props: {cidr: 10.0.1.0/26}, at: [1, 1]}
+- {id: sub-snet-spoke-private-endpoints, type: azure.subnet, name: snet-spoke-private-endpoints, parent: vpc-spoke, props: {cidr: 10.0.1.64/26}, at: [1, 2]}
+- {id: on-premises-vms-172-16-4-40-41, type: common.server, name: on-premises VMs 172.16.4.40-41, at: [2, 1]}
+- {id: on-premises-dns-servers-172-16-1-10-11, type: common.server, name: on-premises DNS servers 172.16.1.10-11, at: [3, 1]}
+- {id: azure-provided-dns-168-63-129-16, type: common.server, name: Azure-provided DNS 168.63.129.16, at: [1, 2]}
+- {id: azure-recursive-resolver, type: common.server, name: Azure recursive resolver, at: [1, 3]}
+- id: er-circuit
+  type: azure.res.azurerm_express_route_circuit
+  name: er-circuit
+  parent: rg-rg-hub
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 1
+  - 1
+- {id: pdz-blob, type: azure.res.azurerm_private_dns_zone, name: pdz-blob, parent: rg-rg-hub, props: {name: changeme, resource_group_name: changeme}, at: [1, 2]}
 - id: ergw-hub
   type: azure.res.azurerm_virtual_network_gateway
   name: ergw-hub
   parent: sub-gatewaysubnet
-  at: [1, 1]
-  props:
-    ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: changeme
-    type: changeme
-- {id: hub-fw, type: azure.res.azurerm_firewall, name: hub-fw, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [1, 1]}
-- {id: dns-resolver-hub, type: azure.res.azurerm_private_dns_resolver, name: dns-resolver-hub, parent: sub-snet-dns-resolver-inbound, props: {location: westeurope, name: changeme, resource_group_name: changeme,
-    virtual_network_id: changeme}, at: [1, 1]}
-- {id: pdz-blob, type: azure.res.azurerm_private_dns_zone, name: pdz-blob, parent: rg-rg-hub, props: {name: changeme, resource_group_name: changeme}, at: [1, 1]}
-- {id: pdz-sql, type: azure.res.azurerm_private_dns_zone, name: pdz-sql, parent: rg-rg-hub, props: {name: changeme, resource_group_name: changeme}, at: [1, 2]}
-- {id: vpc-rg-rg-hub, type: azure.vnet, name: main, parent: rg-rg-hub, props: {cidr: 10.200.0.0/16}, at: [2, 3]}
-- {id: nsg-hub-pe, type: azure.network_security_group, name: nsg-hub-pe, parent: vpc-rg-rg-hub, at: [1, 1]}
-- id: pe-shared-storage
-  type: azure.res.azurerm_private_endpoint
-  name: pe-shared-storage
-  parent: sub-snet-hub-private-endpoints
-  at: [1, 1]
-  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: st-shared, type: azure.storage_account, name: st-shared, parent: rg-rg-hub, at: [1, 3]}
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme, type: changeme}
+  at:
+  - 1
+  - 1
+- {id: dns-forwarder-1, type: azure.virtual_machine, name: dns-forwarder-1, parent: sub-snet-dns-forwarders, at: [1, 1]}
+- {id: dns-forwarder-2, type: azure.virtual_machine, name: dns-forwarder-2, parent: sub-snet-dns-forwarders, at: [1, 2]}
 - {id: vm-app, type: azure.virtual_machine, name: vm-app, parent: sub-snet-app, at: [1, 1]}
-- id: pe-sql-app
+- id: pe-storage-app
   type: azure.res.azurerm_private_endpoint
-  name: pe-sql-app
+  name: pe-storage-app
   parent: sub-snet-spoke-private-endpoints
-  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: sql-app, type: azure.res.azurerm_mssql_server, name: sql-app, parent: rg-rg-spoke, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}, at: [1, 2]}
+  at:
+  - 1
+  - 1
+- {id: st-app, type: azure.storage_account, name: st-app, parent: rg-rg-spoke, at: [1, 2]}
 edges:
-- {from: dc-on-premises, to: ergw-hub, label: ExpressRoute private peering, step: '1'}
-- {from: vpc-hub, to: vpc-spoke, label: hub-spoke peering, link: azurerm_virtual_network_peering}
-- {from: dc-on-premises, to: dns-resolver-hub, label: conditional forwarder for privatelink zones, step: '2'}
-- {from: dns-resolver-hub, to: pdz-blob, label: resolve privatelink.blob.core.windows.net}
-- {from: dc-on-premises, to: pe-shared-storage, label: private IP over ExpressRoute, step: '3'}
-- {from: nsg-hub-pe, to: pe-shared-storage, label: inbound filtering}
-- {from: pe-shared-storage, to: st-shared, label: Private Link (public endpoint disabled)}
-- {from: vm-app, to: hub-fw, label: UDR to firewall (SNAT + logging), step: '4'}
-- {from: hub-fw, to: pe-shared-storage, label: inspected traffic}
-- {from: vm-app, to: pe-sql-app, label: single-app endpoint in spoke, step: '5'}
-- {from: pe-sql-app, to: sql-app, label: Private Link}
+- {from: dc-on-premises, to: er-circuit, label: ExpressRoute circuit, step: '1'}
+- {from: er-circuit, to: ergw-hub, label: ExpressRoute private peering}
+- {from: vpc-hub, to: vpc-spoke, label: virtual network peering, link: azurerm_virtual_network_peering}
+- {from: on-premises-dns-servers-172-16-1-10-11, to: dns-forwarder-1, label: conditional forwarder for privatelink.blob.core.windows.net, step: '2'}
+- {from: on-premises-dns-servers-172-16-1-10-11, to: dns-forwarder-2, label: conditional forwarder for privatelink.blob.core.windows.net, step: '2'}
+- {from: dns-forwarder-1, to: azure-provided-dns-168-63-129-16, label: forward to 168.63.129.16, step: '3'}
+- {from: dns-forwarder-2, to: azure-provided-dns-168-63-129-16, label: forward to 168.63.129.16, step: '3'}
+- {from: azure-provided-dns-168-63-129-16, to: pdz-blob, label: resolve privatelink.blob.core.windows.net, step: '4'}
+- {from: azure-provided-dns-168-63-129-16, to: azure-recursive-resolver, label: public names}
 - {from: pdz-blob, to: vpc-hub, link: azurerm_private_dns_zone_virtual_network_link}
-- {from: pdz-sql, to: vpc-spoke, link: azurerm_private_dns_zone_virtual_network_link}
+- {from: on-premises-vms-172-16-4-40-41, to: pe-storage-app, label: private IP over ExpressRoute, step: '5'}
+- {from: vm-app, to: pe-storage-app, label: private endpoint in the spoke}
+- {from: pe-storage-app, to: st-app, label: Private Link (public endpoint disabled)}
 steps:
-- {n: '1', text: 'datacenter → ergw-hub: ExpressRoute private peering'}
-- {n: '2', text: 'datacenter → dns-resolver-hub: conditional forwarder for privatelink zones'}
-- {n: '3', text: 'datacenter → pe-shared-storage: private IP over ExpressRoute'}
-- {n: '4', text: 'vm-app → hub-fw: UDR to firewall (SNAT + logging)'}
-- {n: '5', text: 'vm-app → pe-sql-app: single-app endpoint in spoke'}
+- {n: '1', text: 'datacenter → er-circuit: ExpressRoute circuit'}
+- {n: '2', text: 'on-premises DNS servers 172.16.1.10-11 → dns-forwarder-1: conditional forwarder for privatelink.blob.core.windows.net'}
+- {n: '3', text: 'dns-forwarder-1 → Azure-provided DNS 168.63.129.16: forward to 168.63.129.16'}
+- {n: '4', text: 'Azure-provided DNS 168.63.129.16 → pdz-blob: resolve privatelink.blob.core.windows.net'}
+- {n: '5', text: 'on-premises VMs 172.16.4.40-41 → pe-storage-app: private IP over ExpressRoute'}

@@ -6,51 +6,42 @@
   category: serverless
   tags: [api gateway, lambda, dynamodb, rest, crud]
   source: https://serverlessland.com/patterns/apigw-lambda-dynamodb
-  description: An API Gateway REST API fronts one Lambda function per route; each function reads or writes items in a single DynamoDB table using the on-demand capacity mode. API Gateway handles throttling, request validation and access logging so the functions contain only business logic.
+  description: An API Gateway REST API fronts a single Lambda function that serves the CRUD routes; the function reads and writes items in one DynamoDB table using the on-demand capacity mode. API Gateway handles throttling and request validation so the function contains only business logic.
   containers:
     - region: us-east-1
   elements:
-    - {tf: aws_api_gateway_rest_api, name: items-api, in: region}
-    - {tf: aws_lambda_function, name: create-item, in: region}
-    - {tf: aws_lambda_function, name: get-item, in: region}
-    - {tf: aws_lambda_function, name: list-items, in: region}
-    - {tf: aws_dynamodb_table, name: items, in: region}
-    - {tf: aws_cloudwatch_log_group, name: api-access-logs, in: region}
-  actors: [client]
+    - {tf: aws_api_gateway_rest_api, name: items-api, in: region, at: [1, 1]}
+    - {tf: aws_lambda_function, name: items-function, in: region, at: [1, 2]}
+    - {tf: aws_dynamodb_table, name: items, in: region, at: [1, 3]}
   flows:
-    - {from: client, to: items-api, label: HTTPS POST /items, step: 1}
-    - {from: items-api, to: create-item, label: Lambda proxy integration, step: 2}
-    - {from: create-item, to: items, label: PutItem, step: 3}
-    - {from: items-api, to: get-item, label: "GET /items/{id}"}
-    - {from: items-api, to: list-items, label: GET /items}
-    - {from: get-item, to: items, label: GetItem}
-    - {from: list-items, to: items, label: Query}
-    - {from: items-api, to: api-access-logs, label: access logs}
+    - {from: items-api, to: items-function, label: Lambda proxy integration, step: 1}
+    - {from: items-function, to: items, label: PutItem / GetItem / Query, step: 2}
 
 - slug: websocket-api-chat-lambda-dynamodb
   title: WebSocket chat API with API Gateway, Lambda and DynamoDB
   category: serverless
   tags: [websocket, api gateway, lambda, dynamodb, real-time]
   source: https://docs.aws.amazon.com/apigateway/latest/developerguide/websocket-api-chat-app.html
-  description: An API Gateway WebSocket API routes $connect, $disconnect and sendmessage frames to three Lambda functions. Connection IDs are stored in a DynamoDB table so the sendmessage handler can broadcast to every connected client through the API Gateway management endpoint.
+  description: An API Gateway WebSocket API routes $connect, $disconnect, $default and sendmessage frames to four Lambda functions. Connection IDs are stored in a DynamoDB table so the sendmessage handler can broadcast to every connected client through the API Gateway management endpoint.
   containers:
     - region: us-east-1
   elements:
-    - {tf: aws_apigatewayv2_api, name: chat-websocket-api, in: region}
-    - {tf: aws_lambda_function, name: on-connect, in: region}
-    - {tf: aws_lambda_function, name: on-disconnect, in: region}
-    - {tf: aws_lambda_function, name: send-message, in: region}
-    - {tf: aws_dynamodb_table, name: connections, in: region}
-    - {tf: aws_cloudwatch_log_group, name: websocket-logs, in: region}
-  actors: [users]
+    - {tf: aws_apigatewayv2_api, name: chat-websocket-api, in: region, at: [1, 1, 4, 1]}
+    - {tf: aws_lambda_function, name: on-connect, in: region, at: [1, 2]}
+    - {tf: aws_lambda_function, name: on-default, in: region, at: [2, 2]}
+    - {tf: aws_lambda_function, name: send-message, in: region, at: [3, 2]}
+    - {tf: aws_lambda_function, name: on-disconnect, in: region, at: [4, 2]}
+    - {tf: aws_dynamodb_table, name: connections, in: region, at: [1, 3, 4, 1]}
+  actors: [{type: users, name: clients, at: [1, 1]}]
   flows:
-    - {from: users, to: chat-websocket-api, label: "wss:// $connect", step: 1}
+    - {from: clients, to: chat-websocket-api, label: "wss:// $connect", step: 1}
     - {from: chat-websocket-api, to: on-connect, label: "$connect route", step: 2}
     - {from: on-connect, to: connections, label: PutItem connectionId, step: 3}
-    - {from: users, to: chat-websocket-api, label: sendmessage frame, step: 4}
+    - {from: clients, to: chat-websocket-api, label: sendmessage frame, step: 4}
     - {from: chat-websocket-api, to: send-message, label: sendmessage route, step: 5}
     - {from: send-message, to: connections, label: Scan connections, step: 6}
     - {from: send-message, to: chat-websocket-api, label: PostToConnection, step: 7}
+    - {from: chat-websocket-api, to: on-default, label: "$default route"}
     - {from: chat-websocket-api, to: on-disconnect, label: "$disconnect route"}
     - {from: on-disconnect, to: connections, label: DeleteItem}
 
@@ -90,34 +81,42 @@
   category: serverless
   tags: [eventbridge, event bus, multi-account, resource policy, archive]
   source: https://aws.amazon.com/blogs/compute/simplifying-cross-account-access-with-amazon-eventbridge-resource-policies
-  description: Producer accounts forward domain events from their local event bus to a central bus in a shared account; a resource policy on the central bus grants PutEvents to the organization. Rules on the central bus route events on to consumer-account buses and an archive keeps a replayable copy.
+  description: A Lambda function in a web-store producer account publishes "New order created" events straight to a central event bus in a shared account; a resource policy on the central bus grants PutEvents to the organization. Rules on the central bus subscribe consumer accounts, forwarding the event to an invoice-processing bus whose rule invokes a Lambda function and to a forecasting bus whose rule starts a Step Functions workflow.
   containers:
     - region: us-east-1
-      account: orders-producer
+      account: web-store
+      at: [1, 1]
     - region: us-east-1
       account: central-events
+      at: [1, 1]
     - region: us-east-1
-      account: billing-consumer
+      account: invoice-processing
+      at: [1, 1]
+    - region: us-east-1
+      account: forecasting
+      at: [1, 1]
   elements:
-    - {tf: aws_lambda_function, name: order-service, in: account:orders-producer}
-    - {tf: aws_cloudwatch_event_bus, name: orders-local-bus, in: account:orders-producer}
-    - {tf: aws_cloudwatch_event_rule, name: forward-to-central, in: account:orders-producer}
-    - {tf: aws_cloudwatch_event_bus, name: central-bus, in: account:central-events}
-    - {tf: aws_cloudwatch_event_archive, name: central-archive, in: account:central-events}
-    - {tf: aws_cloudwatch_event_rule, name: route-order-created, in: account:central-events}
-    - {tf: aws_cloudwatch_event_bus, name: billing-bus, in: account:billing-consumer}
-    - {tf: aws_cloudwatch_event_rule, name: invoice-on-order, in: account:billing-consumer}
-    - {tf: aws_lambda_function, name: billing-service, in: account:billing-consumer}
+    - {tf: aws_lambda_function, name: order-service, in: account:web-store, at: [1, 1]}
+    - {tf: aws_cloudwatch_event_bus, name: ecommerce-event-bus, in: account:central-events, at: [1, 1, 2, 1]}
+    - {tf: aws_cloudwatch_event_rule, name: route-to-invoicing, in: account:central-events, at: [1, 2]}
+    - {tf: aws_cloudwatch_event_rule, name: route-to-forecasting, in: account:central-events, at: [2, 2]}
+    - {tf: aws_cloudwatch_event_bus, name: invoicing-bus, in: account:invoice-processing, at: [1, 1]}
+    - {tf: aws_cloudwatch_event_rule, name: invoice-rule, in: account:invoice-processing, at: [1, 2]}
+    - {tf: aws_lambda_function, name: invoice-service, in: account:invoice-processing, at: [1, 3]}
+    - {tf: aws_cloudwatch_event_bus, name: forecasting-bus, in: account:forecasting, at: [1, 1]}
+    - {tf: aws_cloudwatch_event_rule, name: forecasting-rule, in: account:forecasting, at: [1, 2]}
+    - {tf: aws_sfn_state_machine, name: forecast-workflow, in: account:forecasting, at: [1, 3]}
   actors: []
   flows:
-    - {from: order-service, to: orders-local-bus, label: PutEvents OrderCreated, step: 1}
-    - {from: orders-local-bus, to: forward-to-central, label: match source, step: 2}
-    - {from: forward-to-central, to: central-bus, link: aws_cloudwatch_event_target}
-    - {from: central-bus, to: central-archive, label: archive all events}
-    - {from: central-bus, to: route-order-created, label: detail-type OrderCreated, step: 3}
-    - {from: route-order-created, to: billing-bus, link: aws_cloudwatch_event_target}
-    - {from: billing-bus, to: invoice-on-order, step: 4}
-    - {from: invoice-on-order, to: billing-service, link: aws_cloudwatch_event_target}
+    - {from: order-service, to: ecommerce-event-bus, label: publishes New order created, step: 1}
+    - {from: ecommerce-event-bus, to: route-to-invoicing, label: rules, step: 2}
+    - {from: ecommerce-event-bus, to: route-to-forecasting, label: rules}
+    - {from: route-to-invoicing, to: invoicing-bus, link: aws_cloudwatch_event_target, label: subscribes New order created, step: 3}
+    - {from: route-to-forecasting, to: forecasting-bus, link: aws_cloudwatch_event_target, label: subscribes New order created}
+    - {from: invoicing-bus, to: invoice-rule, label: Invoice rule, step: 4}
+    - {from: invoice-rule, to: invoice-service, link: aws_cloudwatch_event_target}
+    - {from: forecasting-bus, to: forecasting-rule, label: Forecasting rule}
+    - {from: forecasting-rule, to: forecast-workflow, link: aws_cloudwatch_event_target}
 
 - slug: eventbridge-pipes-sqs-enrich-step-functions
   title: EventBridge Pipes from SQS with enrichment to Step Functions
@@ -150,62 +149,56 @@
   category: serverless
   tags: [eventbridge scheduler, cron, one-time schedule, lambda, ses]
   source: https://aws.amazon.com/blogs/compute/scheduling-email-campaigns-at-scale-with-amazon-eventbridge-scheduler/
-  description: An API creates one-time or recurring EventBridge Scheduler schedules inside a schedule group, one per campaign; when a schedule fires it invokes a Lambda function that personalizes and sends email through SES. Failed invocations go to a dead-letter queue and completed one-time schedules are deleted automatically.
+  description: A Step Functions Distributed Map (the campaign scheduler) iterates over the recipient list and creates one one-time EventBridge Scheduler schedule per recipient inside a schedule group, each firing at 9:00 AM in the recipient's own time zone. When a schedule fires it calls SES directly through the Scheduler universal target to send the email, and completed one-time schedules are deleted automatically.
   containers:
     - region: us-east-1
+      groups: [{label: campaign schedule group, at: [1, 2, 3, 1]}]
   elements:
-    - {tf: aws_api_gateway_rest_api, name: campaign-api, in: region}
-    - {tf: aws_lambda_function, name: create-schedule, in: region}
-    - {tf: aws_dynamodb_table, name: campaigns, in: region}
-    - {tf: aws_scheduler_schedule_group, name: campaign-schedules, in: region}
-    - {tf: aws_scheduler_schedule, name: send-campaign, in: region}
-    - {tf: aws_lambda_function, name: send-personalized-email, in: region}
-    - {tf: aws_ses_email_identity, name: marketing-sender, in: region}
-    - {tf: aws_sqs_queue, name: scheduler-dlq, in: region}
-  actors: [user]
+    - {tf: aws_sfn_state_machine, name: campaign-scheduler, in: region, at: [2, 1]}
+    - {tf: aws_scheduler_schedule, name: schedule-recipient-a-9am-est, in: "group:campaign schedule group", at: [1, 1]}
+    - {tf: aws_scheduler_schedule, name: schedule-recipient-b-9am-pst, in: "group:campaign schedule group", at: [2, 1]}
+    - {tf: aws_scheduler_schedule, name: schedule-recipient-x-9am-cet, in: "group:campaign schedule group", at: [3, 1]}
+    - {tf: aws_ses_email_identity, name: marketing-sender, in: region, at: [2, 3]}
   flows:
-    - {from: user, to: campaign-api, label: POST /campaigns, step: 1}
-    - {from: campaign-api, to: create-schedule, step: 2}
-    - {from: create-schedule, to: campaigns, label: PutItem, step: 3}
-    - {from: create-schedule, to: send-campaign, label: "CreateSchedule at(...)", step: 4}
-    - {from: send-campaign, to: send-personalized-email, label: invoke at scheduled time, step: 5}
-    - {from: send-personalized-email, to: campaigns, label: read recipients, step: 6}
-    - {from: send-personalized-email, to: marketing-sender, label: SES SendEmail, step: 7}
-    - {from: send-campaign, to: scheduler-dlq, label: undeliverable invocations}
+    - {from: campaign-scheduler, to: schedule-recipient-a-9am-est, label: Create Schedule, step: 1}
+    - {from: campaign-scheduler, to: schedule-recipient-b-9am-pst, label: Create Schedule}
+    - {from: campaign-scheduler, to: schedule-recipient-x-9am-cet, label: Create Schedule}
+    - {from: schedule-recipient-b-9am-pst, to: marketing-sender, label: Send email, step: 2}
 
 - slug: step-functions-saga-orchestration
   title: Saga orchestration with Step Functions
   category: serverless
   tags: [step functions, saga, compensating transactions, distributed transaction, lambda]
   source: https://aws.amazon.com/blogs/compute/building-a-serverless-distributed-application-using-a-saga-orchestration-pattern
-  description: A booking request starts a Step Functions standard workflow that calls flight, hotel and payment Lambda functions in sequence, each writing to its own DynamoDB table. Catch blocks route any failure to compensating functions that cancel earlier steps in reverse order so the distributed transaction ends consistent.
+  description: A Place Order request starts a Step Functions standard workflow that calls the order, inventory and payment Lambda services in sequence, each writing to its own DynamoDB table. Catch blocks route InventoryUpdateFailed or PaymentFailed to compensating functions that undo earlier steps in reverse order so the distributed transaction ends consistent.
   containers:
     - region: us-east-1
   elements:
-    - {tf: aws_api_gateway_rest_api, name: booking-api, in: region}
-    - {tf: aws_sfn_state_machine, name: booking-saga, in: region}
-    - {tf: aws_lambda_function, name: reserve-flight, in: region}
-    - {tf: aws_lambda_function, name: reserve-hotel, in: region}
-    - {tf: aws_lambda_function, name: charge-payment, in: region}
-    - {tf: aws_lambda_function, name: cancel-flight, in: region}
-    - {tf: aws_lambda_function, name: cancel-hotel, in: region}
-    - {tf: aws_lambda_function, name: refund-payment, in: region}
-    - {tf: aws_dynamodb_table, name: flights, in: region}
-    - {tf: aws_dynamodb_table, name: hotels, in: region}
-    - {tf: aws_dynamodb_table, name: payments, in: region}
+    - {tf: aws_api_gateway_rest_api, name: order-api, in: region, at: [1, 1, 3, 1]}
+    - {tf: aws_sfn_state_machine, name: order-saga, in: region, at: [1, 2, 3, 1]}
+    - {tf: aws_lambda_function, name: order-service, in: region, at: [1, 3]}
+    - {tf: aws_lambda_function, name: inventory-service, in: region, at: [1, 4]}
+    - {tf: aws_lambda_function, name: payment-service, in: region, at: [1, 5]}
+    - {tf: aws_lambda_function, name: cancel-order, in: region, at: [2, 3]}
+    - {tf: aws_lambda_function, name: revert-inventory, in: region, at: [2, 4]}
+    - {tf: aws_lambda_function, name: refund-payment, in: region, at: [2, 5]}
+    - {tf: aws_dynamodb_table, name: orders, in: region, at: [3, 3]}
+    - {tf: aws_dynamodb_table, name: inventory, in: region, at: [3, 4]}
+    - {tf: aws_dynamodb_table, name: payments, in: region, at: [3, 5]}
   actors: [client]
   flows:
-    - {from: client, to: booking-api, label: POST /bookings, step: 1}
-    - {from: booking-api, to: booking-saga, label: StartExecution, step: 2}
-    - {from: booking-saga, to: reserve-flight, step: 3}
-    - {from: reserve-flight, to: flights, label: PutItem}
-    - {from: booking-saga, to: reserve-hotel, step: 4}
-    - {from: reserve-hotel, to: hotels, label: PutItem}
-    - {from: booking-saga, to: charge-payment, step: 5}
-    - {from: charge-payment, to: payments, label: PutItem}
-    - {from: booking-saga, to: refund-payment, label: Catch compensate}
-    - {from: booking-saga, to: cancel-hotel, label: Catch compensate}
-    - {from: booking-saga, to: cancel-flight, label: Catch compensate}
+    - {from: client, to: order-api, label: Place Order, step: 1}
+    - {from: order-api, to: order-saga, label: StartExecution, step: 2}
+    - {from: order-saga, to: order-service, label: PlaceOrder, step: 3}
+    - {from: order-service, to: orders, label: PutItem}
+    - {from: order-saga, to: inventory-service, label: OrderPlaced, step: 4}
+    - {from: inventory-service, to: inventory, label: UpdateItem}
+    - {from: order-saga, to: payment-service, label: InventoryUpdated, step: 5}
+    - {from: payment-service, to: payments, label: PutItem}
+    - {from: payment-service, to: order-saga, label: PaymentProcessed, step: 6}
+    - {from: order-saga, to: refund-payment, label: "PaymentFailed: compensate"}
+    - {from: order-saga, to: revert-inventory, label: "InventoryUpdateFailed: compensate"}
+    - {from: order-saga, to: cancel-order, label: compensate}
 
 - slug: step-functions-parallel-fan-out-fan-in
   title: Parallel fan-out and fan-in with nested Step Functions
@@ -268,58 +261,48 @@
   category: serverless
   tags: [step functions, human approval, task token, callback, api gateway]
   source: https://aws.amazon.com/blogs/compute/implementing-serverless-manual-approval-steps-in-aws-step-functions-and-amazon-api-gateway/
-  description: The workflow pauses at a waitForTaskToken step and a Lambda function emails the approver links that embed the task token. Clicking a link calls an API Gateway endpoint that invokes SendTaskSuccess or SendTaskFailure, and the workflow resumes without any long-running process waiting.
+  description: A CloudWatch schedule invokes a Lambda function that polls the Step Functions activity with GetActivityTask and, through Amazon SES, emails the approver links that embed the task token. Clicking a link in the email client calls an API Gateway endpoint that invokes SendTaskSuccess or SendTaskFailure, and the workflow resumes without any long-running process waiting.
   containers:
     - region: us-east-1
+      groups: [{label: manual-approval, at: [2, 1, 1, 2]}]
   elements:
-    - {tf: aws_api_gateway_rest_api, name: request-api, in: region}
-    - {tf: aws_sfn_state_machine, name: approval-workflow, in: region}
-    - {tf: aws_lambda_function, name: send-approval-email, in: region}
-    - {tf: aws_ses_email_identity, name: approvals-sender, in: region}
-    - {tf: aws_api_gateway_rest_api, name: approval-callback-api, in: region}
-    - {tf: aws_lambda_function, name: fulfil-request, in: region}
-    - {tf: aws_dynamodb_table, name: approval-requests, in: region}
-  actors: [user, client]
+    - {tf: aws_cloudwatch_event_rule, name: approval-poll-schedule, in: region, at: [1, 1]}
+    - {tf: aws_lambda_function, name: send-approval-email, in: region, at: [1, 2]}
+    - {tf: aws_sfn_state_machine, name: approval-workflow, in: region, at: [1, 3]}
+    - {tf: aws_ses_email_identity, name: approvals-sender, in: group:manual-approval, at: [1, 1]}
+    - {tf: aws_api_gateway_rest_api, name: approval-callback-api, in: region, at: [2, 3]}
+  actors: [{type: client, name: user-email-client, at: [2, 1]}]
   flows:
-    - {from: client, to: request-api, label: submit request, step: 1}
-    - {from: request-api, to: approval-workflow, label: StartExecution, step: 2}
-    - {from: approval-workflow, to: send-approval-email, label: waitForTaskToken, step: 3}
-    - {from: send-approval-email, to: approval-requests, label: store token}
-    - {from: send-approval-email, to: approvals-sender, label: email approve/reject links, step: 4}
-    - {from: approvals-sender, to: user, label: approval email, step: 5}
-    - {from: user, to: approval-callback-api, label: "GET /approve?token=", step: 6}
-    - {from: approval-callback-api, to: approval-workflow, label: SendTaskSuccess, step: 7}
-    - {from: approval-workflow, to: fulfil-request, step: 8}
+    - {from: approval-poll-schedule, to: send-approval-email, label: Schedule, step: 1, link: aws_cloudwatch_event_target}
+    - {from: send-approval-email, to: approval-workflow, label: GetActivityTask, step: 2}
+    - {from: send-approval-email, to: approvals-sender, label: TaskToken, step: 3}
+    - {from: approvals-sender, to: user-email-client, label: email, step: 4}
+    - {from: user-email-client, to: approval-callback-api, label: Succeed/Fail, step: 5}
+    - {from: approval-callback-api, to: approval-workflow, label: SendTaskSuccess / SendTaskFailure, step: 6}
 
 - slug: kinesis-lambda-enhanced-fan-out
   title: Kinesis Data Streams with Lambda enhanced fan-out consumers
   category: serverless
   tags: [kinesis, lambda, enhanced fan-out, stream processing, event source mapping]
   source: https://aws.amazon.com/blogs/compute/increasing-real-time-stream-processing-performance-with-amazon-kinesis-data-streams-enhanced-fan-out-and-aws-lambda/
-  description: Producers write clickstream records to a Kinesis data stream; two Lambda functions consume the same stream through registered enhanced fan-out consumers so each gets dedicated 2 MB/s per shard over HTTP/2. Batches that exhaust retries are sent to an SQS on-failure destination and raw records are archived to S3 through Firehose.
+  description: Producers write records to a Kinesis data stream that three Lambda functions consume through event source mappings; with the default shared-throughput consumers the pollers read intermittently via the GetRecords API, and registering enhanced fan-out consumers gives each function dedicated 2 MB/s per shard over HTTP/2 instead. The functions land their results in an S3 bucket, a DynamoDB table and a downstream Kinesis data stream.
   containers:
     - region: us-east-1
   elements:
-    - {tf: aws_kinesis_stream, name: clickstream, in: region}
-    - {tf: aws_kinesis_stream_consumer, name: metrics-consumer, in: region}
-    - {tf: aws_kinesis_stream_consumer, name: fraud-consumer, in: region}
-    - {tf: aws_lambda_function, name: aggregate-metrics, in: region}
-    - {tf: aws_lambda_function, name: detect-fraud, in: region}
-    - {tf: aws_dynamodb_table, name: realtime-metrics, in: region}
-    - {tf: aws_sqs_queue, name: stream-failures, in: region}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: raw-archive, in: region}
-    - {tf: aws_s3_bucket, name: clickstream-archive, in: region}
-  actors: [mobile]
+    - {tf: aws_kinesis_stream, name: clickstream, in: region, at: [1, 1, 3, 1]}
+    - {tf: aws_lambda_function, name: archive-records, in: region, at: [1, 2]}
+    - {tf: aws_lambda_function, name: aggregate-metrics, in: region, at: [2, 2]}
+    - {tf: aws_lambda_function, name: enrich-and-forward, in: region, at: [3, 2]}
+    - {tf: aws_s3_bucket, name: clickstream-archive, in: region, at: [1, 3]}
+    - {tf: aws_dynamodb_table, name: realtime-metrics, in: region, at: [2, 3]}
+    - {tf: aws_kinesis_stream, name: enriched-stream, in: region, at: [3, 3]}
   flows:
-    - {from: mobile, to: clickstream, label: PutRecords, step: 1}
-    - {from: clickstream, to: metrics-consumer, label: SubscribeToShard HTTP/2, step: 2}
-    - {from: clickstream, to: fraud-consumer, label: SubscribeToShard HTTP/2}
-    - {from: metrics-consumer, to: aggregate-metrics, link: aws_lambda_event_source_mapping}
-    - {from: fraud-consumer, to: detect-fraud, link: aws_lambda_event_source_mapping}
-    - {from: aggregate-metrics, to: realtime-metrics, label: UpdateItem counters, step: 3}
-    - {from: aggregate-metrics, to: stream-failures, label: on-failure destination}
-    - {from: clickstream, to: raw-archive, label: Firehose source}
-    - {from: raw-archive, to: clickstream-archive, label: buffered PutObject}
+    - {from: clickstream, to: archive-records, link: aws_lambda_event_source_mapping, label: intermittent polling via GetRecords API, step: 1}
+    - {from: clickstream, to: aggregate-metrics, link: aws_lambda_event_source_mapping, label: intermittent polling via GetRecords API}
+    - {from: clickstream, to: enrich-and-forward, link: aws_lambda_event_source_mapping, label: intermittent polling via GetRecords API}
+    - {from: archive-records, to: clickstream-archive, label: PutObject, step: 2}
+    - {from: aggregate-metrics, to: realtime-metrics, label: UpdateItem counters}
+    - {from: enrich-and-forward, to: enriched-stream, label: PutRecords}
 
 - slug: dynamodb-streams-lambda-cdc
   title: DynamoDB Streams change data capture with Lambda
@@ -352,33 +335,32 @@
   category: serverless
   tags: [msk, kafka, lambda, event source mapping, sasl scram]
   source: https://aws.amazon.com/blogs/compute/using-amazon-msk-as-an-event-source-for-aws-lambda/
-  description: A Lambda event source mapping polls a topic on an MSK cluster inside private subnets, authenticating with SASL/SCRAM credentials from Secrets Manager, and invokes the function with batches of records. Interface endpoints for Lambda and STS in the cluster VPC let the poller reach the control plane without a NAT gateway.
+  description: An MSK cluster spreads its brokers over the private subnets of two Availability Zones; a NAT gateway in each public subnet gives the private subnets their outbound path to the Lambda and STS control plane. A Lambda event source mapping polls a topic on the cluster, authenticating with SASL/SCRAM credentials from Secrets Manager, and invokes the function with batches of records.
   containers:
     - region: eu-west-1
       vpcs:
         - name: streaming
           cidr: 10.20.0.0/16
+          at: [1, 1, 2, 1]
           subnets:
-            - {name: kafka-a, cidr: 10.20.1.0/24, az: a, public: false}
-            - {name: kafka-b, cidr: 10.20.2.0/24, az: b, public: false}
+            - {name: public-a, cidr: 10.20.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: kafka-a, cidr: 10.20.1.0/24, az: a, public: false, at: [2, 1]}
+            - {name: public-b, cidr: 10.20.10.0/24, az: b, public: true, at: [1, 1]}
+            - {name: kafka-b, cidr: 10.20.2.0/24, az: b, public: false, at: [2, 1]}
   elements:
-    - {tf: aws_msk_cluster, name: events-cluster, in: vpc:streaming}
-    - {tf: aws_instance, name: producer-app, in: subnet:kafka-a}
-    - {tf: aws_secretsmanager_secret, name: kafka-scram-credentials, in: region}
-    - {tf: aws_vpc_endpoint, name: lambda-endpoint, in: subnet:kafka-a}
-    - {tf: aws_vpc_endpoint, name: sts-endpoint, in: subnet:kafka-b}
-    - {tf: aws_lambda_function, name: kafka-consumer, in: region}
-    - {tf: aws_dynamodb_table, name: processed-events, in: region}
-    - {tf: aws_sqs_queue, name: kafka-failures, in: region}
+    - {tf: aws_nat_gateway, name: nat-a, in: subnet:public-a, at: [1, 1]}
+    - {tf: aws_nat_gateway, name: nat-b, in: subnet:public-b, at: [1, 1]}
+    - {tf: aws_msk_cluster, name: events-cluster, in: vpc:streaming, at: [2, 1, 1, 2]}
+    - {tf: aws_instance, name: producer-app, in: subnet:kafka-a, at: [1, 1]}
+    - {tf: aws_secretsmanager_secret, name: kafka-scram-credentials, in: region, at: [2, 2]}
+    - {tf: aws_lambda_function, name: kafka-consumer, in: region, at: [1, 2]}
   actors: []
   flows:
     - {from: producer-app, to: events-cluster, label: produce to topic, step: 1}
     - {from: events-cluster, to: kafka-consumer, link: aws_lambda_event_source_mapping}
     - {from: kafka-consumer, to: kafka-scram-credentials, label: SASL/SCRAM secret, step: 2}
-    - {from: kafka-consumer, to: lambda-endpoint, label: poller control plane}
-    - {from: kafka-consumer, to: sts-endpoint, label: assume role}
-    - {from: kafka-consumer, to: processed-events, label: BatchWriteItem, step: 3}
-    - {from: kafka-consumer, to: kafka-failures, label: on-failure destination}
+    - {from: events-cluster, to: nat-a, label: outbound to Lambda and STS APIs}
+    - {from: events-cluster, to: nat-b, label: outbound to Lambda and STS APIs}
 
 - slug: amazon-mq-rabbitmq-lambda-consumer
   title: Amazon MQ for RabbitMQ as a Lambda event source
@@ -418,27 +400,44 @@
   containers:
     - region: us-east-1
   elements:
-    - {tf: aws_appflow_flow, name: salesforce-to-eventbridge, in: region}
-    - {tf: aws_cloudwatch_event_bus, name: appflow-partner-bus, in: region}
-    - {tf: aws_cloudwatch_event_rule, name: account-changed, in: region}
-    - {tf: aws_lambda_function, name: upsert-account, in: region}
-    - {tf: aws_dynamodb_table, name: accounts, in: region}
-    - {tf: aws_lambda_function, name: write-status-csv, in: region}
-    - {tf: aws_s3_bucket, name: sync-status-files, in: region}
-    - {tf: aws_appflow_flow, name: s3-to-salesforce, in: region}
-    - {tf: aws_sns_topic, name: sync-notifications, in: region}
-  actors: [saas]
+    - {tf: aws_appflow_flow, name: salesforce-to-eventbridge, in: region, at: [3, 1]}
+    - {tf: aws_cloudwatch_event_bus, name: appflow-partner-bus, in: region, at: [3, 2]}
+    - {tf: aws_lambda_function, name: upsert-account, in: region, at: [3, 3]}
+    - {tf: aws_dynamodb_table, name: accounts, in: region, at: [3, 5]}
+    - {tf: aws_lambda_function, name: write-status-csv, in: region, at: [2, 3]}
+    - {tf: aws_s3_bucket, name: sync-status-files, in: region, at: [2, 2]}
+    - {tf: aws_appflow_flow, name: s3-to-salesforce, in: region, at: [2, 1]}
+    - {tf: aws_lambda_function, name: notify-sync-status, in: region, at: [1, 5]}
+    - {tf: aws_sns_topic, name: sync-notifications, in: region, at: [1, 6]}
+    - {tf: aws_lambda_function, name: connect-account-lookup, in: region, at: [3, 6]}
+    - {tf: aws_connect_instance, name: contact-center, in: region, at: [3, 7]}
+    - {tf: aws_cloudwatch_event_bus, name: flow-break-bus, in: region, at: [4, 1]}
+    - {tf: aws_lambda_function, name: flow-break-alert, in: region, at: [4, 2]}
+    - {tf: aws_sns_topic, name: support-alerts, in: region, at: [4, 3]}
+  actors:
+    - {type: users, name: business-users, at: [1, 1]}
+    - {type: saas, name: salesforce, at: [2, 1]}
+    - {type: users, name: business-users-and-support-team, at: [1, 3]}
+    - {type: users, name: aws-solution-support-team, at: [2, 3]}
   flows:
-    - {from: saas, to: salesforce-to-eventbridge, label: Salesforce change event, step: 1}
+    - {from: business-users, to: salesforce, label: account changes}
+    - {from: salesforce, to: salesforce-to-eventbridge, label: event request payload as input, step: 1}
     - {from: salesforce-to-eventbridge, to: appflow-partner-bus, label: PutEvents, step: 2}
-    - {from: appflow-partner-bus, to: account-changed, step: 3}
-    - {from: account-changed, to: upsert-account, link: aws_cloudwatch_event_target}
+    - {from: appflow-partner-bus, to: upsert-account, link: aws_cloudwatch_event_target, step: 3}
     - {from: upsert-account, to: accounts, label: UpdateItem, step: 4}
-    - {from: accounts, to: write-status-csv, link: aws_lambda_event_source_mapping}
-    - {from: write-status-csv, to: sync-status-files, label: PutObject status.csv, step: 5}
-    - {from: sync-status-files, to: s3-to-salesforce, label: scheduled flow source, step: 6}
-    - {from: s3-to-salesforce, to: saas, label: update Salesforce records, step: 7}
-    - {from: write-status-csv, to: sync-notifications, label: Publish}
+    - {from: accounts, to: write-status-csv, link: aws_lambda_event_source_mapping, label: DynamoDB Streams, step: 6}
+    - {from: write-status-csv, to: sync-status-files, label: PutObject status.csv, step: 7}
+    - {from: sync-status-files, to: s3-to-salesforce, label: scheduled flow source, step: 8}
+    - {from: s3-to-salesforce, to: salesforce, label: event request status as output, step: 9}
+    - {from: accounts, to: notify-sync-status, link: aws_lambda_event_source_mapping, label: DynamoDB Streams, step: 10}
+    - {from: notify-sync-status, to: sync-notifications, label: Publish, step: 11}
+    - {from: sync-notifications, to: business-users-and-support-team, link: aws_sns_topic_subscription, label: email}
+    - {from: salesforce-to-eventbridge, to: flow-break-bus, label: if any flow breaks, step: 12}
+    - {from: flow-break-bus, to: flow-break-alert, link: aws_cloudwatch_event_target, step: 13}
+    - {from: flow-break-alert, to: support-alerts, label: Publish, step: 14}
+    - {from: support-alerts, to: aws-solution-support-team, link: aws_sns_topic_subscription, label: email}
+    - {from: contact-center, to: connect-account-lookup, label: contact flow invokes, step: 15}
+    - {from: connect-account-lookup, to: accounts, label: GetItem / UpdateItem, step: 16}
 
 - slug: sqs-fifo-ordered-processing
   title: Ordered processing with SQS FIFO and Lambda
@@ -469,27 +468,26 @@
   category: resilience
   tags: [sqs, dead-letter queue, replay, redrive, exponential backoff]
   source: https://aws.amazon.com/blogs/compute/using-amazon-sqs-dead-letter-queues-to-replay-messages
-  description: Messages that fail processing land in a dead-letter queue; a replay Lambda function moves them back to the main queue with a delay computed by exponential backoff and a retry counter in message attributes. Messages that exceed the retry limit are parked in a second dead-letter queue for manual inspection, and an alarm tracks its depth.
+  description: An application producer sends messages to a main queue that an application consumer reads; messages that fail processing land in a dead-letter queue, and a replay Lambda function moves them back to the main queue with a delay computed by exponential backoff and a retry counter in message attributes. Messages that exceed the retry limit are parked in a second dead-letter queue that operators inspect manually.
   containers:
     - region: us-east-1
   elements:
-    - {tf: aws_sqs_queue, name: main-queue, in: region}
-    - {tf: aws_sqs_queue, name: main-dlq, in: region}
-    - {tf: aws_sqs_queue, name: manual-review-dlq, in: region}
-    - {tf: aws_lambda_function, name: message-consumer, in: region}
-    - {tf: aws_lambda_function, name: dlq-replay, in: region}
-    - {tf: aws_cloudwatch_metric_alarm, name: manual-dlq-alarm, in: region}
-    - {tf: aws_sns_topic, name: operator-alerts, in: region}
-  actors: [client]
+    - {tf: aws_sqs_queue, name: main-queue, in: region, at: [1, 1]}
+    - {tf: aws_sqs_queue, name: main-dlq, in: region, at: [2, 1]}
+    - {tf: aws_lambda_function, name: dlq-replay, in: region, at: [2, 2]}
+    - {tf: aws_sqs_queue, name: manual-review-dlq, in: region, at: [3, 3]}
+  actors:
+    - {type: server, name: application-producer, at: [1, 1]}
+    - {type: server, name: application-consumer, at: [1, 3]}
+    - {type: users, name: operators, at: [2, 2]}
   flows:
-    - {from: client, to: main-queue, label: SendMessage, step: 1}
-    - {from: main-queue, to: message-consumer, link: aws_lambda_event_source_mapping}
-    - {from: main-queue, to: main-dlq, label: maxReceiveCount exceeded, step: 2}
-    - {from: main-dlq, to: dlq-replay, link: aws_lambda_event_source_mapping}
-    - {from: dlq-replay, to: main-queue, label: SendMessage with DelaySeconds backoff, step: 3}
-    - {from: dlq-replay, to: manual-review-dlq, label: retry limit reached, step: 4}
-    - {from: manual-review-dlq, to: manual-dlq-alarm, label: queue depth metric}
-    - {from: manual-dlq-alarm, to: operator-alerts, label: ALARM action}
+    - {from: application-producer, to: main-queue, label: SendMessage, step: 1}
+    - {from: main-queue, to: application-consumer, label: ReceiveMessage, step: 2}
+    - {from: main-queue, to: main-dlq, label: maxReceiveCount exceeded, step: 3}
+    - {from: main-dlq, to: dlq-replay, label: replay, step: 4, link: aws_lambda_event_source_mapping}
+    - {from: dlq-replay, to: main-queue, label: "max retries not reached: SendMessage with DelaySeconds backoff", step: 5}
+    - {from: dlq-replay, to: manual-review-dlq, label: max retries exceeded, step: 6}
+    - {from: manual-review-dlq, to: operators, label: manual inspection}
 
 - slug: lambda-destinations-async-routing
   title: Asynchronous Lambda invocation with destinations
@@ -554,29 +552,20 @@
   category: serverless
   tags: [s3 event notifications, eventbridge, lambda, file processing, content-based routing]
   source: https://aws.amazon.com/blogs/compute/using-dynamic-amazon-s3-event-handling-with-amazon-eventbridge
-  description: An uploads bucket sends Object Created notifications to EventBridge, where rules match on object key suffix so CSV files go to an import function and JSON manifests start a Step Functions workflow. Processed output is written to a second bucket and metadata to DynamoDB; failed deliveries land in a dead-letter queue.
+  description: Object uploads to an S3 bucket are recorded as CloudTrail data events, which EventBridge receives and matches with a rule on the bucket name and object key so a Lambda function processes each new file. The rule pattern is changed in EventBridge without touching the bucket's notification configuration.
   containers:
     - region: eu-west-1
   elements:
-    - {tf: aws_s3_bucket, name: uploads, in: region}
-    - {tf: aws_cloudwatch_event_rule, name: csv-object-created, in: region}
-    - {tf: aws_cloudwatch_event_rule, name: json-object-created, in: region}
-    - {tf: aws_lambda_function, name: import-csv, in: region}
-    - {tf: aws_sfn_state_machine, name: manifest-workflow, in: region}
-    - {tf: aws_dynamodb_table, name: file-metadata, in: region}
-    - {tf: aws_s3_bucket, name: processed-files, in: region}
-    - {tf: aws_sqs_queue, name: event-delivery-dlq, in: region}
-  actors: [client]
+    - {tf: aws_s3_bucket, name: uploads, in: region, at: [1, 1]}
+    - {tf: aws_cloudtrail, name: s3-data-events-trail, in: region, at: [1, 2]}
+    - {tf: aws_cloudwatch_event_rule, name: object-created-rule, in: region, at: [1, 3]}
+    - {tf: aws_lambda_function, name: process-file, in: region, at: [1, 4]}
+  actors: [{type: users, name: users, at: [1, 1]}]
   flows:
-    - {from: client, to: uploads, label: PutObject, step: 1}
-    - {from: uploads, to: csv-object-created, label: Object Created suffix .csv, step: 2}
-    - {from: uploads, to: json-object-created, label: Object Created suffix .json}
-    - {from: csv-object-created, to: import-csv, link: aws_cloudwatch_event_target}
-    - {from: json-object-created, to: manifest-workflow, link: aws_cloudwatch_event_target}
-    - {from: import-csv, to: uploads, label: GetObject, step: 3}
-    - {from: import-csv, to: file-metadata, label: BatchWriteItem, step: 4}
-    - {from: import-csv, to: processed-files, label: PutObject result, step: 5}
-    - {from: csv-object-created, to: event-delivery-dlq, label: target DLQ}
+    - {from: users, to: uploads, label: Data, step: 1}
+    - {from: uploads, to: s3-data-events-trail, label: PutObject data event, step: 2}
+    - {from: s3-data-events-trail, to: object-created-rule, label: PutObject event, step: 3}
+    - {from: object-created-rule, to: process-file, label: matched rule, step: 4, link: aws_cloudwatch_event_target}
 
 - slug: cloudfront-lambda-image-optimization
   title: On-the-fly image optimization with CloudFront and Lambda
@@ -587,21 +576,19 @@
   containers:
     - region: us-east-1
   elements:
-    - {tf: aws_cloudfront_distribution, name: image-cdn, in: region}
-    - {tf: aws_cloudfront_function, name: normalize-image-url, in: region}
-    - {tf: aws_s3_bucket, name: transformed-images, in: region}
-    - {tf: aws_lambda_function, name: image-transformer, in: region}
-    - {tf: aws_s3_bucket, name: original-images, in: region}
-    - {tf: aws_cloudwatch_log_group, name: transformer-logs, in: region}
+    - {tf: aws_cloudfront_distribution, name: image-cdn, in: region, at: [1, 2, 3, 1]}
+    - {tf: aws_cloudfront_function, name: normalize-image-url, in: region, at: [1, 1, 3, 1]}
+    - {tf: aws_s3_bucket, name: transformed-images, in: region, at: [1, 3]}
+    - {tf: aws_lambda_function, name: image-transformer, in: region, at: [2, 3]}
+    - {tf: aws_s3_bucket, name: original-images, in: region, at: [3, 3]}
   actors: [users]
   flows:
-    - {from: users, to: image-cdn, label: "GET /photo.jpg?width=400&format=auto", step: 1}
-    - {from: image-cdn, to: normalize-image-url, label: viewer request rewrite, step: 2}
-    - {from: image-cdn, to: transformed-images, label: primary origin, step: 3}
-    - {from: image-cdn, to: image-transformer, label: origin failover to function URL, step: 4}
-    - {from: image-transformer, to: original-images, label: GetObject original, step: 5}
-    - {from: image-transformer, to: transformed-images, label: PutObject variant, step: 6}
-    - {from: image-transformer, to: transformer-logs, label: logs}
+    - {from: users, to: normalize-image-url, label: "image request /image.jpg?format=auto&width=256", step: 1}
+    - {from: normalize-image-url, to: image-cdn, label: "normalize and rewrite path /image.jpg/format=avif,width=256", step: 2}
+    - {from: image-cdn, to: transformed-images, label: fetch image from S3 if generated, step: 3}
+    - {from: image-cdn, to: image-transformer, label: otherwise generate the variant via the function URL, step: 4}
+    - {from: image-transformer, to: original-images, label: fetch the original image, step: 4a}
+    - {from: image-transformer, to: transformed-images, label: store the generated variant, step: 4b}
 
 - slug: lambda-edge-request-customization
   title: Request customization at the edge with Lambda@Edge
@@ -638,64 +625,74 @@
   category: serverless
   tags: [aurora serverless, data api, api gateway, lambda, secrets manager]
   source: https://aws.amazon.com/blogs/database/using-the-data-api-to-interact-with-an-amazon-aurora-serverless-mysql-database/
-  description: API Gateway routes REST calls to Lambda functions that run SQL against an Aurora Serverless cluster through the HTTPS Data API instead of a database driver, so the functions need no VPC attachment or connection pooling. Database credentials live in Secrets Manager and are referenced by ARN in each ExecuteStatement call.
+  description: Applications of any kind, EC2 and Elastic Beanstalk fleets, containers on ECS pulled from ECR, Lambda functions and on-premises servers, run SQL against an Aurora Serverless cluster through the HTTPS Data API endpoint instead of a database driver, so callers need no VPC attachment or connection pooling. The cluster itself stays in private subnets; only the Data API endpoint is reachable by the callers.
   containers:
     - region: us-east-1
+      groups:
+        - {label: ec2-vm-apps, at: [1, 1]}
+        - {label: containerized-apps, at: [1, 2]}
+        - {label: serverless-apps, at: [1, 3]}
       vpcs:
         - name: data
           cidr: 10.50.0.0/16
+          at: [2, 1, 1, 3]
           subnets:
             - {name: db-a, cidr: 10.50.1.0/24, az: a, public: false}
             - {name: db-b, cidr: 10.50.2.0/24, az: b, public: false}
   elements:
-    - {tf: aws_api_gateway_rest_api, name: inventory-api, in: region}
-    - {tf: aws_lambda_function, name: add-record, in: region}
-    - {tf: aws_lambda_function, name: get-records, in: region}
-    - {tf: aws_rds_cluster, name: inventory-aurora, in: vpc:data}
-    - {tf: aws_rds_cluster_instance, name: inventory-writer, in: subnet:db-a}
-    - {tf: aws_secretsmanager_secret, name: aurora-credentials, in: region}
-    - {tf: aws_cloudwatch_log_group, name: api-logs, in: region}
-  actors: [client]
+    - {tf: aws_autoscaling_group, name: ec2-app-fleet, in: group:ec2-vm-apps, at: [1, 1]}
+    - {tf: aws_elastic_beanstalk_application, name: beanstalk-app, in: group:ec2-vm-apps, at: [1, 2]}
+    - {tf: aws_ecr_repository, name: app-images, in: group:containerized-apps, at: [1, 1]}
+    - {tf: aws_ecs_cluster, name: ecs-apps, in: group:containerized-apps, at: [1, 2]}
+    - {tf: aws_lambda_function, name: add-record, in: group:serverless-apps, at: [1, 1]}
+    - {tf: aws_lambda_function, name: get-records, in: group:serverless-apps, at: [1, 2]}
+    - {tf: aws_rds_cluster, name: inventory-aurora, in: vpc:data, at: [1, 1, 2, 1]}
+  actors:
+    - {type: server, name: on-prem-apps, at: [2, 2]}
   flows:
-    - {from: client, to: inventory-api, label: POST /records, step: 1}
-    - {from: inventory-api, to: add-record, step: 2}
-    - {from: add-record, to: aurora-credentials, label: secret ARN reference, step: 3}
-    - {from: add-record, to: inventory-aurora, label: Data API ExecuteStatement INSERT, step: 4}
-    - {from: inventory-api, to: get-records, label: GET /records}
-    - {from: get-records, to: inventory-aurora, label: Data API ExecuteStatement SELECT}
-    - {from: inventory-api, to: api-logs, label: access logs}
+    - {from: ec2-app-fleet, to: inventory-aurora, label: Data API endpoint ExecuteStatement}
+    - {from: beanstalk-app, to: inventory-aurora, label: Data API endpoint}
+    - {from: app-images, to: ecs-apps, label: pull image}
+    - {from: ecs-apps, to: inventory-aurora, label: Data API endpoint}
+    - {from: add-record, to: inventory-aurora, label: Data API ExecuteStatement INSERT, step: 1}
+    - {from: get-records, to: inventory-aurora, label: Data API ExecuteStatement SELECT, step: 2}
+    - {from: on-prem-apps, to: inventory-aurora, label: Data API endpoint over HTTPS}
 
 - slug: private-api-gateway-vpc-endpoint
   title: Private REST API consumed through an execute-api VPC endpoint
   category: security
   tags: [private api, api gateway, vpc endpoint, privatelink, cross-account]
   source: https://aws.amazon.com/blogs/compute/architecture-patterns-for-consuming-private-apis-cross-account/
-  description: A producer account exposes a private API Gateway REST API backed by Lambda; its resource policy allows calls only from a named execute-api interface endpoint. A consumer account creates that endpoint in its VPC, resolves the API hostname through a Route 53 private hosted zone, and applications in private subnets call the API over PrivateLink without traversing the internet.
+  description: A producer account exposes a private API Gateway REST API whose resource policy allows calls only from a named execute-api interface endpoint. A consumer account creates that endpoint in its VPC, and its callers, a regional API Gateway, a Lambda function, an ECS service and an EC2 instance, reach the private API over PrivateLink without traversing the internet.
   containers:
     - region: eu-west-1
-      account: api-producer
-    - region: eu-west-1
       account: api-consumer
+      account_at: [1, 1]
+      at: [2, 1]
       vpcs:
         - name: consumer
           cidr: 10.60.0.0/16
+          at: [2, 1]
           subnets:
-            - {name: consumer-private-a, cidr: 10.60.1.0/24, az: a, public: false}
-            - {name: consumer-private-b, cidr: 10.60.2.0/24, az: b, public: false}
+            - {name: consumer-private-a, cidr: 10.60.1.0/24, az: a, public: false, at: [1, 1]}
+    - region: eu-west-1
+      account: api-producer
+      account_at: [1, 2]
+      at: [2, 1]
   elements:
-    - {tf: aws_api_gateway_rest_api, name: private-orders-api, in: account:api-producer}
-    - {tf: aws_lambda_function, name: orders-backend, in: account:api-producer}
-    - {tf: aws_dynamodb_table, name: orders, in: account:api-producer}
-    - {tf: aws_vpc_endpoint, name: execute-api-endpoint, in: subnet:consumer-private-a}
-    - {tf: aws_route53_zone, name: api-private-zone, in: account:api-consumer}
-    - {tf: aws_instance, name: consumer-app, in: subnet:consumer-private-b}
+    - {tf: aws_api_gateway_rest_api, name: consumer-regional-api, in: account:api-consumer, at: [1, 1]}
+    - {tf: aws_lambda_function, name: consumer-lambda, in: account:api-consumer, at: [1, 1]}
+    - {tf: aws_ecs_cluster, name: consumer-ecs-cluster, in: subnet:consumer-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: consumer-app, in: subnet:consumer-private-a, at: [2, 1]}
+    - {tf: aws_vpc_endpoint, name: execute-api-endpoint, in: account:api-consumer, at: [1, 2, 2, 1]}
+    - {tf: aws_api_gateway_rest_api, name: private-orders-api, in: account:api-producer, at: [1, 1]}
   actors: []
   flows:
-    - {from: consumer-app, to: api-private-zone, label: resolve api.internal alias, step: 1}
-    - {from: consumer-app, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: 2}
-    - {from: execute-api-endpoint, to: private-orders-api, label: "resource policy allows aws:SourceVpce", step: 3}
-    - {from: private-orders-api, to: orders-backend, step: 4}
-    - {from: orders-backend, to: orders, label: Query, step: 5}
+    - {from: consumer-regional-api, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: 1}
+    - {from: consumer-lambda, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: 2}
+    - {from: consumer-ecs-cluster, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: 3}
+    - {from: consumer-app, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: 4}
+    - {from: execute-api-endpoint, to: private-orders-api, label: "resource policy allows aws:SourceVpce", step: 5}
 
 - slug: webhook-ingestion-verify-store-route
   title: Webhook ingestion with verification, storage and routing

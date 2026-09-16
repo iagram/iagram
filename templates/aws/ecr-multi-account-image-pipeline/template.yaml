@@ -11,62 +11,70 @@ tags:
 - multi-account
 image: https://d2908q01vomqb2.cloudfront.net/fe2ef495a1152561572949784c16bf23abb28057/2022/10/10/architecture-1.jpg
 source: https://aws.amazon.com/blogs/containers/amazon-ecr-in-multi-account-and-multi-region-architectures/
-description: A platform account caches upstream public images through an ECR pull-through cache and a tooling account builds application images with CodeBuild, scanning them with Amazon Inspector on push
-  and promoting clean images while quarantining ones with critical CVEs. ECR replication copies promoted images to the production account and to a second Region for disaster recovery, and workload clusters
-  pull from their local registry through VPC endpoints rather than across accounts.
+description: The development account's ECR registry caches upstream images from ECR Public and Quay in a pull-through cache repository, and a CodePipeline whose CodeBuild stage builds application images
+  pushes them to a development repository where Amazon Inspector scans them on push and reports findings to Security Hub. Clean images are promoted to a production repository in the same registry; CodeDeploy
+  rolls them out to the development ECS cluster and to the ECS cluster in the production account, which pulls the images through a VPC endpoint rather than over the internet.
 nodes:
-- {id: org, type: aws.organization, name: organization, props: {root_id: r-abcd}, at: [1, 2]}
-- {id: acct-tooling, type: aws.account, name: tooling, parent: org, at: [1, 1]}
-- {id: ou-organization, type: aws.organizational_unit, name: organization, parent: org, at: [1, 2]}
-- {id: acct-platform, type: aws.account, name: platform, parent: ou-organization, at: [1, 1]}
-- {id: acct-production, type: aws.account, name: production, parent: ou-organization, at: [1, 2]}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-tooling, props: {region: eu-west-1}, at: [1, 1]}
-- {id: vpc-workloads, type: aws.vpc, name: workloads, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}, at: [3, 1, 1, 4]}
-- {id: az-workloads-a, type: aws.availability_zone, name: a, parent: vpc-workloads, props: {zone: a}, at: [1, 1]}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-workloads-a, props: {cidr: 10.0.16.0/20, az: a, public: false}, at: [1, 1]}
-- {id: sub-endpoints-a, type: aws.subnet, name: endpoints-a, parent: az-workloads-a, props: {cidr: 10.0.32.0/24, az: a, public: false}, at: [1, 2]}
-- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-production, props: {region: eu-central-1}, caption: dr, at: [1, 2]}
-- {id: user, type: common.user, name: user, at: [1, 1]}
-- {id: public-cache-rule, type: aws.res.aws_ecr_pull_through_cache_rule, name: public-cache-rule, parent: acct-platform, props: {ecr_repository_prefix: changeme, upstream_registry_url: changeme}, at: [1, 1]}
-- {id: cached-base-images, type: aws.res.aws_ecr_repository, name: cached-base-images, parent: acct-platform, props: {name: changeme}, at: [1, 2]}
-- {id: app-source, type: aws.res.aws_codecommit_repository, name: app-source, parent: reg-eu-west-1, props: {repository_name: changeme}, at: [2, 1]}
+- {id: acct-development, type: aws.account, name: development, at: [1, 1]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-development, props: {region: eu-west-1}, at: [1, 1]}
+- {id: grp-ecr-registry, type: common.group, name: ecr-registry, parent: reg-eu-west-1, at: [1, 1, 1, 2]}
+- {id: grp-codepipeline, type: common.group, name: codepipeline, parent: reg-eu-west-1, at: [2, 2]}
+- {id: acct-production, type: aws.account, name: production, at: [1, 2]}
+- {id: reg-eu-west-1-2, type: aws.region, name: eu-west-1, parent: acct-production, props: {region: eu-west-1}, at: [1, 1]}
+- {id: ecr-public, type: common.saas, name: ecr-public, at: [1, 1]}
+- {id: quay-io, type: common.saas, name: quay-io, at: [2, 1]}
+- {id: pull-through-cache-repo, type: aws.res.aws_ecr_repository, name: pull-through-cache-repo, parent: grp-ecr-registry, props: {name: changeme}, at: [1, 1]}
+- {id: development-repo, type: aws.res.aws_ecr_repository, name: development-repo, parent: grp-ecr-registry, props: {name: changeme}, at: [1, 2]}
+- {id: production-repo, type: aws.res.aws_ecr_repository, name: production-repo, parent: grp-ecr-registry, props: {name: changeme}, at: [1, 3]}
+- id: inspector-scanning
+  type: aws.res.aws_inspector2_enabler
+  name: inspector-scanning
+  parent: reg-eu-west-1
+  props: {account_ids: [], resource_types: []}
+  at:
+  - 1
+  - 3
+- {id: security-hub, type: aws.res.aws_securityhub_account, name: security-hub, parent: reg-eu-west-1, at: [2, 1]}
+- id: image-pipeline
+  type: aws.res.aws_codepipeline
+  name: image-pipeline
+  parent: grp-codepipeline
+  props: {artifact_store: [], name: changeme, role_arn: changeme, stage: []}
+  at:
+  - 2
+  - 1
 - id: image-build
   type: aws.res.aws_codebuild_project
   name: image-build
-  parent: reg-eu-west-1
-  at: [2, 2]
+  parent: grp-codepipeline
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: app-build-repo, type: aws.res.aws_ecr_repository, name: app-build-repo, parent: reg-eu-west-1, props: {name: changeme}, at: [1, 1]}
-- {id: app-quarantine-repo, type: aws.res.aws_ecr_repository, name: app-quarantine-repo, parent: reg-eu-west-1, props: {name: changeme}, at: [1, 2]}
-- {id: scan-complete-rule, type: aws.res.aws_cloudwatch_event_rule, name: scan-complete-rule, parent: reg-eu-west-1, at: [1, 3]}
-- {id: promote-or-quarantine-fn, type: aws.lambda_function, name: promote-or-quarantine-fn, parent: reg-eu-west-1, at: [1, 4]}
-- {id: replicate-to-prod, type: aws.res.aws_ecr_replication_configuration, name: replicate-to-prod, parent: reg-eu-west-1, at: [2, 3]}
-- {id: prod-app-repo, type: aws.res.aws_ecr_repository, name: prod-app-repo, parent: acct-production, props: {name: changeme}, at: [1, 1]}
-- {id: prod-dr-app-repo, type: aws.res.aws_ecr_repository, name: prod-dr-app-repo, parent: reg-eu-central-1, props: {name: changeme}, at: [1, 1]}
-- {id: ecr-dkr-endpoint, type: aws.res.aws_vpc_endpoint, name: ecr-dkr-endpoint, parent: sub-endpoints-a, props: {vpc_id: changeme}, at: [1, 1]}
-- {id: prod-cluster, type: aws.eks_cluster, name: prod-cluster, parent: vpc-workloads, at: [2, 1, 1, 2]}
-- {id: az-vpc-workloads-b, type: aws.availability_zone, name: b, parent: vpc-workloads, props: {zone: b}, at: [1, 2]}
-- {id: sub-vpc-workloads-b, type: aws.subnet, name: private-b, parent: az-vpc-workloads-b, props: {cidr: 10.0.251.0/24, az: b, public: false}, at: [1, 1]}
+  at:
+  - 1
+  - 1
+- {id: ecs-deploy, type: aws.res.aws_codedeploy_app, name: ecs-deploy, parent: grp-codepipeline, props: {name: changeme}, at: [1, 2]}
+- {id: dev-cluster, type: aws.res.aws_ecs_cluster, name: dev-cluster, parent: reg-eu-west-1, props: {name: changeme}, at: [3, 2]}
+- {id: ecr-endpoint, type: aws.res.aws_vpc_endpoint, name: ecr-endpoint, parent: acct-production, props: {vpc_id: changeme}, at: [1, 1]}
+- {id: prod-cluster, type: aws.res.aws_ecs_cluster, name: prod-cluster, parent: acct-production, props: {name: changeme}, at: [1, 2]}
 edges:
-- {from: public-cache-rule, to: cached-base-images, label: pull-through cache from ECR Public / Quay, step: '1'}
-- {from: cached-base-images, to: image-build, label: vetted base image (cross-account pull), step: '2'}
-- {from: user, to: app-source, label: git push, step: '3'}
-- {from: app-source, to: image-build, label: build trigger, step: '4'}
-- {from: image-build, to: app-build-repo, label: docker push, step: '5'}
-- {from: scan-complete-rule, to: promote-or-quarantine-fn, label: ECR image scan completed, step: '6', link: aws_cloudwatch_event_target}
-- {from: promote-or-quarantine-fn, to: app-quarantine-repo, label: critical CVEs found}
-- {from: promote-or-quarantine-fn, to: prod-app-repo, label: promote clean image, step: '7'}
-- {from: replicate-to-prod, to: prod-app-repo, label: cross-account replication rule}
-- {from: prod-app-repo, to: prod-dr-app-repo, label: cross-Region replication, step: '8'}
-- {from: prod-cluster, to: ecr-dkr-endpoint, label: image pull, step: '9'}
-- {from: ecr-dkr-endpoint, to: prod-app-repo, label: PrivateLink}
+- {from: ecr-public, to: pull-through-cache-repo, label: pull-through cache, step: '1'}
+- {from: quay-io, to: pull-through-cache-repo, label: pull-through cache, step: '1'}
+- {from: pull-through-cache-repo, to: image-build, label: vetted base image, step: '2'}
+- {from: image-build, to: development-repo, label: 'docker push, scan on push', step: '3'}
+- {from: inspector-scanning, to: development-repo, label: image scanning}
+- {from: inspector-scanning, to: security-hub, label: Inspector scan findings}
+- {from: pull-through-cache-repo, to: development-repo, label: base image}
+- {from: development-repo, to: production-repo, label: promote clean image, step: '4'}
+- {from: production-repo, to: ecs-deploy, label: release image, step: '5'}
+- {from: ecs-deploy, to: dev-cluster, label: deploy to development, step: '6'}
+- {from: ecs-deploy, to: prod-cluster, label: deploy to production, step: '7'}
+- {from: prod-cluster, to: ecr-endpoint, label: image pull, step: '8'}
+- {from: ecr-endpoint, to: production-repo, label: PrivateLink cross-account pull}
 steps:
-- {n: '1', text: 'public-cache-rule → cached-base-images: pull-through cache from ECR Public / Quay'}
-- {n: '2', text: 'cached-base-images → image-build: vetted base image (cross-account pull)'}
-- {n: '3', text: 'user → app-source: git push'}
-- {n: '4', text: 'app-source → image-build: build trigger'}
-- {n: '5', text: 'image-build → app-build-repo: docker push'}
-- {n: '6', text: 'scan-complete-rule → promote-or-quarantine-fn: ECR image scan completed'}
-- {n: '7', text: 'promote-or-quarantine-fn → prod-app-repo: promote clean image'}
-- {n: '8', text: 'prod-app-repo → prod-dr-app-repo: cross-Region replication'}
-- {n: '9', text: 'prod-cluster → ecr-dkr-endpoint: image pull'}
+- {n: '1', text: 'ecr-public → pull-through-cache-repo: pull-through cache'}
+- {n: '2', text: 'pull-through-cache-repo → image-build: vetted base image'}
+- {n: '3', text: 'image-build → development-repo: docker push, scan on push'}
+- {n: '4', text: 'development-repo → production-repo: promote clean image'}
+- {n: '5', text: 'production-repo → ecs-deploy: release image'}
+- {n: '6', text: 'ecs-deploy → dev-cluster: deploy to development'}
+- {n: '7', text: 'ecs-deploy → prod-cluster: deploy to production'}
+- {n: '8', text: 'prod-cluster → ecr-endpoint: image pull'}

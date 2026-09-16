@@ -9,29 +9,27 @@ tags:
 - internal dns
 image: https://docs.cloud.google.com/static/dns/images/Diagram-2-with-cross-project-binding.svg
 source: https://docs.cloud.google.com/dns/docs/zones/zones-overview
-description: Private managed zones are authorized to one or more VPC networks and serve internal names such as internal.example.com to instances in those networks, alongside managed reverse lookup zones
-  for PTR records and Service Directory zones for service discovery. A response policy or private zone can override public names, for example to point googleapis.com at private endpoints.
+description: In a Shared VPC organization each service project owns a private managed zone (service1.example.com, service2.example.com) that is bound across projects to the Shared VPC network of the host
+  project, so instances in the shared subnet resolve internal names from both zones. The network admin grants the dns.networks.bindPrivateDNSZone IAM permission on the host project, and each application
+  admin holds dns.managedZones.create on their own service project to create the zone and attach it to the shared network.
 nodes:
-- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: us-central1}, at: [1, 1]}
-- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-workload, props: {cidr: 10.170.0.0/16}, at: [1, 1, 3, 1]}
-- {id: sub-app-usc1, type: gcp.subnetwork, name: app-usc1, parent: vpc-app-vpc, props: {cidr: 10.170.0.0/24, region: us-central1}, at: [1, 1]}
-- {id: sub-db-usc1, type: gcp.subnetwork, name: db-usc1, parent: vpc-app-vpc, props: {cidr: 10.170.1.0/24, region: us-central1}, at: [2, 1]}
-- {id: internal-private-zone, type: gcp.cloud_dns_zone, name: internal-private-zone, parent: prj-workload, props: {domain: example.com}, at: [1, 2]}
-- {id: reverse-lookup-zone, type: gcp.cloud_dns_zone, name: reverse-lookup-zone, parent: prj-workload, props: {domain: example.com}, at: [2, 2]}
-- {id: service-directory-zone, type: gcp.cloud_dns_zone, name: service-directory-zone, parent: prj-workload, props: {domain: example.com}, at: [3, 2]}
-- {id: logging-dns-policy, type: gcp.res.google_dns_policy, name: logging-dns-policy, parent: vpc-app-vpc, props: {name: changeme}, at: [1, 2, 2, 1]}
-- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-app-usc1, at: [1, 1]}
-- {id: db-internal-ip, type: gcp.res.google_compute_address, name: db-internal-ip, parent: sub-db-usc1, props: {name: changeme}, at: [1, 2]}
-- {id: db-vm, type: gcp.compute_instance, name: db-vm, parent: sub-db-usc1, at: [1, 1]}
+- {id: prj-host-project, type: gcp.project, name: host-project, props: {project_id: host-project-123456, project: changeme, region: us-central1}, at: [2, 1, 2, 1]}
+- {id: vpc-shared-vpc, type: gcp.vpc, name: shared-vpc, parent: prj-host-project, props: {cidr: 10.170.0.0/16}, at: [1, 1]}
+- {id: sub-shared-subnet, type: gcp.subnetwork, name: shared-subnet, parent: vpc-shared-vpc, props: {cidr: 10.170.0.0/24, region: us-central1}, at: [1, 1]}
+- {id: prj-service-project1, type: gcp.project, name: service-project1, props: {project_id: service-project1-123456, project: changeme, region: us-central1}, at: [2, 2]}
+- {id: prj-service-project2, type: gcp.project, name: service-project2, props: {project_id: service-project2-123456, project: changeme, region: us-central1}, at: [3, 2]}
+- {id: network-admin, type: common.user, name: Network admin, at: [1, 2]}
+- {id: app1-admin, type: common.user, name: App1 admin, at: [2, 3]}
+- {id: app2-admin, type: common.user, name: App2 admin, at: [3, 3]}
+- {id: service1-private-zone, type: gcp.cloud_dns_zone, name: service1-private-zone, parent: prj-service-project1, props: {domain: example.com}, at: [1, 1]}
+- {id: service2-private-zone, type: gcp.cloud_dns_zone, name: service2-private-zone, parent: prj-service-project2, props: {domain: example.com}, at: [1, 1]}
 edges:
-- {from: app-vm, to: internal-private-zone, label: resolve db.internal.example.com, step: '1'}
-- {from: internal-private-zone, to: db-internal-ip, label: A record to reserved internal IP, step: '2'}
-- {from: app-vm, to: db-vm, label: connect by name, step: '3'}
-- {from: db-vm, to: reverse-lookup-zone, label: PTR lookup of client IP, step: '4'}
-- {from: app-vm, to: service-directory-zone, label: discover registered services, step: '5'}
+- {from: network-admin, to: prj-host-project, label: gives dns.networks.bindPrivateDNSZone IAM permission on the host project, step: '1'}
+- {from: app1-admin, to: service1-private-zone, label: gets dns.managedZones.create on service project1 and creates the zone, step: '2'}
+- {from: app2-admin, to: service2-private-zone, label: gets dns.managedZones.create on service project2 and creates the zone, step: '2'}
+- {from: service1-private-zone, to: vpc-shared-vpc, label: zone association to the Shared VPC network, step: '3'}
+- {from: service2-private-zone, to: vpc-shared-vpc, label: zone association to the Shared VPC network, step: '3'}
 steps:
-- {n: '1', text: 'app-vm → internal-private-zone: resolve db.internal.example.com'}
-- {n: '2', text: 'internal-private-zone → db-internal-ip: A record to reserved internal IP'}
-- {n: '3', text: 'app-vm → db-vm: connect by name'}
-- {n: '4', text: 'db-vm → reverse-lookup-zone: PTR lookup of client IP'}
-- {n: '5', text: 'app-vm → service-directory-zone: discover registered services'}
+- {n: '1', text: 'Network admin → project:host-project: gives dns.networks.bindPrivateDNSZone IAM permission on the host project'}
+- {n: '2', text: 'App1 admin → service1-private-zone: gets dns.managedZones.create on service project1 and creates the zone'}
+- {n: '3', text: 'service1-private-zone → vpc:shared-vpc: zone association to the Shared VPC network'}

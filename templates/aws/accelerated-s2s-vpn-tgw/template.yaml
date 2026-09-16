@@ -10,40 +10,45 @@ tags:
 - edge
 image: https://docs.aws.amazon.com/images/whitepapers/latest/hybrid-connectivity/images/managed-vpn-tg-single-region.png
 source: https://docs.aws.amazon.com/whitepapers/latest/hybrid-connectivity/aws-accelerated-site-to-site-vpn-aws-transit-gateway-single-aws-region.html
-description: An accelerated Site-to-Site VPN attaches to a Transit Gateway and uses AWS Global Accelerator so that each IPsec tunnel terminates at anycast IPs announced from the nearest AWS edge location
-  instead of at the Region. The customer gateway's traffic enters the AWS global network close to the site and rides the backbone to the Regional Transit Gateway, reducing jitter and path variability compared
-  with traversing the public internet all the way to the Region.
+description: An accelerated Site-to-Site VPN attaches to a Transit Gateway that interconnects three VPCs, each spanning two Availability Zones, and uses AWS Global Accelerator so that each IPsec tunnel
+  terminates at anycast IPs announced from the nearest AWS point of presence instead of at the Region. Traffic from the customer gateway router leaves the corporate data center through its local ISP, enters
+  the AWS global network close to the site and rides the backbone to the Regional Transit Gateway, reducing jitter and path variability compared with traversing the public internet all the way to the Region.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 3]}
+- {id: dc-corporate-data-center, type: common.datacenter, name: corporate-data-center, at: [1, 3]}
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
 - {id: reg-ap-southeast-2, type: aws.region, name: ap-southeast-2, parent: acct-prod, props: {region: ap-southeast-2}, at: [1, 1]}
-- {id: grp-aws-edge-location, type: common.group, name: aws-edge-location, parent: reg-ap-southeast-2, at: [1, 3, 2, 1]}
-- {id: vpc-workload, type: aws.vpc, name: workload, parent: reg-ap-southeast-2, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: az-workload-a, type: aws.availability_zone, name: a, parent: vpc-workload, props: {zone: a}, at: [1, 1]}
-- {id: sub-workload-private-a, type: aws.subnet, name: workload-private-a, parent: az-workload-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-workload-b, type: aws.availability_zone, name: b, parent: vpc-workload, props: {zone: b}, at: [2, 1]}
-- {id: sub-workload-private-b, type: aws.subnet, name: workload-private-b, parent: az-workload-b, props: {cidr: 10.1.2.0/24, az: b, public: false}, at: [1, 1]}
-- {id: internet, type: common.internet, name: internet, at: [1, 2]}
-- {id: vpc-reg-ap-southeast-2, type: aws.vpc, name: main, parent: reg-ap-southeast-2, props: {cidr: 10.200.0.0/16}, at: [2, 1]}
-- {id: az-reg-ap-southeast-2-a, type: aws.availability_zone, name: a, parent: vpc-reg-ap-southeast-2, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-ap-southeast-2-a, type: aws.subnet, name: private-a, parent: az-reg-ap-southeast-2-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-ap-southeast-2-b, type: aws.availability_zone, name: b, parent: vpc-reg-ap-southeast-2, props: {zone: b}, at: [2, 1]}
-- {id: sub-reg-ap-southeast-2-b, type: aws.subnet, name: private-b, parent: az-reg-ap-southeast-2-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-ap-southeast-2-a, props: {type: changeme}, at: [1, 1]}
-- {id: vpn-accelerator, type: aws.res.aws_globalaccelerator_accelerator, name: vpn-accelerator, parent: grp-aws-edge-location, props: {name: changeme}, at: [1, 1]}
-- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-ap-southeast-2, at: [1, 2, 2, 1]}
-- {id: workload-a, type: aws.ec2_instance, name: workload-a, parent: sub-workload-private-a, at: [1, 1]}
-- {id: workload-b, type: aws.ec2_instance, name: workload-b, parent: sub-workload-private-b, at: [1, 1]}
+- {id: vpc-workload-1, type: aws.vpc, name: workload-1, parent: reg-ap-southeast-2, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-workload-1-a, type: aws.availability_zone, name: a, parent: vpc-workload-1, props: {zone: a}, at: [1, 1]}
+- {id: sub-workload-1-az-a, type: aws.subnet, name: workload-1-az-a, parent: az-workload-1-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-workload-1-b, type: aws.availability_zone, name: b, parent: vpc-workload-1, props: {zone: b}, at: [2, 1]}
+- {id: sub-workload-1-az-b, type: aws.subnet, name: workload-1-az-b, parent: az-workload-1-b, props: {cidr: 10.1.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: vpc-workload-2, type: aws.vpc, name: workload-2, parent: reg-ap-southeast-2, props: {cidr: 10.2.0.0/16}, at: [2, 1]}
+- {id: az-workload-2-a, type: aws.availability_zone, name: a, parent: vpc-workload-2, props: {zone: a}, at: [1, 1]}
+- {id: sub-workload-2-az-a, type: aws.subnet, name: workload-2-az-a, parent: az-workload-2-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-workload-2-b, type: aws.availability_zone, name: b, parent: vpc-workload-2, props: {zone: b}, at: [2, 1]}
+- {id: sub-workload-2-az-b, type: aws.subnet, name: workload-2-az-b, parent: az-workload-2-b, props: {cidr: 10.2.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: vpc-workload-3, type: aws.vpc, name: workload-3, parent: reg-ap-southeast-2, props: {cidr: 10.3.0.0/16}, at: [3, 1]}
+- {id: az-workload-3-a, type: aws.availability_zone, name: a, parent: vpc-workload-3, props: {zone: a}, at: [1, 1]}
+- {id: sub-workload-3-az-a, type: aws.subnet, name: workload-3-az-a, parent: az-workload-3-a, props: {cidr: 10.3.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-workload-3-b, type: aws.availability_zone, name: b, parent: vpc-workload-3, props: {zone: b}, at: [2, 1]}
+- {id: sub-workload-3-az-b, type: aws.subnet, name: workload-3-az-b, parent: az-workload-3-b, props: {cidr: 10.3.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: internet-local-isp, type: common.internet, name: internet-local-isp, at: [1, 2]}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-ap-southeast-2, at: [1, 2, 3, 1]}
+- {id: aws-global-network, type: aws.res.aws_networkmanager_global_network, name: aws-global-network, parent: acct-prod, at: [1, 2]}
+- {id: vpn-accelerator-pop, type: aws.res.aws_globalaccelerator_accelerator, name: vpn-accelerator-pop, parent: acct-prod, props: {name: changeme}, at: [1, 3]}
+- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: acct-prod, props: {type: changeme}, at: [1, 4]}
 edges:
-- {from: dc-on-premises, to: dc-cgw, step: '1'}
-- {from: dc-cgw, to: internet, label: IPsec to anycast tunnel endpoints, step: '2'}
-- {from: internet, to: vpn-accelerator, label: nearest edge location, step: '3'}
-- {from: hub-tgw, to: vpc-workload, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: hub-tgw, to: workload-a, step: '6'}
-- {from: vpn-accelerator, to: hub-tgw, label: AWS global network, step: '4'}
+- {from: dc-corporate-data-center, to: dc-cgw, label: customer gateway router}
+- {from: dc-cgw, to: internet-local-isp, label: IPsec tunnels to anycast IPs, step: '1'}
+- {from: internet-local-isp, to: vpn-accelerator-pop, label: nearest AWS PoP, step: '2'}
+- {from: vpn-accelerator-pop, to: aws-global-network, label: AWS global network, step: '3'}
+- {from: aws-global-network, to: hub-tgw, step: '4'}
+- {from: dc-cgw, to: hub-tgw, label: Site-to-Site IPsec connection, link: aws_vpn_connection}
+- {from: hub-tgw, to: vpc-workload-1, label: inter-VPC communication, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-workload-2, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-workload-3, link: aws_ec2_transit_gateway_vpc_attachment}
 steps:
-- {n: '1', text: datacenter → dc-cgw}
-- {n: '2', text: 'dc-cgw → internet: IPsec to anycast tunnel endpoints'}
-- {n: '3', text: 'internet → vpn-accelerator: nearest edge location'}
-- {n: '4', text: 'vpn-accelerator → hub-tgw: AWS global network'}
-- {n: '6', text: hub-tgw → workload-a}
+- {n: '1', text: 'dc-cgw → internet-local-isp: IPsec tunnels to anycast IPs'}
+- {n: '2', text: 'internet-local-isp → vpn-accelerator-pop: nearest AWS PoP'}
+- {n: '3', text: 'vpn-accelerator-pop → aws-global-network: AWS global network'}
+- {n: '4', text: aws-global-network → hub-tgw}

@@ -270,29 +270,33 @@
   category: serverless
   tags: [event hubs, kafka, functions, stream analytics, capture, consumer groups]
   source: https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-about
-  description: Producers send events over AMQP, Kafka or HTTPS to a partitioned event hub in an Event Hubs namespace, where they are retained for a configurable period. Separate consumer groups let an Azure Functions app and a Stream Analytics job read the same stream independently with checkpointing, while Capture writes the raw events to Blob Storage or Data Lake Storage for long-term retention.
+  description: Producers send events over AMQP, Kafka or HTTPS to a partitioned event hub in an Event Hubs namespace, and Event Hubs Capture writes the raw events as Avro blobs to a storage account or Data Lake Storage Gen2 container, authenticating with a user-assigned managed identity that can also target a storage account in a second subscription. Separate consumer groups let an Azure Functions app and a Stream Analytics job read the same stream independently with checkpointing.
   containers:
-    - subscription: workload
+    - subscription: subscription-1
       resource_group: {name: rg-streaming, location: westeurope}
+    - subscription: subscription-2
+      resource_group: {name: rg-capture-archive, location: westeurope}
   elements:
-    - {tf: azurerm_eventhub_namespace, name: evhns-telemetry, in: resource_group:rg-streaming}
-    - {tf: azurerm_eventhub, name: evh-telemetry, in: resource_group:rg-streaming}
-    - {tf: azurerm_storage_account, name: st-capture, in: resource_group:rg-streaming}
-    - {tf: azurerm_service_plan, name: asp-functions, in: resource_group:rg-streaming}
-    - {tf: azurerm_linux_function_app, name: func-stream-processor, in: resource_group:rg-streaming}
-    - {tf: azurerm_stream_analytics_job, name: asa-realtime, in: resource_group:rg-streaming}
-    - {tf: azurerm_cosmosdb_account, name: cosmos-hot-path, in: resource_group:rg-streaming}
-    - {tf: azurerm_application_insights, name: appi-stream, in: resource_group:rg-streaming}
-  actors: [device, client]
+    - {tf: azurerm_eventhub_namespace, name: evhns-telemetry, in: resource_group:rg-streaming, at: [1, 1]}
+    - {tf: azurerm_eventhub, name: evh-telemetry, in: resource_group:rg-streaming, at: [1, 2]}
+    - {tf: azurerm_user_assigned_identity, name: id-capture, in: resource_group:rg-streaming, at: [1, 3]}
+    - {tf: azurerm_storage_account, name: st-capture, in: resource_group:rg-streaming, at: [1, 4]}
+    - {tf: azurerm_storage_data_lake_gen2_filesystem, name: dls-capture, in: resource_group:rg-streaming, at: [1, 5]}
+    - {tf: azurerm_linux_function_app, name: func-stream-processor, in: resource_group:rg-streaming, at: [2, 2]}
+    - {tf: azurerm_stream_analytics_job, name: asa-realtime, in: resource_group:rg-streaming, at: [2, 3]}
+    - {tf: azurerm_storage_account, name: st-capture-sub2, in: resource_group:rg-capture-archive, at: [1, 1]}
+    - {tf: azurerm_storage_data_lake_gen2_filesystem, name: dls-capture-sub2, in: resource_group:rg-capture-archive, at: [1, 2]}
+  actors: [{type: device, name: device, at: [1, 1]}, {type: client, name: client, at: [2, 1]}]
   flows:
     - {from: device, to: evh-telemetry, label: AMQP / Kafka produce, step: 1}
     - {from: client, to: evh-telemetry, label: HTTPS produce, step: 1}
-    - {from: evh-telemetry, to: func-stream-processor, label: Event Hubs trigger (consumer group A), step: 2}
-    - {from: evh-telemetry, to: asa-realtime, label: consumer group B, step: 2}
-    - {from: evh-telemetry, to: st-capture, label: Capture (Avro), step: 2}
-    - {from: func-stream-processor, to: cosmos-hot-path, label: write processed events, step: 3}
+    - {from: evh-telemetry, to: st-capture, label: Capture (Avro) as the managed identity, step: 2}
+    - {from: evh-telemetry, to: st-capture-sub2, label: Capture to a storage account in subscription-2, step: 2}
+    - {from: id-capture, to: st-capture, label: Storage Blob Data Contributor}
+    - {from: id-capture, to: st-capture-sub2, label: Storage Blob Data Contributor}
+    - {from: evh-telemetry, to: func-stream-processor, label: Event Hubs trigger (consumer group A), step: 3}
+    - {from: evh-telemetry, to: asa-realtime, label: consumer group B, step: 3}
     - {from: func-stream-processor, to: st-capture, label: checkpoints}
-    - {from: func-stream-processor, to: appi-stream, label: telemetry}
 
 - slug: durable-functions-stateful-workflows
   title: Durable Functions stateful serverless workflows
@@ -325,31 +329,31 @@
   category: serverless
   tags: [logic apps, api management, integration, connectors, entra id, key vault]
   source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/enterprise-integration/basic-enterprise-integration
-  description: Client applications authenticate with Microsoft Entra ID and call the API Management gateway, which validates the token and forwards requests to Logic Apps workflows imported as APIs. Logic Apps orchestrates calls to back-end systems such as SaaS applications, Azure services and line-of-business databases through connectors, with Key Vault holding secrets and Azure Monitor collecting diagnostics.
+  description: Client applications call the API Management gateway over HTTP and authenticate with Microsoft Entra ID, and the gateway validates the token and forwards requests to a Logic Apps workflow imported as an API. Logic Apps orchestrates calls to back-end systems such as SaaS applications and line-of-business services through connectors, API Management and Logic Apps publish their interfaces to the developer portal where developers consume the API documentation, Key Vault holds secrets and Azure Monitor collects diagnostic logs.
   containers:
     - subscription: workload
       resource_group: {name: rg-integration, location: westeurope}
   elements:
-    - {tf: azurerm_api_management, name: apim-integration, in: resource_group:rg-integration}
-    - {tf: azurerm_logic_app_workflow, name: logic-order-orchestration, in: resource_group:rg-integration}
-    - {tf: azurerm_logic_app_workflow, name: logic-customer-sync, in: resource_group:rg-integration}
-    - {tf: azurerm_key_vault, name: kv-integration, in: resource_group:rg-integration}
-    - {tf: azurerm_mssql_server, name: sql-lob, in: resource_group:rg-integration}
-    - {tf: azurerm_linux_web_app, name: api-lob-service, in: resource_group:rg-integration}
-    - {tf: azurerm_application_insights, name: appi-apim, in: resource_group:rg-integration}
-    - {tf: azurerm_log_analytics_workspace, name: law-integration, in: resource_group:rg-integration}
-  actors: [client, idp, saas]
+    - {tf: azurerm_api_management, name: apim-integration, in: resource_group:rg-integration, at: [1, 1, 2, 1]}
+    - {tf: azurerm_logic_app_workflow, name: logic-order-orchestration, in: resource_group:rg-integration, at: [1, 2]}
+    - {tf: azurerm_linux_web_app, name: api-lob-service, in: resource_group:rg-integration, at: [1, 3]}
+    - {tf: azurerm_key_vault, name: kv-integration, in: resource_group:rg-integration, at: [2, 2]}
+    - {tf: azurerm_log_analytics_workspace, name: log-azure-monitor, in: resource_group:rg-integration, at: [2, 3]}
+  actors: [{type: idp, name: Microsoft Entra ID, at: [1, 1]}, {type: client, name: client, at: [2, 1]}, {type: user, name: developer, at: [3, 1]}, {type: saas, name: saas, at: [1, 3, 3, 1]}]
   flows:
-    - {from: client, to: idp, label: OAuth 2.0 token, step: 1}
-    - {from: client, to: apim-integration, label: HTTPS with bearer token, step: 2}
-    - {from: apim-integration, to: logic-order-orchestration, label: trigger workflow, step: 3}
-    - {from: logic-order-orchestration, to: sql-lob, label: SQL connector, step: 4}
-    - {from: logic-order-orchestration, to: api-lob-service, label: HTTP action, step: 4}
-    - {from: logic-customer-sync, to: saas, label: SaaS connector, step: 4}
+    - {from: client, to: apim-integration, label: HTTP, step: 1}
+    - {from: client, to: Microsoft Entra ID, label: authentication (OAuth 2.0 token), step: 2}
+    - {from: apim-integration, to: Microsoft Entra ID, label: validate JWT}
+    - {from: apim-integration, to: logic-order-orchestration, label: forward request to the workflow API, step: 3}
+    - {from: logic-order-orchestration, to: saas, label: SaaS connector, step: 4}
+    - {from: logic-order-orchestration, to: api-lob-service, label: HTTP action to line-of-business service, step: 4}
+    - {from: developer, to: Microsoft Entra ID, label: create application registration}
+    - {from: logic-order-orchestration, to: apim-integration, label: publish interfaces to the developer portal}
+    - {from: apim-integration, to: developer, label: consume API documentation (developer portal)}
     - {from: logic-order-orchestration, to: kv-integration, label: secrets (managed identity)}
     - {from: apim-integration, to: kv-integration, label: named values}
-    - {from: apim-integration, to: appi-apim, label: telemetry}
-    - {from: logic-order-orchestration, to: law-integration, label: diagnostics}
+    - {from: apim-integration, to: log-azure-monitor, label: diagnostic logs (Azure Monitor)}
+    - {from: logic-order-orchestration, to: log-azure-monitor, label: diagnostic logs (Azure Monitor)}
 
 - slug: container-apps-dapr-microservices
   title: Microservices on Azure Container Apps with Dapr and KEDA
@@ -396,53 +400,61 @@
   category: containers
   tags: [aks, hub-spoke, azure firewall, application gateway, private cluster, container registry, key vault]
   source: https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/containers/aks/baseline-aks
-  description: A private AKS cluster with system and user node pools runs in a spoke virtual network peered to a hub that hosts Azure Firewall, a gateway subnet and Azure Bastion, with all cluster egress forced through the firewall by user-defined routes. Application Gateway with WAF terminates TLS and forwards to an internal load balancer and in-cluster ingress, and the cluster reaches Container Registry and Key Vault only through private endpoints.
+  description: A private AKS cluster with system and user node pools runs in a spoke virtual network peered to a hub that hosts Azure Firewall, Azure Bastion and a gateway subnet whose virtual network gateway connects the on-premises network, with all cluster egress forced through the firewall by user-defined routes. Application Gateway with WAF terminates TLS and forwards to an internal load balancer and in-cluster ingress, operators reach the API server through an Azure Bastion tunnel to the internal load balancer of the API server VNet integration subnet, and the cluster reaches Container Registry and Key Vault only through private endpoints while Azure Monitor collects container insights.
   containers:
     - subscription: connectivity
       resource_group: {name: rg-enterprise-networking-hubs, location: eastus2}
       vnets:
         - name: vnet-hub
           cidr: 10.200.0.0/24
+          at: [1, 1]
           subnets:
-            - {name: AzureFirewallSubnet, cidr: 10.200.0.0/26}
-            - {name: GatewaySubnet, cidr: 10.200.0.64/27}
-            - {name: AzureBastionSubnet, cidr: 10.200.0.128/26}
+            - {name: AzureBastionSubnet, cidr: 10.200.0.128/26, at: [1, 1]}
+            - {name: AzureFirewallSubnet, cidr: 10.200.0.0/26, at: [1, 2]}
+            - {name: GatewaySubnet, cidr: 10.200.0.64/27, at: [1, 3]}
     - subscription: workload
       resource_group: {name: rg-bu0001a0008, location: eastus2}
       vnets:
         - name: vnet-spoke-aks
           cidr: 10.240.0.0/16
+          at: [1, 2, 2, 1]
           subnets:
-            - {name: snet-clusternodes, cidr: 10.240.0.0/22}
-            - {name: snet-clusteringressservices, cidr: 10.240.4.0/28}
-            - {name: snet-applicationgateway, cidr: 10.240.4.16/28}
-            - {name: snet-privatelinkendpoints, cidr: 10.240.4.32/28}
+            - {name: snet-privatelinkendpoints, cidr: 10.240.4.32/28, at: [1, 1]}
+            - {name: snet-apiserver, cidr: 10.240.5.0/28, at: [1, 2]}
+            - {name: snet-clusteringressservices, cidr: 10.240.4.0/28, at: [1, 3]}
+            - {name: snet-applicationgateway, cidr: 10.240.4.16/28, at: [1, 4]}
+            - {name: snet-clusternodes, cidr: 10.240.0.0/22, at: [2, 1, 1, 4]}
   elements:
-    - {tf: azurerm_firewall, name: fw-hub, in: subnet:AzureFirewallSubnet}
-    - {tf: azurerm_bastion_host, name: bastion-hub, in: subnet:AzureBastionSubnet}
-    - {tf: azurerm_application_gateway, name: appgw-waf, in: subnet:snet-applicationgateway}
-    - {tf: azurerm_lb, name: ilb-ingress, in: subnet:snet-clusteringressservices}
-    - {tf: azurerm_kubernetes_cluster, name: aks-baseline, in: subnet:snet-clusternodes}
-    - {tf: azurerm_private_endpoint, name: pe-acr, in: subnet:snet-privatelinkendpoints}
-    - {tf: azurerm_private_endpoint, name: pe-keyvault, in: subnet:snet-privatelinkendpoints}
-    - {tf: azurerm_container_registry, name: acr-baseline, in: resource_group:rg-bu0001a0008}
-    - {tf: azurerm_key_vault, name: kv-aks-baseline, in: resource_group:rg-bu0001a0008}
-    - {tf: azurerm_log_analytics_workspace, name: law-aks, in: resource_group:rg-bu0001a0008}
-  actors: [users, internet, user]
+    - {tf: azurerm_bastion_host, name: bastion-hub, in: subnet:AzureBastionSubnet, at: [1, 1]}
+    - {tf: azurerm_firewall, name: fw-hub, in: subnet:AzureFirewallSubnet, at: [1, 1]}
+    - {tf: azurerm_virtual_network_gateway, name: vgw-hub, in: subnet:GatewaySubnet, at: [1, 1]}
+    - {tf: azurerm_private_endpoint, name: pe-keyvault, in: subnet:snet-privatelinkendpoints, at: [1, 1]}
+    - {tf: azurerm_private_endpoint, name: pe-acr, in: subnet:snet-privatelinkendpoints, at: [2, 1]}
+    - {tf: azurerm_lb, name: ilb-apiserver, in: subnet:snet-apiserver, at: [1, 1]}
+    - {tf: azurerm_lb, name: ilb-ingress, in: subnet:snet-clusteringressservices, at: [1, 1]}
+    - {tf: azurerm_application_gateway, name: appgw-waf, in: subnet:snet-applicationgateway, at: [1, 1]}
+    - {tf: azurerm_kubernetes_cluster, name: aks-baseline, in: subnet:snet-clusternodes, at: [1, 1]}
+    - {tf: azurerm_kubernetes_cluster_node_pool, name: npsystem, in: aks-baseline, at: [1, 1]}
+    - {tf: azurerm_kubernetes_cluster_node_pool, name: npuser01, in: aks-baseline, at: [1, 2]}
+    - {tf: azurerm_key_vault, name: kv-aks-baseline, in: resource_group:rg-bu0001a0008, at: [1, 1]}
+    - {tf: azurerm_container_registry, name: acr-baseline, in: resource_group:rg-bu0001a0008, at: [2, 1]}
+    - {tf: azurerm_log_analytics_workspace, name: law-aks, in: resource_group:rg-bu0001a0008, at: [1, 3, 2, 1]}
+  actors: [{type: user, name: user, at: [1, 1]}, {type: datacenter, name: on-premises network, at: [1, 3]}, {type: users, name: users, at: [2, 3]}]
   flows:
-    - {from: vnet:vnet-hub, to: vnet:vnet-spoke-aks, link: azurerm_virtual_network_peering, label: peering}
-    - {from: users, to: appgw-waf, label: HTTPS (WAF, TLS termination), step: 1}
+    - {from: vnet:vnet-hub, to: vnet:vnet-spoke-aks, link: azurerm_virtual_network_peering, label: virtual network peering}
+    - {from: datacenter, to: vgw-hub, label: VPN or ExpressRoute to the gateway subnet}
+    - {from: user, to: bastion-hub, label: Azure Bastion tunnel (kubectl via native client)}
+    - {from: bastion-hub, to: ilb-apiserver, label: private IP address of the API server}
+    - {from: ilb-apiserver, to: aks-baseline, label: API server VNet integration}
+    - {from: users, to: appgw-waf, label: "HTTPS (WAF, TLS termination)", step: 1}
     - {from: appgw-waf, to: ilb-ingress, label: HTTPS to internal load balancer, step: 2}
     - {from: ilb-ingress, to: aks-baseline, label: ingress controller to pods, step: 3}
-    - {from: aks-baseline, to: fw-hub, label: "0.0.0.0/0 via UDR", step: 4}
-    - {from: fw-hub, to: internet, label: allowed egress (FQDN rules), step: 5}
-    - {from: aks-baseline, to: pe-acr, label: image pull}
-    - {from: pe-acr, to: acr-baseline, label: private link}
+    - {from: aks-baseline, to: fw-hub, label: "0.0.0.0/0 via UDR: allowed egress by FQDN rules", step: 4}
+    - {from: kv-aks-baseline, to: pe-keyvault, label: private link}
+    - {from: acr-baseline, to: pe-acr, label: private link}
     - {from: aks-baseline, to: pe-keyvault, label: Secrets Store CSI driver}
-    - {from: pe-keyvault, to: kv-aks-baseline, label: private link}
-    - {from: user, to: bastion-hub, label: operator access}
-    - {from: bastion-hub, to: aks-baseline, label: private API server}
-    - {from: aks-baseline, to: law-aks, label: container insights}
+    - {from: aks-baseline, to: pe-acr, label: image pull}
+    - {from: aks-baseline, to: law-aks, label: container insights (Azure Monitor)}
 
 - slug: aks-private-cluster-azure-firewall
   title: Private AKS cluster protected by Azure Firewall in a hub-spoke topology
@@ -640,34 +652,21 @@
   category: containers
   tags: [container registry, geo-replication, acr tasks, webhooks, private endpoint, regional endpoints, aks]
   source: https://learn.microsoft.com/en-us/azure/container-registry/container-registry-geo-replication
-  description: A Premium container registry in its home region is geo-replicated to additional regions so that a single global endpoint routes pushes and pulls to the nearest active-active replica, with content synced across replicas under eventual consistency. ACR Tasks build images in the home region, webhooks fire per replica when replication completes, and AKS clusters in each region pull their images from the local replica through the global or regional endpoint, optionally over private endpoints.
+  description: A Premium container registry is geo-replicated so that clients such as regional AKS nodes address a single global endpoint (myregistry.azurecr.io, serving the auth and data plane APIs) and Azure-managed routing sends each request to the geo-replica with the best network performance profile. The replica answers blob requests with a 307 redirect to its own data endpoint, backed by regional blob storage or a dedicated data endpoint, so image layers are pulled from the nearest region.
   containers:
     - subscription: workload
       resource_group: {name: rg-acr-global, location: westeurope}
     - subscription: workload
-      resource_group: {name: rg-aks-westeurope, location: westeurope}
-    - subscription: workload
-      resource_group: {name: rg-aks-eastus, location: eastus}
+      resource_group: {name: rg-acr-replica-eastus, location: eastus}
   elements:
-    - {tf: azurerm_container_registry, name: acr-premium-geo, in: resource_group:rg-acr-global}
-    - {tf: azurerm_container_registry_task, name: acr-task-build, in: resource_group:rg-acr-global}
-    - {tf: azurerm_container_registry_webhook, name: acr-webhook-replicated, in: resource_group:rg-acr-global}
-    - {tf: azurerm_key_vault, name: kv-acr-cmk, in: resource_group:rg-acr-global}
-    - {tf: azurerm_kubernetes_cluster, name: aks-westeurope, in: resource_group:rg-aks-westeurope}
-    - {tf: azurerm_private_endpoint, name: pe-acr-westeurope, in: resource_group:rg-aks-westeurope}
-    - {tf: azurerm_kubernetes_cluster, name: aks-eastus, in: resource_group:rg-aks-eastus}
-    - {tf: azurerm_private_endpoint, name: pe-acr-eastus, in: resource_group:rg-aks-eastus}
-  actors: [user]
+    - {tf: azurerm_container_registry, name: acr-premium-geo, in: resource_group:rg-acr-global, at: [1, 1]}
+    - {tf: azurerm_container_registry, name: acr-replica-eastus, in: resource_group:rg-acr-replica-eastus, at: [1, 1]}
+    - {tf: azurerm_storage_account, name: st-acr-data-eastus, in: resource_group:rg-acr-replica-eastus, at: [2, 1]}
+  actors: [{type: client, name: client, at: [1, 1]}]
   flows:
-    - {from: user, to: acr-task-build, label: git commit triggers ACR Task, step: 1}
-    - {from: acr-task-build, to: acr-premium-geo, label: push image to home region, step: 2}
-    - {from: acr-premium-geo, to: acr-premium-geo, label: replicate to eastus replica (eventual consistency), step: 3}
-    - {from: acr-premium-geo, to: acr-webhook-replicated, label: push event per replica, step: 4}
-    - {from: aks-westeurope, to: pe-acr-westeurope, label: pull myregistry.westeurope.geo.azurecr.io, step: 5}
-    - {from: pe-acr-westeurope, to: acr-premium-geo, label: private link to westeurope replica}
-    - {from: aks-eastus, to: pe-acr-eastus, label: pull myregistry.eastus.geo.azurecr.io, step: 5}
-    - {from: pe-acr-eastus, to: acr-premium-geo, label: private link to eastus replica}
-    - {from: acr-premium-geo, to: kv-acr-cmk, label: customer-managed key}
+    - {from: client, to: acr-premium-geo, label: "docker pull myregistry.azurecr.io (global endpoint: auth and data plane APIs)", step: 1}
+    - {from: acr-premium-geo, to: acr-replica-eastus, label: Azure-managed routing to the geo-replica with the best network performance profile, step: 2}
+    - {from: acr-replica-eastus, to: st-acr-data-eastus, label: 307 redirect to the geo-replica's data endpoint (blob storage or dedicated data endpoint), step: 3}
 
 - slug: aro-cluster-master-worker-subnets
   title: Azure Red Hat OpenShift 4 cluster in a virtual network with master and worker subnets

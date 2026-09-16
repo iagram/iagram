@@ -10,31 +10,35 @@ tags:
 - online boutique
 image: https://docs.cloud.google.com/static/architecture/images/exposing-service-mesh-apps-through-gke-ingress-standard-approach.svg
 source: https://docs.cloud.google.com/architecture/exposing-service-mesh-apps-through-gke-ingress
-description: The Online Boutique microservices run on a GKE cluster inside Cloud Service Mesh, and a global external Application Load Balancer provisioned by GKE Gateway sends traffic to the mesh ingress
-  gateway. Cloud Armor and Certificate Manager provide edge security and TLS at the load balancer, while the mesh handles mTLS and application-level routing between services.
+description: The Online Boutique microservices run on a GKE cluster inside Cloud Service Mesh, and an external load balancer provisioned by GKE Gateway sends client traffic to the mesh ingress gateway proxies.
+  The ingress gateway routes each request to the application pods, whose sidecar proxies handle mTLS and application-level routing between services.
 nodes:
-- {id: prj-gke-prj, type: gcp.project, name: gke-prj, props: {project_id: gke-prj-123456, project: changeme, region: europe-west1}, at: [1, 3]}
-- {id: vpc-gke-vpc, type: gcp.vpc, name: gke-vpc, parent: prj-gke-prj, at: [1, 2, 4, 1]}
+- {id: prj-gke-prj, type: gcp.project, name: gke-prj, props: {project_id: gke-prj-123456, project: changeme, region: europe-west1}, at: [1, 2]}
+- {id: grp-cloud-service-mesh, type: common.group, name: Cloud Service Mesh, parent: prj-gke-prj, at: [1, 3, 2, 1]}
+- {id: vpc-gke-vpc, type: gcp.vpc, name: gke-vpc, parent: prj-gke-prj, at: [1, 2, 2, 1]}
 - {id: sub-gke-sub, type: gcp.subnetwork, name: gke-sub, parent: vpc-gke-vpc, props: {cidr: 10.40.0.0/20, region: europe-west1}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: internet, type: common.internet, name: internet, at: [1, 2]}
+- {id: external-client, type: common.client, name: external-client, at: [1, 1]}
+- {id: gke-gateway-lb, type: gcp.res.google_compute_global_forwarding_rule, name: gke-gateway-lb, parent: prj-gke-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
+- {id: mesh-ingress-backend, type: gcp.res.google_compute_backend_service, name: mesh-ingress-backend, parent: prj-gke-prj, props: {name: changeme}, at: [2, 1]}
 - {id: boutique-cluster, type: gcp.gke_cluster, name: boutique-cluster, parent: sub-gke-sub, at: [1, 1]}
-- {id: edge-armor-policy, type: gcp.res.google_compute_security_policy, name: edge-armor-policy, parent: prj-gke-prj, props: {name: changeme}, at: [1, 1]}
-- {id: gke-gateway-lb, type: gcp.res.google_compute_global_forwarding_rule, name: gke-gateway-lb, parent: prj-gke-prj, props: {name: changeme, target: changeme}, at: [2, 1]}
-- {id: mesh-ingress-backend, type: gcp.res.google_compute_backend_service, name: mesh-ingress-backend, parent: prj-gke-prj, props: {name: changeme}, at: [3, 1]}
-- {id: boutique-images, type: gcp.res.google_artifact_registry_repository, name: boutique-images, parent: prj-gke-prj, props: {format: changeme, repository_id: changeme}, at: [4, 1]}
-- {id: cart-redis, type: gcp.res.google_redis_instance, name: cart-redis, parent: sub-gke-sub, props: {memory_size_gb: 1, name: changeme}, at: [1, 2]}
-- {id: gke-nat, type: gcp.res.google_compute_router_nat, name: gke-nat, parent: vpc-gke-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [1, 2]}
+- id: mesh-ingress-gateway
+  type: gcp.res.google_network_services_gateway
+  name: mesh-ingress-gateway
+  parent: grp-cloud-service-mesh
+  props: {name: changeme, ports: [], type: changeme}
+  at:
+  - 1
+  - 1
+- {id: boutique-app-pods, type: gcp.res.google_container_node_pool, name: boutique-app-pods, parent: boutique-cluster, props: {cluster: changeme}, at: [1, 2]}
+- {id: boutique-mesh, type: gcp.res.google_network_services_mesh, name: boutique-mesh, parent: grp-cloud-service-mesh, props: {name: changeme}, at: [2, 1, 1, 2]}
 edges:
-- {from: users, to: gke-gateway-lb, label: HTTPS, step: '1'}
-- {from: edge-armor-policy, to: gke-gateway-lb, label: WAF / DDoS filter}
+- {from: external-client, to: gke-gateway-lb, label: HTTPS, step: '1'}
 - {from: gke-gateway-lb, to: mesh-ingress-backend, label: container NEG, step: '2'}
-- {from: mesh-ingress-backend, to: boutique-cluster, label: mesh ingress gateway, step: '3'}
-- {from: boutique-cluster, to: cart-redis, label: cartservice state, step: '4'}
-- {from: boutique-images, to: boutique-cluster, label: pull images}
-- {from: gke-nat, to: internet, label: private nodes egress}
+- {from: mesh-ingress-backend, to: mesh-ingress-gateway, label: ingress gateway proxies, step: '3'}
+- {from: mesh-ingress-gateway, to: boutique-app-pods, label: mTLS to sidecar proxies, step: '4'}
+- {from: boutique-mesh, to: boutique-cluster, label: mesh runs on the cluster}
 steps:
-- {n: '1', text: 'users → gke-gateway-lb: HTTPS'}
+- {n: '1', text: 'external-client → gke-gateway-lb: HTTPS'}
 - {n: '2', text: 'gke-gateway-lb → mesh-ingress-backend: container NEG'}
-- {n: '3', text: 'mesh-ingress-backend → boutique-cluster: mesh ingress gateway'}
-- {n: '4', text: 'boutique-cluster → cart-redis: cartservice state'}
+- {n: '3', text: 'mesh-ingress-backend → mesh-ingress-gateway: ingress gateway proxies'}
+- {n: '4', text: 'mesh-ingress-gateway → boutique-app-pods: mTLS to sidecar proxies'}

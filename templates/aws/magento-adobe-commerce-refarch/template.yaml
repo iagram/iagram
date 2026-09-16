@@ -11,61 +11,97 @@ tags:
 - aurora
 image: https://docs.aws.amazon.com/images/whitepapers/latest/migrating-magento-open-source-adobe-commerce-to-aws/images/reference-architecture-magento.png
 source: https://docs.aws.amazon.com/whitepapers/latest/migrating-magento-open-source-adobe-commerce-to-aws/reference-architecture.html
-description: Magento web and admin nodes run in Auto Scaling groups behind an Application Load Balancer, sharing media and var directories through EFS and caching sessions and full pages in ElastiCache
-  for Redis. Catalog search runs on an OpenSearch domain, the store database on Aurora MySQL, and CloudFront with AWS WAF delivers the storefront and shields it from bots.
+description: Users reach the store through Route 53, AWS WAF, and CloudFront; an Application Load Balancer sends requests to Varnish cache instances in each Availability Zone, and cache misses go through
+  a second load balancer to Magento EC2 instances in an Auto Scaling group. Magento uses Amazon MQ, OpenSearch for catalog search, ElastiCache for Redis for sessions and full-page cache, Aurora MySQL with
+  a read replica, and S3 as remote storage for media, with Secrets Manager holding credentials, SES sending email, and NAT gateways and bastion hosts in the public subnets.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1, at: [1, 1]}
+- {id: grp-edge, type: common.group, name: edge, parent: reg-us-east-1, at: [1, 1]}
 - {id: vpc-magento, type: aws.vpc, name: magento, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 2]}
-- {id: az-magento-a, type: aws.availability_zone, name: a, parent: vpc-magento, props: {zone: a}, at: [1, 3]}
+- {id: az-magento-a, type: aws.availability_zone, name: a, parent: vpc-magento, props: {zone: a}, at: [1, 4]}
 - {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-magento-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
-- {id: az-magento-b, type: aws.availability_zone, name: b, parent: vpc-magento, props: {zone: b}, at: [2, 3]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-magento-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 2]}
+- {id: az-magento-b, type: aws.availability_zone, name: b, parent: vpc-magento, props: {zone: b}, at: [2, 4]}
 - {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-magento-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
-- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-magento-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 2]}
-- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-magento-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [1, 2]}
-- {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-magento-a, props: {cidr: 10.0.20.0/24, az: a, public: false}, at: [1, 3]}
-- {id: sub-data-b, type: aws.subnet, name: data-b, parent: az-magento-b, props: {cidr: 10.0.21.0/24, az: b, public: false}, at: [1, 3]}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-magento-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [1, 2]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: store-cdn, type: aws.cloudfront_distribution, name: store-cdn, parent: grp-global-edge, at: [2, 1]}
+- {id: store-zone, type: aws.route53_zone, name: store-zone, parent: grp-edge, props: {domain: example.com}, at: [1, 1]}
 - id: store-waf
   type: aws.res.aws_wafv2_web_acl
   name: store-waf
-  parent: grp-global-edge
-  at: [1, 1]
+  parent: grp-edge
   props: {default_action: {}, scope: changeme, visibility_config: {}}
-- {id: store-media, type: aws.s3_bucket, name: store-media, parent: reg-us-east-1, at: [1, 3]}
+  at:
+  - 2
+  - 1
+- {id: store-cdn, type: aws.cloudfront_distribution, name: store-cdn, parent: grp-edge, at: [3, 1]}
+- {id: store-secrets, type: aws.res.aws_secretsmanager_secret, name: store-secrets, parent: grp-edge, at: [4, 1]}
+- {id: store-email, type: aws.res.aws_ses_domain_identity, name: store-email, parent: grp-edge, props: {domain: example.com}, at: [5, 1]}
 - {id: magento-igw, type: aws.res.aws_internet_gateway, name: magento-igw, parent: vpc-magento, at: [1, 1, 2, 1]}
+- {id: varnish-alb, type: aws.alb, name: varnish-alb, parent: vpc-magento, at: [1, 2, 2, 1]}
+- {id: magento-alb, type: aws.alb, name: magento-alb, parent: vpc-magento, at: [1, 3, 2, 1]}
+- {id: magento-asg, type: aws.res.aws_autoscaling_group, name: magento-asg, parent: vpc-magento, props: {max_size: 1, min_size: 1}, at: [3, 4]}
 - {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
-- {id: store-alb, type: aws.alb, name: store-alb, parent: vpc-magento, at: [1, 2, 2, 1]}
-- {id: web-asg, type: aws.res.aws_autoscaling_group, name: web-asg, parent: vpc-magento, props: {max_size: 1, min_size: 1}, at: [1, 4]}
-- {id: web-a, type: aws.ec2_instance, name: web-a, parent: sub-app-a, at: [1, 1]}
-- {id: web-b, type: aws.ec2_instance, name: web-b, parent: sub-app-b, at: [1, 1]}
-- {id: admin-cron, type: aws.ec2_instance, name: admin-cron, parent: sub-app-a, at: [1, 2]}
-- {id: magento-shared, type: aws.res.aws_efs_file_system, name: magento-shared, parent: vpc-magento, at: [2, 4]}
-- {id: redis-cache, type: aws.res.aws_elasticache_replication_group, name: redis-cache, parent: sub-data-a, props: {description: changeme, replication_group_id: changeme}, at: [1, 1]}
-- {id: catalog-search, type: aws.res.aws_opensearch_domain, name: catalog-search, parent: sub-data-b, props: {domain_name: changeme}, at: [1, 1]}
-- {id: store-aurora, type: aws.res.aws_rds_cluster, name: store-aurora, parent: sub-data-b, props: {engine: changeme}, at: [1, 2]}
+- {id: bastion-a, type: aws.ec2_instance, name: bastion-a, parent: sub-public-a, at: [2, 1]}
+- {id: nat-b, type: aws.res.aws_nat_gateway, name: nat-b, parent: sub-public-b, at: [1, 1]}
+- {id: bastion-b, type: aws.ec2_instance, name: bastion-b, parent: sub-public-b, at: [2, 1]}
+- {id: varnish-a, type: aws.ec2_instance, name: varnish-a, parent: sub-private-a, at: [1, 1]}
+- {id: mq-a, type: aws.res.aws_mq_broker, name: mq-a, parent: sub-private-a, props: {broker_name: changeme, engine_type: changeme, engine_version: changeme, host_instance_type: changeme}, at: [2, 1]}
+- {id: magento-a, type: aws.ec2_instance, name: magento-a, parent: sub-private-a, at: [1, 2]}
+- {id: catalog-search-a, type: aws.res.aws_opensearch_domain, name: catalog-search-a, parent: sub-private-a, props: {domain_name: changeme}, at: [1, 3]}
+- {id: redis-primary, type: aws.res.aws_elasticache_replication_group, name: redis-primary, parent: sub-private-a, props: {description: changeme, replication_group_id: changeme}, at: [1, 4]}
+- {id: aurora-primary, type: aws.res.aws_rds_cluster, name: aurora-primary, parent: sub-private-a, props: {engine: changeme}, at: [1, 5]}
+- {id: varnish-b, type: aws.ec2_instance, name: varnish-b, parent: sub-private-b, at: [1, 1]}
+- {id: mq-b, type: aws.res.aws_mq_broker, name: mq-b, parent: sub-private-b, props: {broker_name: changeme, engine_type: changeme, engine_version: changeme, host_instance_type: changeme}, at: [2, 1]}
+- {id: magento-b, type: aws.ec2_instance, name: magento-b, parent: sub-private-b, at: [1, 2]}
+- {id: catalog-search-b, type: aws.res.aws_opensearch_domain, name: catalog-search-b, parent: sub-private-b, props: {domain_name: changeme}, at: [1, 3]}
+- {id: redis-replica, type: aws.res.aws_elasticache_replication_group, name: redis-replica, parent: sub-private-b, props: {description: changeme, replication_group_id: changeme}, at: [1, 4]}
+- {id: aurora-replica, type: aws.res.aws_rds_cluster_instance, name: aurora-replica, parent: aurora-primary, props: {cluster_identifier: changeme, engine: changeme, instance_class: changeme}, at: [1, 5]}
+- {id: store-media, type: aws.s3_bucket, name: store-media, parent: reg-us-east-1, at: [1, 3]}
 edges:
-- {from: users, to: store-cdn, label: HTTPS, step: '1'}
-- {from: store-waf, to: store-cdn, label: bot control and managed rules}
-- {from: store-cdn, to: store-media, label: static media origin}
-- {from: store-cdn, to: store-alb, label: storefront origin, step: '2'}
-- {from: store-alb, to: web-a, step: '3'}
-- {from: store-alb, to: web-b}
-- {from: web-asg, to: web-a, label: scales}
-- {from: web-a, to: magento-shared, label: pub/media and var over NFS}
-- {from: admin-cron, to: magento-shared, label: NFS}
-- {from: web-a, to: redis-cache, label: sessions and full page cache, step: '4'}
-- {from: web-a, to: catalog-search, label: product search, step: '5'}
-- {from: web-a, to: store-aurora, label: MySQL, step: '6'}
-- {from: admin-cron, to: store-aurora, label: indexers and cron}
-- {from: web-a, to: nat-a}
+- {from: users, to: store-zone, label: DNS, step: '1'}
+- {from: users, to: store-cdn, label: HTTPS}
+- {from: store-waf, to: store-cdn, label: web ACL, step: '2'}
+- {from: store-cdn, to: magento-igw, label: origin requests, step: '3'}
+- {from: magento-igw, to: varnish-alb, label: forward, step: '4'}
+- {from: varnish-alb, to: varnish-a, label: HTTP, step: '5'}
+- {from: varnish-alb, to: varnish-b, label: HTTP}
+- {from: varnish-a, to: magento-alb, label: cache miss, step: '6'}
+- {from: varnish-b, to: magento-alb, label: cache miss}
+- {from: magento-alb, to: magento-a, label: HTTP, step: '7'}
+- {from: magento-alb, to: magento-b, label: HTTP}
+- {from: magento-asg, to: magento-a, label: scales}
+- {from: magento-asg, to: magento-b, label: scales}
+- {from: magento-a, to: mq-a, label: message queue}
+- {from: magento-b, to: mq-b, label: message queue}
+- {from: magento-a, to: catalog-search-a, label: product search, step: '8'}
+- {from: magento-b, to: catalog-search-b, label: product search}
+- {from: magento-a, to: redis-primary, label: sessions and full page cache, step: '9'}
+- {from: redis-primary, to: redis-replica, label: asynchronous replication}
+- {from: magento-a, to: aurora-primary, label: reads and writes, step: '10'}
+- {from: magento-b, to: aurora-primary, label: writes}
+- {from: magento-b, to: aurora-replica, label: reads}
+- {from: aurora-primary, to: aurora-replica, label: asynchronous replication}
+- {from: magento-a, to: store-media, label: remote storage for Magento, step: '11'}
+- {from: magento-b, to: store-media, label: remote storage for Magento}
+- {from: store-secrets, to: magento-a, label: database credentials}
+- {from: magento-a, to: store-email, label: transactional email}
+- {from: bastion-a, to: magento-a, label: SSH}
+- {from: bastion-b, to: magento-b, label: SSH}
+- {from: magento-a, to: nat-a, label: outbound}
+- {from: magento-b, to: nat-b, label: outbound}
 - {from: nat-a, to: magento-igw}
+- {from: nat-b, to: magento-igw}
 steps:
-- {n: '1', text: 'users → store-cdn: HTTPS'}
-- {n: '2', text: 'store-cdn → store-alb: storefront origin'}
-- {n: '3', text: store-alb → web-a}
-- {n: '4', text: 'web-a → redis-cache: sessions and full page cache'}
-- {n: '5', text: 'web-a → catalog-search: product search'}
-- {n: '6', text: 'web-a → store-aurora: MySQL'}
+- {n: '1', text: 'users → store-zone: DNS'}
+- {n: '2', text: 'store-waf → store-cdn: web ACL'}
+- {n: '3', text: 'store-cdn → magento-igw: origin requests'}
+- {n: '4', text: 'magento-igw → varnish-alb: forward'}
+- {n: '5', text: 'varnish-alb → varnish-a: HTTP'}
+- {n: '6', text: 'varnish-a → magento-alb: cache miss'}
+- {n: '7', text: 'magento-alb → magento-a: HTTP'}
+- {n: '8', text: 'magento-a → catalog-search-a: product search'}
+- {n: '9', text: 'magento-a → redis-primary: sessions and full page cache'}
+- {n: '10', text: 'magento-a → aurora-primary: reads and writes'}
+- {n: '11', text: 'magento-a → store-media: remote storage for Magento'}

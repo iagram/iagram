@@ -10,28 +10,27 @@ tags:
 - 99.99% sla
 image: https://docs.cloud.google.com/static/network-connectivity/docs/vpn/images/ha-gcp-2-peer-1-tunnel.svg
 source: https://docs.cloud.google.com/network-connectivity/docs/vpn/concepts/topologies
-description: An HA VPN gateway with two interfaces connects to an on-premises peer gateway with one or two external IPs, carrying two IPsec tunnels that each run a BGP session to a Cloud Router. Active-active
-  or active-passive tunnel routing delivers a 99.99% availability SLA for the Google side.
+description: An HA VPN gateway in us-central1 of VPC network-a has two interfaces, each carrying an IPsec tunnel over the internet to one interface of the on-premises peer VPN gateway, which is registered
+  in the project as an external VPN gateway with two interfaces. Both tunnels must be up for the 99.99% availability SLA on the Google side; a missing tunnel on interface 1 leaves the connection without
+  redundancy.
 nodes:
 - {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 1]}
-- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west2}, at: [1, 1]}
-- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-net-hub, props: {cidr: 10.60.0.0/16}, at: [1, 1]}
-- {id: sub-hybrid-ew2, type: gcp.subnetwork, name: hybrid-ew2, parent: vpc-hybrid-vpc, props: {cidr: 10.60.0.0/24, region: europe-west2}, at: [3, 1, 1, 2]}
-- {id: ha-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: ha-vpn-gw, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}, at: [1, 1, 2, 1]}
-- {id: vpn-router, type: gcp.res.google_compute_router, name: vpn-router, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}, at: [1, 3, 2, 1]}
-- {id: tunnel-if0, type: gcp.res.google_compute_vpn_tunnel, name: tunnel-if0, parent: vpc-hybrid-vpc, props: {name: changeme, shared_secret: changeme}, at: [1, 2]}
-- {id: tunnel-if1, type: gcp.res.google_compute_vpn_tunnel, name: tunnel-if1, parent: vpc-hybrid-vpc, props: {name: changeme, shared_secret: changeme}, at: [2, 2]}
-- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub, at: [2, 1]}
-- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}, at: [1, 1]}
-- {id: onprem-peer-gw, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-peer-gw, parent: sub-prj-net-hub, props: {name: changeme}, at: [1, 1]}
-- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-hybrid-ew2, at: [1, 1]}
-- {id: allow-onprem, type: gcp.firewall_rule, name: allow-onprem, parent: vpc-hybrid-vpc, at: [3, 3]}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-central1}, at: [1, 1]}
+- {id: vpc-network-a, type: gcp.vpc, name: network-a, parent: prj-net-hub, props: {cidr: 10.60.0.0/16}, at: [1, 1]}
+- {id: sub-us-central1, type: gcp.subnetwork, name: us-central1, parent: vpc-network-a, props: {cidr: 10.60.0.0/24, region: us-central1}, at: [1, 1]}
+- {id: internet, type: common.internet, name: Internet, at: [1, 2]}
+- {id: ha-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: ha-vpn-gw, parent: sub-us-central1, props: {name: changeme, network: changeme}, at: [1, 1, 2, 1]}
+- {id: ha-vpn-interface-0, type: gcp.res.google_compute_vpn_tunnel, name: ha-vpn-interface-0, parent: sub-us-central1, props: {name: changeme, shared_secret: changeme}, at: [1, 2]}
+- {id: ha-vpn-interface-1, type: gcp.res.google_compute_vpn_tunnel, name: ha-vpn-interface-1, parent: sub-us-central1, props: {name: changeme, shared_secret: changeme}, at: [2, 2]}
+- {id: peer-vpn-gateway, type: gcp.res.google_compute_external_vpn_gateway, name: peer-vpn-gateway, parent: prj-net-hub, props: {name: changeme}, at: [2, 1]}
 edges:
-- {from: onprem-peer-gw, to: tunnel-if0, label: IPsec tunnel 0, step: '1'}
-- {from: onprem-peer-gw, to: tunnel-if1, label: IPsec tunnel 1, step: '1'}
-- {from: vpn-router, to: onprem-peer-gw, label: BGP over both tunnels, step: '2'}
-- {from: app-vm, to: onprem-peer-gw, label: private traffic ECMP, step: '3'}
+- {from: ha-vpn-gw, to: ha-vpn-interface-0, label: interface 0}
+- {from: ha-vpn-gw, to: ha-vpn-interface-1, label: interface 1}
+- {from: ha-vpn-interface-0, to: internet, label: IPsec tunnel 0 to peer gateway interface 0, step: '1'}
+- {from: ha-vpn-interface-1, to: internet, label: missing tunnel (IPsec tunnel 1 to peer gateway interface 1), step: '1'}
+- {from: internet, to: peer-vpn-gateway, label: peer gateway interfaces 0 and 1, step: '2'}
+- {from: peer-vpn-gateway, to: dc-on-premises, label: on-premises network, step: '3'}
 steps:
-- {n: '1', text: 'onprem-peer-gw → tunnel-if0: IPsec tunnel 0'}
-- {n: '2', text: 'vpn-router → onprem-peer-gw: BGP over both tunnels'}
-- {n: '3', text: 'app-vm → onprem-peer-gw: private traffic ECMP'}
+- {n: '1', text: 'ha-vpn-interface-0 → Internet: IPsec tunnel 0 to peer gateway interface 0'}
+- {n: '2', text: 'Internet → peer-vpn-gateway: peer gateway interfaces 0 and 1'}
+- {n: '3', text: 'peer-vpn-gateway → datacenter: on-premises network'}

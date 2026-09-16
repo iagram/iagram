@@ -9,47 +9,20 @@ tags:
 - edge compute
 image: https://docs.aws.amazon.com/images/local-zones/latest/ug/images/region-with-lzs.png
 source: https://docs.aws.amazon.com/local-zones/latest/ug/how-local-zones-work.html
-description: A regional VPC is extended with a subnet in a Local Zone close to end users; an Application Load Balancer and EC2 instances there terminate user traffic through the Local Zone's own internet
-  connection while the database and asynchronous processing remain in the parent region. Direct Connect from an on-premises site takes the shortest path to the Local Zone without hairpinning through the
-  region.
+description: A VPC in the parent region us-west-2 spans two regional Availability Zones (us-west-2a and us-west-2b) and is extended with a third subnet in the Local Zone us-west-2-lax-1, which is close
+  to end users. Each subnet hosts EC2 instances; the Local Zone subnet terminates latency-sensitive traffic through the Local Zone's own internet connection while the regional subnets keep the rest of the
+  application in the parent region.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 1]}
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
 - {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, at: [1, 1]}
-- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-west-2, props: {cidr: 10.50.0.0/16}, at: [1, 1, 1, 4]}
-- {id: az-app-lax-1a, type: aws.availability_zone, name: lax-1a, parent: vpc-app, props: {zone: -lax-1a}, at: [1, 2]}
-- {id: sub-lax-public, type: aws.subnet, name: lax-public, parent: az-app-lax-1a, props: {cidr: 10.50.100.0/24, az: -lax-1a, public: true}, at: [2, 1]}
-- {id: sub-lax-private, type: aws.subnet, name: lax-private, parent: az-app-lax-1a, props: {cidr: 10.50.101.0/24, az: -lax-1a, public: false}, at: [3, 1]}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-west-2, props: {cidr: 10.50.0.0/16}, at: [1, 1]}
 - {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}, at: [1, 1]}
 - {id: sub-region-private-a, type: aws.subnet, name: region-private-a, parent: az-app-a, props: {cidr: 10.50.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: app-igw, type: aws.res.aws_internet_gateway, name: app-igw, parent: vpc-app, at: [2, 2]}
-- {id: lax-alb, type: aws.alb, name: lax-alb, parent: az-app-lax-1a, at: [1, 1]}
-- {id: lax-web-asg, type: aws.res.aws_autoscaling_group, name: lax-web-asg, parent: sub-lax-private, props: {max_size: 1, min_size: 1}, at: [1, 1]}
-- {id: lax-web-server, type: aws.ec2_instance, name: lax-web-server, parent: sub-lax-private, at: [1, 2]}
-- {id: app-db, type: aws.rds_instance, name: app-db, parent: sub-region-private-a, at: [1, 1]}
-- {id: async-jobs, type: aws.sqs_queue, name: async-jobs, parent: reg-us-west-2, at: [2, 3]}
-- {id: job-worker, type: aws.lambda_function, name: job-worker, parent: reg-us-west-2, at: [2, 4]}
-- {id: onprem-dx, type: aws.res.aws_dx_connection, name: onprem-dx, parent: reg-us-west-2, props: {bandwidth: changeme, location: westeurope, name: changeme}, at: [2, 2]}
-- {id: vpc-reg-us-west-2, type: aws.vpc, name: main, parent: reg-us-west-2, props: {cidr: 10.200.0.0/16}, at: [2, 1]}
-- {id: az-reg-us-west-2-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-west-2, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-us-west-2-a, type: aws.subnet, name: private-a, parent: az-reg-us-west-2-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-us-west-2-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-west-2, props: {zone: b}, at: [1, 2]}
-- {id: sub-reg-us-west-2-b, type: aws.subnet, name: private-b, parent: az-reg-us-west-2-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: legacy-app-server, type: aws.ec2_instance, name: legacy-app-server, parent: sub-reg-us-west-2-a, at: [1, 1]}
-edges:
-- {from: users, to: app-igw, label: HTTPS via Local Zone internet egress, step: '1'}
-- {from: app-igw, to: lax-alb, step: '1'}
-- {from: lax-alb, to: lax-web-server, label: target group, step: '2'}
-- {from: lax-web-asg, to: lax-web-server, label: capacity in Local Zone}
-- {from: lax-web-server, to: app-db, label: reads and writes to parent region, step: '3'}
-- {from: lax-web-server, to: async-jobs, label: enqueue background work, step: '4'}
-- {from: async-jobs, to: job-worker, link: aws_lambda_event_source_mapping}
-- {from: legacy-app-server, to: onprem-dx, label: private connectivity, step: '5'}
-- {from: onprem-dx, to: lax-web-server, label: shortest path to Local Zone subnet, step: '5'}
-steps:
-- {n: '1', text: 'users → app-igw: HTTPS via Local Zone internet egress'}
-- {n: '2', text: 'lax-alb → lax-web-server: target group'}
-- {n: '3', text: 'lax-web-server → app-db: reads and writes to parent region'}
-- {n: '4', text: 'lax-web-server → async-jobs: enqueue background work'}
-- {n: '5', text: 'legacy-app-server → onprem-dx: private connectivity'}
+- {id: az-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}, at: [1, 2]}
+- {id: sub-region-private-b, type: aws.subnet, name: region-private-b, parent: az-app-b, props: {cidr: 10.50.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-app-lax-1, type: aws.availability_zone, name: lax-1, parent: vpc-app, props: {zone: -lax-1}, at: [1, 3]}
+- {id: sub-lax-subnet, type: aws.subnet, name: lax-subnet, parent: az-app-lax-1, props: {cidr: 10.50.100.0/24, az: -lax-1, public: true}, at: [1, 1]}
+- {id: app-server-a, type: aws.ec2_instance, name: app-server-a, parent: sub-region-private-a, at: [1, 1]}
+- {id: app-server-b, type: aws.ec2_instance, name: app-server-b, parent: sub-region-private-b, at: [1, 1]}
+- {id: lax-app-server, type: aws.ec2_instance, name: lax-app-server, parent: sub-lax-subnet, at: [1, 1]}
+edges: []

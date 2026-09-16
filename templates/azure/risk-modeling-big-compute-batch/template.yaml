@@ -12,53 +12,46 @@ tags:
 - burst
 image: https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/images/big-compute-logical.png
 source: https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/big-compute
-description: Big compute workloads such as financial risk modeling and Monte Carlo simulations split into thousands of finite tasks that a scheduler distributes across a burst-provisioned pool of compute-intensive
-  VMs, which scale back to zero when the run finishes. Azure Batch provisions the pool, assigns tasks, monitors progress and autoscales, with input data and results in Azure Storage; tightly coupled tasks
-  use RDMA-capable H-series VMs, and an on-premises HPC Pack head node can burst into Azure over ExpressRoute or VPN.
+description: Big compute workloads such as financial risk modeling and Monte Carlo simulations split into thousands of finite tasks that a client submits through a job queue to a scheduler and coordinator,
+  Azure Batch, which distributes them across burst-provisioned pools of compute-intensive VMs that scale back to zero when the run finishes. Embarrassingly parallel tasks each read their inputs from and
+  write their results to Azure Storage independently, while tightly coupled tasks run on RDMA-capable H-series VMs in a pool that exchanges intermediate results over the network and shares one storage account.
 nodes:
-- {id: dc-on-premises-hpc, type: common.datacenter, name: on-premises-hpc, at: [2, 1]}
 - {id: sub-risk, type: azure.subscription, name: risk, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2, 2, 1]}
 - {id: rg-rg-risk-grid, type: azure.resource_group, name: rg-risk-grid, parent: sub-risk, props: {location: westeurope}, at: [1, 1]}
-- {id: vpc-vnet-hpc, type: azure.vnet, name: vnet-hpc, parent: rg-rg-risk-grid, props: {cidr: 10.90.0.0/16}, at: [1, 2, 3, 1]}
-- {id: sub-snet-batch-pool, type: azure.subnet, name: snet-batch-pool, parent: vpc-vnet-hpc, props: {cidr: 10.90.0.0/22}, at: [1, 2]}
-- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-hpc, props: {cidr: 10.90.255.0/27}, at: [1, 1]}
-- {id: user, type: common.user, name: user, at: [1, 1]}
-- {id: batch-risk, type: azure.res.azurerm_batch_account, name: batch-risk, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: grp-parallel-tasks, type: common.group, name: Parallel tasks, parent: rg-rg-risk-grid, at: [1, 2]}
+- {id: grp-tightly-coupled-tasks, type: common.group, name: Tightly coupled tasks, parent: rg-rg-risk-grid, at: [2, 2]}
+- {id: client, type: common.client, name: Client, at: [1, 1]}
+- {id: batch-risk, type: azure.res.azurerm_batch_account, name: batch-risk, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1, 2, 1]}
+- {id: st-task-inputs, type: azure.storage_account, name: st-task-inputs, parent: grp-parallel-tasks, at: [1, 1]}
+- id: pool-parallel
+  type: azure.res.azurerm_batch_pool
+  name: pool-parallel
+  parent: grp-parallel-tasks
+  props: {account_name: changeme, name: changeme, node_agent_sku_id: changeme, resource_group_name: changeme, storage_image_reference: {}, vm_size: changeme}
+  at:
+  - 1
+  - 2
+- {id: st-task-results, type: azure.storage_account, name: st-task-results, parent: grp-parallel-tasks, at: [1, 3]}
+- {id: st-shared-data, type: azure.storage_account, name: st-shared-data, parent: grp-tightly-coupled-tasks, at: [1, 1]}
 - id: pool-hb-rdma
   type: azure.res.azurerm_batch_pool
   name: pool-hb-rdma
-  parent: sub-snet-batch-pool
-  at: [1, 1]
+  parent: grp-tightly-coupled-tasks
   props: {account_name: changeme, name: changeme, node_agent_sku_id: changeme, resource_group_name: changeme, storage_image_reference: {}, vm_size: changeme}
-- {id: striskdata, type: azure.storage_account, name: striskdata, parent: rg-rg-risk-grid, at: [2, 1]}
-- {id: kv-batch, type: azure.key_vault, name: kv-batch, parent: rg-rg-risk-grid, at: [3, 1]}
-- id: vpngw-hpc
-  type: azure.res.azurerm_virtual_network_gateway
-  name: vpngw-hpc
-  parent: sub-gatewaysubnet
-  at: [1, 1]
-  props:
-    ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: changeme
-    type: changeme
-- {id: vpc-rg-rg-risk-grid, type: azure.vnet, name: main, parent: rg-rg-risk-grid, props: {cidr: 10.200.0.0/16}, at: [1, 3]}
-- {id: sub-rg-rg-risk-grid, type: azure.subnet, name: main, parent: vpc-rg-rg-risk-grid, props: {cidr: 10.200.0.0/24}, at: [1, 1]}
-- {id: vm-hpc-head-node, type: azure.virtual_machine, name: vm-hpc-head-node, parent: sub-rg-rg-risk-grid, at: [1, 1]}
-- {id: law-batch, type: azure.res.azurerm_log_analytics_workspace, name: law-batch, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 3]}
+  at:
+  - 2
+  - 1
 edges:
-- {from: user, to: striskdata, label: upload market data and application packages, step: '1'}
-- {from: user, to: batch-risk, label: submit job with Monte Carlo tasks, step: '2'}
-- {from: batch-risk, to: pool-hb-rdma, label: provision VMs, step: '3'}
-- {from: pool-hb-rdma, to: striskdata, label: read inputs, step: '4'}
-- {from: batch-risk, to: kv-batch, label: customer-managed keys}
-- {from: dc-on-premises-hpc, to: vpngw-hpc, label: ExpressRoute / VPN}
-- {from: vm-hpc-head-node, to: pool-hb-rdma, label: HPC Pack burst to Azure nodes}
-- {from: batch-risk, to: law-batch, label: job and pool metrics}
+- {from: client, to: batch-risk, label: job queue (Monte Carlo tasks), step: '1'}
+- {from: client, to: st-task-inputs, label: upload market data and application packages}
+- {from: batch-risk, to: pool-parallel, label: schedule independent tasks, step: '2'}
+- {from: batch-risk, to: pool-hb-rdma, label: schedule MPI tasks on RDMA-capable nodes, step: '2'}
+- {from: st-task-inputs, to: pool-parallel, label: read inputs, step: '3'}
+- {from: pool-parallel, to: st-task-results, label: write results, step: '4'}
+- {from: pool-hb-rdma, to: st-shared-data, label: shared input and results}
+- {from: pool-hb-rdma, to: pool-hb-rdma, label: node-to-node InfiniBand exchange}
 steps:
-- {n: '1', text: 'user → striskdata: upload market data and application packages'}
-- {n: '2', text: 'user → batch-risk: submit job with Monte Carlo tasks'}
-- {n: '3', text: 'batch-risk → pool-hb-rdma: provision VMs'}
-- {n: '4', text: 'pool-hb-rdma → striskdata: read inputs'}
+- {n: '1', text: 'Client → batch-risk: job queue (Monte Carlo tasks)'}
+- {n: '2', text: 'batch-risk → pool-parallel: schedule independent tasks'}
+- {n: '3', text: 'st-task-inputs → pool-parallel: read inputs'}
+- {n: '4', text: 'pool-parallel → st-task-results: write results'}

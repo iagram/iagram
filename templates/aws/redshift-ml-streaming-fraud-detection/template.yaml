@@ -8,33 +8,47 @@ tags:
 - kinesis data streams
 image: https://d2908q01vomqb2.cloudfront.net/b6692ea5df920cad691c20319a6fffd7a4a766b8/2022/12/08/BDB-2351-image001.png
 source: https://aws.amazon.com/blogs/big-data/near-real-time-fraud-detection-using-amazon-redshift-streaming-ingestion-with-amazon-kinesis-data-streams-and-amazon-redshift-ml
-description: A producer on EC2 simulates credit card transactions into a Kinesis data stream, which Redshift ingests through a streaming materialized view. A Redshift ML model trained on historical transactions
-  scores the incoming records with a SQL prediction function so fraudulent transactions are flagged within seconds.
+description: A Python Boto3 producer on EC2 simulates credit card transactions into a Kinesis data stream, which Redshift ingests through a streaming materialized view. A Redshift ML model trained on the
+  customer payment history scores the incoming records into a predictions table, and a Lambda function reads the flagged transactions to alert customers through Amazon Pinpoint and to block the card in
+  the payment application.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-fraud-vpc, type: aws.vpc, name: fraud-vpc, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 1, 2, 1]}
-- {id: az-fraud-vpc-a, type: aws.availability_zone, name: a, parent: vpc-fraud-vpc, props: {zone: a}, at: [1, 1]}
-- {id: sub-app-subnet, type: aws.subnet, name: app-subnet, parent: az-fraud-vpc-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
-- {id: sub-redshift-a, type: aws.subnet, name: redshift-a, parent: az-fraud-vpc-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 2]}
-- {id: az-fraud-vpc-b, type: aws.availability_zone, name: b, parent: vpc-fraud-vpc, props: {zone: b}, at: [2, 1]}
-- {id: sub-redshift-b, type: aws.subnet, name: redshift-b, parent: az-fraud-vpc-b, props: {cidr: 10.0.2.0/24, az: b, public: false}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 2]}
-- {id: transaction-simulator, type: aws.ec2_instance, name: transaction-simulator, parent: sub-app-subnet, at: [1, 1]}
+- {id: grp-stream-producer, type: common.group, name: Stream Producer, parent: reg-us-east-1, at: [1, 1]}
+- {id: grp-stream-consumer, type: common.group, name: Stream Consumer, parent: reg-us-east-1, at: [1, 3]}
+- {id: customers, type: common.users, name: customers, at: [1, 2]}
+- {id: payment-application, type: common.server, name: payment application, at: [2, 2]}
+- id: transaction-simulator
+  type: aws.res.aws_ec2_fleet
+  name: transaction-simulator
+  parent: grp-stream-producer
+  props: {launch_template_config: [], target_capacity_specification: {}}
+  at:
+  - 1
+  - 1
 - {id: transactions-stream, type: aws.res.aws_kinesis_stream, name: transactions-stream, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
-- {id: fraud-cluster, type: aws.res.aws_redshift_cluster, name: fraud-cluster, parent: vpc-fraud-vpc, props: {cluster_identifier: changeme, node_type: changeme}, at: [1, 2, 2, 1]}
-- {id: training-data-bucket, type: aws.s3_bucket, name: training-data-bucket, parent: reg-us-east-1, at: [2, 2]}
-- {id: fraud-model, type: aws.res.aws_sagemaker_model, name: fraud-model, parent: reg-us-east-1, props: {execution_role_arn: changeme}, at: [1, 3]}
-- {id: redshift-ml-role, type: aws.res.aws_iam_role, name: redshift-ml-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}, at: [2, 3]}
+- {id: streaming-materialized-view, type: aws.res.aws_redshiftdata_statement, name: streaming-materialized-view, parent: grp-stream-consumer, props: {database: changeme, sql: changeme}, at: [1, 1, 1, 2]}
+- {id: fraud-model, type: aws.res.aws_sagemaker_model, name: fraud-model, parent: grp-stream-consumer, props: {execution_role_arn: changeme}, at: [2, 2]}
+- {id: predictions-table, type: aws.res.aws_redshiftdata_statement, name: predictions-table, parent: grp-stream-consumer, props: {database: changeme, sql: changeme}, at: [2, 3]}
+- {id: customer-payment-history, type: aws.res.aws_redshiftdata_statement, name: customer-payment-history, parent: grp-stream-consumer, props: {database: changeme, sql: changeme}, at: [3, 1]}
+- {id: fraud-cluster, type: aws.res.aws_redshift_cluster, name: fraud-cluster, parent: grp-stream-consumer, props: {cluster_identifier: changeme, node_type: changeme}, at: [3, 3]}
+- {id: alert-handler, type: aws.lambda_function, name: alert-handler, parent: reg-us-east-1, at: [1, 4]}
+- {id: customer-alerts, type: aws.res.aws_pinpoint_app, name: customer-alerts, parent: reg-us-east-1, at: [1, 5]}
 edges:
 - {from: transaction-simulator, to: transactions-stream, label: PutRecords, step: '1'}
-- {from: transactions-stream, to: fraud-cluster, label: streaming materialized view, step: '2'}
-- {from: training-data-bucket, to: fraud-cluster, label: historical training set, step: '3'}
-- {from: fraud-cluster, to: fraud-model, label: CREATE MODEL via SageMaker Autopilot, step: '4'}
-- {from: fraud-cluster, to: users, label: fraud predictions, step: '5'}
+- {from: transactions-stream, to: streaming-materialized-view, label: Redshift streaming ingestion, step: '2'}
+- {from: streaming-materialized-view, to: fraud-model, label: streaming data ingestion, step: '3'}
+- {from: customer-payment-history, to: fraud-model, label: training and test sets (CREATE MODEL), step: '4'}
+- {from: fraud-model, to: predictions-table, label: deployed model predictions, step: '5'}
+- {from: fraud-cluster, to: predictions-table, label: customer data}
+- {from: predictions-table, to: alert-handler, label: flagged transactions, step: '6'}
+- {from: alert-handler, to: customer-alerts, label: alert customers}
+- {from: customer-alerts, to: customers, label: notifications}
+- {from: alert-handler, to: payment-application, label: block credit card}
 steps:
 - {n: '1', text: 'transaction-simulator → transactions-stream: PutRecords'}
-- {n: '2', text: 'transactions-stream → fraud-cluster: streaming materialized view'}
-- {n: '3', text: 'training-data-bucket → fraud-cluster: historical training set'}
-- {n: '4', text: 'fraud-cluster → fraud-model: CREATE MODEL via SageMaker Autopilot'}
-- {n: '5', text: 'fraud-cluster → users: fraud predictions'}
+- {n: '2', text: 'transactions-stream → streaming-materialized-view: Redshift streaming ingestion'}
+- {n: '3', text: 'streaming-materialized-view → fraud-model: streaming data ingestion'}
+- {n: '4', text: 'customer-payment-history → fraud-model: training and test sets (CREATE MODEL)'}
+- {n: '5', text: 'fraud-model → predictions-table: deployed model predictions'}
+- {n: '6', text: 'predictions-table → alert-handler: flagged transactions'}

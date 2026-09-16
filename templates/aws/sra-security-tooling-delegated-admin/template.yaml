@@ -11,34 +11,54 @@ tags:
 - security reference architecture
 image: https://docs.aws.amazon.com/images/prescriptive-guidance/latest/security-reference-architecture/images/guide-img/91d313fc-d5f1-45a8-a5a6-2f4fc7abc93a/images/f8a9de61-8b84-410c-8ffc-d3935eb7f5b3.png
 source: https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/security-tooling.html
-description: A dedicated Security Tooling account in the Security OU is the delegated administrator for Security Hub, GuardDuty, Detective, Inspector, Macie, Config, Firewall Manager, Audit Manager and
-  IAM Access Analyzer across the organization. Findings from every member account aggregate there while long-term exports go to S3 buckets in the Log Archive account.
+description: A dedicated Security Tooling account in the Security OU is the delegated administrator for Security Hub CSPM, Security Hub, GuardDuty, Detective, Inspector, Macie, Config, Firewall Manager,
+  Audit Manager, IAM Access Analyzer and Security Lake across the organization, and also hosts the CloudTrail organization trail with its CloudWatch log group, a Private CA, an EventBridge bus that triggers
+  Lambda response functions, KMS keys and the least-privilege permissions and roles that operate the tooling. Findings from every member account aggregate there while long-term exports go to S3 buckets
+  in the Log Archive account.
 nodes:
 - {id: acct-management, type: aws.account, name: management, at: [1, 4]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}, at: [1, 2]}
 - {id: acct-security-tooling, type: aws.account, name: security-tooling, at: [1, 3]}
-- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}, at: [1, 3]}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}, at: [3, 5]}
 - {id: acct-log-archive, type: aws.account, name: log-archive, at: [1, 5]}
 - {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-log-archive, props: {region: us-east-1}, at: [1, 1]}
 - {id: acct-workload, type: aws.account, name: workload, at: [1, 2]}
 - {id: reg-us-east-1-4, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}, at: [3, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
 - {id: security-ou, type: aws.res.aws_organizations_organizational_unit, name: security-ou, parent: acct-management, props: {name: changeme, parent_id: changeme}, at: [1, 1]}
-- {id: security-hub-admin, type: aws.res.aws_securityhub_account, name: security-hub-admin, parent: acct-security-tooling, at: [2, 2]}
-- {id: guardduty-admin, type: aws.res.aws_guardduty_detector, name: guardduty-admin, parent: acct-security-tooling, at: [2, 1]}
-- {id: detective-graph, type: aws.res.aws_detective_graph, name: detective-graph, parent: acct-security-tooling, at: [3, 3]}
+- {id: delegated-admin-roles, type: aws.res.aws_iam_role, name: delegated-admin-roles, parent: acct-security-tooling, props: {assume_role_policy: changeme}, at: [1, 1]}
+- {id: cloudwatch-logs, type: aws.res.aws_cloudwatch_log_group, name: cloudwatch-logs, parent: acct-security-tooling, at: [1, 2]}
+- {id: org-trail, type: aws.res.aws_cloudtrail, name: org-trail, parent: acct-security-tooling, props: {name: changeme, s3_bucket_name: changeme}, at: [1, 3]}
+- id: private-ca
+  type: aws.res.aws_acmpca_certificate_authority
+  name: private-ca
+  parent: acct-security-tooling
+  props: {certificate_authority_configuration: {}}
+  at:
+  - 1
+  - 4
 - id: inspector-admin
   type: aws.res.aws_inspector2_enabler
   name: inspector-admin
   parent: acct-security-tooling
-  at: [1, 1]
-  props:
-    account_ids: []
-    resource_types: []
-- {id: macie-admin, type: aws.res.aws_macie2_account, name: macie-admin, parent: acct-security-tooling, at: [3, 2]}
-- {id: config-aggregator, type: aws.res.aws_config_configuration_aggregator, name: config-aggregator, parent: acct-security-tooling, props: {name: changeme}, at: [1, 2]}
-- {id: org-access-analyzer, type: aws.res.aws_accessanalyzer_analyzer, name: org-access-analyzer, parent: acct-security-tooling, props: {analyzer_name: changeme}, at: [3, 1]}
-- {id: findings-archive, type: aws.s3_bucket, name: findings-archive, parent: reg-us-east-1, at: [1, 1]}
+  props: {account_ids: [], resource_types: []}
+  at:
+  - 1
+  - 5
+- {id: audit-manager, type: aws.res.aws_auditmanager_framework, name: audit-manager, parent: acct-security-tooling, props: {name: changeme}, at: [2, 2]}
+- {id: config-aggregator, type: aws.res.aws_config_configuration_aggregator, name: config-aggregator, parent: acct-security-tooling, props: {name: changeme}, at: [2, 3]}
+- {id: security-events-bus, type: aws.res.aws_cloudwatch_event_bus, name: security-events-bus, parent: acct-security-tooling, props: {name: changeme}, at: [2, 4]}
+- {id: security-lake, type: aws.res.aws_securitylake_data_lake, name: security-lake, parent: acct-security-tooling, props: {meta_store_manager_role_arn: changeme}, at: [2, 5]}
+- {id: guardduty-admin, type: aws.res.aws_guardduty_detector, name: guardduty-admin, parent: acct-security-tooling, at: [3, 1]}
+- {id: security-hub-cspm, type: aws.res.aws_securityhub_standards_subscription, name: security-hub-cspm, parent: acct-security-tooling, props: {standards_arn: changeme}, at: [3, 2]}
+- {id: security-hub-admin, type: aws.res.aws_securityhub_account, name: security-hub-admin, parent: acct-security-tooling, at: [3, 3]}
+- {id: firewall-manager, type: aws.res.aws_fms_admin_account, name: firewall-manager, parent: acct-security-tooling, at: [3, 4]}
+- {id: response-lambda, type: aws.lambda_function, name: response-lambda, parent: reg-us-east-1-2, at: [1, 1]}
+- {id: org-access-analyzer, type: aws.res.aws_accessanalyzer_analyzer, name: org-access-analyzer, parent: acct-security-tooling, props: {analyzer_name: changeme}, at: [4, 2]}
+- {id: macie-admin, type: aws.res.aws_macie2_account, name: macie-admin, parent: acct-security-tooling, at: [4, 3]}
+- {id: detective-graph, type: aws.res.aws_detective_graph, name: detective-graph, parent: acct-security-tooling, at: [4, 4]}
+- {id: findings-kms-key, type: aws.res.aws_kms_key, name: findings-kms-key, parent: acct-security-tooling, at: [4, 5]}
+- {id: findings-archive, type: aws.s3_bucket, name: findings-archive, parent: reg-us-east-1-3, at: [1, 1]}
 - {id: guardduty-member, type: aws.res.aws_guardduty_detector, name: guardduty-member, parent: acct-workload, at: [1, 1]}
 - {id: security-hub-member, type: aws.res.aws_securityhub_account, name: security-hub-member, parent: acct-workload, at: [2, 1]}
 edges:
@@ -49,6 +69,11 @@ edges:
 - {from: macie-admin, to: security-hub-admin, label: sensitive data findings, step: '5'}
 - {from: guardduty-admin, to: detective-graph, label: behavior graph, step: '6'}
 - {from: guardduty-admin, to: findings-archive, label: export beyond 90 days, step: '7'}
+- {from: security-hub-cspm, to: security-hub-admin, label: CSPM control findings, step: '8'}
+- {from: security-hub-admin, to: security-events-bus, label: findings events, step: '9'}
+- {from: security-events-bus, to: response-lambda, label: automated response, step: '10'}
+- {from: security-hub-admin, to: security-lake, label: findings source}
+- {from: org-trail, to: cloudwatch-logs, label: trail events}
 - {from: users, to: security-hub-admin, label: security operators}
 steps:
 - {n: '1', text: 'guardduty-member → guardduty-admin: member findings'}
@@ -58,3 +83,6 @@ steps:
 - {n: '5', text: 'macie-admin → security-hub-admin: sensitive data findings'}
 - {n: '6', text: 'guardduty-admin → detective-graph: behavior graph'}
 - {n: '7', text: 'guardduty-admin → findings-archive: export beyond 90 days'}
+- {n: '8', text: 'security-hub-cspm → security-hub-admin: CSPM control findings'}
+- {n: '9', text: 'security-hub-admin → security-events-bus: findings events'}
+- {n: '10', text: 'security-events-bus → response-lambda: automated response'}

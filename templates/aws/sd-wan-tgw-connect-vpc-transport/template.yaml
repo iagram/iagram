@@ -10,45 +10,50 @@ tags:
 - branch offices
 image: https://d2908q01vomqb2.cloudfront.net/5b384ce32d8cdef02bc3a139d4cac0a22bb029e8/2020/12/10/tgw-high-level-architecture-fig-1-v1.png
 source: https://aws.amazon.com/blogs/networking-and-content-delivery/simplify-sd-wan-connectivity-with-aws-transit-gateway-connect/
-description: SD-WAN virtual appliances run in a dedicated transport VPC whose attachment serves as the underlay for a Transit Gateway Connect attachment; each appliance is a Connect peer that builds a GRE
-  tunnel to the Transit Gateway and exchanges routes over BGP. Branch sites reach the appliances through the SD-WAN overlay across the internet, and their prefixes are propagated dynamically into TGW route
-  tables without IPsec throughput limits or static routes.
+description: A third-party SD-WAN virtual appliance runs in a dedicated Connect VPC whose VPC attachment serves as the underlay for a Transit Gateway Connect attachment; the appliance is a Connect peer
+  that builds a GRE tunnel to the Transit Gateway and exchanges routes over BGP, and three workload VPCs (A, B, C) hang off the same Transit Gateway through VPC attachments. The corporate SD-WAN site reaches
+  the appliance over Direct Connect and the SD-WAN overlay, branch sites reach it through the overlay over Site-to-Site VPN, and their prefixes are propagated dynamically into TGW route tables without IPsec
+  throughput limits or static routes.
 nodes:
-- {id: dc-branch-offices, type: common.datacenter, name: branch-offices, at: [1, 3]}
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: dc-corporate-sd-wan, type: common.datacenter, name: corporate-sd-wan, at: [1, 2]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1, 3, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-sdwan-transport, type: aws.vpc, name: sdwan-transport, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 4]}
-- {id: az-sdwan-transport-a, type: aws.availability_zone, name: a, parent: vpc-sdwan-transport, props: {zone: a}, at: [1, 1]}
-- {id: sub-sdwan-public-a, type: aws.subnet, name: sdwan-public-a, parent: az-sdwan-transport-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
-- {id: az-sdwan-transport-b, type: aws.availability_zone, name: b, parent: vpc-sdwan-transport, props: {zone: b}, at: [1, 2]}
-- {id: sub-sdwan-public-b, type: aws.subnet, name: sdwan-public-b, parent: az-sdwan-transport-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
-- {id: sub-sdwan-tgw-a, type: aws.subnet, name: sdwan-tgw-a, parent: az-sdwan-transport-a, props: {cidr: 10.0.2.0/28, az: a, public: false}, at: [2, 1]}
-- {id: vpc-workload, type: aws.vpc, name: workload, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: az-workload-a, type: aws.availability_zone, name: a, parent: vpc-workload, props: {zone: a}, at: [1, 1]}
-- {id: sub-workload-private-a, type: aws.subnet, name: workload-private-a, parent: az-workload-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: internet, type: common.internet, name: internet, at: [1, 2]}
-- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1, at: [1, 2]}
+- {id: vpc-vpc-a, type: aws.vpc, name: vpc-a, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: az-vpc-a-a, type: aws.availability_zone, name: a, parent: vpc-vpc-a, props: {zone: a}, at: [1, 1]}
+- {id: sub-vpc-a-private, type: aws.subnet, name: vpc-a-private, parent: az-vpc-a-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-vpc-b, type: aws.vpc, name: vpc-b, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [2, 1]}
+- {id: az-vpc-b-a, type: aws.availability_zone, name: a, parent: vpc-vpc-b, props: {zone: a}, at: [1, 1]}
+- {id: sub-vpc-b-private, type: aws.subnet, name: vpc-b-private, parent: az-vpc-b-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-vpc-c, type: aws.vpc, name: vpc-c, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}, at: [3, 1]}
+- {id: az-vpc-c-a, type: aws.availability_zone, name: a, parent: vpc-vpc-c, props: {zone: a}, at: [1, 1]}
+- {id: sub-vpc-c-private, type: aws.subnet, name: vpc-c-private, parent: az-vpc-c-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-connect-vpc, type: aws.vpc, name: connect-vpc, parent: reg-us-east-1, props: {cidr: 172.31.0.0/16}, at: [2, 3]}
+- {id: az-connect-vpc-a, type: aws.availability_zone, name: a, parent: vpc-connect-vpc, props: {zone: a}, at: [1, 1]}
+- {id: sub-connect-appliance, type: aws.subnet, name: connect-appliance, parent: az-connect-vpc-a, props: {cidr: 172.31.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: branch-office-1, type: common.client, name: branch-office-1, at: [2, 2]}
+- {id: branch-office-2, type: common.mobile, name: branch-office-2, at: [3, 2]}
+- {id: vpc-a-instance, type: aws.ec2_instance, name: vpc-a-instance, parent: sub-vpc-a-private, at: [1, 1]}
+- {id: vpc-b-instance, type: aws.ec2_instance, name: vpc-b-instance, parent: sub-vpc-b-private, at: [1, 1]}
+- {id: vpc-c-instance, type: aws.ec2_instance, name: vpc-c-instance, parent: sub-vpc-c-private, at: [1, 1]}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1, at: [2, 2]}
 - {id: sdwan-connect, type: aws.res.aws_ec2_transit_gateway_connect, name: sdwan-connect, parent: reg-us-east-1, props: {transit_gateway_id: changeme, transport_attachment_id: changeme}, at: [1, 3]}
-- {id: sdwan-appliance-a, type: aws.ec2_instance, name: sdwan-appliance-a, parent: sub-sdwan-public-a, at: [1, 1]}
-- {id: sdwan-appliance-b, type: aws.ec2_instance, name: sdwan-appliance-b, parent: sub-sdwan-public-b, at: [1, 1]}
-- {id: sdwan-igw, type: aws.res.aws_internet_gateway, name: sdwan-igw, parent: vpc-sdwan-transport, at: [1, 3]}
-- {id: workload-server, type: aws.ec2_instance, name: workload-server, parent: sub-workload-private-a, at: [1, 1]}
-- {id: az-vpc-workload-b, type: aws.availability_zone, name: b, parent: vpc-workload, props: {zone: b}, at: [1, 2]}
-- {id: sub-vpc-workload-b, type: aws.subnet, name: private-b, parent: az-vpc-workload-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: third-party-virtual-appliance, type: aws.ec2_instance, name: third-party-virtual-appliance, parent: sub-connect-appliance, at: [1, 1]}
+- {id: direct-connect, type: aws.res.aws_dx_connection, name: direct-connect, parent: reg-us-east-1, props: {bandwidth: changeme, location: westeurope, name: changeme}, at: [1, 4]}
 edges:
-- {from: hub-tgw, to: vpc-sdwan-transport, label: transport attachment, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: hub-tgw, to: vpc-workload, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: sdwan-connect, to: hub-tgw, label: Connect attachment over transport}
-- {from: sdwan-appliance-a, to: sdwan-connect, label: GRE + BGP}
-- {from: sdwan-appliance-b, to: sdwan-connect, label: GRE + BGP}
-- {from: dc-branch-offices, to: internet, label: SD-WAN overlay tunnels, step: '1'}
-- {from: internet, to: sdwan-igw, step: '2'}
-- {from: sdwan-igw, to: sdwan-appliance-a, step: '3'}
-- {from: sdwan-appliance-a, to: hub-tgw, label: 'GRE tunnel, branch prefixes via BGP', step: '4'}
-- {from: hub-tgw, to: workload-server, step: '5'}
+- {from: hub-tgw, to: vpc-vpc-a, label: VPC attachment, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-vpc-b, label: VPC attachment, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-vpc-c, label: VPC attachment, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-connect-vpc, label: transport VPC attachment, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: sdwan-connect, to: hub-tgw, label: Connect attachment over the transport attachment}
+- {from: third-party-virtual-appliance, to: hub-tgw, label: GRE tunnel + BGP peering (Connect peer), step: '1'}
+- {from: dc-corporate-sd-wan, to: direct-connect, label: Direct Connect, step: '2'}
+- {from: direct-connect, to: third-party-virtual-appliance, label: Direct Connect}
+- {from: dc-corporate-sd-wan, to: third-party-virtual-appliance, label: SD-WAN overlay}
+- {from: branch-office-1, to: third-party-virtual-appliance, label: SD-WAN overlay over Site-to-Site VPN, step: '3'}
+- {from: branch-office-2, to: third-party-virtual-appliance, label: SD-WAN overlay over Site-to-Site VPN}
+- {from: hub-tgw, to: vpc-a-instance, label: branch prefixes propagated via BGP, step: '4'}
 steps:
-- {n: '1', text: 'datacenter → internet: SD-WAN overlay tunnels'}
-- {n: '2', text: internet → sdwan-igw}
-- {n: '3', text: sdwan-igw → sdwan-appliance-a}
-- {n: '4', text: 'sdwan-appliance-a → hub-tgw: GRE tunnel, branch prefixes via BGP'}
-- {n: '5', text: hub-tgw → workload-server}
+- {n: '1', text: 'third-party-virtual-appliance → hub-tgw: GRE tunnel + BGP peering (Connect peer)'}
+- {n: '2', text: 'datacenter → direct-connect: Direct Connect'}
+- {n: '3', text: 'branch-office-1 → third-party-virtual-appliance: SD-WAN overlay over Site-to-Site VPN'}
+- {n: '4', text: 'hub-tgw → vpc-a-instance: branch prefixes propagated via BGP'}

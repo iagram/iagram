@@ -3,390 +3,523 @@
   category: networking
   tags: [transit gateway, centralized egress, network firewall, nat gateway, multi-vpc]
   source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/using-nat-gateway-with-firewall.html
-  description: Spoke VPCs send their default route to a Transit Gateway whose egress route table forwards all internet-bound traffic to a dedicated egress VPC. Inside the egress VPC the traffic passes through AWS Network Firewall endpoints for stateful inspection before a NAT gateway in a public subnet forwards it to the internet gateway; return traffic follows the same path in reverse.
+  description: Spoke VPCs A and B send their default route to a Transit Gateway whose route table 1 forwards all internet-bound traffic to a dedicated egress VPC and blackholes the private range, while route table 2 returns traffic to the right spoke. Inside the egress VPC each Availability Zone has a TGW subnet with the Transit Gateway ENI, a firewall subnet with an AWS Network Firewall endpoint and a public subnet with a NAT gateway; per-subnet route tables chain TGW ENI to firewall endpoint to NAT gateway to the internet gateway, and return traffic follows the same path in reverse.
   containers:
     - region: eu-west-1
       vpcs:
+        - name: vpc-a
+          cidr: 10.1.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: vpc-a-private, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
+        - name: vpc-b
+          cidr: 10.2.0.0/16
+          at: [1, 2]
+          subnets:
+            - {name: vpc-b-private, cidr: 10.2.1.0/24, az: a, public: false, at: [1, 1]}
         - name: egress
           cidr: 10.0.0.0/16
+          at: [1, 4, 3, 1]
           subnets:
-            - {name: egress-tgw-a, cidr: 10.0.0.0/28, az: a, public: false}
-            - {name: egress-firewall-a, cidr: 10.0.1.0/28, az: a, public: false}
-            - {name: egress-public-a, cidr: 10.0.2.0/24, az: a, public: true}
-            - {name: egress-public-b, cidr: 10.0.3.0/24, az: b, public: true}
-        - name: spoke-app
-          cidr: 10.1.0.0/16
-          subnets:
-            - {name: app-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: spoke-data
-          cidr: 10.2.0.0/16
-          subnets:
-            - {name: data-private-a, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: egress-tgw-a, cidr: 10.0.0.0/28, az: a, public: false, at: [1, 1]}
+            - {name: egress-firewall-a, cidr: 10.0.1.0/28, az: a, public: false, at: [1, 2]}
+            - {name: egress-public-a, cidr: 10.0.2.0/24, az: a, public: true, at: [1, 3]}
+            - {name: egress-tgw-b, cidr: 10.0.0.16/28, az: b, public: false, at: [1, 1]}
+            - {name: egress-firewall-b, cidr: 10.0.1.16/28, az: b, public: false, at: [1, 2]}
+            - {name: egress-public-b, cidr: 10.0.3.0/24, az: b, public: true, at: [1, 3]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_networkfirewall_firewall, name: egress-firewall, in: subnet:egress-firewall-a}
-    - {tf: aws_nat_gateway, name: egress-nat-a, in: subnet:egress-public-a}
-    - {tf: aws_nat_gateway, name: egress-nat-b, in: subnet:egress-public-b}
-    - {tf: aws_internet_gateway, name: egress-igw, in: vpc:egress}
-    - {tf: aws_instance, name: app-server, in: subnet:app-private-a}
-    - {tf: aws_instance, name: data-server, in: subnet:data-private-a}
-  actors: [internet]
+    - {tf: aws_instance, name: vpc-a-instance, in: subnet:vpc-a-private, at: [1, 1]}
+    - {tf: aws_instance, name: vpc-b-instance, in: subnet:vpc-b-private, at: [1, 1]}
+    - {tf: aws_route_table, name: spoke-route-table, in: region, at: [1, 3]}
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [2, 1, 1, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: tgw-route-table-1, in: region, at: [3, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: tgw-route-table-2, in: region, at: [3, 2]}
+    - {tf: aws_route_table, name: tgw-subnet-rt-a, in: vpc:egress, at: [1, 1]}
+    - {tf: aws_route_table, name: firewall-subnet-rt-a, in: vpc:egress, at: [1, 2]}
+    - {tf: aws_route_table, name: public-subnet-rt-a, in: vpc:egress, at: [1, 3]}
+    - {tf: aws_network_interface, name: tgw-eni-a, in: subnet:egress-tgw-a, at: [1, 1]}
+    - {tf: aws_networkfirewall_firewall, name: firewall-endpoint-1, in: subnet:egress-firewall-a, at: [1, 1]}
+    - {tf: aws_nat_gateway, name: nat-gw-1, in: subnet:egress-public-a, at: [1, 1]}
+    - {tf: aws_network_interface, name: tgw-eni-b, in: subnet:egress-tgw-b, at: [1, 1]}
+    - {tf: aws_networkfirewall_firewall, name: firewall-endpoint-2, in: subnet:egress-firewall-b, at: [1, 1]}
+    - {tf: aws_nat_gateway, name: nat-gw-2, in: subnet:egress-public-b, at: [1, 1]}
+    - {tf: aws_route_table, name: tgw-subnet-rt-b, in: vpc:egress, at: [4, 1]}
+    - {tf: aws_route_table, name: firewall-subnet-rt-b, in: vpc:egress, at: [4, 2]}
+    - {tf: aws_route_table, name: public-subnet-rt-b, in: vpc:egress, at: [4, 3]}
+    - {tf: aws_internet_gateway, name: egress-igw, in: region, at: [1, 5, 3, 1]}
+  actors: []
   flows:
-    - {from: hub-tgw, to: vpc:spoke-app, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:spoke-data, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:vpc-a, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:vpc-b, link: aws_ec2_transit_gateway_vpc_attachment}
     - {from: hub-tgw, to: vpc:egress, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: app-server, to: hub-tgw, label: "0.0.0.0/0 via TGW", step: 1}
-    - {from: hub-tgw, to: egress-firewall, label: egress route table to firewall endpoint, step: 2}
-    - {from: egress-firewall, to: egress-nat-a, label: inspected traffic, step: 3}
-    - {from: egress-nat-a, to: egress-igw, label: SNAT, step: 4}
-    - {from: egress-igw, to: internet, step: 5}
-
+    - {from: vpc-a-instance, to: hub-tgw, label: "0.0.0.0/0 -> TGW", step: 1}
+    - {from: vpc-b-instance, to: hub-tgw, label: "0.0.0.0/0 -> TGW"}
+    - {from: spoke-route-table, to: hub-tgw, label: "spoke route table: 0.0.0.0/0 -> TGW"}
+    - {from: hub-tgw, to: tgw-route-table-1, label: "route table 1: 0.0.0.0/0 -> Egress VPC, 10.0.0.0/8 -> Blackhole", step: 2}
+    - {from: tgw-route-table-2, to: vpc:vpc-a, label: "route table 2: 10.1.0.0/16 -> VPC A"}
+    - {from: tgw-route-table-2, to: vpc:vpc-b, label: "route table 2: 10.2.0.0/16 -> VPC B"}
+    - {from: hub-tgw, to: tgw-eni-a, label: egress VPC attachment, step: 3}
+    - {from: tgw-eni-a, to: firewall-endpoint-1, label: "TGW subnet RT: 0.0.0.0/0 -> FW-VPCE-AZ-A", step: 4}
+    - {from: firewall-endpoint-1, to: nat-gw-1, label: "firewall subnet RT: 0.0.0.0/0 -> NAT-GW-A", step: 5}
+    - {from: nat-gw-1, to: egress-igw, label: "public subnet RT: 0.0.0.0/0 -> IGW, 10.0.0.0/8 -> FW-VPCE-AZ-A", step: 6}
+    - {from: hub-tgw, to: tgw-eni-b}
+    - {from: tgw-eni-b, to: firewall-endpoint-2, label: "0.0.0.0/0 -> FW-VPCE-AZ-B"}
+    - {from: firewall-endpoint-2, to: nat-gw-2, label: "0.0.0.0/0 -> NAT-GW-B"}
+    - {from: nat-gw-2, to: egress-igw, label: "0.0.0.0/0 -> IGW"}
+    - {from: tgw-subnet-rt-a, to: tgw-eni-a, label: Route Table Egx 1}
+    - {from: firewall-subnet-rt-a, to: firewall-endpoint-1}
+    - {from: public-subnet-rt-a, to: nat-gw-1}
+    - {from: tgw-subnet-rt-b, to: tgw-eni-b, label: Route Table Egx 2}
+    - {from: firewall-subnet-rt-b, to: firewall-endpoint-2}
+    - {from: public-subnet-rt-b, to: nat-gw-2}
 - slug: tgw-inspection-vpc-east-west-network-firewall
   title: Centralized east-west and hybrid inspection with an inspection VPC
   category: networking
   tags: [transit gateway, inspection vpc, network firewall, east-west, appliance mode, hybrid]
   source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/centralized-network-security-for-vpc-to-vpc-and-on-premises-to-vpc-traffic.html
-  description: A Transit Gateway with two route tables steers all VPC-to-VPC and on-premises-to-VPC traffic through a dedicated inspection VPC that hosts AWS Network Firewall endpoints in their own subnets, separate from the TGW attachment subnets. Appliance mode on the inspection VPC attachment keeps both directions of a flow on the same Availability Zone so the stateful firewall sees symmetric traffic.
+  description: A third-party VPC, a prod VPC and two dev VPCs attach to a Transit Gateway whose untrusted, prod, dev and security route tables send every default route to a security VPC and return known prefixes to the right attachment, Direct Connect gateway or Site-to-Site VPN. The security VPC (10.4.0.0/16) has per Availability Zone a TGW subnet with the Transit Gateway ENI and a firewall subnet with an AWS Network Firewall endpoint; the TGW subnet route table points 0.0.0.0/0 at the firewall endpoint, the firewall subnet route table returns internal prefixes to the Transit Gateway and sends internet-bound traffic to the internet gateway, and appliance mode on the attachment keeps both directions of a flow in the same zone.
   containers:
     - datacenter: on-premises
     - region: us-east-1
+      at: [1, 1]
+      groups: [{label: transit-gateway, at: [2, 1, 1, 4]}]
       vpcs:
-        - name: inspection
-          cidr: 100.64.0.0/16
+        - name: third-party
+          cidr: 172.16.1.0/24
+          at: [1, 1]
           subnets:
-            - {name: insp-tgw-a, cidr: 100.64.0.0/28, az: a, public: false}
-            - {name: insp-firewall-a, cidr: 100.64.1.0/28, az: a, public: false}
-            - {name: insp-tgw-b, cidr: 100.64.2.0/28, az: b, public: false}
-            - {name: insp-firewall-b, cidr: 100.64.3.0/28, az: b, public: false}
-        - name: spoke-prod
+            - {name: third-party-private-a, cidr: 172.16.1.0/28, az: a, public: false, at: [1, 1]}
+        - name: prod
           cidr: 10.1.0.0/16
+          at: [1, 2]
           subnets:
-            - {name: prod-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: spoke-dev
+            - {name: prod-private-a, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
+        - name: dev-a
           cidr: 10.2.0.0/16
+          at: [1, 3]
           subnets:
-            - {name: dev-private-a, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: dev-a-private-a, cidr: 10.2.1.0/24, az: a, public: false, at: [1, 1]}
+        - name: dev-b
+          cidr: 10.3.0.0/16
+          at: [1, 4]
+          subnets:
+            - {name: dev-b-private-a, cidr: 10.3.1.0/24, az: a, public: false, at: [1, 1]}
+        - name: security
+          cidr: 10.4.0.0/16
+          at: [1, 5, 3, 1]
+          subnets:
+            - {name: sec-tgw-a, cidr: 10.4.0.0/28, az: a, public: false, at: [1, 1]}
+            - {name: sec-firewall-a, cidr: 10.4.1.0/28, az: a, public: false, at: [1, 2]}
+            - {name: sec-tgw-b, cidr: 10.4.2.0/28, az: b, public: false, at: [1, 1]}
+            - {name: sec-firewall-b, cidr: 10.4.3.0/28, az: b, public: false, at: [1, 2]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_ec2_transit_gateway_route_table, name: spoke-rt, in: region}
-    - {tf: aws_ec2_transit_gateway_route_table, name: firewall-rt, in: region}
-    - {tf: aws_networkfirewall_firewall, name: inspection-firewall, in: subnet:insp-firewall-a}
-    - {tf: aws_customer_gateway, name: dc-cgw, in: datacenter}
-    - {tf: aws_vpn_connection, name: dc-vpn, in: region}
-    - {tf: aws_instance, name: prod-app, in: subnet:prod-private-a}
-    - {tf: aws_instance, name: dev-app, in: subnet:dev-private-a}
-  actors: [datacenter]
+    - {tf: aws_instance, name: third-party-app, in: subnet:third-party-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: prod-app, in: subnet:prod-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: dev-a-app, in: subnet:dev-a-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: dev-b-app, in: subnet:dev-b-private-a, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: group:transit-gateway, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: route-table-untrusted, in: group:transit-gateway, at: [2, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: route-table-prod, in: group:transit-gateway, at: [2, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: route-table-dev, in: group:transit-gateway, at: [2, 3]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: route-table-sec, in: group:transit-gateway, at: [2, 4]}
+    - {tf: aws_dx_gateway, name: aws-direct-connect, in: region, at: [3, 3]}
+    - {tf: aws_route_table, name: tgw-subnet-route-table, in: vpc:security, at: [1, 1]}
+    - {tf: aws_route_table, name: firewall-subnet-route-table, in: vpc:security, at: [1, 2]}
+    - {tf: aws_internet_gateway, name: security-igw, in: vpc:security, at: [2, 3, 3, 1]}
+    - {tf: aws_networkfirewall_firewall, name: network-firewall, in: vpc:security, at: [3, 1, 1, 2]}
+    - {tf: aws_network_interface, name: tgw-eni-a, in: subnet:sec-tgw-a, at: [1, 1]}
+    - {tf: aws_vpc_endpoint, name: firewall-endpoint-1, in: subnet:sec-firewall-a, at: [1, 1]}
+    - {tf: aws_network_interface, name: tgw-eni-b, in: subnet:sec-tgw-b, at: [1, 1]}
+    - {tf: aws_vpc_endpoint, name: firewall-endpoint-2, in: subnet:sec-firewall-b, at: [1, 1]}
+  actors: [{type: datacenter, name: on-premises, at: [2, 1]}]
   flows:
-    - {from: hub-tgw, to: vpc:spoke-prod, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:spoke-dev, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:inspection, link: aws_ec2_transit_gateway_vpc_attachment, label: appliance mode}
-    - {from: dc-cgw, to: dc-vpn, label: IPsec}
-    - {from: dc-vpn, to: hub-tgw, label: VPN attachment}
-    - {from: prod-app, to: hub-tgw, label: spoke-rt default to inspection, step: 1}
-    - {from: hub-tgw, to: inspection-firewall, label: stateful inspection, step: 2}
-    - {from: inspection-firewall, to: hub-tgw, label: firewall-rt to destination, step: 3}
-    - {from: hub-tgw, to: dev-app, step: 4}
-    - {from: datacenter, to: dc-cgw, label: on-prem to VPC also inspected}
-
+    - {from: hub-tgw, to: vpc:third-party, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:prod, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:dev-a, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:dev-b, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:security, link: aws_ec2_transit_gateway_vpc_attachment, label: appliance mode}
+    - {from: route-table-untrusted, to: vpc:security, label: "untrusted: 0.0.0.0/0 -> Security VPC, a.b.c.d/n -> Blackhole"}
+    - {from: route-table-prod, to: vpc:prod, label: "prod: 10.1.0.0/16 -> Prod VPC"}
+    - {from: route-table-prod, to: aws-direct-connect, label: "prod: w.x.y.z/n -> DXGW"}
+    - {from: route-table-prod, to: vpc:security, label: "prod: 0.0.0.0/0 -> Security VPC"}
+    - {from: route-table-dev, to: vpc:dev-a, label: "dev: 10.2.0.0/16 -> Dev VPC A"}
+    - {from: route-table-dev, to: vpc:dev-b, label: "dev: 10.3.0.0/16 -> Dev VPC B"}
+    - {from: route-table-dev, to: vpc:security, label: "dev: 0.0.0.0/0 -> Security VPC, a.b.c.d/n -> Blackhole"}
+    - {from: route-table-sec, to: vpc:prod, label: "sec: 10.1.0.0/16 -> Prod VPC"}
+    - {from: route-table-sec, to: vpc:dev-a, label: "sec: 10.2.0.0/16 -> Dev VPC A"}
+    - {from: route-table-sec, to: vpc:dev-b, label: "sec: 10.3.0.0/16 -> Dev VPC B"}
+    - {from: route-table-sec, to: vpc:third-party, label: "sec: 172.16.1.0/24 -> Third Party VPC"}
+    - {from: route-table-sec, to: aws-direct-connect, label: "sec: w.x.y.z/n -> DXGW"}
+    - {from: route-table-sec, to: datacenter, label: "sec: a.b.c.d/n -> VPN"}
+    - {from: datacenter, to: hub-tgw, link: aws_vpn_connection, label: Site-to-Site VPN (100 prefixes)}
+    - {from: datacenter, to: aws-direct-connect, label: Direct Connect (100 prefixes combined IPv4/IPv6)}
+    - {from: aws-direct-connect, to: hub-tgw, link: aws_dx_gateway_association}
+    - {from: prod-app, to: hub-tgw, label: "0.0.0.0/0 -> TGW", step: 1}
+    - {from: hub-tgw, to: tgw-eni-a, label: security VPC attachment, step: 2}
+    - {from: tgw-eni-a, to: firewall-endpoint-1, label: "TGW subnet RT: 0.0.0.0/0 -> FW-EP-1", step: 3}
+    - {from: firewall-endpoint-1, to: network-firewall, label: stateful inspection}
+    - {from: firewall-endpoint-1, to: tgw-eni-a, label: "firewall subnet RT: 10.0.0.0/8, w.x.y.z, a.b.c.d/n, 172.16.1.0/24 -> TGW", step: 4}
+    - {from: firewall-endpoint-1, to: security-igw, label: "firewall subnet RT: 0.0.0.0/0 -> IGW"}
+    - {from: hub-tgw, to: dev-a-app, label: "sec: 10.2.0.0/16 -> Dev VPC A", step: 5}
+    - {from: tgw-subnet-route-table, to: tgw-eni-a}
+    - {from: firewall-subnet-route-table, to: firewall-endpoint-1}
+    - {from: tgw-eni-b, to: firewall-endpoint-2, label: "0.0.0.0/0 -> FW-EP-2"}
+    - {from: firewall-endpoint-2, to: network-firewall}
 - slug: tgw-gwlb-appliance-inspection
   title: Centralized inspection with Gateway Load Balancer and Transit Gateway
   category: networking
   tags: [gateway load balancer, transit gateway, third-party firewall, appliance vpc, geneve]
   source: https://aws.amazon.com/blogs/networking-and-content-delivery/centralized-inspection-architecture-with-aws-gateway-load-balancer-and-aws-transit-gateway/
-  description: A security VPC hosts a Gateway Load Balancer fronting a fleet of third-party firewall appliances in an Auto Scaling group; Gateway Load Balancer endpoints in the same VPC are the routable next hop for traffic arriving from the Transit Gateway. East-west and egress traffic from spoke VPCs is routed to the endpoints, encapsulated in GENEVE to the appliances, and returned transparently to the Transit Gateway, with appliance mode ensuring symmetric flows.
+  description: Two spoke VPCs (10.0.0.0/24 and 10.0.1.0/24) attach to a Transit Gateway through a TGW ENI in each Availability Zone; the TGW egress route table sends 0.0.0.0/0 to the appliance VPC attachment and the transit route table returns each spoke prefix to its own attachment. The appliance VPC (192.168.1.0/24) has, per Availability Zone, a Transit Gateway subnet with the TGW ENI, an appliance subnet with a Gateway Load Balancer endpoint and third-party virtual appliances, and a NAT gateway subnet; a Gateway Load Balancer fronts the appliances, traffic reaches them GENEVE-encapsulated through the endpoint, and inspected traffic leaves through the NAT gateway and the internet gateway, with appliance mode on the attachment keeping flows symmetric.
   containers:
-    - region: us-east-1
+    - region: us-west-2
+      at: [1, 1]
       vpcs:
-        - name: security
-          cidr: 10.0.0.0/16
+        - name: spoke1
+          cidr: 10.0.0.0/24
+          at: [1, 1, 2, 1]
           subnets:
-            - {name: sec-tgw-a, cidr: 10.0.0.0/28, az: a, public: false}
-            - {name: sec-gwlbe-a, cidr: 10.0.1.0/28, az: a, public: false}
-            - {name: sec-appliance-a, cidr: 10.0.2.0/24, az: a, public: false}
-            - {name: sec-public-a, cidr: 10.0.3.0/24, az: a, public: true}
-        - name: spoke-a
-          cidr: 10.1.0.0/16
+            - {name: spoke1-b-1, cidr: 10.0.0.32/28, az: b, public: false, at: [1, 1]}
+            - {name: spoke1-b-tgw, cidr: 10.0.0.48/28, az: b, public: false, at: [1, 2]}
+            - {name: spoke1-a-1, cidr: 10.0.0.0/28, az: a, public: false, at: [1, 1]}
+            - {name: spoke1-a-tgw, cidr: 10.0.0.16/28, az: a, public: false, at: [1, 2]}
+        - name: spoke2
+          cidr: 10.0.1.0/24
+          at: [3, 1, 2, 1]
           subnets:
-            - {name: spoke-a-private, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: spoke-b
-          cidr: 10.2.0.0/16
+            - {name: spoke2-a-1, cidr: 10.0.1.0/28, az: a, public: false, at: [1, 1]}
+            - {name: spoke2-a-tgw, cidr: 10.0.1.16/28, az: a, public: false, at: [1, 2]}
+            - {name: spoke2-b-1, cidr: 10.0.1.32/28, az: b, public: false, at: [1, 1]}
+            - {name: spoke2-b-tgw, cidr: 10.0.1.48/28, az: b, public: false, at: [1, 2]}
+        - name: appliance
+          cidr: 192.168.1.0/24
+          at: [1, 3, 4, 1]
           subnets:
-            - {name: spoke-b-private, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: appliance-tgw-a, cidr: 192.168.1.0/28, az: a, public: false, at: [1, 1]}
+            - {name: appliance-appliance-a, cidr: 192.168.1.16/28, az: a, public: false, at: [1, 2]}
+            - {name: appliance-nat-a, cidr: 192.168.1.32/28, az: a, public: true, at: [1, 3]}
+            - {name: appliance-tgw-b, cidr: 192.168.1.48/28, az: b, public: false, at: [1, 1]}
+            - {name: appliance-appliance-b, cidr: 192.168.1.64/28, az: b, public: false, at: [1, 2]}
+            - {name: appliance-nat-b, cidr: 192.168.1.80/28, az: b, public: true, at: [1, 3]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_lb, name: inspection-gwlb, in: subnet:sec-appliance-a}
-    - {tf: aws_vpc_endpoint, name: gwlb-endpoint-a, in: subnet:sec-gwlbe-a}
-    - {tf: aws_autoscaling_group, name: firewall-appliances, in: subnet:sec-appliance-a}
-    - {tf: aws_instance, name: firewall-appliance-1, in: subnet:sec-appliance-a}
-    - {tf: aws_nat_gateway, name: sec-nat-a, in: subnet:sec-public-a}
-    - {tf: aws_internet_gateway, name: sec-igw, in: vpc:security}
-    - {tf: aws_instance, name: app-a, in: subnet:spoke-a-private}
-    - {tf: aws_instance, name: app-b, in: subnet:spoke-b-private}
-  actors: [internet]
+    - {tf: aws_instance, name: spoke1-app, in: subnet:spoke1-a-1, at: [1, 1]}
+    - {tf: aws_network_interface, name: spoke1-tgw-eni-a, in: subnet:spoke1-a-tgw, at: [1, 1]}
+    - {tf: aws_network_interface, name: spoke1-tgw-eni-b, in: subnet:spoke1-b-tgw, at: [1, 1]}
+    - {tf: aws_instance, name: spoke2-app, in: subnet:spoke2-a-1, at: [1, 1]}
+    - {tf: aws_network_interface, name: spoke2-tgw-eni-a, in: subnet:spoke2-a-tgw, at: [1, 1]}
+    - {tf: aws_network_interface, name: spoke2-tgw-eni-b, in: subnet:spoke2-b-tgw, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [1, 2, 2, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: tgw-egress-route-table, in: region, at: [3, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: tgw-transit-route-table, in: region, at: [4, 2]}
+    - {tf: aws_internet_gateway, name: appliance-igw, in: vpc:appliance, at: [1, 1]}
+    - {tf: aws_lb, name: inspection-gwlb, in: vpc:appliance, at: [3, 1]}
+    - {tf: aws_network_interface, name: appliance-tgw-eni-a, in: subnet:appliance-tgw-a, at: [1, 1]}
+    - {tf: aws_vpc_endpoint, name: gwlb-endpoint-a, in: subnet:appliance-appliance-a, at: [1, 1]}
+    - {tf: aws_instance, name: virtual-appliances-a, in: subnet:appliance-appliance-a, at: [1, 2]}
+    - {tf: aws_nat_gateway, name: nat-gateway-a, in: subnet:appliance-nat-a, at: [1, 1]}
+    - {tf: aws_network_interface, name: appliance-tgw-eni-b, in: subnet:appliance-tgw-b, at: [1, 1]}
+    - {tf: aws_vpc_endpoint, name: gwlb-endpoint-b, in: subnet:appliance-appliance-b, at: [1, 1]}
+    - {tf: aws_instance, name: virtual-appliances-b, in: subnet:appliance-appliance-b, at: [1, 2]}
+    - {tf: aws_nat_gateway, name: nat-gateway-b, in: subnet:appliance-nat-b, at: [1, 1]}
   flows:
-    - {from: hub-tgw, to: vpc:spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:security, link: aws_ec2_transit_gateway_vpc_attachment, label: appliance mode}
-    - {from: app-a, to: hub-tgw, label: route to security VPC, step: 1}
-    - {from: hub-tgw, to: gwlb-endpoint-a, label: TGW subnet route to GWLBE, step: 2}
-    - {from: gwlb-endpoint-a, to: inspection-gwlb, label: PrivateLink, step: 3}
-    - {from: inspection-gwlb, to: firewall-appliance-1, label: GENEVE 6081, step: 4}
-    - {from: firewall-appliance-1, to: inspection-gwlb, label: return, step: 5}
-    - {from: gwlb-endpoint-a, to: sec-nat-a, label: egress after inspection}
-    - {from: sec-nat-a, to: sec-igw}
-    - {from: sec-igw, to: internet}
-    - {from: hub-tgw, to: app-b, label: east-west after inspection}
-
+    - {from: hub-tgw, to: vpc:spoke1, link: aws_ec2_transit_gateway_vpc_attachment, label: Spoke1 VPC association}
+    - {from: hub-tgw, to: vpc:spoke2, link: aws_ec2_transit_gateway_vpc_attachment, label: Spoke2 VPC association}
+    - {from: hub-tgw, to: vpc:appliance, link: aws_ec2_transit_gateway_vpc_attachment, label: appliance VPC association (appliance mode)}
+    - {from: tgw-egress-route-table, to: vpc:appliance, label: 0.0.0.0/0 to appliance VPC attachment}
+    - {from: tgw-transit-route-table, to: vpc:spoke1, label: 10.0.0.0/24 to Spoke1 VPC attachment}
+    - {from: tgw-transit-route-table, to: vpc:spoke2, label: 10.0.1.0/24 to Spoke2 VPC attachment}
+    - {from: spoke1-app, to: spoke1-tgw-eni-a, label: default route to TGW, step: 1}
+    - {from: spoke1-tgw-eni-a, to: hub-tgw, step: 2}
+    - {from: hub-tgw, to: appliance-tgw-eni-a, label: egress route table, step: 3}
+    - {from: appliance-tgw-eni-a, to: gwlb-endpoint-a, label: TGW subnet route to GWLBE, step: 4}
+    - {from: gwlb-endpoint-a, to: inspection-gwlb, label: PrivateLink, step: 5}
+    - {from: inspection-gwlb, to: virtual-appliances-a, label: GENEVE 6081, step: 6}
+    - {from: gwlb-endpoint-a, to: nat-gateway-a, label: egress after inspection, step: 7}
+    - {from: nat-gateway-a, to: appliance-igw, step: 8}
+    - {from: hub-tgw, to: spoke2-tgw-eni-a, label: east-west after inspection}
 - slug: tgw-centralized-ingress-network-firewall
   title: Centralized ingress with AWS Network Firewall and a shared ALB
   category: networking
   tags: [centralized ingress, network firewall, application load balancer, transit gateway, deep packet inspection]
   source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/using-network-firewall-for-centralized-ingress.html
-  description: An ingress VPC exposes a single internet-facing Application Load Balancer; the internet gateway route table (ingress routing) forces inbound packets through AWS Network Firewall endpoints before they reach the load balancer subnets. The ALB terminates TLS and forwards to application targets in spoke VPCs across the Transit Gateway, so spoke VPCs stay private and share one inspected entry point.
+  description: An ingress VPC exposes a single internet-facing Application Load Balancer; the internet gateway ingress route table forces inbound packets through an AWS Network Firewall endpoint in each of three Availability Zones before they reach the load balancer. The ALB terminates TLS and forwards across the Transit Gateway to a Network Load Balancer in front of the application instances in each spoke VPC, so spoke VPCs stay private and share one inspected entry point.
   containers:
     - region: eu-central-1
       vpcs:
+        - name: spoke-1
+          cidr: 10.1.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: spoke-1-private-a, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: spoke-1-private-b, cidr: 10.1.2.0/24, az: b, public: false, at: [1, 1]}
+        - name: spoke-2
+          cidr: 10.2.0.0/16
+          at: [2, 1]
+          subnets:
+            - {name: spoke-2-private-a, cidr: 10.2.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: spoke-2-private-b, cidr: 10.2.2.0/24, az: b, public: false, at: [1, 1]}
         - name: ingress
           cidr: 10.0.0.0/16
+          at: [1, 3, 2, 1]
           subnets:
-            - {name: ingress-firewall-a, cidr: 10.0.0.0/28, az: a, public: false}
-            - {name: ingress-alb-a, cidr: 10.0.1.0/24, az: a, public: true}
-            - {name: ingress-alb-b, cidr: 10.0.2.0/24, az: b, public: true}
-            - {name: ingress-tgw-a, cidr: 10.0.3.0/28, az: a, public: false}
-        - name: spoke-web
-          cidr: 10.1.0.0/16
-          subnets:
-            - {name: web-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-            - {name: web-private-b, cidr: 10.1.2.0/24, az: b, public: false}
+            - {name: ingress-firewall-a, cidr: 10.0.0.0/28, az: a, public: false, at: [1, 1]}
+            - {name: ingress-firewall-b, cidr: 10.0.0.16/28, az: b, public: false, at: [1, 1]}
+            - {name: ingress-firewall-c, cidr: 10.0.0.32/28, az: c, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_internet_gateway, name: ingress-igw, in: vpc:ingress}
-    - {tf: aws_networkfirewall_firewall, name: ingress-firewall, in: subnet:ingress-firewall-a}
-    - {tf: aws_lb, name: ingress-alb-application, in: subnet:ingress-alb-a}
-    - {tf: aws_acm_certificate, name: web-cert, in: region}
-    - {tf: aws_instance, name: web-1, in: subnet:web-private-a}
-    - {tf: aws_instance, name: web-2, in: subnet:web-private-b}
-  actors: [users]
+    - {tf: aws_instance, name: spoke-1-app-a, in: subnet:spoke-1-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: spoke-1-app-b, in: subnet:spoke-1-private-b, at: [1, 1]}
+    - {tf: aws_lb, name: spoke-1-nlb-network, in: vpc:spoke-1, at: [1, 2, 2, 1]}
+    - {tf: aws_instance, name: spoke-2-app-a, in: subnet:spoke-2-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: spoke-2-app-b, in: subnet:spoke-2-private-b, at: [1, 1]}
+    - {tf: aws_lb, name: spoke-2-nlb-network, in: vpc:spoke-2, at: [1, 2, 2, 1]}
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [1, 2, 2, 1]}
+    - {tf: aws_lb, name: ingress-alb-application, in: vpc:ingress, at: [1, 1, 3, 1]}
+    - {tf: aws_networkfirewall_firewall, name: firewall-endpoint-az1, in: subnet:ingress-firewall-a, at: [1, 1]}
+    - {tf: aws_networkfirewall_firewall, name: firewall-endpoint-az2, in: subnet:ingress-firewall-b, at: [1, 1]}
+    - {tf: aws_networkfirewall_firewall, name: firewall-endpoint-az3, in: subnet:ingress-firewall-c, at: [1, 1]}
+    - {tf: aws_internet_gateway, name: ingress-igw, in: vpc:ingress, at: [1, 3, 3, 1]}
+    - {tf: aws_route_table, name: igw-ingress-route-table, in: vpc:ingress, at: [4, 3]}
+  actors: [{type: users, name: users, at: [1, 2]}]
   flows:
     - {from: hub-tgw, to: vpc:ingress, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:spoke-web, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:spoke-1, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:spoke-2, link: aws_ec2_transit_gateway_vpc_attachment}
     - {from: users, to: ingress-igw, label: HTTPS, step: 1}
-    - {from: ingress-igw, to: ingress-firewall, label: IGW ingress route to firewall endpoint, step: 2}
-    - {from: ingress-firewall, to: ingress-alb-application, label: inspected, step: 3}
+    - {from: igw-ingress-route-table, to: ingress-igw, label: "IGW ingress route table: ALB subnet AZn -> VPCe AZn"}
+    - {from: ingress-igw, to: firewall-endpoint-az2, label: ingress routing to the firewall endpoint of the AZ, step: 2}
+    - {from: firewall-endpoint-az2, to: ingress-alb-application, label: inspected, step: 3}
+    - {from: ingress-igw, to: firewall-endpoint-az1}
+    - {from: ingress-igw, to: firewall-endpoint-az3}
+    - {from: firewall-endpoint-az1, to: ingress-alb-application}
+    - {from: firewall-endpoint-az3, to: ingress-alb-application}
     - {from: ingress-alb-application, to: hub-tgw, label: IP targets in spoke, step: 4}
-    - {from: hub-tgw, to: web-1, step: 5}
-    - {from: web-cert, to: ingress-alb-application, label: TLS certificate}
-
+    - {from: hub-tgw, to: spoke-1-nlb-network, step: 5}
+    - {from: spoke-1-nlb-network, to: spoke-1-app-a, step: 6}
+    - {from: spoke-1-nlb-network, to: spoke-1-app-b}
+    - {from: hub-tgw, to: spoke-2-nlb-network}
+    - {from: spoke-2-nlb-network, to: spoke-2-app-a}
+    - {from: spoke-2-nlb-network, to: spoke-2-app-b}
 - slug: tgw-inter-region-peering-global-network
   title: Global network with Transit Gateway inter-Region peering
   category: networking
   tags: [transit gateway, inter-region peering, multi-region, global network, encrypted backbone]
   source: https://aws.amazon.com/blogs/networking-and-content-delivery/building-a-global-network-using-aws-transit-gateway-inter-region-peering/
-  description: Each Region runs its own Transit Gateway hub with local VPC attachments, and the two hubs are joined by a peering attachment that carries traffic over the encrypted AWS global backbone rather than the public internet. Peering attachments do not propagate routes, so each TGW route table holds static routes for the remote Region's CIDRs; on-premises sites connected to one hub can reach VPCs in the other Region through the peering.
+  description: Transit Gateways in eu-west-2 and ap-northeast-2 each attach two VPCs (192.168.0.0/20 and 192.168.16.0/20 in London, 192.168.128.0/20 and 192.168.144.0/20 in Seoul) and are joined by an inter-Region peering attachment that rides the encrypted AWS global network instead of the public internet. Branch offices in LA, London and Seoul reach the nearest Transit Gateway over accelerated Site-to-Site VPN tunnels that enter at an AWS edge location, the London data centre lands on a Direct Connect gateway associated with the London Transit Gateway, and because peering attachments do not propagate routes each TGW route table carries static routes for the remote Region's prefixes.
   containers:
-    - datacenter: on-premises
-    - region: us-east-1
+    - region: eu-west-2
+      account_at: [1, 4, 2, 1]
+      at: [1, 2]
       vpcs:
-        - name: east-app
-          cidr: 10.1.0.0/16
-          subnets:
-            - {name: east-app-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: east-shared
-          cidr: 10.2.0.0/16
-          subnets:
-            - {name: east-shared-private-a, cidr: 10.2.1.0/24, az: a, public: false}
-    - region: eu-west-1
+        - {name: vpc-a-eu-west-2, cidr: 192.168.0.0/20, at: [1, 3]}
+        - {name: vpc-b-eu-west-2, cidr: 192.168.16.0/20, at: [2, 3]}
+    - region: ap-northeast-2
+      at: [3, 2]
       vpcs:
-        - name: eu-app
-          cidr: 10.11.0.0/16
-          subnets:
-            - {name: eu-app-private-a, cidr: 10.11.1.0/24, az: a, public: false}
+        - {name: vpc-a-ap-northeast-2, cidr: 192.168.128.0/20, at: [1, 2]}
+        - {name: vpc-b-ap-northeast-2, cidr: 192.168.144.0/20, at: [2, 2]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: tgw-east, in: region:us-east-1}
-    - {tf: aws_ec2_transit_gateway, name: tgw-eu, in: region:eu-west-1}
-    - {tf: aws_customer_gateway, name: dc-cgw, in: datacenter}
-    - {tf: aws_vpn_connection, name: dc-vpn, in: region:us-east-1}
-    - {tf: aws_instance, name: east-app-server, in: subnet:east-app-private-a}
-    - {tf: aws_instance, name: east-directory, in: subnet:east-shared-private-a}
-    - {tf: aws_instance, name: eu-app-server, in: subnet:eu-app-private-a}
-  actors: [datacenter]
+    - {tf: aws_ec2_transit_gateway, name: tgw-eu-west-2, in: region:eu-west-2, at: [1, 2]}
+    - {tf: aws_ec2_transit_gateway, name: tgw-ap-northeast-2, in: region:ap-northeast-2, at: [2, 1]}
+    - {tf: aws_dx_gateway, name: dxgw-eu-west-2, in: account, at: [1, 1]}
+    - {tf: aws_networkmanager_global_network, name: aws-global-network, in: account, at: [2, 1, 1, 2]}
+  actors:
+    - {type: server, name: branch-la, at: [1, 1]}
+    - {type: server, name: branch-london, at: [1, 2]}
+    - {type: datacenter, name: data-centre-london, at: [1, 3]}
+    - {type: server, name: branch-seoul, at: [2, 1]}
   flows:
-    - {from: tgw-east, to: vpc:east-app, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: tgw-east, to: vpc:east-shared, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: tgw-eu, to: vpc:eu-app, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: tgw-east, to: tgw-eu, link: aws_ec2_transit_gateway_peering_attachment, label: inter-Region peering (static routes)}
-    - {from: datacenter, to: dc-cgw, label: IPsec}
-    - {from: dc-cgw, to: dc-vpn}
-    - {from: dc-vpn, to: tgw-east, label: VPN attachment}
-    - {from: eu-app-server, to: tgw-eu, label: "10.2.0.0/16 via peering", step: 1}
-    - {from: tgw-eu, to: tgw-east, label: "AWS backbone, encrypted", step: 2}
-    - {from: tgw-east, to: east-directory, step: 3}
-
+    - {from: tgw-eu-west-2, to: vpc:vpc-a-eu-west-2, link: aws_ec2_transit_gateway_vpc_attachment, label: "static route 192.168.128.0/20 -> peering", step: 3}
+    - {from: tgw-eu-west-2, to: vpc:vpc-b-eu-west-2, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: tgw-ap-northeast-2, to: vpc:vpc-a-ap-northeast-2, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: tgw-ap-northeast-2, to: vpc:vpc-b-ap-northeast-2, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: vpc:vpc-a-ap-northeast-2, to: tgw-ap-northeast-2, label: "static route 192.168.0.0/20 -> peering attachment", step: 1}
+    - {from: tgw-ap-northeast-2, to: tgw-eu-west-2, link: aws_ec2_transit_gateway_peering_attachment, label: inter-region peering over the AWS global network (encrypted), step: 2}
+    - {from: branch-la, to: tgw-eu-west-2, link: aws_vpn_connection, label: IPsec accelerated Site-to-Site VPN vpn-lax (172.16.0.0/24, via AWS edge location)}
+    - {from: branch-london, to: tgw-eu-west-2, link: aws_vpn_connection, label: IPsec accelerated Site-to-Site VPN vpn-lhr (172.16.1.0/24, via AWS edge location)}
+    - {from: branch-seoul, to: tgw-ap-northeast-2, link: aws_vpn_connection, label: IPsec accelerated Site-to-Site VPN vpn-icn (172.16.2.0/24, via AWS edge location)}
+    - {from: datacenter, to: dxgw-eu-west-2, label: Direct Connect (10.0.0.0/8)}
+    - {from: dxgw-eu-west-2, to: tgw-eu-west-2, link: aws_dx_gateway_association}
+    - {from: aws-global-network, to: tgw-eu-west-2, label: registered transit gateway}
+    - {from: aws-global-network, to: tgw-ap-northeast-2, label: registered transit gateway}
 - slug: cloud-wan-segmented-global-network
   title: AWS Cloud WAN core network with segments across Regions
   category: networking
   tags: [cloud wan, core network, segments, multi-region, policy-based routing]
   source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/aws-cloud-wan.html
-  description: A single global core network defined by a core network policy places a core network edge in every chosen Region and joins them over the AWS backbone; VPC attachments are mapped to production, development, and shared segments using attachment tags. Segments are isolated routing domains, and the policy's segment actions share the shared-services segment with the workload segments while keeping production and development apart.
+  description: A single global core network, defined by a core network policy inside a Network Manager global network, places a core network edge in every chosen Region and joins them over the AWS backbone. Attachments (VPCs, Site-to-Site VPNs, SD-WAN Connect and peered existing transit gateways) are mapped to development, production and shared segments, each an isolated routing domain with its own route table; segment actions share the shared-services segment with the workload segments while keeping production and development apart.
   containers:
     - region: us-east-1
+      at: [1, 1]
+      groups: [{label: attachments, at: [1, 3]}, {label: development-segment, at: [2, 1, 1, 4]}, {label: production-segment, at: [3, 1, 1, 4]}, {label: shared-segment, at: [4, 1, 1, 4]}]
       vpcs:
-        - name: prod-east
-          cidr: 10.1.0.0/16
-          subnets:
-            - {name: prod-east-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: shared-east
-          cidr: 10.9.0.0/16
-          subnets:
-            - {name: shared-east-private-a, cidr: 10.9.1.0/24, az: a, public: false}
+        - {name: prod-east, cidr: 10.1.0.0/16, at: [5, 2]}
+        - {name: shared-east, cidr: 10.9.0.0/16, at: [5, 3]}
     - region: eu-west-1
+      at: [1, 2]
       vpcs:
-        - name: prod-eu
-          cidr: 10.11.0.0/16
-          subnets:
-            - {name: prod-eu-private-a, cidr: 10.11.1.0/24, az: a, public: false}
-        - name: dev-eu
-          cidr: 10.12.0.0/16
-          subnets:
-            - {name: dev-eu-private-a, cidr: 10.12.1.0/24, az: a, public: false}
+        - {name: prod-eu, cidr: 10.11.0.0/16, at: [1, 2]}
+        - {name: dev-eu, cidr: 10.12.0.0/16, at: [1, 3]}
+    - region: ap-southeast-1
+      at: [1, 3]
   elements:
-    - {tf: aws_networkmanager_global_network, name: global-network, in: region:us-east-1}
-    - {tf: aws_networkmanager_core_network, name: core-network, in: region:us-east-1}
-    - {tf: aws_instance, name: prod-east-app, in: subnet:prod-east-private-a}
-    - {tf: aws_instance, name: shared-directory, in: subnet:shared-east-private-a}
-    - {tf: aws_instance, name: prod-eu-app, in: subnet:prod-eu-private-a}
-    - {tf: aws_instance, name: dev-eu-app, in: subnet:dev-eu-private-a}
+    - {tf: aws_networkmanager_global_network, name: global-network, in: region:us-east-1, at: [1, 1]}
+    - {tf: aws_networkmanager_core_network, name: core-network, in: region:us-east-1, at: [1, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: development-segment-routes, in: group:development-segment, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: production-segment-routes, in: group:production-segment, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: shared-segment-routes, in: group:shared-segment, at: [1, 1]}
+    - {tf: aws_networkmanager_core_network, name: core-network-edge-us-east-1, in: region:us-east-1, at: [5, 1]}
+    - {tf: aws_networkmanager_core_network, name: core-network-edge-eu-west-1, in: region:eu-west-1, at: [1, 1]}
+    - {tf: aws_networkmanager_core_network, name: core-network-edge-ap-southeast-1, in: region:ap-southeast-1, at: [1, 1]}
+    - {tf: aws_customer_gateway, name: site-to-site-vpn-cgw, in: group:attachments, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway_connect, name: sd-wan-connect, in: group:attachments, at: [2, 1]}
+    - {tf: aws_ec2_transit_gateway, name: existing-tgw-east, in: region:us-east-1, at: [5, 4]}
+    - {tf: aws_ec2_transit_gateway, name: existing-tgw-eu, in: region:eu-west-1, at: [1, 4]}
   actors: []
   flows:
-    - {from: core-network, to: vpc:prod-east, link: aws_networkmanager_vpc_attachment, label: "segment: production"}
-    - {from: core-network, to: vpc:prod-eu, link: aws_networkmanager_vpc_attachment, label: "segment: production"}
-    - {from: core-network, to: vpc:dev-eu, link: aws_networkmanager_vpc_attachment, label: "segment: development"}
-    - {from: core-network, to: vpc:shared-east, link: aws_networkmanager_vpc_attachment, label: "segment: shared (shared to all)"}
-    - {from: global-network, to: core-network, label: policy document}
-    - {from: prod-eu-app, to: core-network, label: "same segment, cross-Region", step: 1}
-    - {from: core-network, to: prod-east-app, label: core network edge to edge, step: 2}
-    - {from: dev-eu-app, to: shared-directory, label: via shared segment}
-
+    - {from: global-network, to: core-network, label: core network policy (CNP)}
+    - {from: core-network, to: core-network-edge-us-east-1, label: core network edge}
+    - {from: core-network, to: core-network-edge-eu-west-1, label: core network edge}
+    - {from: core-network, to: core-network-edge-ap-southeast-1, label: core network edge}
+    - {from: core-network-edge-us-east-1, to: core-network-edge-eu-west-1, label: AWS backbone}
+    - {from: core-network-edge-eu-west-1, to: core-network-edge-ap-southeast-1, label: AWS backbone}
+    - {from: core-network, to: development-segment-routes, label: development segment}
+    - {from: core-network, to: production-segment-routes, label: production segment}
+    - {from: core-network, to: shared-segment-routes, label: shared segment (shared with all)}
+    - {from: core-network-edge-us-east-1, to: vpc:prod-east, link: aws_networkmanager_vpc_attachment, label: "segment: production"}
+    - {from: core-network-edge-us-east-1, to: vpc:shared-east, link: aws_networkmanager_vpc_attachment, label: "segment: shared"}
+    - {from: core-network-edge-eu-west-1, to: vpc:prod-eu, link: aws_networkmanager_vpc_attachment, label: "segment: production"}
+    - {from: core-network-edge-eu-west-1, to: vpc:dev-eu, link: aws_networkmanager_vpc_attachment, label: "segment: development"}
+    - {from: site-to-site-vpn-cgw, to: core-network, label: Site-to-Site VPN attachment}
+    - {from: sd-wan-connect, to: core-network, label: Connect attachment (SD-WAN)}
+    - {from: existing-tgw-east, to: core-network-edge-us-east-1, label: Transit Gateway peering}
+    - {from: existing-tgw-eu, to: core-network-edge-eu-west-1, label: Transit Gateway peering}
 - slug: cloud-wan-centralized-outbound-inspection
   title: Centralized outbound inspection with Cloud WAN service insertion
   category: networking
   tags: [cloud wan, service insertion, network function group, network firewall, centralized egress]
   source: https://aws.amazon.com/blogs/networking-and-content-delivery/centralized-outbound-inspection-architecture-in-aws-cloud-wan/
-  description: Inspection VPCs hosting AWS Network Firewall endpoints and NAT gateways are attached to the core network as a network function group instead of a segment. A send-to action in the core network policy steers the default route of the production and development segments into the network function group, so internet-bound traffic is inspected in the local Region before leaving through the inspection VPC's NAT gateways.
+  description: A production VPC and an outbound inspection VPC hosting AWS Network Firewall endpoints and NAT gateways in two Availability Zones are attached to an AWS Cloud WAN core network through core network ENIs in dedicated subnets. The production segment's route table carries a static 0.0.0.0/0 route to the inspection VPC attachment while the security segment learns both attachments by propagation, so internet-bound traffic from the production workload is steered through the firewall endpoint and NAT gateway and leaves through the inspection VPC's internet gateway in the same Region.
   containers:
     - region: us-east-1
+      groups: [{label: security-segment, at: [3, 1, 1, 2]}, {label: production-segment, at: [4, 1, 1, 2]}]
       vpcs:
-        - name: inspection-east
-          cidr: 100.64.0.0/16
-          subnets:
-            - {name: insp-cwan-a, cidr: 100.64.0.0/28, az: a, public: false}
-            - {name: insp-firewall-a, cidr: 100.64.1.0/28, az: a, public: false}
-            - {name: insp-public-a, cidr: 100.64.2.0/24, az: a, public: true}
-        - name: prod-east
+        - name: prod
           cidr: 10.1.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: prod-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: dev-east
+            - {name: prod-private-a, cidr: 10.1.0.0/24, az: a, public: false, at: [1, 1]}
+            - {name: prod-private-b, cidr: 10.1.1.0/24, az: b, public: false, at: [1, 1]}
+        - name: outbound-inspection
           cidr: 10.2.0.0/16
+          at: [1, 2]
           subnets:
-            - {name: dev-private-a, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: natgw-a, cidr: 10.2.3.0/28, az: a, public: true, at: [1, 1]}
+            - {name: network-firewall-a, cidr: 10.2.2.0/28, az: a, public: false, at: [2, 1]}
+            - {name: core-network-a, cidr: 10.2.1.0/28, az: a, public: false, at: [3, 1]}
+            - {name: natgw-b, cidr: 10.2.13.0/28, az: b, public: true, at: [1, 1]}
+            - {name: network-firewall-b, cidr: 10.2.12.0/28, az: b, public: false, at: [2, 1]}
+            - {name: core-network-b, cidr: 10.2.11.0/28, az: b, public: false, at: [3, 1]}
   elements:
-    - {tf: aws_networkmanager_global_network, name: global-network, in: region}
-    - {tf: aws_networkmanager_core_network, name: core-network, in: region}
-    - {tf: aws_networkfirewall_firewall, name: inspection-firewall, in: subnet:insp-firewall-a}
-    - {tf: aws_nat_gateway, name: inspection-nat, in: subnet:insp-public-a}
-    - {tf: aws_internet_gateway, name: inspection-igw, in: vpc:inspection-east}
-    - {tf: aws_instance, name: prod-app, in: subnet:prod-private-a}
-    - {tf: aws_instance, name: dev-app, in: subnet:dev-private-a}
-  actors: [internet]
+    - {tf: aws_networkmanager_core_network, name: core-network, in: region, at: [2, 1, 1, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: security-segment-routes, in: group:security-segment, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: production-segment-routes, in: group:production-segment, at: [1, 1]}
+    - {tf: aws_instance, name: prod-app-a, in: subnet:prod-private-a, at: [1, 1]}
+    - {tf: aws_network_interface, name: prod-core-network-eni-a, in: subnet:prod-private-a, at: [1, 2]}
+    - {tf: aws_instance, name: prod-app-b, in: subnet:prod-private-b, at: [1, 1]}
+    - {tf: aws_network_interface, name: prod-core-network-eni-b, in: subnet:prod-private-b, at: [1, 2]}
+    - {tf: aws_nat_gateway, name: nat-gateway-a, in: subnet:natgw-a, at: [1, 1]}
+    - {tf: aws_nat_gateway, name: nat-gateway-b, in: subnet:natgw-b, at: [1, 1]}
+    - {tf: aws_networkfirewall_firewall, name: firewall-endpoint-a, in: subnet:network-firewall-a, at: [1, 1]}
+    - {tf: aws_networkfirewall_firewall, name: firewall-endpoint-b, in: subnet:network-firewall-b, at: [1, 1]}
+    - {tf: aws_network_interface, name: inspection-core-network-eni-a, in: subnet:core-network-a, at: [1, 1]}
+    - {tf: aws_network_interface, name: inspection-core-network-eni-b, in: subnet:core-network-b, at: [1, 1]}
+    - {tf: aws_internet_gateway, name: internet-gateway, in: vpc:outbound-inspection, at: [1, 3]}
+  actors: [{type: internet, name: internet, at: [1, 2]}]
   flows:
-    - {from: core-network, to: vpc:prod-east, link: aws_networkmanager_vpc_attachment, label: "segment: production"}
-    - {from: core-network, to: vpc:dev-east, link: aws_networkmanager_vpc_attachment, label: "segment: development"}
-    - {from: core-network, to: vpc:inspection-east, link: aws_networkmanager_vpc_attachment, label: network function group}
-    - {from: global-network, to: core-network}
-    - {from: prod-app, to: core-network, label: "0.0.0.0/0", step: 1}
-    - {from: core-network, to: inspection-firewall, label: send-to network function group, step: 2}
-    - {from: inspection-firewall, to: inspection-nat, step: 3}
-    - {from: inspection-nat, to: inspection-igw, step: 4}
-    - {from: inspection-igw, to: internet, step: 5}
-
+    - {from: core-network, to: vpc:prod, link: aws_networkmanager_vpc_attachment, label: production segment}
+    - {from: core-network, to: vpc:outbound-inspection, link: aws_networkmanager_vpc_attachment, label: security segment}
+    - {from: production-segment-routes, to: core-network, label: static 0.0.0.0/0 to inspection VPC attachment}
+    - {from: security-segment-routes, to: core-network, label: propagated prod and inspection attachments}
+    - {from: prod-app-a, to: prod-core-network-eni-a, label: 0.0.0.0/0 to core network, step: 1}
+    - {from: prod-core-network-eni-a, to: core-network, label: production segment, step: 2}
+    - {from: core-network, to: inspection-core-network-eni-a, label: security segment, step: 3}
+    - {from: inspection-core-network-eni-a, to: firewall-endpoint-a, step: 4}
+    - {from: firewall-endpoint-a, to: nat-gateway-a, step: 5}
+    - {from: nat-gateway-a, to: internet-gateway, step: 6}
+    - {from: internet-gateway, to: internet, step: 7}
 - slug: vpc-peering-full-mesh
   title: Full-mesh VPC peering between three VPCs
   category: networking
   tags: [vpc peering, full mesh, non-transitive, private routing]
   source: https://docs.aws.amazon.com/vpc/latest/peering/peering-configurations-full-access.html
-  description: Three VPCs that need to reach each other's full CIDR blocks are peered pairwise, because VPC peering is not transitive and a hub cannot relay traffic between spokes. Each VPC's route table carries one route per peer CIDR pointing at the corresponding peering connection, and security groups may reference peer security groups within the same Region.
+  description: A central VPC A holds one VPC peering connection to each of VPCs B, C, D, E, F and G so that every peer can reach VPC A's full CIDR block and VPC A can reach each of theirs. VPC peering is not transitive, so VPC A cannot relay traffic between its peers; two spokes that also need to talk to each other must be peered directly, which taken to its end gives a full mesh, and each VPC's route table carries one route per peer CIDR pointing at the corresponding peering connection.
   containers:
     - region: us-west-2
+      at: [1, 1]
       vpcs:
-        - name: vpc-a
-          cidr: 10.0.0.0/16
-          subnets:
-            - {name: a-private, cidr: 10.0.1.0/24, az: a, public: false}
-        - name: vpc-b
-          cidr: 10.1.0.0/16
-          subnets:
-            - {name: b-private, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: vpc-c
-          cidr: 10.2.0.0/16
-          subnets:
-            - {name: c-private, cidr: 10.2.1.0/24, az: a, public: false}
-  elements:
-    - {tf: aws_instance, name: server-a, in: subnet:a-private}
-    - {tf: aws_instance, name: server-b, in: subnet:b-private}
-    - {tf: aws_instance, name: server-c, in: subnet:c-private}
-    - {tf: aws_route_table, name: rt-a, in: vpc:vpc-a}
-    - {tf: aws_route_table, name: rt-b, in: vpc:vpc-b}
-    - {tf: aws_route_table, name: rt-c, in: vpc:vpc-c}
+        - {name: vpc-c, cidr: 10.2.0.0/16, at: [1, 1]}
+        - {name: vpc-d, cidr: 10.3.0.0/16, at: [1, 2]}
+        - {name: vpc-e, cidr: 10.4.0.0/16, at: [1, 3]}
+        - {name: vpc-a, cidr: 10.0.0.0/16, at: [2, 2]}
+        - {name: vpc-b, cidr: 10.1.0.0/16, at: [2, 1, 2, 1]}
+        - {name: vpc-f, cidr: 10.5.0.0/16, at: [2, 3, 2, 1]}
+        - {name: vpc-g, cidr: 10.6.0.0/16, at: [3, 2]}
+  elements: []
   actors: []
   flows:
     - {from: vpc:vpc-a, to: vpc:vpc-b, link: aws_vpc_peering_connection, label: pcx-ab}
-    - {from: vpc:vpc-b, to: vpc:vpc-c, link: aws_vpc_peering_connection, label: pcx-bc}
     - {from: vpc:vpc-a, to: vpc:vpc-c, link: aws_vpc_peering_connection, label: pcx-ac}
-    - {from: server-a, to: server-b, label: "10.1.0.0/16 via pcx-ab", step: 1}
-    - {from: server-a, to: server-c, label: "10.2.0.0/16 via pcx-ac (no transit through B)", step: 2}
-
+    - {from: vpc:vpc-a, to: vpc:vpc-d, link: aws_vpc_peering_connection, label: pcx-ad}
+    - {from: vpc:vpc-a, to: vpc:vpc-e, link: aws_vpc_peering_connection, label: pcx-ae}
+    - {from: vpc:vpc-a, to: vpc:vpc-f, link: aws_vpc_peering_connection, label: pcx-af}
+    - {from: vpc:vpc-a, to: vpc:vpc-g, link: aws_vpc_peering_connection, label: pcx-ag}
 - slug: privatelink-saas-provider-consumer
   title: SaaS service exposed to consumers over AWS PrivateLink
   category: networking
   tags: [privatelink, endpoint service, network load balancer, saas, interface endpoint, private dns]
   source: https://aws.amazon.com/blogs/architecture/building-saas-services-for-aws-customers-with-privatelink/
-  description: The provider places its application behind a Network Load Balancer and registers the load balancer with a VPC endpoint service, optionally with a verified private DNS name and acceptance rules for consumer accounts. Each consumer creates an interface endpoint in its own VPC that surfaces as elastic network interfaces with private IPs, so the service is reached without internet exposure, peering, or overlapping-CIDR concerns.
+  description: The provider places its auto-scaled application instances, protected by a security group, behind a Network Load Balancer that spans two Availability Zones and is registered as a VPC endpoint service. Each consumer creates an interface endpoint in its own VPC that surfaces as an elastic network interface in each Availability Zone, next to the consumer instances and inside their security group, so the service is reached across the account boundary without internet exposure, peering, or overlapping-CIDR concerns.
   containers:
     - region: us-east-1
       account: provider
+      account_at: [1, 1]
       vpcs:
         - name: provider
-          cidr: 10.0.0.0/16
+          cidr: 10.3.0.0/25
           subnets:
-            - {name: provider-private-a, cidr: 10.0.1.0/24, az: a, public: false}
-            - {name: provider-private-b, cidr: 10.0.2.0/24, az: b, public: false}
+            - {name: provider-private-a, cidr: 10.3.0.0/28, az: a, public: false, at: [1, 1]}
+            - {name: provider-private-b, cidr: 10.3.0.16/28, az: b, public: false, at: [1, 1]}
     - region: us-east-1
       account: consumer
+      account_at: [1, 2]
       vpcs:
         - name: consumer
-          cidr: 10.0.0.0/16
+          cidr: 10.0.0.0/25
           subnets:
-            - {name: consumer-private-a, cidr: 10.0.1.0/24, az: a, public: false}
-            - {name: consumer-private-b, cidr: 10.0.2.0/24, az: b, public: false}
+            - {name: consumer-private-a, cidr: 10.0.0.0/28, az: a, public: false, at: [1, 1]}
+            - {name: consumer-private-b, cidr: 10.0.0.16/28, az: b, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_lb, name: provider-nlb-network, in: subnet:provider-private-a}
-    - {tf: aws_vpc_endpoint_service, name: saas-endpoint-service, in: vpc:provider}
-    - {tf: aws_autoscaling_group, name: saas-app-fleet, in: subnet:provider-private-a}
-    - {tf: aws_instance, name: saas-app-1, in: subnet:provider-private-a}
-    - {tf: aws_instance, name: saas-app-2, in: subnet:provider-private-b}
-    - {tf: aws_vpc_endpoint, name: saas-interface-endpoint, in: subnet:consumer-private-a}
-    - {tf: aws_route53_zone, name: saas-private-dns, in: vpc:consumer}
-    - {tf: aws_instance, name: consumer-app, in: subnet:consumer-private-a}
+    - {tf: aws_lb, name: provider-nlb-network, in: vpc:provider, at: [1, 2, 2, 1]}
+    - {tf: aws_autoscaling_group, name: saas-app-fleet-a, in: subnet:provider-private-a, at: [1, 1]}
+    - {tf: aws_security_group, name: saas-app-sg-a, in: subnet:provider-private-a, at: [1, 2]}
+    - {tf: aws_instance, name: saas-app-1, in: subnet:provider-private-a, at: [1, 3]}
+    - {tf: aws_autoscaling_group, name: saas-app-fleet-b, in: subnet:provider-private-b, at: [1, 1]}
+    - {tf: aws_security_group, name: saas-app-sg-b, in: subnet:provider-private-b, at: [1, 2]}
+    - {tf: aws_instance, name: saas-app-2, in: subnet:provider-private-b, at: [1, 3]}
+    - {tf: aws_security_group, name: consumer-sg-a, in: subnet:consumer-private-a, at: [1, 1]}
+    - {tf: aws_vpc_endpoint, name: saas-interface-endpoint, in: subnet:consumer-private-a, at: [1, 2]}
+    - {tf: aws_instance, name: consumer-app-a, in: subnet:consumer-private-a, at: [1, 3]}
+    - {tf: aws_security_group, name: consumer-sg-b, in: subnet:consumer-private-b, at: [1, 1]}
+    - {tf: aws_network_interface, name: saas-endpoint-eni-b, in: subnet:consumer-private-b, at: [1, 2]}
+    - {tf: aws_instance, name: consumer-app-b, in: subnet:consumer-private-b, at: [1, 3]}
   actors: []
   flows:
-    - {from: consumer-app, to: saas-private-dns, label: resolve api.saas.example.com, step: 1}
-    - {from: consumer-app, to: saas-interface-endpoint, label: TLS to endpoint ENI, step: 2}
-    - {from: saas-interface-endpoint, to: saas-endpoint-service, label: PrivateLink (overlapping CIDRs allowed), step: 3}
-    - {from: saas-endpoint-service, to: provider-nlb-network, step: 4}
-    - {from: provider-nlb-network, to: saas-app-1, step: 5}
+    - {from: consumer-app-a, to: saas-interface-endpoint, label: TLS to endpoint ENI, step: 1}
+    - {from: consumer-app-b, to: saas-endpoint-eni-b, label: TLS to endpoint ENI}
+    - {from: saas-interface-endpoint, to: provider-nlb-network, label: PrivateLink across the account boundary (overlapping CIDRs allowed), step: 2}
+    - {from: saas-endpoint-eni-b, to: provider-nlb-network, label: PrivateLink}
+    - {from: provider-nlb-network, to: saas-app-1, step: 3}
     - {from: provider-nlb-network, to: saas-app-2}
-
 - slug: privatelink-centralized-interface-endpoints
   title: Centralized interface endpoints shared across VPCs via Transit Gateway
   category: networking
@@ -428,53 +561,69 @@
     - {from: spoke-1-app, to: hub-tgw, label: "10.0.0.0/16 via TGW", step: 2}
     - {from: hub-tgw, to: sqs-endpoint, step: 3}
     - {from: spoke-2-app, to: ssm-endpoint, label: same shared endpoints}
-
 - slug: vpc-lattice-multi-account-service-network
   title: Multi-account service-to-service connectivity with Amazon VPC Lattice
   category: networking
   tags: [vpc lattice, service network, multi-account, ram, application networking, iam auth]
   source: https://aws.amazon.com/blogs/networking-and-content-delivery/build-secure-multi-account-multi-vpc-connectivity-for-your-applications-with-amazon-vpc-lattice/
-  description: A central networking account owns a VPC Lattice service network and shares it with workload accounts through AWS RAM; each workload account associates its VPC with the service network and registers its own services with target groups pointing at instances, containers, or Lambda functions. Consumers call services by their Lattice DNS names through the link-local Lattice prefix, with IAM auth policies on the service network and services controlling who may invoke what, independent of VPC CIDRs.
+  description: Four applications live in three AWS accounts in us-west-2 with overlapping-prone, independent VPCs. App1 and App2 run as pods on Amazon EKS clusters with EC2 worker nodes in VPC-1 (10.1.0.0/16) and VPC-2 (10.2.0.0/16), App3 is a Lambda function in VPC-3 (10.3.0.0/16) and App4 an EC2 Auto Scaling group in VPC-4 (10.4.0.0/16). Account 1 owns a VPC Lattice service network and shares it with the other accounts through AWS RAM; each VPC is associated with the service network so the applications call each other by Lattice DNS names through the link-local Lattice prefix, with IAM auth policies deciding who may invoke what independently of VPC CIDRs.
   containers:
     - region: us-west-2
-      account: networking
-    - region: us-west-2
-      account: payments
+      account: account-1
+      account_at: [1, 1]
+      at: [1, 1, 2, 1]
       vpcs:
-        - name: payments
+        - name: vpc-1
           cidr: 10.1.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: payments-private-a, cidr: 10.1.1.0/24, az: a, public: false}
+            - {name: vpc-1-worker-a, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: vpc-1-worker-b, cidr: 10.1.2.0/24, az: b, public: false, at: [1, 1]}
     - region: us-west-2
-      account: orders
+      account: account-2
+      account_at: [1, 2]
+      at: [1, 1]
       vpcs:
-        - name: orders
-          cidr: 10.1.0.0/16
+        - name: vpc-2
+          cidr: 10.2.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: orders-private-a, cidr: 10.1.1.0/24, az: a, public: false}
+            - {name: vpc-2-worker-a, cidr: 10.2.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: vpc-2-worker-b, cidr: 10.2.2.0/24, az: b, public: false, at: [1, 1]}
+    - region: us-west-2
+      account: account-3
+      account_at: [2, 1, 1, 2]
+      at: [1, 1]
+      vpcs:
+        - name: vpc-3
+          cidr: 10.3.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: vpc-3-private-a, cidr: 10.3.1.0/24, az: a, public: false, at: [1, 1]}
+        - {name: vpc-4, cidr: 10.4.0.0/16, at: [1, 2]}
   elements:
-    - {tf: aws_vpclattice_service_network, name: corp-service-network, in: account:networking}
-    - {tf: aws_ram_resource_share, name: service-network-share, in: account:networking}
-    - {tf: aws_vpclattice_service, name: payments-service, in: account:payments}
-    - {tf: aws_vpclattice_target_group, name: payments-targets, in: vpc:payments}
-    - {tf: aws_instance, name: payments-api, in: subnet:payments-private-a}
-    - {tf: aws_vpclattice_service, name: orders-service, in: account:orders}
-    - {tf: aws_lambda_function, name: orders-handler, in: vpc:orders}
-    - {tf: aws_instance, name: orders-client, in: subnet:orders-private-a}
+    - {tf: aws_eks_cluster, name: eks-cluster-1, in: vpc:vpc-1, at: [1, 1, 1, 2]}
+    - {tf: aws_instance, name: app1-worker-node-1, in: subnet:vpc-1-worker-a, at: [1, 1]}
+    - {tf: aws_instance, name: app1-worker-node-2, in: subnet:vpc-1-worker-b, at: [1, 1]}
+    - {tf: aws_eks_cluster, name: eks-cluster-2, in: vpc:vpc-2, at: [1, 1, 1, 2]}
+    - {tf: aws_instance, name: app2-worker-node-1, in: subnet:vpc-2-worker-a, at: [1, 1]}
+    - {tf: aws_instance, name: app2-worker-node-2, in: subnet:vpc-2-worker-b, at: [1, 1]}
+    - {tf: aws_lambda_function, name: app3-lambda-function, in: subnet:vpc-3-private-a, at: [1, 1]}
+    - {tf: aws_autoscaling_group, name: app4-auto-scaling-group, in: vpc:vpc-4, at: [1, 1]}
+    - {tf: aws_vpclattice_service_network, name: corp-service-network, in: account:account-1, at: [1, 2]}
+    - {tf: aws_ram_resource_share, name: service-network-share, in: account:account-1, at: [2, 2]}
   actors: []
   flows:
-    - {from: corp-service-network, to: vpc:payments, link: aws_vpclattice_service_network_vpc_association}
-    - {from: corp-service-network, to: vpc:orders, link: aws_vpclattice_service_network_vpc_association}
-    - {from: corp-service-network, to: payments-service, link: aws_vpclattice_service_network_service_association}
-    - {from: corp-service-network, to: orders-service, link: aws_vpclattice_service_network_service_association}
-    - {from: service-network-share, to: account:payments, label: RAM share}
-    - {from: service-network-share, to: account:orders, label: RAM share}
-    - {from: orders-client, to: corp-service-network, label: "HTTPS to payments Lattice DNS name, SigV4", step: 1}
-    - {from: corp-service-network, to: payments-service, label: auth policy evaluated, step: 2}
-    - {from: payments-service, to: payments-targets, step: 3}
-    - {from: payments-targets, to: payments-api, step: 4}
-    - {from: orders-service, to: orders-handler, label: Lambda target}
-
+    - {from: corp-service-network, to: vpc:vpc-1, link: aws_vpclattice_service_network_vpc_association, label: VPC association}
+    - {from: corp-service-network, to: vpc:vpc-2, link: aws_vpclattice_service_network_vpc_association, label: VPC association}
+    - {from: corp-service-network, to: vpc:vpc-3, link: aws_vpclattice_service_network_vpc_association, label: VPC association}
+    - {from: corp-service-network, to: vpc:vpc-4, link: aws_vpclattice_service_network_vpc_association, label: VPC association}
+    - {from: service-network-share, to: account:account-2, label: RAM share of the service network}
+    - {from: service-network-share, to: account:account-3, label: RAM share of the service network}
+    - {from: app2-worker-node-1, to: corp-service-network, label: "HTTPS to App1 Lattice DNS name, SigV4", step: 1}
+    - {from: corp-service-network, to: app1-worker-node-1, label: auth policy evaluated, routed to App1, step: 2}
+    - {from: app3-lambda-function, to: corp-service-network, label: App3 calls App4, step: 3}
+    - {from: corp-service-network, to: app4-auto-scaling-group, step: 4}
 - slug: dx-maximum-resiliency-transit-vif
   title: Direct Connect maximum resiliency with transit VIFs to a Transit Gateway
   category: networking
@@ -519,450 +668,542 @@
     - {from: hub-tgw, to: vpc:prod, link: aws_ec2_transit_gateway_vpc_attachment}
     - {from: hub-tgw, to: vpc:shared, link: aws_ec2_transit_gateway_vpc_attachment}
     - {from: hub-tgw, to: prod-app, label: on-prem to VPC}
-
 - slug: dx-gateway-private-vif-multi-region
   title: Direct Connect gateway with a private VIF reaching VPCs in multiple Regions
   category: networking
   tags: [direct connect, private virtual interface, direct connect gateway, virtual private gateway, multi-region]
   source: https://aws.amazon.com/blogs/networking-and-content-delivery/hybrid-cloud-architectures-using-aws-direct-connect-gateway/
-  description: A single Direct Connect connection carries a private virtual interface to a globally scoped Direct Connect gateway, which is associated with virtual private gateways attached to VPCs in two different Regions. Routes for each VPC are advertised to the customer router over one BGP session, and the gateway does not forward traffic between the associated VPCs or back toward on-premises through another VIF.
+  description: Two Direct Connect connections at separate Direct Connect locations carry virtual interfaces to a single globally scoped Direct Connect gateway, which is associated with Transit Gateways in us-east-1 and us-east-2 that each attach three VPCs. Routes for every VPC are advertised over BGP to the redundant customer gateway routers of the corporate WAN, and the gateway does not forward traffic between the associated Regions or back toward on-premises through another virtual interface.
   containers:
-    - datacenter: on-premises
+    - {datacenter: corporate-wan, at: [2, 1]}
     - region: us-east-1
-      groups: [{label: dx-location}]
+      at: [1, 1]
       vpcs:
-        - name: east-app
-          cidr: 10.1.0.0/16
-          subnets:
-            - {name: east-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-    - region: ap-southeast-1
+        - {name: east-1-vpc-1, cidr: 10.1.0.0/16, at: [1, 1]}
+        - {name: east-1-vpc-2, cidr: 10.2.0.0/16, at: [1, 2]}
+        - {name: east-1-vpc-3, cidr: 10.3.0.0/16, at: [1, 3]}
+    - region: us-east-2
+      at: [1, 2]
       vpcs:
-        - name: apac-app
-          cidr: 10.21.0.0/16
-          subnets:
-            - {name: apac-private-a, cidr: 10.21.1.0/24, az: a, public: false}
+        - {name: east-2-vpc-1, cidr: 10.11.0.0/16, at: [1, 1]}
+        - {name: east-2-vpc-2, cidr: 10.12.0.0/16, at: [1, 2]}
+        - {name: east-2-vpc-3, cidr: 10.13.0.0/16, at: [1, 3]}
   elements:
-    - {tf: aws_dx_connection, name: dx-connection, in: group:dx-location}
-    - {tf: aws_dx_private_virtual_interface, name: private-vif, in: group:dx-location}
-    - {tf: aws_dx_gateway, name: dx-gateway, in: region:us-east-1}
-    - {tf: aws_vpn_gateway, name: east-vgw, in: vpc:east-app}
-    - {tf: aws_vpn_gateway, name: apac-vgw, in: vpc:apac-app}
-    - {tf: aws_instance, name: east-server, in: subnet:east-private-a}
-    - {tf: aws_instance, name: apac-server, in: subnet:apac-private-a}
-  actors: [datacenter]
+    - {tf: aws_ec2_transit_gateway, name: tgw-us-east-1, in: region:us-east-1, at: [2, 1, 1, 3]}
+    - {tf: aws_ec2_transit_gateway, name: tgw-us-east-2, in: region:us-east-2, at: [2, 1, 1, 3]}
+    - {tf: aws_dx_gateway, name: dxgw, in: account, at: [2, 1, 1, 2]}
+    - {tf: aws_dx_connection, name: dx-connection-1, in: account, at: [3, 1]}
+    - {tf: aws_dx_connection, name: dx-connection-2, in: account, at: [3, 2]}
+    - {tf: aws_customer_gateway, name: cgw-1, in: account, at: [4, 1]}
+    - {tf: aws_customer_gateway, name: cgw-2, in: account, at: [4, 2]}
+  actors: []
   flows:
-    - {from: datacenter, to: dx-connection, label: 1 or 10 Gbps cross-connect, step: 1}
-    - {from: dx-connection, to: private-vif, label: "802.1Q VLAN, BGP", step: 2}
-    - {from: private-vif, to: dx-gateway, step: 3}
-    - {from: dx-gateway, to: east-vgw, link: aws_dx_gateway_association}
-    - {from: dx-gateway, to: apac-vgw, link: aws_dx_gateway_association}
-    - {from: east-vgw, to: east-server, label: propagated route, step: 4}
-    - {from: apac-vgw, to: apac-server, label: cross-Region over AWS backbone}
-
+    - {from: datacenter, to: cgw-1, label: corporate WAN router}
+    - {from: datacenter, to: cgw-2, label: corporate WAN router}
+    - {from: cgw-1, to: cgw-2, label: corporate WAN}
+    - {from: cgw-1, to: dx-connection-1, label: cross-connect at Direct Connect location 1, step: 1}
+    - {from: cgw-2, to: dx-connection-2, label: cross-connect at Direct Connect location 2}
+    - {from: dx-connection-1, to: dxgw, label: "virtual interface, BGP", step: 2}
+    - {from: dx-connection-2, to: dxgw, label: "virtual interface, BGP"}
+    - {from: dxgw, to: tgw-us-east-1, link: aws_dx_gateway_association, step: 3}
+    - {from: dxgw, to: tgw-us-east-2, link: aws_dx_gateway_association}
+    - {from: tgw-us-east-1, to: vpc:east-1-vpc-1, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: tgw-us-east-1, to: vpc:east-1-vpc-2, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: tgw-us-east-1, to: vpc:east-1-vpc-3, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: tgw-us-east-2, to: vpc:east-2-vpc-1, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: tgw-us-east-2, to: vpc:east-2-vpc-2, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: tgw-us-east-2, to: vpc:east-2-vpc-3, link: aws_ec2_transit_gateway_vpc_attachment}
 - slug: sd-wan-tgw-connect-vpc-transport
   title: SD-WAN appliances integrated with Transit Gateway Connect over a VPC attachment
   category: networking
   tags: [sd-wan, transit gateway connect, gre, bgp, virtual appliance, branch offices]
   source: https://aws.amazon.com/blogs/networking-and-content-delivery/simplify-sd-wan-connectivity-with-aws-transit-gateway-connect/
-  description: SD-WAN virtual appliances run in a dedicated transport VPC whose attachment serves as the underlay for a Transit Gateway Connect attachment; each appliance is a Connect peer that builds a GRE tunnel to the Transit Gateway and exchanges routes over BGP. Branch sites reach the appliances through the SD-WAN overlay across the internet, and their prefixes are propagated dynamically into TGW route tables without IPsec throughput limits or static routes.
+  description: A third-party SD-WAN virtual appliance runs in a dedicated Connect VPC whose VPC attachment serves as the underlay for a Transit Gateway Connect attachment; the appliance is a Connect peer that builds a GRE tunnel to the Transit Gateway and exchanges routes over BGP, and three workload VPCs (A, B, C) hang off the same Transit Gateway through VPC attachments. The corporate SD-WAN site reaches the appliance over Direct Connect and the SD-WAN overlay, branch sites reach it through the overlay over Site-to-Site VPN, and their prefixes are propagated dynamically into TGW route tables without IPsec throughput limits or static routes.
   containers:
-    - datacenter: branch-offices
+    - datacenter: corporate-sd-wan
+      at: [1, 2]
     - region: us-east-1
+      account_at: [1, 1, 3, 1]
       vpcs:
-        - name: sdwan-transport
+        - name: vpc-a
           cidr: 10.0.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: sdwan-public-a, cidr: 10.0.0.0/24, az: a, public: true}
-            - {name: sdwan-public-b, cidr: 10.0.1.0/24, az: b, public: true}
-            - {name: sdwan-tgw-a, cidr: 10.0.2.0/28, az: a, public: false}
-        - name: workload
+            - {name: vpc-a-private, cidr: 10.0.1.0/24, az: a, public: false, at: [1, 1]}
+        - name: vpc-b
           cidr: 10.1.0.0/16
+          at: [2, 1]
           subnets:
-            - {name: workload-private-a, cidr: 10.1.1.0/24, az: a, public: false}
+            - {name: vpc-b-private, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
+        - name: vpc-c
+          cidr: 10.2.0.0/16
+          at: [3, 1]
+          subnets:
+            - {name: vpc-c-private, cidr: 10.2.1.0/24, az: a, public: false, at: [1, 1]}
+        - name: connect-vpc
+          cidr: 172.31.0.0/16
+          at: [2, 3]
+          subnets:
+            - {name: connect-appliance, cidr: 172.31.0.0/24, az: a, public: true, at: [1, 1]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_ec2_transit_gateway_connect, name: sdwan-connect, in: region}
-    - {tf: aws_instance, name: sdwan-appliance-a, in: subnet:sdwan-public-a}
-    - {tf: aws_instance, name: sdwan-appliance-b, in: subnet:sdwan-public-b}
-    - {tf: aws_internet_gateway, name: sdwan-igw, in: vpc:sdwan-transport}
-    - {tf: aws_instance, name: workload-server, in: subnet:workload-private-a}
-  actors: [datacenter, internet]
+    - {tf: aws_instance, name: vpc-a-instance, in: subnet:vpc-a-private, at: [1, 1]}
+    - {tf: aws_instance, name: vpc-b-instance, in: subnet:vpc-b-private, at: [1, 1]}
+    - {tf: aws_instance, name: vpc-c-instance, in: subnet:vpc-c-private, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [2, 2]}
+    - {tf: aws_ec2_transit_gateway_connect, name: sdwan-connect, in: region, at: [1, 3]}
+    - {tf: aws_instance, name: third-party-virtual-appliance, in: subnet:connect-appliance, at: [1, 1]}
+    - {tf: aws_dx_connection, name: direct-connect, in: region, at: [1, 4]}
+  actors:
+    - {type: client, name: branch-office-1, at: [2, 2]}
+    - {type: mobile, name: branch-office-2, at: [3, 2]}
   flows:
-    - {from: hub-tgw, to: vpc:sdwan-transport, link: aws_ec2_transit_gateway_vpc_attachment, label: transport attachment}
-    - {from: hub-tgw, to: vpc:workload, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: sdwan-connect, to: hub-tgw, label: Connect attachment over transport}
-    - {from: sdwan-appliance-a, to: sdwan-connect, link: aws_ec2_transit_gateway_connect_peer, label: GRE + BGP}
-    - {from: sdwan-appliance-b, to: sdwan-connect, link: aws_ec2_transit_gateway_connect_peer, label: GRE + BGP}
-    - {from: datacenter, to: internet, label: SD-WAN overlay tunnels, step: 1}
-    - {from: internet, to: sdwan-igw, step: 2}
-    - {from: sdwan-igw, to: sdwan-appliance-a, step: 3}
-    - {from: sdwan-appliance-a, to: hub-tgw, label: "GRE tunnel, branch prefixes via BGP", step: 4}
-    - {from: hub-tgw, to: workload-server, step: 5}
-
+    - {from: hub-tgw, to: vpc:vpc-a, link: aws_ec2_transit_gateway_vpc_attachment, label: VPC attachment}
+    - {from: hub-tgw, to: vpc:vpc-b, link: aws_ec2_transit_gateway_vpc_attachment, label: VPC attachment}
+    - {from: hub-tgw, to: vpc:vpc-c, link: aws_ec2_transit_gateway_vpc_attachment, label: VPC attachment}
+    - {from: hub-tgw, to: vpc:connect-vpc, link: aws_ec2_transit_gateway_vpc_attachment, label: transport VPC attachment}
+    - {from: sdwan-connect, to: hub-tgw, label: Connect attachment over the transport attachment}
+    - {from: third-party-virtual-appliance, to: hub-tgw, label: "GRE tunnel + BGP peering (Connect peer)", step: 1}
+    - {from: datacenter, to: direct-connect, label: Direct Connect, step: 2}
+    - {from: direct-connect, to: third-party-virtual-appliance, label: Direct Connect}
+    - {from: datacenter, to: third-party-virtual-appliance, label: SD-WAN overlay}
+    - {from: branch-office-1, to: third-party-virtual-appliance, label: SD-WAN overlay over Site-to-Site VPN, step: 3}
+    - {from: branch-office-2, to: third-party-virtual-appliance, label: SD-WAN overlay over Site-to-Site VPN}
+    - {from: hub-tgw, to: vpc-a-instance, label: branch prefixes propagated via BGP, step: 4}
 - slug: sd-wan-tgw-connect-direct-connect
   title: SD-WAN headend reaching Transit Gateway Connect over Direct Connect
   category: networking
   tags: [sd-wan, transit gateway connect, direct connect, transit vif, gre, bgp]
   source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/sd-wan-solutions/sdwan-dx-tgw.html
-  description: The on-premises SD-WAN device terminates a Direct Connect transit virtual interface through a Direct Connect gateway associated with the Transit Gateway, and that Direct Connect attachment is the transport for a Connect attachment. The SD-WAN device is a Connect peer that runs GRE and BGP directly to the Transit Gateway, extending SD-WAN segmentation into AWS with higher bandwidth and the larger BGP prefix limit of Connect peers.
+  description: The corporate SD-WAN device behind the customer gateway terminates a Direct Connect transit virtual interface at the Direct Connect location, reaching a Direct Connect gateway associated with the Transit Gateway; that Direct Connect attachment is the transport for a Connect attachment, and the SD-WAN device is a Connect peer that runs a GRE tunnel and BGP peering directly to the Transit Gateway. Two dual-stack spoke VPCs each hold a workload subnet and a TGW subnet with the Transit Gateway ENI, their VPC route tables send 0.0.0.0/0 and ::/0 to the Transit Gateway, and the spoke and appliance Transit Gateway route tables map the SD-WAN segments into AWS with higher bandwidth and the larger BGP prefix limit of Connect peers.
   containers:
-    - datacenter: on-premises
+    - datacenter: corporate-data-center
+      at: [1, 2]
     - region: eu-west-1
-      groups: [{label: dx-location}]
+      account_at: [1, 1]
+      groups: [{label: dx-location, at: [1, 5, 4, 1]}]
       vpcs:
-        - name: prod
+        - name: spoke-a
+          cidr: 10.0.0.0/16
+          at: [2, 1]
+          subnets:
+            - {name: spoke-a-workload, cidr: 10.0.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: spoke-a-tgw, cidr: 10.0.0.0/28, az: a, public: false, at: [2, 1]}
+        - name: spoke-b
           cidr: 10.1.0.0/16
+          at: [3, 1]
           subnets:
-            - {name: prod-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: dev
-          cidr: 10.2.0.0/16
-          subnets:
-            - {name: dev-private-a, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: spoke-b-tgw, cidr: 10.1.0.0/28, az: a, public: false, at: [1, 1]}
+            - {name: spoke-b-workload, cidr: 10.1.1.0/24, az: a, public: false, at: [2, 1]}
   elements:
-    - {tf: aws_instance, name: sdwan-headend, in: datacenter}
-    - {tf: aws_dx_connection, name: dx-connection, in: group:dx-location}
-    - {tf: aws_dx_transit_virtual_interface, name: transit-vif, in: group:dx-location}
-    - {tf: aws_dx_gateway, name: dx-gateway, in: region}
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_ec2_transit_gateway_connect, name: sdwan-connect, in: region}
-    - {tf: aws_instance, name: prod-app, in: subnet:prod-private-a}
-    - {tf: aws_instance, name: dev-app, in: subnet:dev-private-a}
-  actors: [datacenter]
+    - {tf: aws_route_table, name: spoke-a-route-table, in: region, at: [1, 1]}
+    - {tf: aws_route_table, name: spoke-b-route-table, in: region, at: [4, 1]}
+    - {tf: aws_instance, name: spoke-a-instance, in: subnet:spoke-a-workload, at: [1, 1]}
+    - {tf: aws_network_interface, name: spoke-a-tgw-eni, in: subnet:spoke-a-tgw, at: [1, 1]}
+    - {tf: aws_network_interface, name: spoke-b-tgw-eni, in: subnet:spoke-b-tgw, at: [1, 1]}
+    - {tf: aws_instance, name: spoke-b-instance, in: subnet:spoke-b-workload, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [2, 2, 2, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: spoke-vpc-tgw-route-table, in: region, at: [1, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: appliance-vpc-tgw-route-table, in: region, at: [4, 2]}
+    - {tf: aws_ec2_transit_gateway_connect, name: sdwan-connect, in: region, at: [2, 3]}
+    - {tf: aws_dx_gateway, name: dx-gateway, in: region, at: [3, 3]}
+    - {tf: aws_dx_connection, name: dx-router, in: group:dx-location, at: [1, 1]}
+    - {tf: aws_dx_transit_virtual_interface, name: transit-vif, in: group:dx-location, at: [2, 1]}
+    - {tf: aws_customer_gateway, name: customer-gateway, in: region, at: [2, 6, 2, 1]}
+  actors:
+    - {type: server, name: corporate-sdwan-device, at: [1, 3]}
   flows:
-    - {from: sdwan-headend, to: dx-connection, label: cross-connect, step: 1}
-    - {from: dx-connection, to: transit-vif, label: VLAN, step: 2}
-    - {from: transit-vif, to: dx-gateway, step: 3}
-    - {from: dx-gateway, to: hub-tgw, link: aws_dx_gateway_association, label: transport attachment}
+    - {from: spoke-a-instance, to: spoke-a-tgw-eni, label: "0.0.0.0/0 and ::/0 to tgw-id", step: 1}
+    - {from: spoke-a-tgw-eni, to: hub-tgw, label: VPC association, step: 2}
+    - {from: hub-tgw, to: vpc:spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: spoke-a-route-table, to: hub-tgw, label: spoke VPC A route table}
+    - {from: spoke-b-route-table, to: hub-tgw, label: spoke VPC B route table}
+    - {from: hub-tgw, to: spoke-vpc-tgw-route-table, label: spoke VPC route table}
+    - {from: hub-tgw, to: appliance-vpc-tgw-route-table, label: appliance VPC route table}
+    - {from: corporate-sdwan-device, to: customer-gateway, label: corporate data center 192.168.0.0/16}
+    - {from: customer-gateway, to: transit-vif, label: transit VIF, step: 3}
+    - {from: transit-vif, to: dx-router, label: DX location cross-connect}
+    - {from: dx-router, to: dx-gateway, label: AWS Direct Connect}
+    - {from: dx-gateway, to: hub-tgw, link: aws_dx_gateway_association, label: DX gateway association, step: C}
     - {from: sdwan-connect, to: hub-tgw, label: Connect attachment over DX}
-    - {from: sdwan-headend, to: sdwan-connect, link: aws_ec2_transit_gateway_connect_peer, label: "GRE over DX, BGP"}
-    - {from: hub-tgw, to: vpc:prod, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:dev, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: prod-app, label: SD-WAN segment mapped to TGW route table, step: 4}
-
+    - {from: corporate-sdwan-device, to: sdwan-connect, label: "GRE tunnel + BGP peering over DX (Connect peer)", step: A}
+    - {from: hub-tgw, to: spoke-b-tgw-eni, label: SD-WAN segment mapped to TGW route table, step: D}
+    - {from: spoke-b-tgw-eni, to: spoke-b-instance}
 - slug: s2s-vpn-tgw-ecmp-scaling
   title: Scaling Site-to-Site VPN throughput with Transit Gateway ECMP
   category: networking
   tags: [site-to-site vpn, transit gateway, ecmp, bgp, ipsec, throughput]
   source: https://aws.amazon.com/blogs/networking-and-content-delivery/scaling-vpn-throughput-using-aws-transit-gateway/
-  description: Several Site-to-Site VPN connections from the same customer gateway terminate on one Transit Gateway with ECMP enabled, and each connection contributes two IPsec tunnels. With BGP advertising identical prefixes over every tunnel, the Transit Gateway hashes flows across all tunnels, so aggregate bandwidth scales past the single-tunnel limit while each individual flow stays bound to one tunnel.
+  description: In the baseline drawn by the post, an on-premises customer gateway router carries one Site-to-Site VPN connection to a virtual private gateway on each of three VPCs, so every VPC is capped at the bandwidth of a single tunnel pair. Moving the same VPN connections onto one Transit Gateway with ECMP enabled lets each connection contribute two IPsec tunnels; with BGP advertising identical prefixes over every tunnel the Transit Gateway hashes flows across all of them, so aggregate bandwidth scales past the single-tunnel limit while each individual flow stays bound to one tunnel.
   containers:
     - datacenter: on-premises
+      at: [1, 3]
     - region: us-east-1
+      account_at: [1, 1, 2, 1]
       vpcs:
-        - name: app
-          cidr: 10.1.0.0/16
-          subnets:
-            - {name: app-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: data
-          cidr: 10.2.0.0/16
-          subnets:
-            - {name: data-private-a, cidr: 10.2.1.0/24, az: a, public: false}
+        - {name: vpc-1, cidr: 10.1.0.0/16, at: [1, 1]}
+        - {name: vpc-2, cidr: 10.2.0.0/16, at: [2, 1]}
+        - {name: vpc-3, cidr: 10.3.0.0/16, at: [3, 1]}
   elements:
-    - {tf: aws_customer_gateway, name: dc-cgw, in: datacenter}
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
+    - {tf: aws_vpn_gateway, name: vgw-1, in: vpc:vpc-1, at: [1, 1]}
+    - {tf: aws_vpn_gateway, name: vgw-2, in: vpc:vpc-2, at: [1, 1]}
+    - {tf: aws_vpn_gateway, name: vgw-3, in: vpc:vpc-3, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [1, 2, 3, 1]}
+    - {tf: aws_customer_gateway, name: dc-cgw, in: region, at: [1, 3, 3, 1]}
     - {tf: aws_vpn_connection, name: vpn-1, in: region}
     - {tf: aws_vpn_connection, name: vpn-2, in: region}
     - {tf: aws_vpn_connection, name: vpn-3, in: region}
-    - {tf: aws_instance, name: app-server, in: subnet:app-private-a}
-    - {tf: aws_instance, name: data-server, in: subnet:data-private-a}
-  actors: [datacenter]
+  actors:
+    - {type: server, name: customer-gateway-router, at: [1, 2, 2, 1]}
+    - {type: client, name: workstations, at: [2, 3]}
   flows:
-    - {from: datacenter, to: dc-cgw, label: BGP router, step: 1}
+    - {from: workstations, to: customer-gateway-router, label: on-premises LAN}
+    - {from: customer-gateway-router, to: dc-cgw, label: BGP router registered as customer gateway, step: 1}
+    - {from: dc-cgw, to: vgw-1, label: "baseline: one VPN connection per VGW", step: 2}
+    - {from: dc-cgw, to: vgw-2, label: "baseline: one VPN connection per VGW"}
+    - {from: dc-cgw, to: vgw-3, label: "baseline: one VPN connection per VGW"}
     - {from: dc-cgw, to: vpn-1, label: "2 IPsec tunnels, BGP"}
     - {from: dc-cgw, to: vpn-2, label: "2 IPsec tunnels, BGP"}
     - {from: dc-cgw, to: vpn-3, label: "2 IPsec tunnels, BGP"}
     - {from: vpn-1, to: hub-tgw, label: "VPN attachment, ECMP"}
     - {from: vpn-2, to: hub-tgw, label: "VPN attachment, ECMP"}
     - {from: vpn-3, to: hub-tgw, label: "VPN attachment, ECMP"}
-    - {from: hub-tgw, to: vpc:app, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:data, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: app-server, label: 5-tuple hashed across 6 tunnels, step: 2}
-
+    - {from: hub-tgw, to: vpc:vpc-1, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:vpc-2, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:vpc-3, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vgw-1, label: "scaled: flows 5-tuple hashed across 6 tunnels replace the per-VPC VGW", step: 3}
 - slug: accelerated-s2s-vpn-tgw
   title: Accelerated Site-to-Site VPN to a Transit Gateway
   category: networking
   tags: [site-to-site vpn, accelerated vpn, global accelerator, transit gateway, anycast, edge]
   source: https://docs.aws.amazon.com/whitepapers/latest/hybrid-connectivity/aws-accelerated-site-to-site-vpn-aws-transit-gateway-single-aws-region.html
-  description: An accelerated Site-to-Site VPN attaches to a Transit Gateway and uses AWS Global Accelerator so that each IPsec tunnel terminates at anycast IPs announced from the nearest AWS edge location instead of at the Region. The customer gateway's traffic enters the AWS global network close to the site and rides the backbone to the Regional Transit Gateway, reducing jitter and path variability compared with traversing the public internet all the way to the Region.
+  description: An accelerated Site-to-Site VPN attaches to a Transit Gateway that interconnects three VPCs, each spanning two Availability Zones, and uses AWS Global Accelerator so that each IPsec tunnel terminates at anycast IPs announced from the nearest AWS point of presence instead of at the Region. Traffic from the customer gateway router leaves the corporate data center through its local ISP, enters the AWS global network close to the site and rides the backbone to the Regional Transit Gateway, reducing jitter and path variability compared with traversing the public internet all the way to the Region.
   containers:
-    - datacenter: on-premises
+    - {datacenter: corporate-data-center, at: [1, 3]}
     - region: ap-southeast-2
-      groups: [{label: aws-edge-location}]
+      at: [1, 1]
       vpcs:
-        - name: workload
+        - name: workload-1
           cidr: 10.1.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: workload-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-            - {name: workload-private-b, cidr: 10.1.2.0/24, az: b, public: false}
+            - {name: workload-1-az-a, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: workload-1-az-b, cidr: 10.1.2.0/24, az: b, public: false, at: [1, 1]}
+        - name: workload-2
+          cidr: 10.2.0.0/16
+          at: [2, 1]
+          subnets:
+            - {name: workload-2-az-a, cidr: 10.2.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: workload-2-az-b, cidr: 10.2.2.0/24, az: b, public: false, at: [1, 1]}
+        - name: workload-3
+          cidr: 10.3.0.0/16
+          at: [3, 1]
+          subnets:
+            - {name: workload-3-az-a, cidr: 10.3.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: workload-3-az-b, cidr: 10.3.2.0/24, az: b, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_customer_gateway, name: dc-cgw, in: datacenter}
-    - {tf: aws_globalaccelerator_accelerator, name: vpn-accelerator, in: group:aws-edge-location}
-    - {tf: aws_vpn_connection, name: accelerated-vpn, in: region}
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_instance, name: workload-a, in: subnet:workload-private-a}
-    - {tf: aws_instance, name: workload-b, in: subnet:workload-private-b}
-  actors: [datacenter, internet]
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [1, 2, 3, 1]}
+    - {tf: aws_networkmanager_global_network, name: aws-global-network, in: account, at: [1, 2]}
+    - {tf: aws_globalaccelerator_accelerator, name: vpn-accelerator-pop, in: account, at: [1, 3]}
+    - {tf: aws_customer_gateway, name: dc-cgw, in: account, at: [1, 4]}
+  actors: [{type: internet, name: internet-local-isp, at: [1, 2]}]
   flows:
-    - {from: datacenter, to: dc-cgw, step: 1}
-    - {from: dc-cgw, to: internet, label: IPsec to anycast tunnel endpoints, step: 2}
-    - {from: internet, to: vpn-accelerator, label: nearest edge location, step: 3}
-    - {from: vpn-accelerator, to: accelerated-vpn, label: AWS global network, step: 4}
-    - {from: accelerated-vpn, to: hub-tgw, label: VPN attachment, step: 5}
-    - {from: hub-tgw, to: vpc:workload, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: workload-a, step: 6}
-
+    - {from: datacenter, to: dc-cgw, label: customer gateway router}
+    - {from: dc-cgw, to: internet-local-isp, label: IPsec tunnels to anycast IPs, step: 1}
+    - {from: internet-local-isp, to: vpn-accelerator-pop, label: nearest AWS PoP, step: 2}
+    - {from: vpn-accelerator-pop, to: aws-global-network, label: AWS global network, step: 3}
+    - {from: aws-global-network, to: hub-tgw, step: 4}
+    - {from: dc-cgw, to: hub-tgw, link: aws_vpn_connection, label: Site-to-Site IPsec connection}
+    - {from: hub-tgw, to: vpc:workload-1, link: aws_ec2_transit_gateway_vpc_attachment, label: inter-VPC communication}
+    - {from: hub-tgw, to: vpc:workload-2, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:workload-3, link: aws_ec2_transit_gateway_vpc_attachment}
 - slug: client-vpn-tgw-remote-access
   title: Remote user access to multiple VPCs with Client VPN and Transit Gateway
   category: networking
   tags: [client vpn, remote access, transit gateway, openvpn, split tunnel, hybrid]
   source: https://docs.aws.amazon.com/vpn/latest/clientvpn-admin/cvpn-tgw.html
-  description: A Client VPN endpoint associated directly with a Transit Gateway gives remote users access to every VPC and on-premises network attached to that hub without an intermediate VPC. Routes for each destination CIDR are added to the Client VPN endpoint together with authorization rules, split tunnel keeps internet traffic local to the user, and the client source IP is preserved because no source NAT is applied.
+  description: A Client VPN endpoint associated directly with a Transit Gateway gives remote users coming in over the internet access to every VPC attached to that hub without an intermediate VPC. Routes for each destination CIDR are added to the Client VPN endpoint together with authorization rules, split tunnel keeps internet traffic local to the user, and the client source IP is preserved because no source NAT is applied.
   containers:
-    - datacenter: on-premises
     - region: eu-west-1
+      at: [1, 2]
       vpcs:
-        - name: app
+        - name: a
           cidr: 10.1.0.0/16
+          at: [1, 2]
           subnets:
-            - {name: app-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: tools
+            - {name: a-private, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
+        - name: b
           cidr: 10.2.0.0/16
+          at: [2, 3]
           subnets:
-            - {name: tools-private-a, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: b-private, cidr: 10.2.1.0/24, az: a, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_ec2_client_vpn_endpoint, name: corp-client-vpn, in: region}
-    - {tf: aws_acm_certificate, name: vpn-server-cert, in: region}
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_customer_gateway, name: dc-cgw, in: datacenter}
-    - {tf: aws_vpn_connection, name: dc-vpn, in: region}
-    - {tf: aws_instance, name: app-server, in: subnet:app-private-a}
-    - {tf: aws_instance, name: jump-host, in: subnet:tools-private-a}
-  actors: [users, idp, datacenter]
+    - {tf: aws_ec2_client_vpn_endpoint, name: client-vpn-endpoint, in: account, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway, name: transit-gateway, in: region, at: [2, 1]}
+    - {tf: aws_instance, name: instance-a, in: subnet:a-private, at: [1, 1]}
+    - {tf: aws_instance, name: instance-b, in: subnet:b-private, at: [1, 1]}
+  actors: [{type: users, name: users, at: [1, 1]}, {type: internet, name: internet, at: [1, 2]}]
   flows:
-    - {from: users, to: corp-client-vpn, label: OpenVPN TLS 443, step: 1}
-    - {from: corp-client-vpn, to: idp, label: SAML federated authentication, step: 2}
-    - {from: vpn-server-cert, to: corp-client-vpn, label: server certificate}
-    - {from: corp-client-vpn, to: hub-tgw, label: "Transit Gateway association, no SNAT", step: 3}
-    - {from: hub-tgw, to: vpc:app, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:tools, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: app-server, label: authorization rule 10.1.0.0/16, step: 4}
-    - {from: hub-tgw, to: jump-host}
-    - {from: datacenter, to: dc-cgw}
-    - {from: dc-cgw, to: dc-vpn, label: IPsec}
-    - {from: dc-vpn, to: hub-tgw, label: users also reach on-prem}
-
+    - {from: users, to: internet, label: OpenVPN TLS 443, step: 1}
+    - {from: internet, to: client-vpn-endpoint, step: 2}
+    - {from: client-vpn-endpoint, to: transit-gateway, label: "Transit Gateway association, no SNAT", step: 3}
+    - {from: transit-gateway, to: vpc:a, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: transit-gateway, to: vpc:b, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: transit-gateway, to: instance-a, label: authorization rule 10.1.0.0/16, step: 4}
+    - {from: transit-gateway, to: instance-b, label: authorization rule 10.2.0.0/16}
 - slug: hybrid-dns-route53-resolver-shared-services
   title: Hybrid DNS resolution with Route 53 Resolver endpoints in a shared-services VPC
   category: networking
   tags: [route 53 resolver, hybrid dns, inbound endpoint, outbound endpoint, forwarding rules, ram, multi-account]
   source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/set-up-dns-resolution-for-hybrid-networks-in-a-multi-account-aws-environment.html
-  description: A shared-services VPC connected to on-premises through a Transit Gateway hosts one inbound and one outbound Route 53 Resolver endpoint spanning two Availability Zones. On-premises DNS servers forward AWS domains to the inbound endpoint, while Resolver forwarding rules for the corporate domain target the on-premises servers via the outbound endpoint and are shared to workload accounts with AWS RAM and associated with their VPCs, together with the private hosted zone.
+  description: A shared-services VPC hosts an outbound Route 53 Resolver endpoint that reaches the corporate data center over AWS Direct Connect or Site-to-Site VPN. A Resolver forwarding rule for onprem.example.com targets the on-premises DNS server through the outbound endpoint; the rule is shared to the production account with AWS RAM and associated with the production VPC, so queries from EC2 instances to the VPC's Route 53 Resolver are forwarded to the on-premises private DNS zone.
   containers:
-    - datacenter: on-premises
+    - {datacenter: corporate-data-center, at: [1, 3]}
+    - region: us-east-1
+      account: production
+      vpcs:
+        - name: production
+          cidr: 10.1.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: production-private-a, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
     - region: us-east-1
       account: shared-services
       vpcs:
         - name: shared-services
           cidr: 10.0.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: dns-private-a, cidr: 10.0.1.0/24, az: a, public: false}
-            - {name: dns-private-b, cidr: 10.0.2.0/24, az: b, public: false}
-    - region: us-east-1
-      account: workload
-      vpcs:
-        - name: workload
-          cidr: 10.1.0.0/16
-          subnets:
-            - {name: workload-private-a, cidr: 10.1.1.0/24, az: a, public: false}
+            - {name: dns-private-a, cidr: 10.0.1.0/24, az: a, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_instance, name: onprem-dns, in: datacenter}
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_customer_gateway, name: dc-cgw, in: datacenter}
-    - {tf: aws_vpn_connection, name: dc-vpn, in: region}
-    - {tf: aws_route53_resolver_endpoint, name: inbound-resolver, in: subnet:dns-private-a}
-    - {tf: aws_route53_resolver_endpoint, name: outbound-resolver, in: subnet:dns-private-b}
-    - {tf: aws_route53_resolver_rule, name: forward-corp-example-com, in: vpc:shared-services}
-    - {tf: aws_route53_zone, name: aws-corp-private-zone, in: vpc:shared-services}
-    - {tf: aws_ram_resource_share, name: dns-rules-share, in: account:shared-services}
-    - {tf: aws_instance, name: workload-server, in: subnet:workload-private-a}
-  actors: [datacenter]
+    - {tf: aws_instance, name: ec2-instance-1, in: subnet:production-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: ec2-instance-2, in: subnet:production-private-a, at: [1, 2]}
+    - {tf: aws_route53_resolver_config, name: production-vpc-resolver, in: vpc:production, at: [1, 2]}
+    - {tf: aws_route53_resolver_rule, name: production-forward-rule, in: account:production, at: [2, 1]}
+    - {tf: aws_route53_resolver_endpoint, name: outbound-resolver-endpoint, in: subnet:dns-private-a, at: [1, 1]}
+    - {tf: aws_route53_resolver_rule, name: onprem-forward-rule, in: account:shared-services, at: [2, 1]}
+  actors: [{type: server, name: on-prem-dns-server, at: [2, 3]}]
   flows:
-    - {from: datacenter, to: dc-cgw}
-    - {from: dc-cgw, to: dc-vpn, label: IPsec}
-    - {from: dc-vpn, to: hub-tgw}
-    - {from: hub-tgw, to: vpc:shared-services, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:workload, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: onprem-dns, to: inbound-resolver, label: "forward aws.corp.example.com (UDP/TCP 53)", step: 1}
-    - {from: inbound-resolver, to: aws-corp-private-zone, label: resolve in private hosted zone, step: 2}
-    - {from: workload-server, to: forward-corp-example-com, label: "query corp.example.com", step: 3}
-    - {from: forward-corp-example-com, to: outbound-resolver, step: 4}
-    - {from: outbound-resolver, to: onprem-dns, label: forward to on-prem DNS via TGW, step: 5}
-    - {from: dns-rules-share, to: account:workload, label: RAM share of rules}
-    - {from: forward-corp-example-com, to: vpc:workload, link: aws_route53_resolver_rule_association}
-    - {from: aws-corp-private-zone, to: vpc:workload, link: aws_route53_zone_association}
-
+    - {from: ec2-instance-1, to: production-vpc-resolver, label: "Q: db.onprem.example.com", step: 1}
+    - {from: production-vpc-resolver, to: production-forward-rule, label: matching forward rule, step: 2}
+    - {from: onprem-forward-rule, to: production-forward-rule, label: cross-account sharing (RAM) and association}
+    - {from: production-forward-rule, to: vpc:production, link: aws_route53_resolver_rule_association}
+    - {from: onprem-forward-rule, to: outbound-resolver-endpoint, label: "rule type forward, domain onprem.example.com"}
+    - {from: outbound-resolver-endpoint, to: on-prem-dns-server, label: forward over Direct Connect or Site-to-Site VPN, step: 3}
+    - {from: on-prem-dns-server, to: outbound-resolver-endpoint, label: "A: db.onprem.example.com 1.2.3.4", step: 4}
+    - {from: datacenter, to: on-prem-dns-server, label: onprem.example.com private DNS zone}
 - slug: dns-firewall-centralized-firewall-manager
   title: Centralized DNS Firewall rule groups enforced with Firewall Manager
   category: networking
   tags: [dns firewall, route 53 resolver, firewall manager, multi-account, dns exfiltration, security]
   source: https://aws.amazon.com/blogs/networking-and-content-delivery/securing-hybrid-workloads-using-amazon-route-53-resolver-dns-firewall/
-  description: A Route 53 Resolver DNS Firewall rule group with block and allow domain lists is authored in the security tooling account and distributed by AWS Firewall Manager policies to every VPC in the organization, including new ones. The Route 53 Resolver in each VPC evaluates queries from workloads against the associated rule group before resolving, and on-premises queries that arrive through inbound Resolver endpoints receive the same treatment.
+  description: A Route 53 Resolver DNS Firewall rule group with block and allow domain lists is associated with the hybrid-DNS VPC, and AWS Firewall Manager policies can distribute the same rule group to every VPC in the organization, including new ones. On-premises clients ask their DNS server, which forwards over highly resilient Direct Connect or Site-to-Site VPN through the virtual private gateway to inbound Resolver endpoint ENIs in two Availability Zones; the Route 53 Resolver evaluates each query against the DNS Firewall before answering from the private hosted zone or from external authoritative name servers.
   containers:
-    - datacenter: on-premises
     - region: us-east-1
-      account: security-tooling
-    - region: us-east-1
-      account: workload
+      account: hybrid-dns-protection
+      at: [1, 2]
       vpcs:
-        - name: workload
+        - name: hybrid-dns
           cidr: 10.1.0.0/16
+          at: [1, 2]
           subnets:
-            - {name: workload-private-a, cidr: 10.1.1.0/24, az: a, public: false}
-            - {name: workload-private-b, cidr: 10.1.2.0/24, az: b, public: false}
+            - {name: private-a, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: private-b, cidr: 10.1.2.0/24, az: b, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_route53_resolver_firewall_rule_group, name: corp-dns-firewall-rules, in: account:security-tooling}
-    - {tf: aws_route53_resolver_firewall_domain_list, name: blocked-domains, in: account:security-tooling}
-    - {tf: aws_fms_policy, name: dns-firewall-policy, in: account:security-tooling}
-    - {tf: aws_route53_resolver_endpoint, name: inbound-resolver, in: subnet:workload-private-a}
-    - {tf: aws_instance, name: workload-server, in: subnet:workload-private-a}
-    - {tf: aws_cloudwatch_log_group, name: dns-firewall-logs, in: account:security-tooling}
-  actors: [datacenter, internet]
+    - {tf: aws_customer_gateway, name: customer-gateway, in: account:hybrid-dns-protection, at: [1, 1]}
+    - {tf: aws_vpn_gateway, name: virtual-private-gateway, in: region, at: [1, 1]}
+    - {tf: aws_route53_resolver_endpoint, name: inbound-resolver-endpoint, in: vpc:hybrid-dns, at: [3, 1]}
+    - {tf: aws_network_interface, name: inbound-eni-a, in: subnet:private-a, at: [1, 1]}
+    - {tf: aws_network_interface, name: inbound-eni-b, in: subnet:private-b, at: [1, 1]}
+    - {tf: aws_route53_resolver_firewall_rule_group, name: dns-firewall, in: vpc:hybrid-dns, at: [1, 2, 2, 1]}
+    - {tf: aws_route53_zone, name: private-hosted-zone, in: vpc:hybrid-dns, at: [1, 3]}
+    - {tf: aws_route53_resolver_config, name: route53-resolver, in: vpc:hybrid-dns, at: [2, 3]}
+    - {tf: aws_route53_resolver_firewall_domain_list, name: blocked-domains, in: region, at: [2, 1]}
+    - {tf: aws_fms_policy, name: dns-firewall-policy, in: region, at: [2, 2]}
+  actors: [{type: client, name: on-prem-client, at: [1, 1]}, {type: server, name: on-prem-dns-server, at: [2, 1]}, {type: internet, name: external-authoritative-name-servers, at: [1, 3]}]
   flows:
-    - {from: blocked-domains, to: corp-dns-firewall-rules, label: BLOCK list}
-    - {from: dns-firewall-policy, to: corp-dns-firewall-rules, label: Firewall Manager policy}
-    - {from: corp-dns-firewall-rules, to: vpc:workload, link: aws_route53_resolver_firewall_rule_group_association, label: auto-associated to every VPC}
-    - {from: workload-server, to: corp-dns-firewall-rules, label: DNS query evaluated by Resolver, step: 1}
-    - {from: corp-dns-firewall-rules, to: internet, label: allowed query resolved, step: 2}
-    - {from: corp-dns-firewall-rules, to: dns-firewall-logs, label: "query logs, blocked events", step: 3}
-    - {from: datacenter, to: inbound-resolver, label: on-prem forwarders}
-    - {from: inbound-resolver, to: corp-dns-firewall-rules, label: same rules applied}
-
+    - {from: on-prem-client, to: on-prem-dns-server, label: DNS query, step: 1}
+    - {from: on-prem-dns-server, to: customer-gateway, label: conditional forwarding for AWS domains, step: 2}
+    - {from: customer-gateway, to: virtual-private-gateway, link: aws_vpn_connection, label: highly resilient Direct Connect or Site-to-Site VPN, step: 3}
+    - {from: virtual-private-gateway, to: inbound-eni-a, step: 4}
+    - {from: virtual-private-gateway, to: inbound-eni-b}
+    - {from: inbound-resolver-endpoint, to: inbound-eni-a, label: one ENI per subnet}
+    - {from: inbound-resolver-endpoint, to: inbound-eni-b}
+    - {from: inbound-eni-a, to: dns-firewall, label: query evaluated against rule group, step: 5}
+    - {from: inbound-eni-b, to: dns-firewall}
+    - {from: dns-firewall, to: route53-resolver, step: 6}
+    - {from: route53-resolver, to: private-hosted-zone, label: private names}
+    - {from: route53-resolver, to: external-authoritative-name-servers, label: recursive resolution}
+    - {from: blocked-domains, to: dns-firewall, label: BLOCK list}
+    - {from: dns-firewall-policy, to: dns-firewall, label: Firewall Manager policy}
 - slug: global-accelerator-multi-region-alb
   title: Multi-Region application fronted by AWS Global Accelerator
   category: networking
   tags: [global accelerator, anycast, multi-region, application load balancer, failover, traffic dials]
   source: https://aws.amazon.com/blogs/networking-and-content-delivery/deploying-multi-region-applications-in-aws-using-aws-global-accelerator/
-  description: A standard accelerator provides two static anycast IP addresses and a listener with one endpoint group per Region, each containing the Region's internet-facing Application Load Balancer. Client traffic enters the AWS network at the nearest edge location and is routed to the closest healthy endpoint group; health checks, traffic dials, and endpoint weights drive automatic failover and controlled shifts between Regions.
+  description: A standard accelerator provides two static anycast IP addresses announced over BGP from AWS edge locations, and a listener with one endpoint group per Region (us-west-1 and eu-west-1) whose endpoints are EC2 instances spread across two Availability Zones. Client traffic enters the AWS network at the nearest edge location and is routed to the closest healthy endpoint group; health checks, endpoint-group traffic dials and per-instance endpoint weights drive automatic failover and controlled shifts between Regions.
   containers:
-    - region: us-east-1
+    - region: us-west-1
+      at: [1, 1]
+      groups: [{label: aws-edge-locations-us, at: [1, 1]}]
       vpcs:
-        - name: app-east
+        - name: app-us
           cidr: 10.1.0.0/16
+          at: [3, 1]
           subnets:
-            - {name: east-public-a, cidr: 10.1.0.0/24, az: a, public: true}
-            - {name: east-private-a, cidr: 10.1.1.0/24, az: a, public: false}
+            - {name: us-private-a, cidr: 10.1.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: us-private-b, cidr: 10.1.2.0/24, az: b, public: false, at: [1, 1]}
     - region: eu-west-1
+      at: [1, 2]
+      groups: [{label: aws-edge-locations-eu, at: [1, 1]}]
       vpcs:
         - name: app-eu
           cidr: 10.2.0.0/16
+          at: [3, 1]
           subnets:
-            - {name: eu-public-a, cidr: 10.2.0.0/24, az: a, public: true}
-            - {name: eu-private-a, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: eu-private-a, cidr: 10.2.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: eu-private-b, cidr: 10.2.2.0/24, az: b, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_globalaccelerator_accelerator, name: app-accelerator, in: region:us-east-1}
-    - {tf: aws_globalaccelerator_listener, name: tcp-443-listener, in: region:us-east-1}
-    - {tf: aws_globalaccelerator_endpoint_group, name: endpoint-group-east, in: region:us-east-1}
-    - {tf: aws_globalaccelerator_endpoint_group, name: endpoint-group-eu, in: region:eu-west-1}
-    - {tf: aws_lb, name: east-alb-application, in: subnet:east-public-a}
-    - {tf: aws_lb, name: eu-alb-application, in: subnet:eu-public-a}
-    - {tf: aws_autoscaling_group, name: east-web-fleet, in: subnet:east-private-a}
-    - {tf: aws_autoscaling_group, name: eu-web-fleet, in: subnet:eu-private-a}
-    - {tf: aws_route53_zone, name: public-zone, in: region:us-east-1}
-  actors: [users]
+    - {tf: aws_globalaccelerator_accelerator, name: accelerator-us-edge, in: group:aws-edge-locations-us, at: [1, 1]}
+    - {tf: aws_globalaccelerator_accelerator, name: accelerator-eu-edge, in: group:aws-edge-locations-eu, at: [1, 1]}
+    - {tf: aws_globalaccelerator_endpoint_group, name: endpoint-group-1, in: region:us-west-1, at: [2, 1]}
+    - {tf: aws_globalaccelerator_endpoint_group, name: endpoint-group-2, in: region:eu-west-1, at: [2, 1]}
+    - {tf: aws_instance, name: us-instance-1, in: subnet:us-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: us-instance-2, in: subnet:us-private-a, at: [1, 2]}
+    - {tf: aws_instance, name: us-instance-3, in: subnet:us-private-b, at: [1, 1]}
+    - {tf: aws_instance, name: us-instance-4, in: subnet:us-private-b, at: [1, 2]}
+    - {tf: aws_instance, name: eu-instance-1, in: subnet:eu-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: eu-instance-2, in: subnet:eu-private-a, at: [1, 2]}
+    - {tf: aws_instance, name: eu-instance-3, in: subnet:eu-private-b, at: [1, 1]}
+    - {tf: aws_instance, name: eu-instance-4, in: subnet:eu-private-b, at: [1, 2]}
+  actors: [{type: users, name: users-us-region, at: [1, 1]}, {type: users, name: users-eu-region, at: [1, 2]}, {type: internet, name: internet, at: [2, 1, 1, 2]}]
   flows:
-    - {from: users, to: public-zone, label: resolve app.example.com to static anycast IPs, step: 1}
-    - {from: users, to: app-accelerator, label: TCP 443 to nearest edge, step: 2}
-    - {from: app-accelerator, to: tcp-443-listener, step: 3}
-    - {from: tcp-443-listener, to: endpoint-group-east, label: traffic dial 100}
-    - {from: tcp-443-listener, to: endpoint-group-eu, label: traffic dial 100}
-    - {from: endpoint-group-east, to: east-alb-application, label: health-checked endpoint, step: 4}
-    - {from: endpoint-group-eu, to: eu-alb-application, label: health-checked endpoint}
-    - {from: east-alb-application, to: east-web-fleet, step: 5}
-    - {from: eu-alb-application, to: eu-web-fleet}
-
+    - {from: users-us-region, to: internet, label: TCP 443}
+    - {from: users-eu-region, to: internet, label: TCP 443}
+    - {from: internet, to: accelerator-us-edge, label: anycast IP (BGP) at nearest edge}
+    - {from: internet, to: accelerator-eu-edge, label: anycast IP (BGP) at nearest edge}
+    - {from: accelerator-us-edge, to: endpoint-group-1, label: "traffic dial 0-100%"}
+    - {from: accelerator-eu-edge, to: endpoint-group-2, label: "traffic dial 0-100%"}
+    - {from: accelerator-us-edge, to: endpoint-group-2, label: failover to healthy Region}
+    - {from: endpoint-group-1, to: us-instance-1, label: weight 1-255}
+    - {from: endpoint-group-1, to: us-instance-2}
+    - {from: endpoint-group-1, to: us-instance-3}
+    - {from: endpoint-group-1, to: us-instance-4}
+    - {from: endpoint-group-2, to: eu-instance-1, label: weight 1-255}
+    - {from: endpoint-group-2, to: eu-instance-2}
+    - {from: endpoint-group-2, to: eu-instance-3}
+    - {from: endpoint-group-2, to: eu-instance-4}
 - slug: ipv6-dual-stack-centralized-ipv4-egress
   title: Dual-stack VPCs with centralized IPv4 egress and decentralized IPv6 egress
   category: networking
   tags: [ipv6, dual-stack, egress-only internet gateway, centralized egress, nat gateway, transit gateway]
   source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/centralized-egress-for-ipv6.html
-  description: Spoke VPCs carry both an IPv4 CIDR and an Amazon-provided IPv6 CIDR; IPv4 default routes go to the Transit Gateway and out through NAT gateways in a central egress VPC. Because IPv6 addresses are globally unique and NAT is not required, each spoke keeps its own egress-only internet gateway for the "::/0" route, so IPv6 traffic leaves locally while inbound IPv6 connections remain blocked.
+  description: Spoke VPCs carry both an IPv4 CIDR and an Amazon-provided IPv6 CIDR; IPv4 default routes go through the Transit Gateway ENIs in each private subnet to the Transit Gateway and out through NAT gateways in the two Availability Zones of a central egress VPC, which also has an internet gateway and an egress-only internet gateway. Because IPv6 addresses are globally unique and NAT is not required, each spoke keeps its own egress-only internet gateway for the "::/0" route, so IPv6 traffic leaves locally while inbound IPv6 connections remain blocked.
   containers:
     - region: us-east-1
       vpcs:
         - name: egress
+          cidr: 192.168.0.0/16
+          at: [1, 1, 1, 2]
+          subnets:
+            - {name: egress-public-a, cidr: 192.168.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: egress-private-a, cidr: 192.168.4.0/24, az: a, public: false, at: [2, 1]}
+            - {name: egress-public-b, cidr: 192.168.1.0/24, az: b, public: true, at: [1, 1]}
+            - {name: egress-private-b, cidr: 192.168.5.0/24, az: b, public: false, at: [2, 1]}
+        - name: app1
           cidr: 10.0.0.0/16
+          at: [3, 1]
           subnets:
-            - {name: egress-public-a, cidr: 10.0.0.0/24, az: a, public: true}
-            - {name: egress-tgw-a, cidr: 10.0.10.0/28, az: a, public: false}
-        - name: spoke-a
+            - {name: app1-private-a, cidr: 10.0.0.0/24, az: a, public: false, at: [1, 1]}
+            - {name: app1-private-b, cidr: 10.0.1.0/24, az: b, public: false, at: [1, 1]}
+        - name: app2
           cidr: 10.1.0.0/16
+          at: [3, 2]
           subnets:
-            - {name: spoke-a-private, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: spoke-b
-          cidr: 10.2.0.0/16
-          subnets:
-            - {name: spoke-b-private, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: app2-private-a, cidr: 10.1.0.0/24, az: a, public: false, at: [1, 1]}
+            - {name: app2-private-b, cidr: 10.1.1.0/24, az: b, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_nat_gateway, name: egress-nat-a, in: subnet:egress-public-a}
-    - {tf: aws_internet_gateway, name: egress-igw, in: vpc:egress}
-    - {tf: aws_egress_only_internet_gateway, name: spoke-a-eigw, in: vpc:spoke-a}
-    - {tf: aws_egress_only_internet_gateway, name: spoke-b-eigw, in: vpc:spoke-b}
-    - {tf: aws_instance, name: app-a, in: subnet:spoke-a-private}
-    - {tf: aws_instance, name: app-b, in: subnet:spoke-b-private}
-  actors: [internet]
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [2, 1, 1, 2]}
+    - {tf: aws_internet_gateway, name: egress-igw, in: vpc:egress, at: [1, 1]}
+    - {tf: aws_egress_only_internet_gateway, name: egress-eigw, in: vpc:egress, at: [1, 2]}
+    - {tf: aws_nat_gateway, name: nat64-gateway-a, in: subnet:egress-public-a, at: [1, 1]}
+    - {tf: aws_nat_gateway, name: nat64-gateway-b, in: subnet:egress-public-b, at: [1, 1]}
+    - {tf: aws_network_interface, name: egress-tgw-eni-a, in: subnet:egress-private-a, at: [1, 1]}
+    - {tf: aws_network_interface, name: egress-tgw-eni-b, in: subnet:egress-private-b, at: [1, 1]}
+    - {tf: aws_egress_only_internet_gateway, name: app1-eigw, in: vpc:app1, at: [1, 1]}
+    - {tf: aws_egress_only_internet_gateway, name: app2-eigw, in: vpc:app2, at: [1, 1]}
+    - {tf: aws_instance, name: app1-instance-a, in: subnet:app1-private-a, at: [1, 1]}
+    - {tf: aws_network_interface, name: app1-tgw-eni-a, in: subnet:app1-private-a, at: [1, 2]}
+    - {tf: aws_instance, name: app1-instance-b, in: subnet:app1-private-b, at: [1, 1]}
+    - {tf: aws_network_interface, name: app1-tgw-eni-b, in: subnet:app1-private-b, at: [1, 2]}
+    - {tf: aws_network_interface, name: app2-tgw-eni-a, in: subnet:app2-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: app2-instance-a, in: subnet:app2-private-a, at: [1, 2]}
+    - {tf: aws_network_interface, name: app2-tgw-eni-b, in: subnet:app2-private-b, at: [1, 1]}
+    - {tf: aws_instance, name: app2-instance-b, in: subnet:app2-private-b, at: [1, 2]}
   flows:
-    - {from: hub-tgw, to: vpc:spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:app1, link: aws_ec2_transit_gateway_vpc_attachment}
+    - {from: hub-tgw, to: vpc:app2, link: aws_ec2_transit_gateway_vpc_attachment}
     - {from: hub-tgw, to: vpc:egress, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: app-a, to: hub-tgw, label: "IPv4 0.0.0.0/0 via TGW", step: 1}
-    - {from: hub-tgw, to: egress-nat-a, step: 2}
-    - {from: egress-nat-a, to: egress-igw, step: 3}
-    - {from: egress-igw, to: internet, label: IPv4, step: 4}
-    - {from: app-a, to: spoke-a-eigw, label: "IPv6 ::/0 local", step: 5}
-    - {from: spoke-a-eigw, to: internet, label: IPv6 outbound only, step: 6}
-    - {from: app-b, to: spoke-b-eigw, label: "IPv6 ::/0 local"}
-
+    - {from: app1-instance-a, to: app1-tgw-eni-a, label: "IPv4 0.0.0.0/0 to TGW ENI", step: 1}
+    - {from: app1-tgw-eni-a, to: hub-tgw, step: 2}
+    - {from: hub-tgw, to: egress-tgw-eni-a, label: egress attachment, step: 3}
+    - {from: egress-tgw-eni-a, to: nat64-gateway-a, label: "0.0.0.0/0 to NAT gateway", step: 4}
+    - {from: nat64-gateway-a, to: egress-igw, label: IPv4 out, step: 5}
+    - {from: app1-instance-a, to: app1-eigw, label: "IPv6 ::/0 local, outbound only", step: 6}
+    - {from: app1-instance-b, to: app1-tgw-eni-b, label: IPv4 0.0.0.0/0}
+    - {from: app1-instance-b, to: app1-eigw, label: "IPv6 ::/0"}
+    - {from: app2-instance-a, to: app2-tgw-eni-a, label: IPv4 0.0.0.0/0}
+    - {from: app2-instance-a, to: app2-eigw, label: "IPv6 ::/0"}
+    - {from: app2-instance-b, to: app2-tgw-eni-b, label: IPv4 0.0.0.0/0}
+    - {from: app2-instance-b, to: app2-eigw, label: "IPv6 ::/0"}
+    - {from: egress-tgw-eni-b, to: nat64-gateway-b, label: 0.0.0.0/0}
+    - {from: nat64-gateway-b, to: egress-igw}
 - slug: ipv6-only-centralized-egress-nat64
   title: IPv6-only workloads reaching IPv4 destinations with centralized NAT64 and DNS64
   category: networking
   tags: [ipv6-only, nat64, dns64, nat gateway, transit gateway, centralized egress]
   source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/ipv6-vpc-architectures/ipv6-centralized-egress-nat64.html
-  description: Workloads in IPv6-only subnets enable DNS64 so that IPv4-only destinations resolve to synthesized addresses in the 64:ff9b::/96 well-known prefix, and a route for that prefix points at the Transit Gateway. The Transit Gateway forwards to a central egress VPC where NAT gateways perform NAT64 to translate to IPv4 and send the traffic through the internet gateway, while native IPv6 traffic exits through the egress VPC's egress-only internet gateway.
+  description: An instance in the IPv6-only private subnet of spoke VPC A enables DNS64 so that IPv4-only destinations resolve to synthesized addresses in the 64:ff9b::/96 well-known prefix; the subnet route table sends that prefix and "::/0" to the Transit Gateway ENI in the spoke's TGW subnet. The Transit Gateway route table forwards to the egress VPC, whose TGW subnet route table points 64:ff9b::/96 at the NAT gateway in the public subnet; the NAT gateway performs NAT64 to translate to IPv4 and the public subnet route table sends the traffic through the internet gateway to the internet.
   containers:
     - region: us-east-1
       vpcs:
-        - name: egress
+        - name: spoke-a
           cidr: 10.0.0.0/16
+          at: [2, 1]
           subnets:
-            - {name: egress-public-a, cidr: 10.0.0.0/24, az: a, public: true}
-            - {name: egress-public-b, cidr: 10.0.1.0/24, az: b, public: true}
-            - {name: egress-tgw-a, cidr: 10.0.10.0/28, az: a, public: false}
-        - name: spoke-ipv6
-          cidr: 10.1.0.0/16
+            - {name: spoke-a-private, cidr: 10.0.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: spoke-a-tgw, cidr: 10.0.0.224/28, az: a, public: false, at: [2, 1]}
+        - name: egress
+          cidr: 10.10.0.0/16
+          at: [2, 3]
           subnets:
-            - {name: ipv6-only-a, cidr: 10.1.1.0/24, az: a, public: false}
-            - {name: ipv6-only-b, cidr: 10.1.2.0/24, az: b, public: false}
+            - {name: egress-public, cidr: 10.10.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: egress-tgw, cidr: 10.10.1.224/28, az: a, public: false, at: [2, 1]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_nat_gateway, name: nat64-a, in: subnet:egress-public-a}
-    - {tf: aws_nat_gateway, name: nat64-b, in: subnet:egress-public-b}
-    - {tf: aws_internet_gateway, name: egress-igw, in: vpc:egress}
-    - {tf: aws_egress_only_internet_gateway, name: egress-eigw, in: vpc:egress}
-    - {tf: aws_instance, name: ipv6-app-a, in: subnet:ipv6-only-a}
-    - {tf: aws_instance, name: ipv6-app-b, in: subnet:ipv6-only-b}
-  actors: [internet]
+    - {tf: aws_route_table, name: spoke-a-private-route-table, in: region, at: [1, 1]}
+    - {tf: aws_instance, name: ec2-instance-a, in: subnet:spoke-a-private, at: [1, 1]}
+    - {tf: aws_network_interface, name: spoke-a-tgw-eni, in: subnet:spoke-a-tgw, at: [1, 1]}
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [2, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: tgw-route-table, in: region, at: [3, 2]}
+    - {tf: aws_internet_gateway, name: egress-igw, in: vpc:egress, at: [1, 2]}
+    - {tf: aws_nat_gateway, name: nat64-gateway, in: subnet:egress-public, at: [1, 1]}
+    - {tf: aws_network_interface, name: egress-tgw-eni, in: subnet:egress-tgw, at: [1, 1]}
+    - {tf: aws_route_table, name: egress-public-route-table, in: vpc:egress, at: [2, 2]}
+    - {tf: aws_route_table, name: egress-tgw-route-table, in: vpc:egress, at: [3, 2]}
+  actors: [{type: internet, name: internet, at: [1, 2]}]
   flows:
-    - {from: hub-tgw, to: vpc:spoke-ipv6, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: hub-tgw, to: vpc:egress, link: aws_ec2_transit_gateway_vpc_attachment}
-    - {from: ipv6-app-a, to: hub-tgw, label: "DNS64 answer 64:ff9b::/96 routed to TGW", step: 1}
-    - {from: hub-tgw, to: nat64-a, label: egress route table, step: 2}
-    - {from: nat64-a, to: egress-igw, label: NAT64 to IPv4 source, step: 3}
-    - {from: egress-igw, to: internet, label: IPv4-only destination, step: 4}
-    - {from: ipv6-app-b, to: hub-tgw, label: "native IPv6 ::/0"}
-    - {from: hub-tgw, to: egress-eigw, label: IPv6 destinations}
-    - {from: egress-eigw, to: internet, label: IPv6}
-
+    - {from: hub-tgw, to: vpc:spoke-a, link: aws_ec2_transit_gateway_vpc_attachment, label: TGW attachment}
+    - {from: hub-tgw, to: vpc:egress, link: aws_ec2_transit_gateway_vpc_attachment, label: TGW attachment}
+    - {from: ec2-instance-a, to: spoke-a-tgw-eni, label: "DNS64 answer 64:ff9b::/96 and ::/0 -> TGW-ENI", step: 1}
+    - {from: spoke-a-tgw-eni, to: hub-tgw, label: TGW attachment, step: 2}
+    - {from: hub-tgw, to: egress-tgw-eni, label: "TGW route table: 64:ff9b::/96 -> Egress VPC", step: 3}
+    - {from: egress-tgw-eni, to: nat64-gateway, label: "TGW subnet route table: 64:ff9b::/96 -> NATGW-ID", step: 4}
+    - {from: nat64-gateway, to: egress-igw, label: "NAT64 to IPv4 source, 0.0.0.0/0 -> IGW-ID", step: 5}
+    - {from: egress-igw, to: internet, label: IPv4-only destination}
+    - {from: spoke-a-private-route-table, to: spoke-a-tgw-eni, label: "spoke VPC A private subnet route table"}
+    - {from: tgw-route-table, to: hub-tgw, label: "10.0.0.0/16 -> Spoke VPC A, 64:ff9b::/96 -> Egress VPC"}
+    - {from: egress-public-route-table, to: nat64-gateway, label: egress VPC public subnet route table}
+    - {from: egress-tgw-route-table, to: egress-tgw-eni, label: egress VPC TGW subnet route table}
 - slug: shared-vpc-ram-multi-account
   title: Shared VPC with subnets shared to participant accounts via AWS RAM
   category: networking
@@ -1004,48 +1245,61 @@
     - {from: shared-igw, to: internet}
     - {from: team-a-app, to: shared-s3-endpoint, label: owner-managed gateway endpoint}
     - {from: internet, to: team-a-alb-application, label: HTTPS}
-
 - slug: tgw-isolated-vpcs-shared-services
   title: Network segmentation with Transit Gateway route tables and a shared-services VPC
   category: networking
   tags: [transit gateway, segmentation, route tables, isolated vpcs, shared services]
   source: https://docs.aws.amazon.com/vpc/latest/tgw/transit-gateway-isolated-shared.html
-  description: "Two Transit Gateway route tables implement segmentation: the isolated VPCs are associated with a route table that only holds a propagated route to the shared-services VPC and the VPN, so they cannot reach each other, while the shared-services and VPN attachments use a second route table that propagates routes from every VPC. The result is a hub where every workload reaches shared tooling and on-premises, but workload VPCs stay mutually isolated without any VPC peering."
+  description: "VPCs A, B and C each attach to one Transit Gateway from a public and a private subnet whose instances carry their own network interfaces. Two Transit Gateway route tables implement segmentation: the isolated VPCs A and B are associated with a route table that only holds a propagated route to the shared-services VPC C, so they cannot reach each other, while the shared-services attachment uses a second route table that propagates routes from every VPC; every workload reaches shared tooling but workload VPCs stay mutually isolated without any VPC peering."
   containers:
-    - datacenter: on-premises
     - region: eu-west-1
+      account_at: [1, 1]
+      at: [1, 1]
       vpcs:
-        - name: shared-services
-          cidr: 10.0.0.0/16
-          subnets:
-            - {name: shared-private-a, cidr: 10.0.1.0/24, az: a, public: false}
-        - name: isolated-a
-          cidr: 10.1.0.0/16
-          subnets:
-            - {name: isolated-a-private, cidr: 10.1.1.0/24, az: a, public: false}
-        - name: isolated-b
+        - name: vpc-b
           cidr: 10.2.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: isolated-b-private, cidr: 10.2.1.0/24, az: a, public: false}
+            - {name: vpc-b-public, cidr: 10.2.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: vpc-b-private, cidr: 10.2.1.0/24, az: a, public: false, at: [2, 1]}
+        - name: vpc-a
+          cidr: 10.1.0.0/16
+          at: [1, 3]
+          subnets:
+            - {name: vpc-a-public, cidr: 10.1.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: vpc-a-private, cidr: 10.1.1.0/24, az: a, public: false, at: [2, 1]}
+        - name: vpc-c
+          cidr: 10.0.0.0/16
+          at: [3, 2]
+          subnets:
+            - {name: vpc-c-public, cidr: 10.0.0.0/24, az: a, public: true, at: [1, 1]}
+            - {name: vpc-c-private, cidr: 10.0.1.0/24, az: a, public: false, at: [2, 1]}
   elements:
-    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region}
-    - {tf: aws_ec2_transit_gateway_route_table, name: isolated-rt, in: region}
-    - {tf: aws_ec2_transit_gateway_route_table, name: shared-rt, in: region}
-    - {tf: aws_customer_gateway, name: dc-cgw, in: datacenter}
-    - {tf: aws_vpn_connection, name: dc-vpn, in: region}
-    - {tf: aws_instance, name: directory-server, in: subnet:shared-private-a}
-    - {tf: aws_instance, name: app-a, in: subnet:isolated-a-private}
-    - {tf: aws_instance, name: app-b, in: subnet:isolated-b-private}
-  actors: [datacenter]
+    - {tf: aws_instance, name: vpc-b-public-instance, in: subnet:vpc-b-public, at: [1, 1]}
+    - {tf: aws_network_interface, name: vpc-b-public-eni, in: subnet:vpc-b-public, at: [1, 2]}
+    - {tf: aws_instance, name: vpc-b-private-instance, in: subnet:vpc-b-private, at: [1, 1]}
+    - {tf: aws_network_interface, name: vpc-b-private-eni, in: subnet:vpc-b-private, at: [1, 2]}
+    - {tf: aws_instance, name: vpc-a-public-instance, in: subnet:vpc-a-public, at: [1, 1]}
+    - {tf: aws_network_interface, name: vpc-a-public-eni, in: subnet:vpc-a-public, at: [1, 2]}
+    - {tf: aws_instance, name: vpc-a-private-instance, in: subnet:vpc-a-private, at: [1, 1]}
+    - {tf: aws_network_interface, name: vpc-a-private-eni, in: subnet:vpc-a-private, at: [1, 2]}
+    - {tf: aws_instance, name: vpc-c-public-instance, in: subnet:vpc-c-public, at: [1, 1]}
+    - {tf: aws_network_interface, name: vpc-c-public-eni, in: subnet:vpc-c-public, at: [1, 2]}
+    - {tf: aws_instance, name: vpc-c-private-instance, in: subnet:vpc-c-private, at: [1, 1]}
+    - {tf: aws_network_interface, name: vpc-c-private-eni, in: subnet:vpc-c-private, at: [1, 2]}
+    - {tf: aws_ec2_transit_gateway, name: hub-tgw, in: region, at: [2, 2]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: isolated-rt, in: region, at: [2, 1]}
+    - {tf: aws_ec2_transit_gateway_route_table, name: shared-rt, in: region, at: [2, 3]}
+  actors: []
   flows:
-    - {from: hub-tgw, to: vpc:isolated-a, link: aws_ec2_transit_gateway_vpc_attachment, label: associated with isolated-rt}
-    - {from: hub-tgw, to: vpc:isolated-b, link: aws_ec2_transit_gateway_vpc_attachment, label: associated with isolated-rt}
-    - {from: hub-tgw, to: vpc:shared-services, link: aws_ec2_transit_gateway_vpc_attachment, label: associated with shared-rt}
-    - {from: datacenter, to: dc-cgw}
-    - {from: dc-cgw, to: dc-vpn, label: IPsec}
-    - {from: dc-vpn, to: hub-tgw, label: "VPN attachment, shared-rt"}
-    - {from: app-a, to: hub-tgw, label: isolated-rt (shared + VPN routes only), step: 1}
-    - {from: hub-tgw, to: directory-server, step: 2}
-    - {from: directory-server, to: hub-tgw, label: shared-rt has all VPC routes, step: 3}
-    - {from: hub-tgw, to: app-b, step: 4}
-    - {from: app-a, to: app-b, label: "blocked, no route in isolated-rt"}
+    - {from: hub-tgw, to: vpc:vpc-a, link: aws_ec2_transit_gateway_vpc_attachment, label: associated with isolated-rt}
+    - {from: hub-tgw, to: vpc:vpc-b, link: aws_ec2_transit_gateway_vpc_attachment, label: associated with isolated-rt}
+    - {from: hub-tgw, to: vpc:vpc-c, link: aws_ec2_transit_gateway_vpc_attachment, label: associated with shared-rt}
+    - {from: isolated-rt, to: vpc:vpc-c, label: "isolated-rt: propagated route to VPC C only"}
+    - {from: shared-rt, to: vpc:vpc-a, label: "shared-rt: propagated from VPC A"}
+    - {from: shared-rt, to: vpc:vpc-b, label: "shared-rt: propagated from VPC B"}
+    - {from: vpc-a-private-instance, to: hub-tgw, label: isolated-rt (route to VPC C only), step: 1}
+    - {from: hub-tgw, to: vpc-c-private-instance, step: 2}
+    - {from: vpc-c-private-instance, to: hub-tgw, label: shared-rt has all VPC routes, step: 3}
+    - {from: hub-tgw, to: vpc-b-private-instance, step: 4}
+    - {from: vpc-a-private-instance, to: vpc-b-private-instance, label: "blocked, no route in isolated-rt"}

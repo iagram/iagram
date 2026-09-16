@@ -10,55 +10,85 @@ tags:
 - step functions
 image: https://docs.aws.amazon.com/images/solutions/latest/media2cloud-on-aws/images/media2cloud-architecture-diagram.png
 source: https://docs.aws.amazon.com/solutions/latest/media2cloud-on-aws/architecture-overview.html
-description: Uploaded media triggers a main Step Functions state machine whose ingestion sub-workflow creates proxies with MediaConvert and whose analysis sub-workflow runs Rekognition, Transcribe, Comprehend
-  and Textract jobs. DynamoDB holds workflow artifacts, OpenSearch indexes the extracted metadata for search, an IoT Core topic pushes progress to the web app served through CloudFront and API Gateway behind
-  Cognito, and SNS publishes ingest and analysis completion events.
+description: Users sign in through Cognito and call API Gateway, which starts a main Step Functions state machine whose ingestion sub-workflow creates proxies with MediaConvert and open-source tools and
+  whose analysis sub-workflow runs Rekognition, Transcribe, Comprehend and Textract jobs (Textract has no Terraform resource and is not drawn). DynamoDB holds workflow artifacts, OpenSearch indexes the
+  extracted metadata, web, proxy, ingest and logs S3 buckets store the assets, CloudWatch and EventBridge capture job state changes for optional downstream integration, an IoT Core topic pushes progress
+  over MQTT to the web app served through CloudFront, and SNS publishes ingest and analysis completion events.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-web-tier, type: common.group, name: web tier, parent: reg-us-east-1, at: [1, 1, 2, 1]}
-- {id: grp-workflows, type: common.group, name: workflows, parent: reg-us-east-1, at: [1, 2]}
-- {id: grp-storage-and-search, type: common.group, name: storage and search, parent: reg-us-east-1, at: [2, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 2, 2, 1]}
+- {id: grp-main-state-machine, type: common.group, name: main state machine, parent: reg-us-east-1, at: [1, 3, 2, 1]}
+- {id: grp-media-services-and-tools, type: common.group, name: media services and tools, parent: reg-us-east-1, at: [1, 4]}
+- {id: grp-ai-ml-services, type: common.group, name: AI/ML services, parent: reg-us-east-1, at: [2, 4]}
+- {id: grp-datastore-services, type: common.group, name: datastore services, parent: reg-us-east-1, at: [3, 3]}
+- {id: grp-notification-services, type: common.group, name: notification services, parent: reg-us-east-1, at: [3, 4]}
+- {id: grp-events-services, type: common.group, name: events services, parent: reg-us-east-1, at: [3, 5]}
+- {id: grp-storage-services, type: common.group, name: storage services, parent: reg-us-east-1, at: [4, 3, 1, 2]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: m2c-users, type: aws.res.aws_cognito_user_pool, name: m2c-users, parent: grp-web-tier, props: {name: changeme}, at: [1, 1]}
-- {id: m2c-api, type: aws.res.aws_api_gateway_rest_api, name: m2c-api, parent: grp-web-tier, props: {name: changeme}, at: [1, 2]}
-- {id: m2c-web, type: aws.cloudfront_distribution, name: m2c-web, parent: grp-web-tier, at: [2, 2]}
-- {id: workflow-progress-topic, type: aws.res.aws_iot_topic_rule, name: workflow-progress-topic, parent: grp-web-tier, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}, at: [3, 1]}
-- {id: main-state-machine, type: aws.res.aws_sfn_state_machine, name: main-state-machine, parent: grp-workflows, props: {definition: changeme, role_arn: changeme}, at: [1, 1, 2, 1]}
-- {id: ingestion-workflow, type: aws.res.aws_sfn_state_machine, name: ingestion-workflow, parent: grp-workflows, props: {definition: changeme, role_arn: changeme}, at: [1, 2]}
-- {id: analysis-workflow, type: aws.res.aws_sfn_state_machine, name: analysis-workflow, parent: grp-workflows, props: {definition: changeme, role_arn: changeme}, at: [2, 2]}
-- {id: proxy-transcode-queue, type: aws.res.aws_media_convert_queue, name: proxy-transcode-queue, parent: grp-workflows, props: {name: changeme}, at: [1, 3]}
-- {id: face-collection, type: aws.res.aws_rekognition_collection, name: face-collection, parent: grp-workflows, props: {collection_id: changeme}, at: [2, 3]}
-- {id: job-state-change-rule, type: aws.res.aws_cloudwatch_event_rule, name: job-state-change-rule, parent: grp-workflows, at: [2, 4]}
-- {id: ingest-bucket, type: aws.s3_bucket, name: ingest-bucket, parent: grp-storage-and-search, at: [2, 2]}
-- {id: proxy-bucket, type: aws.s3_bucket, name: proxy-bucket, parent: grp-storage-and-search, at: [2, 1]}
-- {id: ingest-table, type: aws.dynamodb_table, name: ingest-table, parent: grp-storage-and-search, at: [1, 1]}
-- {id: media-search, type: aws.res.aws_opensearch_domain, name: media-search, parent: grp-storage-and-search, props: {domain_name: changeme}, at: [1, 2]}
-- {id: m2c-events, type: aws.res.aws_sns_topic, name: m2c-events, parent: grp-storage-and-search, at: [1, 3]}
+- {id: downstream-process, type: common.server, name: downstream process, at: [2, 3]}
+- {id: m2c-users, type: aws.res.aws_cognito_user_pool, name: m2c-users, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
+- {id: m2c-api, type: aws.res.aws_api_gateway_rest_api, name: m2c-api, parent: reg-us-east-1, props: {name: changeme}, at: [2, 2]}
+- {id: m2c-web, type: aws.cloudfront_distribution, name: m2c-web, parent: reg-us-east-1, at: [3, 2]}
+- {id: main-state-machine, type: aws.res.aws_sfn_state_machine, name: main-state-machine, parent: grp-main-state-machine, props: {definition: changeme, role_arn: changeme}, at: [1, 1, 2, 1]}
+- {id: ingestion-workflow, type: aws.res.aws_sfn_state_machine, name: ingestion-workflow, parent: grp-main-state-machine, props: {definition: changeme, role_arn: changeme}, at: [1, 2]}
+- {id: analysis-workflow, type: aws.res.aws_sfn_state_machine, name: analysis-workflow, parent: grp-main-state-machine, props: {definition: changeme, role_arn: changeme}, at: [2, 2]}
+- {id: proxy-transcode-queue, type: aws.res.aws_media_convert_queue, name: proxy-transcode-queue, parent: grp-media-services-and-tools, props: {name: changeme}, at: [1, 1]}
+- {id: open-source-tools, type: aws.lambda_function, name: open-source-tools, parent: grp-media-services-and-tools, at: [1, 2]}
+- {id: face-collection, type: aws.res.aws_rekognition_collection, name: face-collection, parent: grp-ai-ml-services, props: {collection_id: changeme}, at: [1, 1]}
+- {id: transcribe-vocabulary, type: aws.res.aws_transcribe_vocabulary, name: transcribe-vocabulary, parent: grp-ai-ml-services, props: {language_code: changeme, vocabulary_name: changeme}, at: [1, 2]}
+- id: comprehend-recognizer
+  type: aws.res.aws_comprehend_entity_recognizer
+  name: comprehend-recognizer
+  parent: grp-ai-ml-services
+  props: {data_access_role_arn: changeme, input_data_config: {}, language_code: changeme, name: changeme}
+  at:
+  - 1
+  - 3
+- {id: ingest-table, type: aws.dynamodb_table, name: ingest-table, parent: grp-datastore-services, at: [1, 1]}
+- {id: media-search, type: aws.res.aws_opensearch_domain, name: media-search, parent: grp-datastore-services, props: {domain_name: changeme}, at: [1, 2]}
+- {id: workflow-progress-topic, type: aws.res.aws_iot_topic_rule, name: workflow-progress-topic, parent: grp-notification-services, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme},
+  at: [1, 1]}
+- {id: m2c-events, type: aws.res.aws_sns_topic, name: m2c-events, parent: grp-notification-services, at: [1, 2]}
+- {id: m2c-logs, type: aws.res.aws_cloudwatch_log_group, name: m2c-logs, parent: grp-events-services, at: [1, 1]}
+- {id: job-state-change-rule, type: aws.res.aws_cloudwatch_event_rule, name: job-state-change-rule, parent: grp-events-services, at: [1, 2]}
+- {id: web-bucket, type: aws.s3_bucket, name: web-bucket, parent: grp-storage-services, at: [1, 1]}
+- {id: proxy-bucket, type: aws.s3_bucket, name: proxy-bucket, parent: grp-storage-services, at: [1, 2]}
+- {id: ingest-bucket, type: aws.s3_bucket, name: ingest-bucket, parent: grp-storage-services, at: [1, 3]}
+- {id: logs-bucket, type: aws.s3_bucket, name: logs-bucket, parent: grp-storage-services, at: [1, 4]}
 edges:
+- {from: users, to: m2c-users, label: Cognito sign-in, step: '1'}
+- {from: m2c-users, to: m2c-api, label: authenticated REST calls, step: '2'}
 - {from: users, to: m2c-web, label: web application, step: '3'}
-- {from: m2c-web, to: m2c-api, label: IAM-authenticated REST calls, step: '2'}
-- {from: m2c-api, to: m2c-users, label: Cognito sign-in, step: '1'}
-- {from: m2c-api, to: main-state-machine, label: start ingestion, step: '4'}
-- {from: users, to: ingest-bucket, label: upload media}
-- {from: main-state-machine, to: ingestion-workflow, label: sub-state machine, step: '5'}
+- {from: m2c-web, to: web-bucket, label: static web app origin}
+- {from: m2c-api, to: main-state-machine, label: start workflow, step: '4'}
+- {from: main-state-machine, to: ingestion-workflow, label: ingest sub-workflow, step: '5'}
+- {from: main-state-machine, to: analysis-workflow, label: analysis sub-workflow, step: '6'}
 - {from: ingestion-workflow, to: proxy-transcode-queue, label: proxy generation}
+- {from: ingestion-workflow, to: open-source-tools, label: media}
+- {from: analysis-workflow, to: face-collection, label: Rekognition analysis}
+- {from: analysis-workflow, to: transcribe-vocabulary, label: Transcribe jobs}
+- {from: analysis-workflow, to: comprehend-recognizer, label: Comprehend jobs}
+- {from: main-state-machine, to: ingest-table, label: workflow artifacts, step: '7'}
+- {from: main-state-machine, to: media-search, label: index ML metadata, step: '8'}
+- {from: main-state-machine, to: ingest-bucket, label: ingest, step: '9'}
 - {from: proxy-transcode-queue, to: proxy-bucket, label: proxies and thumbnails}
-- {from: main-state-machine, to: analysis-workflow, label: sub-state machine, step: '6'}
-- {from: analysis-workflow, to: face-collection, label: Rekognition face search}
-- {from: job-state-change-rule, to: analysis-workflow, link: aws_cloudwatch_event_target}
-- {from: analysis-workflow, to: ingest-table, label: status and artifact pointers, step: '7'}
-- {from: analysis-workflow, to: media-search, label: index ML metadata, step: '8'}
-- {from: analysis-workflow, to: workflow-progress-topic, label: MQTT progress to front end, step: '12'}
-- {from: analysis-workflow, to: m2c-events, label: analysis_completed, step: '13'}
+- {from: main-state-machine, to: m2c-logs, label: workflow logs, step: '10'}
+- {from: job-state-change-rule, to: main-state-machine, link: aws_cloudwatch_event_target}
+- {from: job-state-change-rule, to: downstream-process, label: integration with optional downstream process, step: '11'}
+- {from: main-state-machine, to: workflow-progress-topic, label: progress over IoT MQTT protocol, step: '12'}
+- {from: workflow-progress-topic, to: users, label: IoT MQTT protocol}
+- {from: main-state-machine, to: m2c-events, label: ingest and analysis completed events, step: '13'}
 steps:
-- {n: '1', text: 'm2c-api → m2c-users: Cognito sign-in'}
-- {n: '2', text: 'm2c-web → m2c-api: IAM-authenticated REST calls'}
+- {n: '1', text: 'users → m2c-users: Cognito sign-in'}
+- {n: '2', text: 'm2c-users → m2c-api: authenticated REST calls'}
 - {n: '3', text: 'users → m2c-web: web application'}
-- {n: '4', text: 'm2c-api → main-state-machine: start ingestion'}
-- {n: '5', text: 'main-state-machine → ingestion-workflow: sub-state machine'}
-- {n: '6', text: 'main-state-machine → analysis-workflow: sub-state machine'}
-- {n: '7', text: 'analysis-workflow → ingest-table: status and artifact pointers'}
-- {n: '8', text: 'analysis-workflow → media-search: index ML metadata'}
-- {n: '12', text: 'analysis-workflow → workflow-progress-topic: MQTT progress to front end'}
-- {n: '13', text: 'analysis-workflow → m2c-events: analysis_completed'}
+- {n: '4', text: 'm2c-api → main-state-machine: start workflow'}
+- {n: '5', text: 'main-state-machine → ingestion-workflow: ingest sub-workflow'}
+- {n: '6', text: 'main-state-machine → analysis-workflow: analysis sub-workflow'}
+- {n: '7', text: 'main-state-machine → ingest-table: workflow artifacts'}
+- {n: '8', text: 'main-state-machine → media-search: index ML metadata'}
+- {n: '9', text: 'main-state-machine → ingest-bucket: ingest'}
+- {n: '10', text: 'main-state-machine → m2c-logs: workflow logs'}
+- {n: '11', text: 'job-state-change-rule → downstream process: integration with optional downstream process'}
+- {n: '12', text: 'main-state-machine → workflow-progress-topic: progress over IoT MQTT protocol'}
+- {n: '13', text: 'main-state-machine → m2c-events: ingest and analysis completed events'}

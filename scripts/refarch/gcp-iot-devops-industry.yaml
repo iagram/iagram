@@ -3,37 +3,46 @@
   category: iot
   tags: [mqtt, gke, pub/sub, dataflow, bigquery, network load balancer, iot]
   source: https://docs.cloud.google.com/architecture/connected-devices/mqtt-broker-architecture
-  description: Edge devices open TLS MQTT sessions through a regional external passthrough Network Load Balancer with session affinity to a three-node standards-based MQTT broker cluster hosted on GKE, which authenticates devices against a credential store in Cloud SQL. The broker bridges topics to Pub/Sub, and Dataflow (Apache Beam MQTT driver or Pub/Sub source) processes the stream into BigQuery while commands flow back to devices through the same broker.
+  description: Edge devices connect through an edge gateway (certificate store, edge software, device connectors) and cloud clients connect directly, all opening TLS MQTT sessions through Cloud Load Balancing to a standards-based MQTT broker cluster hosted on GKE; a broker administration tier authenticates and authorises devices against a device credential store in Cloud SQL and exposes a broker administration API. Google Cloud connectors (an Apache Beam MqttIO Dataflow job and an MQTT Pub/Sub connector) move telemetry into BigQuery and downstream processing, while Cloud IAM, Cloud Logging and Cloud Monitoring are the project-level resources.
   containers:
     - project: iot-prj
       region: europe-west1
+      account_at: [1, 2, 3, 1]
+      groups:
+        - {label: gcp-connectors, at: [1, 4]}
+        - {label: project-level-resources, at: [2, 1, 1, 5]}
       vpcs:
         - name: iot-vpc
           cidr: 10.40.0.0/16
+          at: [1, 1, 1, 3]
           subnets:
-            - {name: broker-sub, cidr: 10.40.1.0/24, region: europe-west1}
+            - {name: broker-sub, cidr: 10.40.1.0/24, region: europe-west1, at: [1, 2, 1, 2]}
+            - {name: broker-admin-sub, cidr: 10.40.2.0/24, region: europe-west1, at: [2, 3]}
   elements:
-    - {tf: google_compute_forwarding_rule, name: mqtt-nlb, in: vpc:iot-vpc}
-    - {tf: google_container_cluster, name: mqtt-broker-gke, in: subnet:broker-sub}
-    - {tf: google_sql_database_instance, name: device-credential-db, in: vpc:iot-vpc}
-    - {tf: google_pubsub_topic, name: telemetry-topic, in: project:iot-prj}
-    - {tf: google_pubsub_topic, name: command-topic, in: project:iot-prj}
-    - {tf: google_dataflow_job, name: telemetry-stream-job, in: project:iot-prj}
-    - {tf: google_bigquery_dataset, name: telemetry-ds, in: project:iot-prj}
-    - {tf: google_bigquery_table, name: telemetry-raw, in: project:iot-prj}
-    - {tf: google_cloud_run_v2_service, name: device-command-api, in: project:iot-prj}
-  actors: [device, users]
+    - {tf: google_compute_forwarding_rule, name: mqtt-nlb, in: vpc:iot-vpc, at: [1, 1, 2, 1]}
+    - {tf: google_container_cluster, name: mqtt-broker-gke, in: subnet:broker-sub, at: [1, 1]}
+    - {tf: google_sql_database_instance, name: device-credential-db, in: vpc:iot-vpc, at: [2, 2]}
+    - {tf: google_compute_instance, name: device-auth-service, in: subnet:broker-admin-sub, at: [1, 1]}
+    - {tf: google_compute_instance, name: broker-admin-api, in: subnet:broker-admin-sub, at: [1, 2]}
+    - {tf: google_dataflow_job, name: telemetry-stream-job, in: group:gcp-connectors, at: [1, 1]}
+    - {tf: google_pubsub_topic, name: telemetry-topic, in: group:gcp-connectors, at: [2, 1]}
+    - {tf: google_bigquery_dataset, name: telemetry-ds, in: project:iot-prj, at: [1, 5]}
+    - {tf: google_service_account, name: broker-iam-service-account, in: group:project-level-resources, at: [1, 1]}
+    - {tf: google_logging_project_bucket_config, name: broker-logs, in: group:project-level-resources, at: [1, 2]}
+    - {tf: google_monitoring_dashboard, name: broker-monitoring, in: group:project-level-resources, at: [1, 3]}
+  actors: [{type: device, name: edge-devices, at: [1, 1]}, {type: server, name: edge-gateway, at: [2, 1]}, {type: client, name: cloud-clients, at: [3, 1]}]
   flows:
-    - {from: device, to: mqtt-nlb, label: MQTT over TLS 8883, step: 1}
-    - {from: mqtt-nlb, to: mqtt-broker-gke, label: session-affine TCP, step: 2}
-    - {from: mqtt-broker-gke, to: device-credential-db, label: device auth lookup, step: 3}
-    - {from: mqtt-broker-gke, to: telemetry-topic, label: topic bridge publish, step: 4}
-    - {from: telemetry-topic, to: telemetry-stream-job, link: google_pubsub_subscription}
-    - {from: telemetry-stream-job, to: telemetry-raw, label: streaming insert, step: 5}
-    - {from: users, to: device-command-api, label: send command, step: 6}
-    - {from: device-command-api, to: command-topic, label: publish command, step: 7}
-    - {from: command-topic, to: mqtt-broker-gke, link: google_pubsub_subscription}
-    - {from: mqtt-broker-gke, to: device, label: MQTT command topic, step: 8}
+    - {from: edge-devices, to: edge-gateway, label: device connectors, certificate store / SE, step: 1}
+    - {from: edge-gateway, to: mqtt-nlb, label: MQTT with TLS 8883, step: 2}
+    - {from: cloud-clients, to: mqtt-nlb, label: MQTT with TLS 8883, step: 2}
+    - {from: mqtt-nlb, to: mqtt-broker-gke, label: session-affine TCP to broker 1..N, step: 3}
+    - {from: mqtt-broker-gke, to: device-auth-service, label: device authentication and authorization, step: 4}
+    - {from: device-auth-service, to: device-credential-db, label: credential lookup}
+    - {from: broker-admin-api, to: mqtt-broker-gke, label: broker administration API (HTTPS/gRPC)}
+    - {from: mqtt-broker-gke, to: telemetry-stream-job, label: Beam MqttIO connector, step: 5}
+    - {from: mqtt-broker-gke, to: telemetry-topic, label: MQTT Pub/Sub connector, step: 6}
+    - {from: telemetry-stream-job, to: telemetry-ds, label: streaming insert, step: 7}
+    - {from: mqtt-broker-gke, to: edge-gateway, label: command topics over MQTT with TLS, step: 8}
 
 - slug: distributed-cloud-connected-edge
   title: Google Distributed Cloud connected edge clusters managed from a Google Cloud region
@@ -118,72 +127,98 @@
   category: industry
   tags: [retail, commerce search, recommendations, user events, bigquery, pub/sub, cloud run]
   source: https://docs.cloud.google.com/retail/docs/overview
-  description: A storefront API on Cloud Run calls the AI Commerce Search service for personalised search and recommendations, records user events in real time and publishes them to Pub/Sub, where Dataflow lands them in BigQuery for analytics. The product catalog is imported on a schedule from BigQuery and Cloud Storage, and search performance data is exported back to BigQuery for measurement.
+  description: The product catalog (from BigQuery, Cloud Storage or the API) and global and local inventories are ingested into Vertex AI Search for commerce, and an e-commerce frontend on Cloud Run calls its search, browse and recommendations API while recording user events (ranking, personalisation, dynamic facets) in real time. Google Tag Manager transforms and pushes the analytics stream into the user events topic, products and user events are exported to BigQuery, and Google Analytics 4 receives the streamed analytics while its export is imported into BigQuery for measurement.
   containers:
     - project: retail-prj
       region: europe-west1
+      account_at: [1, 1, 4, 1]
   elements:
-    - {tf: google_compute_global_forwarding_rule, name: storefront-glb, in: project:retail-prj}
-    - {tf: google_cloud_run_v2_service, name: storefront-api, in: project:retail-prj}
-    - {tf: google_pubsub_topic, name: user-events, in: project:retail-prj}
-    - {tf: google_dataflow_job, name: events-to-bq-job, in: project:retail-prj}
-    - {tf: google_bigquery_dataset, name: retail-analytics, in: project:retail-prj}
-    - {tf: google_bigquery_table, name: product-catalog, in: project:retail-prj}
-    - {tf: google_storage_bucket, name: catalog-import-bucket, in: project:retail-prj}
-    - {tf: google_cloud_scheduler_job, name: nightly-catalog-import, in: project:retail-prj}
-    - {tf: google_cloudfunctions2_function, name: catalog-import-fn, in: project:retail-prj}
-    - {tf: google_redis_instance, name: session-cache, in: project:retail-prj}
-  actors: [users, mobile]
+    - {tf: google_bigquery_table, name: product-catalog, in: project:retail-prj, at: [1, 1]}
+    - {tf: google_storage_bucket, name: catalog-import-bucket, in: project:retail-prj, at: [2, 1]}
+    - {tf: google_bigquery_table, name: inventories, in: project:retail-prj, at: [3, 1]}
+    - {tf: google_discovery_engine_search_engine, name: vais-commerce, in: project:retail-prj, at: [1, 2, 2, 1]}
+    - {tf: google_cloud_run_v2_service, name: storefront-api, in: project:retail-prj, at: [1, 3, 2, 1]}
+    - {tf: google_bigquery_dataset, name: retail-analytics, in: project:retail-prj, at: [3, 2]}
+    - {tf: google_pubsub_topic, name: user-events, in: project:retail-prj, at: [3, 3]}
+  actors: [users, mobile, {type: saas, name: Google Tag Manager, at: [3, 2]}, {type: saas, name: Google Analytics 4, at: [4, 2]}]
   flows:
-    - {from: users, to: storefront-glb, label: HTTPS, step: 1}
-    - {from: mobile, to: storefront-glb, label: HTTPS, step: 1}
-    - {from: storefront-glb, to: storefront-api, label: serverless NEG, step: 2}
-    - {from: storefront-api, to: session-cache, label: session and cart, step: 3}
-    - {from: storefront-api, to: user-events, label: publish user event, step: 4}
-    - {from: user-events, to: events-to-bq-job, link: google_pubsub_subscription}
-    - {from: events-to-bq-job, to: retail-analytics, label: streaming insert, step: 5}
-    - {from: nightly-catalog-import, to: catalog-import-fn, label: cron trigger, step: 6}
-    - {from: catalog-import-fn, to: product-catalog, label: read catalog, step: 7}
-    - {from: catalog-import-fn, to: catalog-import-bucket, label: stage import files, step: 8}
+    - {from: product-catalog, to: vais-commerce, label: "catalog: format and ingest (BigQuery)", step: 1}
+    - {from: catalog-import-bucket, to: vais-commerce, label: catalog import (Cloud Storage)}
+    - {from: inventories, to: vais-commerce, label: "inventories: setInventories / addLocalInventories API", step: 3}
+    - {from: users, to: storefront-api, label: HTTPS}
+    - {from: mobile, to: storefront-api, label: HTTPS}
+    - {from: storefront-api, to: vais-commerce, label: search / browse / recommendations API, step: 4}
+    - {from: storefront-api, to: user-events, label: "user events: ranking, personalisation, dynamic facets", step: 2}
+    - {from: user-events, to: vais-commerce, label: user events API}
+    - {from: vais-commerce, to: retail-analytics, label: products and user events}
+    - {from: storefront-api, to: Google Tag Manager, label: analytics stream}
+    - {from: Google Tag Manager, to: user-events, label: transform and push}
+    - {from: storefront-api, to: Google Analytics 4, label: stream analytics}
+    - {from: Google Analytics 4, to: retail-analytics, label: GA4 export}
+    - {from: retail-analytics, to: user-events, label: GA4 import}
 
 - slug: manufacturing-data-engine
   title: Manufacturing Data Engine with Manufacturing Connect edge, Pub/Sub, Bigtable and BigQuery
   category: industry
   tags: [manufacturing, opc ua, mqtt, pub/sub, dataflow, bigtable, bigquery, looker]
   source: https://docs.cloud.google.com/manufacturing-data-engine/docs/overview
-  description: Manufacturing Connect edge gateways on the factory floor translate industrial protocols (OPC UA, MQTT) into standardised messages on the input-messages Pub/Sub topic, where the Message Mapper and Metadata Manager transform them with Whistle mappings and enrich them with asset metadata. Processed records are written to BigQuery, Bigtable and Cloud Storage sinks, republished on an output topic, and exposed through a Federation API and Looker for analytics.
+  description: Manufacturing Connect edge gateways in the customer factory (drawn as an external server next to the PLC devices) translate industrial protocols (OPC UA, MQTT) into standardised messages on the input-messages Pub/Sub topic, while batch files from other sources land in a Cloud Storage bucket read by a GCS reader Dataflow job. Inside the VPC the Message Mapper (Whistle source classes), Configuration Manager (tag creation, backed by Cloud SQL and Memorystore for Redis) and Metadata Manager (metadata enrichment) run on GKE and hand records to the sinks, Pub/Sub sink and BigQuery sink on GKE and Bigtable writer, GCS writer and transformations (event change window) Dataflow jobs, which write to the output topic, BigQuery, Bigtable and Cloud Storage; a Federation API on GKE exposes the data to Looker and applications.
   containers:
-    - datacenter: factory-floor
     - project: mde-prj
       region: europe-west1
+      account_at: [1, 2, 3, 1]
       vpcs:
         - name: mde-vpc
           cidr: 10.70.0.0/16
+          at: [1, 2, 6, 1]
           subnets:
-            - {name: mde-sub, cidr: 10.70.1.0/24, region: europe-west1}
+            - {name: federation-sub, cidr: 10.70.4.0/24, region: europe-west1, at: [1, 4]}
+            - {name: sinks-sub, cidr: 10.70.3.0/24, region: europe-west1, at: [2, 4, 2, 1]}
+            - {name: processing-sub, cidr: 10.70.1.0/24, region: europe-west1, at: [3, 1, 1, 3]}
   elements:
-    - {tf: google_compute_instance, name: mc-edge-gateway, in: datacenter:factory-floor}
-    - {tf: google_pubsub_topic, name: input-messages, in: project:mde-prj}
-    - {tf: google_container_cluster, name: mde-processing-gke, in: subnet:mde-sub}
-    - {tf: google_dataflow_job, name: mde-stream-job, in: project:mde-prj}
-    - {tf: google_bigquery_dataset, name: mde-warehouse, in: project:mde-prj}
-    - {tf: google_bigtable_instance, name: mde-timeseries, in: project:mde-prj}
-    - {tf: google_storage_bucket, name: mde-archive, in: project:mde-prj}
-    - {tf: google_pubsub_topic, name: output-messages, in: project:mde-prj}
-    - {tf: google_cloud_run_v2_service, name: federation-api, in: project:mde-prj}
-  actors: [device, users]
+    - {tf: google_storage_bucket, name: batch-ingestion-bucket, in: project:mde-prj, at: [1, 1]}
+    - {tf: google_dataflow_job, name: gcs-reader-job, in: project:mde-prj, at: [2, 1]}
+    - {tf: google_pubsub_topic, name: input-messages, in: project:mde-prj, at: [3, 1]}
+    - {tf: google_container_cluster, name: message-mapper-gke, in: subnet:processing-sub, at: [1, 1]}
+    - {tf: google_container_cluster, name: config-manager-gke, in: subnet:processing-sub, at: [1, 2]}
+    - {tf: google_container_cluster, name: metadata-manager-gke, in: subnet:processing-sub, at: [1, 3]}
+    - {tf: google_sql_database_instance, name: config-db, in: vpc:mde-vpc, at: [2, 2]}
+    - {tf: google_redis_instance, name: config-cache, in: vpc:mde-vpc, at: [2, 3]}
+    - {tf: google_container_cluster, name: federation-api-gke, in: subnet:federation-sub, at: [1, 1]}
+    - {tf: google_container_cluster, name: pubsub-sink-gke, in: subnet:sinks-sub, at: [1, 1]}
+    - {tf: google_container_cluster, name: bq-sink-gke, in: subnet:sinks-sub, at: [2, 1]}
+    - {tf: google_dataflow_job, name: bigtable-writer-job, in: vpc:mde-vpc, at: [4, 4]}
+    - {tf: google_dataflow_job, name: gcs-writer-job, in: vpc:mde-vpc, at: [5, 4]}
+    - {tf: google_dataflow_job, name: transformations-job, in: vpc:mde-vpc, at: [6, 4]}
+    - {tf: google_pubsub_topic, name: output-messages, in: project:mde-prj, at: [2, 3]}
+    - {tf: google_bigquery_dataset, name: mde-warehouse, in: project:mde-prj, at: [3, 3]}
+    - {tf: google_bigtable_instance, name: mde-timeseries, in: project:mde-prj, at: [4, 3]}
+    - {tf: google_storage_bucket, name: mde-archive, in: project:mde-prj, at: [5, 3]}
+  actors: [{type: device, name: plc-devices, at: [1, 1]}, {type: server, name: mc-edge-gateway, at: [2, 1]}, {type: server, name: other-sources, at: [3, 1]}, {type: users, name: users, at: [1, 3, 3, 1]}]
   flows:
-    - {from: device, to: mc-edge-gateway, label: OPC UA / MQTT from PLCs, step: 1}
+    - {from: plc-devices, to: mc-edge-gateway, label: OPC UA / MQTT from PLCs, step: 1}
     - {from: mc-edge-gateway, to: input-messages, label: standardised messages, step: 2}
-    - {from: input-messages, to: mde-processing-gke, link: google_pubsub_subscription}
-    - {from: mde-processing-gke, to: mde-stream-job, label: mapped and enriched records, step: 3}
-    - {from: mde-stream-job, to: mde-warehouse, label: BigQuery sink, step: 4}
-    - {from: mde-stream-job, to: mde-timeseries, label: Bigtable sink, step: 4}
-    - {from: mde-stream-job, to: mde-archive, label: archive sink, step: 4}
-    - {from: mde-stream-job, to: output-messages, label: republish, step: 5}
-    - {from: federation-api, to: mde-warehouse, label: federated query, step: 6}
-    - {from: federation-api, to: mde-timeseries, label: point lookup, step: 6}
-    - {from: users, to: federation-api, label: Looker and apps, step: 7}
+    - {from: other-sources, to: batch-ingestion-bucket, label: batch files}
+    - {from: batch-ingestion-bucket, to: gcs-reader-job, label: GCS reader}
+    - {from: gcs-reader-job, to: input-messages, label: batch messages}
+    - {from: input-messages, to: message-mapper-gke, link: google_pubsub_subscription}
+    - {from: message-mapper-gke, to: config-manager-gke, label: source classes / Whistle mappings, step: 3}
+    - {from: config-manager-gke, to: config-db, label: configuration store}
+    - {from: config-manager-gke, to: config-cache, label: configuration cache}
+    - {from: config-manager-gke, to: metadata-manager-gke, label: tag creation, step: 4}
+    - {from: metadata-manager-gke, to: pubsub-sink-gke, label: enriched records, step: 5}
+    - {from: metadata-manager-gke, to: bq-sink-gke, label: enriched records, step: 5}
+    - {from: metadata-manager-gke, to: bigtable-writer-job, label: enriched records, step: 5}
+    - {from: metadata-manager-gke, to: gcs-writer-job, label: enriched records, step: 5}
+    - {from: metadata-manager-gke, to: transformations-job, label: enriched records, step: 5}
+    - {from: pubsub-sink-gke, to: output-messages, label: Pub/Sub sink}
+    - {from: bq-sink-gke, to: mde-warehouse, label: BigQuery sink}
+    - {from: bigtable-writer-job, to: mde-timeseries, label: Bigtable writer}
+    - {from: gcs-writer-job, to: mde-archive, label: raw and processed archive}
+    - {from: transformations-job, to: config-manager-gke, label: event change window transformations}
+    - {from: federation-api-gke, to: mde-warehouse, label: federated query, step: 6}
+    - {from: federation-api-gke, to: mde-timeseries, label: point lookup, step: 6}
+    - {from: users, to: federation-api-gke, label: Looker and apps, step: 7}
 
 - slug: healthcare-fhir-bigquery-analytics
   title: Healthcare data platform with Cloud Healthcare API FHIR store streaming to BigQuery
@@ -221,76 +256,111 @@
   category: data
   tags: [data mesh, financial services, bigquery, dataplex, analytics hub, domain ownership]
   source: https://docs.cloud.google.com/architecture/design-self-service-data-platform-data-mesh
-  description: Business domains (for example payments and risk) each own a project where Pub/Sub and Dataflow feed BigQuery data products that are catalogued as Dataplex lake assets and exposed through authorized views. A central platform team provides Terraform project templates via Cloud Build, an Analytics Hub exchange for cross-domain sharing, and common observability such as freshness alerts on data products.
+  description: A central data platform team runs a self-service data platform whose common services are a metadata and discovery layer (Data Catalog tag templates and lineage, Knowledge Catalog logical data organisation and glossary) and central policy management (policy tag taxonomies), plus a data products development environment template that bundles data operations (IAM groups, Cloud Logging, Cloud Monitoring freshness alerts), data storage (Cloud Storage, BigQuery, Bigtable, Pub/Sub), data processing (Dataflow, Managed Service for Apache Spark), an Agent Platform endpoint and a Cloud Run data product interface. A data workspace project factory built from Cloud Build and Terraform templates provisions the domain projects (for example payments) where Pub/Sub and Dataflow feed BigQuery data products catalogued as Dataplex lake assets and shared through an Analytics Hub exchange.
   containers:
     - project: data-platform-prj
       region: europe-west1
+      account_at: [1, 1, 2, 1]
+      groups:
+        - {label: metadata-discovery, at: [1, 1]}
+        - {label: central-policy, at: [1, 2]}
+        - {label: product-template, at: [2, 1, 1, 2]}
+        - {label: project-factory, at: [3, 1]}
     - project: payments-domain-prj
       region: europe-west1
-    - project: risk-domain-prj
-      region: europe-west1
+      account_at: [1, 2]
   elements:
-    - {tf: google_cloudbuild_trigger, name: domain-provisioning-trigger, in: project:data-platform-prj}
-    - {tf: google_storage_bucket, name: platform-templates, in: project:data-platform-prj}
-    - {tf: google_bigquery_analytics_hub_data_exchange, name: fsi-data-exchange, in: project:data-platform-prj}
-    - {tf: google_monitoring_alert_policy, name: product-freshness-alert, in: project:data-platform-prj}
-    - {tf: google_pubsub_topic, name: payment-events, in: project:payments-domain-prj}
-    - {tf: google_dataflow_job, name: payments-ingest-job, in: project:payments-domain-prj}
-    - {tf: google_bigquery_dataset, name: payments-data-product, in: project:payments-domain-prj}
-    - {tf: google_dataplex_lake, name: payments-lake, in: project:payments-domain-prj}
-    - {tf: google_bigquery_dataset, name: risk-consumer-ds, in: project:risk-domain-prj}
-    - {tf: google_dataflow_job, name: risk-scoring-job, in: project:risk-domain-prj}
-  actors: [users, server]
+    - {tf: google_dataplex_aspect_type, name: catalog-tag-templates, in: group:metadata-discovery, at: [1, 1]}
+    - {tf: google_data_catalog_entry, name: catalog-lineage-entries, in: group:metadata-discovery, at: [1, 2]}
+    - {tf: google_dataplex_glossary, name: logical-data-glossary, in: group:metadata-discovery, at: [1, 3]}
+    - {tf: google_data_catalog_taxonomy, name: policy-tag-taxonomy, in: group:central-policy, at: [1, 1]}
+    - {tf: google_cloud_identity_group, name: data-ops-iam-groups, in: group:product-template, at: [1, 1]}
+    - {tf: google_logging_project_bucket_config, name: template-logs, in: group:product-template, at: [1, 2]}
+    - {tf: google_monitoring_alert_policy, name: product-freshness-alert, in: group:product-template, at: [1, 3]}
+    - {tf: google_storage_bucket, name: template-storage, in: group:product-template, at: [2, 1]}
+    - {tf: google_bigquery_dataset, name: template-bigquery, in: group:product-template, at: [2, 2]}
+    - {tf: google_bigtable_instance, name: template-bigtable, in: group:product-template, at: [2, 3]}
+    - {tf: google_pubsub_topic, name: template-pubsub, in: group:product-template, at: [2, 4]}
+    - {tf: google_dataflow_job, name: template-dataflow, in: group:product-template, at: [3, 1]}
+    - {tf: google_dataproc_batch, name: template-managed-spark, in: group:product-template, at: [3, 2]}
+    - {tf: google_vertex_ai_endpoint, name: template-agent-platform, in: group:product-template, at: [3, 3]}
+    - {tf: google_cloud_run_v2_service, name: template-product-interface, in: group:product-template, at: [3, 4]}
+    - {tf: google_cloudbuild_trigger, name: domain-provisioning-trigger, in: group:project-factory, at: [1, 1]}
+    - {tf: google_storage_bucket, name: platform-templates, in: group:project-factory, at: [1, 2]}
+    - {tf: google_bigquery_analytics_hub_data_exchange, name: fsi-data-exchange, in: project:data-platform-prj, at: [3, 2]}
+    - {tf: google_pubsub_topic, name: payment-events, in: project:payments-domain-prj, at: [1, 1]}
+    - {tf: google_dataflow_job, name: payments-ingest-job, in: project:payments-domain-prj, at: [1, 2]}
+    - {tf: google_bigquery_dataset, name: payments-data-product, in: project:payments-domain-prj, at: [1, 3]}
+    - {tf: google_dataplex_lake, name: payments-lake, in: project:payments-domain-prj, at: [2, 3]}
+  actors: []
   flows:
-    - {from: server, to: payment-events, label: core banking events, step: 1}
-    - {from: payment-events, to: payments-ingest-job, link: google_pubsub_subscription}
-    - {from: payments-ingest-job, to: payments-data-product, label: curated tables, step: 2}
-    - {from: payments-lake, to: payments-data-product, label: Dataplex asset, step: 3}
-    - {from: payments-data-product, to: fsi-data-exchange, link: google_bigquery_analytics_hub_listing}
-    - {from: fsi-data-exchange, to: risk-consumer-ds, label: linked dataset subscription, step: 4}
-    - {from: risk-consumer-ds, to: risk-scoring-job, label: cross-domain read, step: 5}
-    - {from: product-freshness-alert, to: payments-data-product, label: freshness SLI, step: 6}
     - {from: platform-templates, to: domain-provisioning-trigger, label: Terraform templates}
-    - {from: domain-provisioning-trigger, to: project:payments-domain-prj, label: provision domain project}
-    - {from: users, to: risk-consumer-ds, label: analysts, step: 7}
+    - {from: domain-provisioning-trigger, to: project:payments-domain-prj, label: provision domain project, step: 1}
+    - {from: group:product-template, to: project:payments-domain-prj, label: development environment template, step: 2}
+    - {from: payment-events, to: payments-ingest-job, link: google_pubsub_subscription}
+    - {from: payments-ingest-job, to: payments-data-product, label: curated tables, step: 3}
+    - {from: payments-lake, to: payments-data-product, label: Dataplex asset, step: 4}
+    - {from: catalog-tag-templates, to: payments-data-product, label: tag and lineage metadata, step: 5}
+    - {from: policy-tag-taxonomy, to: payments-data-product, label: column-level policy tags}
+    - {from: payments-data-product, to: fsi-data-exchange, link: google_bigquery_analytics_hub_listing}
+    - {from: product-freshness-alert, to: payments-data-product, label: freshness SLI, step: 6}
 
 - slug: gaming-agones-open-match-spanner
   title: Global multiplayer game backend with Agones on GKE, Open Match, Spanner and Memorystore
   category: industry
   tags: [gaming, agones, open match, gke, spanner, memorystore, cloud deploy]
   source: https://github.com/googleforgames/global-multiplayer-demo
-  description: Dedicated game servers run as Agones fleets on GKE clusters while backend microservices (frontend, profile, ping discovery, Open Match director and match function) run on GKE Autopilot with Memorystore for Redis backing Open Match state. Player profiles and in-game data live in Spanner, and Cloud Build builds images into Artifact Registry that Cloud Deploy rolls out to the clusters.
+  description: Players reach regional Cloud Load Balancers in us-central1, europe-west1 and asia-east1; in us-central1 a GKE Autopilot cluster runs the frontend (authenticating players with Google OAuth), the profile service and the Open Match components (core, match functions, director) with Memorystore for Redis backing Open Match state, while dedicated game servers run as Agones fleets (with allocator and ping services) on GKE clusters in all three regions, connected through Anthos Service Mesh. Player profiles and in-game data live in a globally replicated Spanner instance, and Cloud Build builds images into Artifact Registry that Cloud Deploy rolls out to the clusters.
   containers:
     - project: game-prj
-      region: europe-west1
+      region: us-central1
+      account_at: [2, 2]
+      groups: [{label: ci-cd, at: [2, 1, 1, 3]}]
       vpcs:
         - name: game-vpc
           cidr: 10.80.0.0/16
+          at: [1, 1, 1, 3]
           subnets:
-            - {name: gameservers-sub, cidr: 10.80.1.0/24, region: europe-west1}
-            - {name: backend-sub, cidr: 10.80.2.0/24, region: europe-west1}
+            - {name: autopilot-sub, cidr: 10.80.1.0/24, region: us-central1, at: [1, 2]}
+            - {name: agones-us-central1, cidr: 10.80.2.0/24, region: us-central1, at: [2, 2]}
+            - {name: agones-europe-west1, cidr: 10.80.3.0/24, region: europe-west1, at: [3, 2]}
+            - {name: agones-asia-east1, cidr: 10.80.4.0/24, region: asia-east1, at: [4, 2]}
   elements:
-    - {tf: google_compute_global_forwarding_rule, name: game-frontend-glb, in: project:game-prj}
-    - {tf: google_container_cluster, name: agones-gameservers-gke, in: subnet:gameservers-sub}
-    - {tf: google_container_cluster, name: backend-autopilot-gke, in: subnet:backend-sub}
-    - {tf: google_redis_instance, name: open-match-redis, in: vpc:game-vpc}
-    - {tf: google_spanner_instance, name: player-spanner, in: project:game-prj}
-    - {tf: google_artifact_registry_repository, name: game-images, in: project:game-prj}
-    - {tf: google_cloudbuild_trigger, name: game-build-trigger, in: project:game-prj}
-    - {tf: google_clouddeploy_delivery_pipeline, name: game-delivery-pipeline, in: project:game-prj}
-  actors: [users, user]
+    - {tf: google_compute_forwarding_rule, name: lb-us-central1, in: vpc:game-vpc, at: [1, 1, 2, 1]}
+    - {tf: google_compute_forwarding_rule, name: lb-europe-west1, in: vpc:game-vpc, at: [3, 1]}
+    - {tf: google_compute_forwarding_rule, name: lb-asia-east1, in: vpc:game-vpc, at: [4, 1]}
+    - {tf: google_container_cluster, name: backend-autopilot-gke, in: subnet:autopilot-sub, at: [1, 1]}
+    - {tf: google_container_cluster, name: agones-gke-us-central1, in: subnet:agones-us-central1, at: [1, 1]}
+    - {tf: google_container_cluster, name: agones-gke-europe-west1, in: subnet:agones-europe-west1, at: [1, 1]}
+    - {tf: google_container_cluster, name: agones-gke-asia-east1, in: subnet:agones-asia-east1, at: [1, 1]}
+    - {tf: google_redis_instance, name: open-match-redis, in: vpc:game-vpc, at: [1, 3]}
+    - {tf: google_spanner_instance, name: player-spanner, in: project:game-prj, at: [1, 4]}
+    - {tf: google_network_services_mesh, name: anthos-service-mesh, in: project:game-prj, at: [2, 4]}
+    - {tf: google_cloudbuild_trigger, name: game-build-trigger, in: group:ci-cd, at: [1, 1]}
+    - {tf: google_artifact_registry_repository, name: game-images, in: group:ci-cd, at: [1, 2]}
+    - {tf: google_clouddeploy_delivery_pipeline, name: game-delivery-pipeline, in: group:ci-cd, at: [1, 3]}
+  actors: [{type: users, name: players, at: [2, 1]}, {type: idp, name: Google OAuth, at: [1, 2]}]
   flows:
-    - {from: users, to: game-frontend-glb, label: login and matchmaking HTTPS, step: 1}
-    - {from: game-frontend-glb, to: backend-autopilot-gke, label: frontend service, step: 2}
-    - {from: backend-autopilot-gke, to: player-spanner, label: player profile read/write, step: 3}
-    - {from: backend-autopilot-gke, to: open-match-redis, label: Open Match tickets, step: 4}
-    - {from: backend-autopilot-gke, to: agones-gameservers-gke, label: allocate game server, step: 5}
-    - {from: users, to: agones-gameservers-gke, label: UDP game traffic, step: 6}
-    - {from: agones-gameservers-gke, to: player-spanner, label: in-game state, step: 7}
-    - {from: user, to: game-build-trigger, label: developer git push, step: 8}
+    - {from: players, to: lb-us-central1, label: login and matchmaking HTTPS, step: 1}
+    - {from: lb-us-central1, to: backend-autopilot-gke, label: frontend service, step: 2}
+    - {from: backend-autopilot-gke, to: Google OAuth, label: player sign-in, step: 3}
+    - {from: backend-autopilot-gke, to: player-spanner, label: profile service read/write, step: 4}
+    - {from: backend-autopilot-gke, to: open-match-redis, label: Open Match core state, step: 5}
+    - {from: backend-autopilot-gke, to: agones-gke-us-central1, label: match director allocates game server, step: 6}
+    - {from: players, to: lb-europe-west1, label: ping and UDP game traffic, step: 7}
+    - {from: players, to: lb-asia-east1, label: ping and UDP game traffic, step: 7}
+    - {from: lb-us-central1, to: agones-gke-us-central1, label: ping and game servers}
+    - {from: lb-europe-west1, to: agones-gke-europe-west1, label: ping and game servers}
+    - {from: lb-asia-east1, to: agones-gke-asia-east1, label: ping and game servers}
+    - {from: anthos-service-mesh, to: agones-gke-europe-west1, label: allocator service via service mesh}
+    - {from: anthos-service-mesh, to: agones-gke-asia-east1, label: allocator service via service mesh}
+    - {from: backend-autopilot-gke, to: anthos-service-mesh, label: cross-region allocation, step: 8}
     - {from: game-build-trigger, to: game-images, label: push image, step: 9}
-    - {from: game-delivery-pipeline, to: agones-gameservers-gke, label: rollout, step: 10}
+    - {from: game-images, to: game-delivery-pipeline, label: release}
     - {from: game-delivery-pipeline, to: backend-autopilot-gke, label: rollout, step: 10}
+    - {from: game-delivery-pipeline, to: agones-gke-us-central1, label: rollout, step: 10}
+    - {from: game-delivery-pipeline, to: agones-gke-europe-west1, label: rollout, step: 10}
+    - {from: game-delivery-pipeline, to: agones-gke-asia-east1, label: rollout, step: 10}
 
 - slug: media-transcoding-transcoder-api
   title: Media transcoding pipeline with Cloud Storage, Transcoder API, Pub/Sub and Cloud CDN
@@ -329,115 +399,126 @@
   category: industry
   tags: [financial services, aml, bigquery, machine learning, risk scoring]
   source: https://docs.cloud.google.com/financial-services/anti-money-laundering/docs/concepts/overview
-  description: Core banking transactions, customer records and historical suspicious activity reports are landed in BigQuery datasets that follow the AML AI schema, and an AML AI instance with an engine configuration trains a model on that data. Monthly prediction runs write customer risk scores and explainability results back to BigQuery, where investigation tooling consumes them.
+  description: Core banking transactions, accounts, party data and historical AML data (suspicious activity reports) are prepared and landed in BigQuery tables that follow the AML AI schema; the bank calls the AML AI API, which trains a model on that data and writes customer risk scores with built-in explainability to a results dataset. Investigators review the scored parties against their risk tolerance, escalate cases and file suspicious activity reports using the model explainability, and the investigation outcomes feed back into the AML data in a dynamic feedback loop.
   containers:
     - project: aml-prj
       region: europe-west1
+      account_at: [1, 2]
   elements:
-    - {tf: google_storage_bucket, name: core-banking-landing, in: project:aml-prj}
-    - {tf: google_dataflow_job, name: banking-load-job, in: project:aml-prj}
-    - {tf: google_bigquery_dataset, name: aml-input-ds, in: project:aml-prj}
-    - {tf: google_bigquery_table, name: party-transactions, in: project:aml-prj}
-    - {tf: google_bigquery_dataset, name: aml-results-ds, in: project:aml-prj}
-    - {tf: google_workflows_workflow, name: aml-prediction-workflow, in: project:aml-prj}
-    - {tf: google_cloud_scheduler_job, name: monthly-prediction-schedule, in: project:aml-prj}
-    - {tf: google_cloud_run_v2_service, name: investigation-ui, in: project:aml-prj}
-    - {tf: google_kms_key_ring, name: aml-cmek-ring, in: project:aml-prj}
-  actors: [server, users]
+    - {tf: google_storage_bucket, name: core-banking-landing, in: project:aml-prj, at: [1, 1]}
+    - {tf: google_bigquery_dataset, name: aml-input-ds, in: project:aml-prj, at: [2, 1]}
+    - {tf: google_bigquery_table, name: transactions, in: project:aml-prj, at: [1, 2]}
+    - {tf: google_bigquery_table, name: accounts, in: project:aml-prj, at: [2, 2]}
+    - {tf: google_bigquery_table, name: party-data, in: project:aml-prj, at: [3, 2]}
+    - {tf: google_bigquery_table, name: aml-data, in: project:aml-prj, at: [4, 2]}
+    - {tf: google_vertex_ai_endpoint, name: aml-ai-engine, in: project:aml-prj, at: [1, 3, 2, 1]}
+    - {tf: google_bigquery_table, name: risk-scores, in: project:aml-prj, at: [1, 4]}
+    - {tf: google_bigquery_dataset, name: aml-results-ds, in: project:aml-prj, at: [2, 4]}
+    - {tf: google_storage_bucket, name: sar-reports, in: project:aml-prj, at: [1, 5]}
+  actors: [{type: server, name: core-banking, at: [1, 1]}, {type: users, name: investigators, at: [1, 3]}]
   flows:
-    - {from: server, to: core-banking-landing, label: nightly core banking extracts, step: 1}
-    - {from: core-banking-landing, to: banking-load-job, label: batch load, step: 2}
-    - {from: banking-load-job, to: party-transactions, label: AML AI schema tables, step: 3}
-    - {from: monthly-prediction-schedule, to: aml-prediction-workflow, label: monthly trigger, step: 4}
-    - {from: aml-prediction-workflow, to: aml-input-ds, label: AML AI training and prediction read, step: 5}
-    - {from: aml-prediction-workflow, to: aml-results-ds, label: risk scores written, step: 6}
-    - {from: aml-cmek-ring, to: aml-input-ds, label: CMEK}
-    - {from: users, to: investigation-ui, label: investigators, step: 7}
-    - {from: investigation-ui, to: aml-results-ds, label: query risk scores, step: 8}
+    - {from: core-banking, to: core-banking-landing, label: data preparation for AML AI, step: 1}
+    - {from: core-banking-landing, to: transactions, label: AML AI schema load, step: 2}
+    - {from: core-banking-landing, to: accounts, label: AML AI schema load}
+    - {from: core-banking-landing, to: party-data, label: AML AI schema load}
+    - {from: core-banking-landing, to: aml-data, label: AML AI schema load}
+    - {from: aml-input-ds, to: aml-ai-engine, label: "detection: call API to access AML AI", step: 3}
+    - {from: aml-ai-engine, to: risk-scores, label: customer risk scores with explainability, step: 4}
+    - {from: investigators, to: risk-scores, label: "review: escalate based on risk tolerance", step: 5}
+    - {from: investigators, to: sar-reports, label: "investigate: file SAR using model explainability", step: 6}
+    - {from: investigators, to: aml-data, label: dynamic feedback loop, step: 7}
 
 - slug: telecom-network-automation-nephio
   title: Telecom network automation with Nephio on GKE, Config Sync and Distributed Cloud edge
   category: industry
   tags: [telecom, nephio, network functions, gke, config sync, distributed cloud edge, audit logs]
   source: https://docs.cloud.google.com/telecom-network-automation/docs/overview
-  description: Telecom Network Automation is a managed Nephio deployment where a GKE orchestration cluster runs Kubernetes operators that apply Configuration as Data from a Git repository to network function clusters on Google Distributed Cloud edge sites through GitOps reconciliation and zero-touch provisioning. Administrative and data-access audit logs are routed to BigQuery for compliance reporting, and edge sites keep running if the management plane is disconnected.
+  description: "Telecom Network Automation is a managed Nephio deployment in which a GKE orchestration cluster runs Kubernetes operators that apply Configuration as Data blueprints (collections of Kubernetes CRDs) from a Git repository, provisions GKE and Google Distributed Cloud edge workload clusters through cloud infrastructure automation, and deploys CNF workloads onto them through Config Sync reconciliation, while an end-to-end service and slice orchestrator drives it over a declarative API. Administrative and data-access audit logs are routed to BigQuery for compliance reporting, and edge sites keep running if the management plane is disconnected."
   containers:
     - datacenter: cell-site
+      at: [3, 2]
     - project: tna-prj
       region: europe-west1
+      account_at: [2, 2]
       vpcs:
         - name: tna-vpc
           cidr: 10.90.0.0/16
+          at: [1, 2, 2, 1]
           subnets:
-            - {name: orchestration-sub, cidr: 10.90.1.0/24, region: europe-west1}
+            - {name: orchestration-sub, cidr: 10.90.1.0/24, region: europe-west1, at: [1, 1]}
+            - {name: workload-sub, cidr: 10.90.2.0/24, region: europe-west1, at: [2, 1]}
   elements:
-    - {tf: google_container_cluster, name: nephio-orchestration-gke, in: subnet:orchestration-sub}
-    - {tf: google_sourcerepo_repository, name: network-config-repo, in: project:tna-prj}
-    - {tf: google_gke_hub_feature, name: config-management-feature, in: project:tna-prj}
-    - {tf: google_gke_hub_membership, name: edge-nf-membership, in: project:tna-prj}
-    - {tf: google_artifact_registry_repository, name: network-function-images, in: project:tna-prj}
-    - {tf: google_edgecontainer_cluster, name: ran-edge-cluster, in: datacenter:cell-site}
-    - {tf: google_compute_ha_vpn_gateway, name: tna-vpn-gw, in: vpc:tna-vpc}
-    - {tf: google_logging_project_sink, name: audit-to-bq-sink, in: project:tna-prj}
-    - {tf: google_bigquery_dataset, name: network-audit-ds, in: project:tna-prj}
-  actors: [user]
+    - {tf: google_container_cluster, name: nf-workload-gke, in: subnet:workload-sub, at: [1, 1]}
+    - {tf: google_container_node_pool, name: cnf-gke-node-pool, at: [1, 1]}
+    - {tf: google_container_cluster, name: nephio-orchestration-gke, in: subnet:orchestration-sub, at: [1, 1]}
+    - {tf: google_sourcerepo_repository, name: network-config-repo, in: project:tna-prj, at: [1, 1]}
+    - {tf: google_gke_hub_feature, name: config-management-feature, in: project:tna-prj, at: [1, 3]}
+    - {tf: google_gke_hub_fleet, name: nf-cluster-fleet, in: project:tna-prj, at: [2, 1]}
+    - {tf: google_gke_hub_membership, name: edge-nf-membership, in: project:tna-prj, at: [2, 3]}
+    - {tf: google_edgecontainer_cluster, name: ran-edge-cluster, in: project:tna-prj, at: [3, 1, 1, 3]}
+    - {tf: google_edgecontainer_node_pool, name: cnf-edge-node-pool, at: [1, 1]}
+    - {tf: google_logging_project_sink, name: audit-to-bq-sink, in: project:tna-prj, at: [1, 4]}
+    - {tf: google_bigquery_dataset, name: network-audit-ds, in: project:tna-prj, at: [2, 4]}
+  actors:
+    - {type: server, name: e2e-service-orchestrator, at: [1, 2]}
+    - {type: user, at: [2, 1]}
   flows:
-    - {from: user, to: network-config-repo, label: network engineer commits intent, step: 1}
-    - {from: network-config-repo, to: nephio-orchestration-gke, label: Configuration as Data, step: 2}
-    - {from: nephio-orchestration-gke, to: config-management-feature, label: rendered packages, step: 3}
-    - {from: ran-edge-cluster, to: tna-vpn-gw, link: google_edgecontainer_vpn_connection}
-    - {from: ran-edge-cluster, to: edge-nf-membership, label: fleet registration, step: 4}
-    - {from: config-management-feature, to: ran-edge-cluster, label: Config Sync reconciliation, step: 5}
-    - {from: network-function-images, to: ran-edge-cluster, label: network function images, step: 6}
-    - {from: nephio-orchestration-gke, to: audit-to-bq-sink, label: admin and data-access audit logs, step: 7}
-    - {from: audit-to-bq-sink, to: network-audit-ds, label: routed logs, step: 8}
+    - {from: e2e-service-orchestrator, to: nephio-orchestration-gke, label: API and declarative integration with higher-level orchestrators, step: 1}
+    - {from: user, to: network-config-repo, label: network engineer commits intent, step: 2}
+    - {from: network-config-repo, to: nephio-orchestration-gke, label: Configuration as Data blueprints (Kubernetes CRDs), step: 3}
+    - {from: nephio-orchestration-gke, to: nf-cluster-fleet, label: cloud infrastructure automation provisions workload clusters, step: 4}
+    - {from: nf-cluster-fleet, to: nf-workload-gke, label: GKE workload cluster in the fleet}
+    - {from: ran-edge-cluster, to: edge-nf-membership, label: fleet registration, step: 5}
+    - {from: nephio-orchestration-gke, to: config-management-feature, label: Kubernetes operators render packages, step: 6}
+    - {from: config-management-feature, to: nf-workload-gke, label: Config Sync reconciliation, step: 7}
+    - {from: config-management-feature, to: ran-edge-cluster, label: Config Sync reconciliation, step: 7}
+    - {from: nephio-orchestration-gke, to: cnf-gke-node-pool, label: CNF workloads, step: 8}
+    - {from: nephio-orchestration-gke, to: cnf-edge-node-pool, label: CNF workloads, step: 8}
+    - {from: ran-edge-cluster, to: datacenter, label: GDC Edge hardware installed at the cell site}
+    - {from: nephio-orchestration-gke, to: audit-to-bq-sink, label: admin and data-access audit logs, step: 9}
+    - {from: audit-to-bq-sink, to: network-audit-ds, label: routed logs, step: 10}
 
 - slug: cicd-cloud-build-cloud-deploy-gke
   title: CI/CD with Cloud Build, Artifact Registry and Cloud Deploy to staging and production GKE
   category: devops
   tags: [ci/cd, cloud build, cloud deploy, artifact registry, gke, skaffold, cloud code]
   source: https://docs.cloud.google.com/architecture/app-development-and-delivery-with-cloud-code-gcb-cd-and-gke
-  description: Developers iterate with Cloud Code, and each commit to the source repository triggers Cloud Build to build and test the container and push it to Artifact Registry. Cloud Deploy then creates a release from the shared Skaffold configuration and promotes it through a delivery pipeline from the staging GKE cluster to production after a manual approval.
+  description: Developers iterate in Cloud Shell with Cloud Code against a minikube development cluster and push to a Cloud Source Repositories repository that is replicated from GitHub; each commit triggers Cloud Build to build and test the container, store build artifacts in Cloud Storage and push the image to Artifact Registry. Cloud Deploy then creates a release from the shared Skaffold configuration, stores the rendered deploy artifacts in a second bucket and promotes it from the staging GKE cluster to production after a manual approval.
   containers:
     - project: cicd-prj
       region: europe-west1
-    - project: app-staging-prj
-      region: europe-west1
+      account_at: [1, 2, 2, 1]
+      groups: [{label: cloud-shell, at: [2, 1, 3, 1]}]
       vpcs:
-        - name: staging-vpc
+        - name: cicd-vpc
           cidr: 10.100.0.0/16
+          at: [3, 3, 1, 2]
           subnets:
-            - {name: staging-sub, cidr: 10.100.1.0/24, region: europe-west1}
-    - project: app-prod-prj
-      region: europe-west1
-      vpcs:
-        - name: prod-vpc
-          cidr: 10.110.0.0/16
-          subnets:
-            - {name: prod-sub, cidr: 10.110.1.0/24, region: europe-west1}
+            - {name: cluster-sub, cidr: 10.100.1.0/24, region: europe-west1, at: [1, 1]}
   elements:
-    - {tf: google_sourcerepo_repository, name: app-source-repo, in: project:cicd-prj}
-    - {tf: google_cloudbuild_trigger, name: app-ci-trigger, in: project:cicd-prj}
-    - {tf: google_artifact_registry_repository, name: app-images, in: project:cicd-prj}
-    - {tf: google_clouddeploy_delivery_pipeline, name: app-delivery-pipeline, in: project:cicd-prj}
-    - {tf: google_clouddeploy_target, name: staging-target, in: project:cicd-prj}
-    - {tf: google_clouddeploy_target, name: prod-target, in: project:cicd-prj}
-    - {tf: google_container_cluster, name: staging-gke, in: subnet:staging-sub}
-    - {tf: google_container_cluster, name: prod-gke, in: subnet:prod-sub}
-    - {tf: google_storage_bucket, name: deploy-artifacts-bucket, in: project:cicd-prj}
-  actors: [user, users]
+    - {tf: google_sourcerepo_repository, name: app-source-repo, in: project:cicd-prj, at: [1, 1]}
+    - {tf: google_container_attached_cluster, name: minikube-dev-cluster, in: group:cloud-shell, at: [1, 1]}
+    - {tf: google_cloudbuild_trigger, name: app-ci-trigger, in: project:cicd-prj, at: [2, 2]}
+    - {tf: google_storage_bucket, name: build-artifacts-bucket, in: project:cicd-prj, at: [1, 3]}
+    - {tf: google_storage_bucket, name: deploy-artifacts-bucket, in: project:cicd-prj, at: [1, 4]}
+    - {tf: google_clouddeploy_delivery_pipeline, name: app-delivery-pipeline, in: project:cicd-prj, at: [2, 3]}
+    - {tf: google_container_cluster, name: staging-gke, in: subnet:cluster-sub, at: [1, 1]}
+    - {tf: google_container_cluster, name: prod-gke, in: subnet:cluster-sub, at: [1, 2]}
+    - {tf: google_artifact_registry_repository, name: app-images, in: project:cicd-prj, at: [4, 3]}
+  actors: [{type: saas, name: GitHub, at: [1, 1]}, {type: user, name: developer, at: [2, 1]}]
   flows:
-    - {from: user, to: app-source-repo, label: git push, step: 1}
-    - {from: app-source-repo, to: app-ci-trigger, label: commit event, step: 2}
-    - {from: app-ci-trigger, to: app-images, label: build, test, push image, step: 3}
-    - {from: app-ci-trigger, to: app-delivery-pipeline, label: create release (Skaffold), step: 4}
-    - {from: app-delivery-pipeline, to: deploy-artifacts-bucket, label: rendered manifests}
-    - {from: app-delivery-pipeline, to: staging-target, label: rollout, step: 5}
-    - {from: staging-target, to: staging-gke, label: kubectl apply, step: 6}
-    - {from: app-delivery-pipeline, to: prod-target, label: promote after approval, step: 7}
-    - {from: prod-target, to: prod-gke, label: kubectl apply, step: 8}
-    - {from: app-images, to: prod-gke, label: image pull, step: 9}
-    - {from: users, to: prod-gke, label: HTTPS, step: 10}
+    - {from: GitHub, to: app-source-repo, label: clone (git replication)}
+    - {from: developer, to: minikube-dev-cluster, label: develop with Cloud Code in Cloud Shell, step: 1}
+    - {from: minikube-dev-cluster, to: app-source-repo, label: git push, step: 2}
+    - {from: app-source-repo, to: app-ci-trigger, label: trigger, step: 3}
+    - {from: app-ci-trigger, to: build-artifacts-bucket, label: build artifacts}
+    - {from: app-ci-trigger, to: app-images, label: build, test, push image, step: 4}
+    - {from: app-ci-trigger, to: app-delivery-pipeline, label: create release (Skaffold), step: 5}
+    - {from: app-delivery-pipeline, to: deploy-artifacts-bucket, label: rendered deploy artifacts}
+    - {from: app-delivery-pipeline, to: staging-gke, label: rollout to staging, step: 6}
+    - {from: app-delivery-pipeline, to: prod-gke, label: approval, then promote to production, step: 7}
+    - {from: app-images, to: staging-gke, label: image pull}
+    - {from: app-images, to: prod-gke, label: image pull}
 
 - slug: gitops-config-sync-fleet
   title: GitOps for GKE fleets with Config Sync and Policy Controller
@@ -480,36 +561,56 @@
   category: devops
   tags: [terraform, cloud build, gitops, infrastructure as code, cloud storage state]
   source: https://docs.cloud.google.com/docs/terraform/resource-management/managing-infrastructure-as-code
-  description: A single Git repository holds Terraform code with a dev and a prod branch, and Cloud Build triggers run terraform plan on feature-branch pull requests and terraform init, plan and apply on merges to an environment branch. Terraform state is stored remotely in a Cloud Storage bucket and the Cloud Build service account carries the IAM permissions needed to create resources in the target environments.
+  description: "A single GitHub repository holds Terraform code on short-lived feature branches plus a dev and a prod branch; Cloud Build triggers run terraform plan on feature-branch pushes and terraform init, plan and apply on merges to dev or prod, creating the firewall rules, subnet and Apache Compute Engine VM of each environment's VPC network. Terraform state is stored remotely in a Cloud Storage bucket and the Cloud Build service account carries the IAM permissions needed to create resources in the target environments."
   containers:
     - project: iac-prj
       region: europe-west1
+      account_at: [1, 3, 2, 1]
     - project: dev-env-prj
       region: europe-west1
+      account_at: [1, 4]
+      vpcs:
+        - name: dev-vpc
+          cidr: 10.10.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: dev-sub, cidr: 10.10.1.0/24, region: europe-west1, at: [1, 2]}
     - project: prod-env-prj
       region: europe-west1
+      account_at: [2, 4]
+      vpcs:
+        - name: prod-vpc
+          cidr: 10.20.0.0/16
+          at: [1, 1]
+          subnets:
+            - {name: prod-sub, cidr: 10.20.1.0/24, region: europe-west1, at: [1, 2]}
   elements:
-    - {tf: google_cloudbuildv2_connection, name: github-connection, in: project:iac-prj}
-    - {tf: google_cloudbuildv2_repository, name: infra-repo, in: project:iac-prj}
-    - {tf: google_cloudbuild_trigger, name: pr-plan-trigger, in: project:iac-prj}
-    - {tf: google_cloudbuild_trigger, name: dev-apply-trigger, in: project:iac-prj}
-    - {tf: google_cloudbuild_trigger, name: prod-apply-trigger, in: project:iac-prj}
-    - {tf: google_storage_bucket, name: tfstate-bucket, in: project:iac-prj}
-    - {tf: google_service_account, name: cloudbuild-terraform-sa, in: project:iac-prj}
-    - {tf: google_compute_network, name: dev-vpc, in: project:dev-env-prj}
-    - {tf: google_compute_network, name: prod-vpc, in: project:prod-env-prj}
-  actors: [user]
+    - {tf: google_cloudbuildv2_repository, name: infra-repo, in: project:iac-prj, at: [1, 1, 3, 1]}
+    - {tf: google_cloudbuild_trigger, name: feature-plan-trigger, in: project:iac-prj, at: [1, 2]}
+    - {tf: google_cloudbuild_trigger, name: dev-apply-trigger, in: project:iac-prj, at: [2, 2]}
+    - {tf: google_cloudbuild_trigger, name: prod-apply-trigger, in: project:iac-prj, at: [3, 2]}
+    - {tf: google_storage_bucket, name: tfstate-bucket, in: project:iac-prj, at: [1, 3, 2, 1]}
+    - {tf: google_service_account, name: cloudbuild-terraform-sa, in: project:iac-prj, at: [3, 3]}
+    - {tf: google_compute_firewall, name: dev-allow-http, in: vpc:dev-vpc, at: [1, 1]}
+    - {tf: google_compute_instance, name: dev-apache-vm, in: subnet:dev-sub, at: [1, 1]}
+    - {tf: google_compute_firewall, name: prod-allow-http, in: vpc:prod-vpc, at: [1, 1]}
+    - {tf: google_compute_instance, name: prod-apache-vm, in: subnet:prod-sub, at: [1, 1]}
+  actors:
+    - {type: user, name: developer-or-operator, at: [1, 1, 2, 1]}
+    - {type: saas, name: github-repository, at: [1, 2, 2, 1]}
   flows:
-    - {from: user, to: infra-repo, label: pull request to feature branch, step: 1}
-    - {from: github-connection, to: infra-repo, label: GitHub connection}
-    - {from: infra-repo, to: pr-plan-trigger, label: PR event, step: 2}
-    - {from: pr-plan-trigger, to: tfstate-bucket, label: terraform plan (read state), step: 3}
-    - {from: infra-repo, to: dev-apply-trigger, label: merge to dev branch, step: 4}
-    - {from: dev-apply-trigger, to: dev-vpc, label: terraform apply, step: 5}
-    - {from: infra-repo, to: prod-apply-trigger, label: merge to prod branch, step: 6}
-    - {from: prod-apply-trigger, to: prod-vpc, label: terraform apply, step: 7}
-    - {from: dev-apply-trigger, to: tfstate-bucket, label: state lock and write, step: 5}
-    - {from: prod-apply-trigger, to: tfstate-bucket, label: state lock and write, step: 7}
+    - {from: developer-or-operator, to: github-repository, label: pushes Terraform code to feature branches x to z and to dev or prod, step: 1}
+    - {from: github-repository, to: infra-repo, label: repository connected to Cloud Build}
+    - {from: infra-repo, to: feature-plan-trigger, label: feature branch push triggers terraform plan, step: 2}
+    - {from: feature-plan-trigger, to: tfstate-bucket, label: terraform plan (read state), step: 3}
+    - {from: infra-repo, to: dev-apply-trigger, label: dev branch triggers, step: 4}
+    - {from: dev-apply-trigger, to: dev-allow-http, label: terraform apply firewall rules, step: 5}
+    - {from: dev-apply-trigger, to: dev-apache-vm, label: terraform apply Apache VM, step: 5}
+    - {from: infra-repo, to: prod-apply-trigger, label: prod branch triggers, step: 6}
+    - {from: prod-apply-trigger, to: prod-allow-http, label: terraform apply firewall rules, step: 7}
+    - {from: prod-apply-trigger, to: prod-apache-vm, label: terraform apply Apache VM, step: 7}
+    - {from: dev-apply-trigger, to: tfstate-bucket, label: state lock and write}
+    - {from: prod-apply-trigger, to: tfstate-bucket, label: state lock and write}
     - {from: cloudbuild-terraform-sa, to: prod-apply-trigger, label: build service account}
 
 - slug: observability-managed-prometheus-monitoring
@@ -517,37 +618,39 @@
   category: observability
   tags: [managed prometheus, cloud monitoring, cloud logging, cloud trace, ops agent, grafana, promql]
   source: https://docs.cloud.google.com/stackdriver/docs/managed-prometheus
-  description: Managed collection on GKE and the Ops Agent on Compute Engine scrape Prometheus and OpenTelemetry metrics into Managed Service for Prometheus, which stores them for 24 months in Monarch alongside Cloud Monitoring system metrics, while logs and traces are collected by Cloud Logging and Cloud Trace. Teams query with PromQL from Cloud Monitoring dashboards or Grafana, and PromQL-based alerting policies notify on-call channels.
+  description: Prometheus-based collectors (managed collection on GKE, the Ops Agent on Compute Engine, an OpenTelemetry sidecar on Cloud Run, self-deployed collectors in other clouds and on-premises) write metrics using push through the Cloud Monitoring ingest API into Monarch, the Cloud Monitoring time-series store that also holds free platform metrics and log-based metrics for 24 months. Read clients (Grafana, the Cloud Monitoring UI and PromQL alerting rules) read using PromQL through the OSS PromQL query API, and Grafana dashboards and Prometheus alert rules can be imported into Cloud Monitoring.
   containers:
     - project: obs-prj
       region: europe-west1
+      account_at: [1, 1, 3, 1]
       vpcs:
         - name: app-vpc
           cidr: 10.130.0.0/16
+          at: [1, 1, 1, 3]
           subnets:
-            - {name: app-sub, cidr: 10.130.1.0/24, region: europe-west1}
+            - {name: app-sub, cidr: 10.130.1.0/24, region: europe-west1, at: [1, 1, 1, 3]}
   elements:
-    - {tf: google_container_cluster, name: app-gke, in: subnet:app-sub}
-    - {tf: google_compute_instance, name: legacy-app-vm, in: subnet:app-sub}
-    - {tf: google_compute_instance, name: grafana-vm, in: subnet:app-sub}
-    - {tf: google_monitoring_dashboard, name: golden-signals-dashboard, in: project:obs-prj}
-    - {tf: google_monitoring_alert_policy, name: promql-error-rate-alert, in: project:obs-prj}
-    - {tf: google_monitoring_notification_channel, name: oncall-channel, in: project:obs-prj}
-    - {tf: google_logging_project_bucket_config, name: app-log-bucket, in: project:obs-prj}
-    - {tf: google_monitoring_uptime_check_config, name: app-uptime-check, in: project:obs-prj}
-    - {tf: google_compute_global_forwarding_rule, name: app-glb, in: project:obs-prj}
-  actors: [users, user]
+    - {tf: google_container_cluster, name: app-gke, in: subnet:app-sub, at: [1, 1]}
+    - {tf: google_compute_instance, name: legacy-app-vm, in: subnet:app-sub, at: [1, 2]}
+    - {tf: google_compute_instance, name: grafana-vm, in: subnet:app-sub, at: [1, 3]}
+    - {tf: google_cloud_run_v2_service, name: cloud-run-app, in: project:obs-prj, at: [1, 4]}
+    - {tf: google_monitoring_monitored_project, name: monarch-metrics-scope, in: project:obs-prj, at: [2, 1, 1, 2]}
+    - {tf: google_monitoring_dashboard, name: golden-signals-dashboard, in: project:obs-prj, at: [2, 3]}
+    - {tf: google_monitoring_alert_policy, name: promql-error-rate-alert, in: project:obs-prj, at: [2, 4]}
+    - {tf: google_logging_metric, name: log-based-metrics, in: project:obs-prj, at: [3, 1]}
+  actors: [{type: datacenter, name: on-prem, at: [1, 2]}, {type: saas, name: other-clouds, at: [2, 2]}, {type: user, name: sre, at: [3, 2]}]
   flows:
-    - {from: users, to: app-glb, label: HTTPS, step: 1}
-    - {from: app-glb, to: app-gke, label: traffic, step: 2}
-    - {from: app-gke, to: golden-signals-dashboard, label: managed collection scrape to Monarch, step: 3}
-    - {from: legacy-app-vm, to: golden-signals-dashboard, label: Ops Agent Prometheus receiver, step: 3}
-    - {from: app-gke, to: app-log-bucket, label: container logs and traces, step: 4}
-    - {from: grafana-vm, to: golden-signals-dashboard, label: PromQL via Prometheus API, step: 5}
-    - {from: promql-error-rate-alert, to: app-gke, label: PromQL alert condition, step: 6}
-    - {from: promql-error-rate-alert, to: oncall-channel, label: notify, step: 7}
-    - {from: app-uptime-check, to: app-glb, label: synthetic probe, step: 8}
-    - {from: user, to: grafana-vm, label: SRE dashboards, step: 9}
+    - {from: app-gke, to: monarch-metrics-scope, label: managed collection writes using push, step: 1}
+    - {from: legacy-app-vm, to: monarch-metrics-scope, label: Ops Agent Prometheus receiver push, step: 1}
+    - {from: cloud-run-app, to: monarch-metrics-scope, label: OTel sidecar collector push, step: 1}
+    - {from: datacenter, to: monarch-metrics-scope, label: self-deployed collector push, step: 1}
+    - {from: other-clouds, to: monarch-metrics-scope, label: self-deployed collector push, step: 1}
+    - {from: log-based-metrics, to: monarch-metrics-scope, label: log-based and free platform metrics, step: 2}
+    - {from: grafana-vm, to: monarch-metrics-scope, label: reads using PromQL (query API), step: 3}
+    - {from: golden-signals-dashboard, to: monarch-metrics-scope, label: Cloud Monitoring UI PromQL, step: 3}
+    - {from: promql-error-rate-alert, to: monarch-metrics-scope, label: alerting rules evaluated with PromQL, step: 4}
+    - {from: grafana-vm, to: golden-signals-dashboard, label: import Grafana dashboards and Prometheus alerts}
+    - {from: sre, to: grafana-vm, label: SRE dashboards, step: 5}
 
 - slug: slo-monitoring-burn-rate-alerts
   title: SLO monitoring with Cloud Monitoring services, SLIs and burn-rate alerts

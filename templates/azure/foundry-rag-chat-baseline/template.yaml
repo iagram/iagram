@@ -10,87 +10,188 @@ tags:
 - firewall
 image: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/_images/baseline-microsoft-foundry.svg
 source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-microsoft-foundry-chat
-description: A chat UI on zone-redundant App Service behind Application Gateway with WAF invokes an agent that grounds Azure OpenAI model calls with vector search results from Azure AI Search and persists
-  conversation state in Cosmos DB and Storage. All PaaS dependencies are reached over private endpoints from a segmented virtual network, and agent egress to external tools passes through Azure Firewall
-  FQDN rules.
+description: A chat UI on zone-redundant App Service behind Application Gateway with WAF invokes a Microsoft Foundry Agent Service agent through a private endpoint; the agent grounds Azure OpenAI model
+  calls with retrieval from an AI Search knowledge store and keeps its dependencies (AI Search, Cosmos DB, Storage) behind private endpoints. All PaaS services are reached from a segmented virtual network
+  with private DNS zones and DDoS protection, agent egress to internet sources passes through Azure Firewall, operators reach a jump box through Azure Bastion, build agents deploy the app, and Application
+  Insights with Azure Monitor observe the workload.
 nodes:
 - {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2, 2, 1]}
 - {id: rg-rg-chat-baseline, type: azure.resource_group, name: rg-chat-baseline, parent: sub-workload, props: {location: westeurope}, at: [1, 1]}
-- {id: vpc-vnet-chat, type: azure.vnet, name: vnet-chat, parent: rg-rg-chat-baseline, props: {cidr: 10.0.0.0/16}, at: [1, 1, 1, 5]}
-- {id: sub-snet-appserviceplan, type: azure.subnet, name: snet-appServicePlan, parent: vpc-vnet-chat, props: {cidr: 10.0.0.0/24}, at: [1, 2]}
+- {id: grp-foundry-agent-service-dependencies, type: common.group, name: Foundry Agent Service dependencies, parent: rg-rg-chat-baseline, at: [2, 8, 1, 3]}
+- {id: grp-microsoft-foundry, type: common.group, name: Microsoft Foundry, parent: rg-rg-chat-baseline, at: [1, 13, 2, 1]}
+- {id: vpc-vnet-chat, type: azure.vnet, name: vnet-chat, parent: rg-rg-chat-baseline, props: {cidr: 10.0.0.0/16}, at: [1, 1, 1, 12]}
 - {id: sub-snet-appgateway, type: azure.subnet, name: snet-appGateway, parent: vpc-vnet-chat, props: {cidr: 10.0.1.0/24}, at: [1, 1, 2, 1]}
-- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-chat, props: {cidr: 10.0.2.0/27}, at: [2, 2]}
-- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-chat, props: {cidr: 10.0.5.0/26}, at: [1, 3, 2, 1]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: internet, type: common.internet, name: internet, at: [1, 3, 2, 1]}
-- {id: idp, type: common.idp, name: idp, at: [2, 1]}
+- {id: sub-snet-appserviceplan, type: azure.subnet, name: snet-appServicePlan, parent: vpc-vnet-chat, props: {cidr: 10.0.0.0/24}, at: [1, 2]}
+- {id: sub-snet-agentintegration, type: azure.subnet, name: snet-agentIntegration, parent: vpc-vnet-chat, props: {cidr: 10.0.3.0/24}, at: [1, 3]}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-chat, props: {cidr: 10.0.5.0/26}, at: [1, 4]}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-vnet-chat, props: {cidr: 10.0.6.0/26}, at: [1, 5]}
+- {id: sub-snet-jumpbox, type: azure.subnet, name: snet-jumpBox, parent: vpc-vnet-chat, props: {cidr: 10.0.7.0/27}, at: [1, 6]}
+- {id: sub-snet-buildagents, type: azure.subnet, name: snet-buildAgents, parent: vpc-vnet-chat, props: {cidr: 10.0.8.0/27}, at: [1, 7]}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-chat, props: {cidr: 10.0.2.0/27}, at: [2, 2, 1, 6]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: microsoft-entra-id, type: common.idp, name: Microsoft Entra ID, at: [2, 1]}
+- {id: internet-sources, type: common.internet, name: internet sources, at: [1, 3, 2, 1]}
 - id: appgw-waf
   type: azure.res.azurerm_application_gateway
   name: appgw-waf
   parent: sub-snet-appgateway
-  at: [1, 1]
-  props:
-    backend_address_pool: []
-    frontend_ip_configuration: []
-    frontend_port: []
-    gateway_ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: {}
+  props: {backend_address_pool: [], frontend_ip_configuration: [], frontend_port: [], gateway_ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 1
+  - 1
 - id: web-chat-ui
   type: azure.res.azurerm_linux_web_app
   name: web-chat-ui
   parent: sub-snet-appserviceplan
-  at: [1, 1]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
-- {id: azure-openai, type: azure.res.azurerm_cognitive_account, name: azure-openai, parent: rg-rg-chat-baseline, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
-    sku_name: changeme}, at: [2, 4]}
-- id: pe-openai
+  at:
+  - 1
+  - 1
+- id: pe-agent-integration
   type: azure.res.azurerm_private_endpoint
-  name: pe-openai
-  parent: sub-snet-privateendpoints
-  at: [1, 1]
+  name: pe-agent-integration
+  parent: sub-snet-agentintegration
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: srch-grounding, type: azure.res.azurerm_search_service, name: srch-grounding, parent: rg-rg-chat-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}, at: [2, 5]}
+  at:
+  - 1
+  - 1
+- {id: fw-egress, type: azure.res.azurerm_firewall, name: fw-egress, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme},
+  at: [1, 1]}
+- {id: bastion-chat, type: azure.res.azurerm_bastion_host, name: bastion-chat, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: vm-jumpbox, type: azure.virtual_machine, name: vm-jumpbox, parent: sub-snet-jumpbox, at: [1, 1]}
+- {id: vm-build-agents, type: azure.virtual_machine, name: vm-build-agents, parent: sub-snet-buildagents, at: [1, 1]}
+- id: pe-appservice
+  type: azure.res.azurerm_private_endpoint
+  name: pe-appservice
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 1
+- id: pe-keyvault
+  type: azure.res.azurerm_private_endpoint
+  name: pe-keyvault
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 2
+- id: pe-storage
+  type: azure.res.azurerm_private_endpoint
+  name: pe-storage
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 3
+- id: pe-foundry
+  type: azure.res.azurerm_private_endpoint
+  name: pe-foundry
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 4
 - id: pe-search
   type: azure.res.azurerm_private_endpoint
   name: pe-search
   parent: sub-snet-privateendpoints
-  at: [1, 2]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 5
+- id: pe-cosmos
+  type: azure.res.azurerm_private_endpoint
+  name: pe-cosmos
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 6
+- id: pe-agent-storage
+  type: azure.res.azurerm_private_endpoint
+  name: pe-agent-storage
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 7
+- id: pe-knowledge-store
+  type: azure.res.azurerm_private_endpoint
+  name: pe-knowledge-store
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 8
+- {id: pdns-privatelink, type: azure.res.azurerm_private_dns_zone, name: pdns-privatelink, parent: rg-rg-chat-baseline, props: {name: changeme, resource_group_name: changeme}, at: [2, 1]}
+- {id: ddos-plan, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-plan, parent: rg-rg-chat-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [
+    2, 2]}
+- {id: appi-chat, type: azure.res.azurerm_application_insights, name: appi-chat, parent: rg-rg-chat-baseline, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [2, 3]}
+- {id: law-chat, type: azure.res.azurerm_log_analytics_workspace, name: law-chat, parent: rg-rg-chat-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 4]}
+- {id: plan-chat-zone-redundant, type: azure.res.azurerm_service_plan, name: plan-chat-zone-redundant, parent: rg-rg-chat-baseline, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
+    sku_name: changeme}, at: [2, 5]}
+- {id: kv-chat, type: azure.key_vault, name: kv-chat, parent: rg-rg-chat-baseline, at: [2, 6]}
+- {id: stwebdeploy, type: azure.storage_account, name: stwebdeploy, parent: rg-rg-chat-baseline, at: [2, 7]}
+- {id: srch-grounding, type: azure.res.azurerm_search_service, name: srch-grounding, parent: grp-foundry-agent-service-dependencies, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}, at: [1, 1]}
 - id: cosmos-agent-threads
   type: azure.res.azurerm_cosmosdb_account
   name: cosmos-agent-threads
-  parent: rg-rg-chat-baseline
-  at: [2, 3]
-  props:
-    consistency_policy: {}
-    geo_location: []
-    location: westeurope
-    name: changeme
-    offer_type: changeme
-    resource_group_name: changeme
-- {id: stagentfiles, type: azure.storage_account, name: stagentfiles, parent: rg-rg-chat-baseline, at: [2, 2]}
-- {id: kv-chat, type: azure.key_vault, name: kv-chat, parent: rg-rg-chat-baseline, at: [2, 1]}
-- {id: fw-egress, type: azure.res.azurerm_firewall, name: fw-egress, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [1, 1]}
+  parent: grp-foundry-agent-service-dependencies
+  props: {consistency_policy: {}, geo_location: [], location: westeurope, name: changeme, offer_type: changeme, resource_group_name: changeme}
+  at:
+  - 1
+  - 2
+- {id: stagentfiles, type: azure.storage_account, name: stagentfiles, parent: grp-foundry-agent-service-dependencies, at: [1, 3]}
+- {id: srch-knowledge-store, type: azure.res.azurerm_search_service, name: srch-knowledge-store, parent: rg-rg-chat-baseline, props: {location: westeurope, name: changeme, resource_group_name: changeme,
+    sku: changeme}, at: [2, 11]}
+- id: foundry-account
+  type: azure.res.azurerm_ai_foundry
+  name: foundry-account
+  parent: grp-microsoft-foundry
+  props: {identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
+  at:
+  - 1
+  - 1
+- {id: azure-openai, type: azure.res.azurerm_cognitive_account, name: azure-openai, parent: grp-microsoft-foundry, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}, at: [2, 1]}
 edges:
-- {from: users, to: appgw-waf, label: HTTPS, step: '1'}
-- {from: appgw-waf, to: web-chat-ui, label: HTTPS via private endpoint, step: '2'}
-- {from: web-chat-ui, to: pe-openai, label: chat completion (managed identity), step: '3'}
-- {from: pe-openai, to: azure-openai, label: private link}
-- {from: web-chat-ui, to: pe-search, label: vector / semantic retrieval, step: '4'}
+- {from: user, to: appgw-waf, label: HTTPS, step: '1'}
+- {from: user, to: microsoft-entra-id, label: authentication}
+- {from: appgw-waf, to: pe-appservice, label: HTTPS via private endpoint}
+- {from: pe-appservice, to: web-chat-ui, label: private link}
+- {from: plan-chat-zone-redundant, to: web-chat-ui, label: zone-redundant instances (zones 1-3)}
+- {from: web-chat-ui, to: pe-keyvault, label: secrets and certificates}
+- {from: pe-keyvault, to: kv-chat, label: private link}
+- {from: web-chat-ui, to: pe-storage, label: deployment package}
+- {from: pe-storage, to: stwebdeploy, label: private link}
+- {from: web-chat-ui, to: pe-foundry, label: invoke agent (managed identity), step: '2'}
+- {from: pe-foundry, to: foundry-account, label: Foundry Agent Service, step: '3'}
+- {from: foundry-account, to: pe-agent-integration, label: agent integration subnet (virtual interface)}
+- {from: pe-agent-integration, to: pe-search, label: agent dependencies, step: '4'}
 - {from: pe-search, to: srch-grounding, label: private link}
-- {from: web-chat-ui, to: cosmos-agent-threads, label: persist conversation, step: '5'}
-- {from: web-chat-ui, to: stagentfiles, label: uploaded files}
-- {from: web-chat-ui, to: fw-egress, label: external tool calls, step: '6'}
-- {from: fw-egress, to: internet, label: allowed FQDNs}
-- {from: appgw-waf, to: kv-chat, label: TLS certificate}
-- {from: users, to: idp, label: Microsoft Entra ID authentication}
+- {from: pe-agent-integration, to: pe-cosmos, label: agent threads, step: '4'}
+- {from: pe-cosmos, to: cosmos-agent-threads, label: private link}
+- {from: pe-agent-integration, to: pe-agent-storage, label: agent files, step: '4'}
+- {from: pe-agent-storage, to: stagentfiles, label: private link}
+- {from: pe-agent-integration, to: fw-egress, label: outbound traffic, step: '5'}
+- {from: fw-egress, to: internet-sources, label: allowed FQDNs}
+- {from: foundry-account, to: azure-openai, label: model inference, step: '6'}
+- {from: pe-agent-integration, to: pe-knowledge-store, label: knowledge retrieval (optionally via an API gateway), step: '7'}
+- {from: pe-knowledge-store, to: srch-knowledge-store, label: private link}
+- {from: pdns-privatelink, to: vpc-vnet-chat, label: linked}
+- {from: ddos-plan, to: vpc-vnet-chat, label: DDoS Protection}
+- {from: web-chat-ui, to: appi-chat, label: telemetry}
+- {from: appi-chat, to: law-chat, label: Azure Monitor}
+- {from: bastion-chat, to: vm-jumpbox, label: operator access}
+- {from: vm-build-agents, to: stwebdeploy, label: publish deployment package}
 steps:
-- {n: '1', text: 'users → appgw-waf: HTTPS'}
-- {n: '2', text: 'appgw-waf → web-chat-ui: HTTPS via private endpoint'}
-- {n: '3', text: 'web-chat-ui → pe-openai: chat completion (managed identity)'}
-- {n: '4', text: 'web-chat-ui → pe-search: vector / semantic retrieval'}
-- {n: '5', text: 'web-chat-ui → cosmos-agent-threads: persist conversation'}
-- {n: '6', text: 'web-chat-ui → fw-egress: external tool calls'}
+- {n: '1', text: 'user → appgw-waf: HTTPS'}
+- {n: '2', text: 'web-chat-ui → pe-foundry: invoke agent (managed identity)'}
+- {n: '3', text: 'pe-foundry → foundry-account: Foundry Agent Service'}
+- {n: '4', text: 'pe-agent-integration → pe-search: agent dependencies'}
+- {n: '5', text: 'pe-agent-integration → fw-egress: outbound traffic'}
+- {n: '6', text: 'foundry-account → azure-openai: model inference'}
+- {n: '7', text: 'pe-agent-integration → pe-knowledge-store: knowledge retrieval (optionally via an API gateway)'}

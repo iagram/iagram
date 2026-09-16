@@ -10,47 +10,74 @@ tags:
 - sqs
 image: https://d2908q01vomqb2.cloudfront.net/f1f836cb4ea6efb2a0b1b99f41ad8b103eff4b59/2023/10/13/idp-llm-workflow.png
 source: https://aws.amazon.com/blogs/machine-learning/intelligent-document-processing-with-amazon-textract-amazon-bedrock-and-langchain/
-description: Documents uploaded to S3 start a Step Functions workflow that submits asynchronous Textract analysis jobs; completion notifications reach SQS through SNS and a Lambda collects the extracted
-  text. A classification step routes each document through a Comprehend custom classifier or a Bedrock model, and a Bedrock extraction step returns structured fields that are stored in DynamoDB and S3.
+description: Documents captured in S3 are OCR'd with Textract and categorised and tagged by a Comprehend custom classifier or a Bedrock Anthropic Claude model. The categorised documents then go through
+  extraction and enrichment, Textract queries, forms and tables, Comprehend entity and PII redaction and Claude summarisation, normalisation and Q&A over a vector store, before a verification stage routes
+  low-confidence predictions to a human-in-the-loop review and high-confidence ones, plus Claude spell corrections, to a post-processing Lambda that integrates the results into downstream databases and
+  applications.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-classification, type: common.group, name: classification, parent: reg-us-east-1, at: [1, 2, 2, 1]}
+- {id: grp-extraction-and-enrichment, type: common.group, name: extraction and enrichment, parent: reg-us-east-1, at: [1, 4, 2, 1]}
+- {id: grp-verification-and-human-review, type: common.group, name: verification and human review, parent: reg-us-east-1, at: [1, 5, 2, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: downstream-applications, type: common.database, name: downstream applications, at: [1, 3]}
 - {id: inbound-documents, type: aws.s3_bucket, name: inbound-documents, parent: reg-us-east-1, at: [1, 1]}
-- {id: idp-workflow, type: aws.res.aws_sfn_state_machine, name: idp-workflow, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}, at: [1, 2, 2, 1]}
-- {id: start-textract-fn, type: aws.lambda_function, name: start-textract-fn, parent: reg-us-east-1, at: [1, 3]}
-- {id: textract-job-status, type: aws.res.aws_sns_topic, name: textract-job-status, parent: reg-us-east-1, at: [1, 4]}
-- {id: textract-results, type: aws.sqs_queue, name: textract-results, parent: reg-us-east-1, at: [1, 5]}
-- {id: collect-text-fn, type: aws.lambda_function, name: collect-text-fn, parent: reg-us-east-1, at: [1, 6]}
+- {id: textract-ocr-fn, type: aws.lambda_function, name: textract-ocr-fn, parent: grp-classification, at: [1, 1]}
 - id: doc-type-classifier
   type: aws.res.aws_comprehend_document_classifier
   name: doc-type-classifier
-  parent: reg-us-east-1
-  at: [2, 4]
+  parent: grp-classification
   props: {data_access_role_arn: changeme, input_data_config: {}, language_code: changeme, name: changeme}
-- {id: classify-fn, type: aws.lambda_function, name: classify-fn, parent: reg-us-east-1, at: [2, 3]}
-- {id: extract-fields-fn, type: aws.lambda_function, name: extract-fields-fn, parent: reg-us-east-1, at: [2, 6]}
-- {id: extracted-fields, type: aws.dynamodb_table, name: extracted-fields, parent: reg-us-east-1, at: [1, 7]}
-- {id: processed-documents, type: aws.s3_bucket, name: processed-documents, parent: reg-us-east-1, at: [2, 7]}
+  at:
+  - 2
+  - 1
+- {id: claude-classifier, type: aws.res.aws_bedrock_inference_profile, name: claude-classifier, parent: grp-classification, props: {name: changeme}, at: [3, 1]}
+- {id: categorized-documents, type: aws.dynamodb_table, name: categorized-documents, parent: reg-us-east-1, at: [1, 3]}
+- {id: vector-db, type: aws.res.aws_opensearchserverless_collection, name: vector-db, parent: reg-us-east-1, props: {name: changeme}, at: [2, 3]}
+- {id: textract-analyze-fn, type: aws.lambda_function, name: textract-analyze-fn, parent: grp-extraction-and-enrichment, at: [1, 1]}
+- id: pii-entity-recognizer
+  type: aws.res.aws_comprehend_entity_recognizer
+  name: pii-entity-recognizer
+  parent: grp-extraction-and-enrichment
+  props: {data_access_role_arn: changeme, input_data_config: {}, language_code: changeme, name: changeme}
+  at:
+  - 2
+  - 1
+- {id: claude-extraction, type: aws.res.aws_bedrock_inference_profile, name: claude-extraction, parent: grp-extraction-and-enrichment, props: {name: changeme}, at: [3, 1]}
+- id: human-review-loop
+  type: aws.res.aws_sagemaker_flow_definition
+  name: human-review-loop
+  parent: grp-verification-and-human-review
+  props: {flow_definition_name: changeme, human_loop_config: {}, output_config: {}, role_arn: changeme}
+  at:
+  - 1
+  - 1
+- {id: post-processing-fn, type: aws.lambda_function, name: post-processing-fn, parent: grp-verification-and-human-review, at: [2, 2]}
+- {id: claude-spell-check, type: aws.res.aws_bedrock_inference_profile, name: claude-spell-check, parent: grp-verification-and-human-review, props: {name: changeme}, at: [3, 1]}
 edges:
-- {from: users, to: inbound-documents, label: upload PDF, step: '1'}
-- {from: inbound-documents, to: idp-workflow, label: S3 event via EventBridge, step: '2'}
-- {from: idp-workflow, to: start-textract-fn, step: '3'}
-- {from: start-textract-fn, to: textract-job-status, label: StartDocumentAnalysis with NotificationChannel, step: '4'}
-- {from: textract-job-status, to: textract-results, link: aws_sns_topic_subscription}
-- {from: textract-results, to: collect-text-fn, link: aws_lambda_event_source_mapping}
-- {from: collect-text-fn, to: idp-workflow, label: SendTaskSuccess with text, step: '5'}
-- {from: idp-workflow, to: classify-fn, step: '6'}
-- {from: classify-fn, to: doc-type-classifier, label: ClassifyDocument}
-- {from: idp-workflow, to: extract-fields-fn, label: Bedrock extraction prompt, step: '7'}
-- {from: extract-fields-fn, to: extracted-fields, label: structured JSON, step: '8'}
-- {from: extract-fields-fn, to: processed-documents, label: outputs}
+- {from: users, to: inbound-documents, label: Document capture, step: '1'}
+- {from: inbound-documents, to: textract-ocr-fn, label: Textract OCR, step: '2'}
+- {from: textract-ocr-fn, to: doc-type-classifier, label: Comprehend classification}
+- {from: textract-ocr-fn, to: claude-classifier, label: or Bedrock Claude classification}
+- {from: doc-type-classifier, to: categorized-documents, label: Categorized documents, step: '3'}
+- {from: claude-classifier, to: categorized-documents, label: Categorized documents}
+- {from: categorized-documents, to: textract-analyze-fn, label: 'Textract: query, forms, tables and more', step: '4'}
+- {from: categorized-documents, to: pii-entity-recognizer, label: 'Comprehend: entities, PII redaction'}
+- {from: categorized-documents, to: vector-db, label: Vector DB}
+- {from: vector-db, to: claude-extraction, label: 'Claude: summary, normalization, Q&A', step: '5'}
+- {from: textract-analyze-fn, to: human-review-loop, label: Route low confidence predictions, step: '6'}
+- {from: textract-analyze-fn, to: post-processing-fn, label: Route high confidence predictions, step: '7'}
+- {from: claude-extraction, to: claude-spell-check, label: 'Claude: spell check, corrections'}
+- {from: human-review-loop, to: post-processing-fn, label: reviewed predictions}
+- {from: claude-spell-check, to: post-processing-fn, label: corrected text}
+- {from: post-processing-fn, to: downstream-applications, label: Integrate into downstream databases / applications, step: '8'}
 steps:
-- {n: '1', text: 'users → inbound-documents: upload PDF'}
-- {n: '2', text: 'inbound-documents → idp-workflow: S3 event via EventBridge'}
-- {n: '3', text: idp-workflow → start-textract-fn}
-- {n: '4', text: 'start-textract-fn → textract-job-status: StartDocumentAnalysis with NotificationChannel'}
-- {n: '5', text: 'collect-text-fn → idp-workflow: SendTaskSuccess with text'}
-- {n: '6', text: idp-workflow → classify-fn}
-- {n: '7', text: 'idp-workflow → extract-fields-fn: Bedrock extraction prompt'}
-- {n: '8', text: 'extract-fields-fn → extracted-fields: structured JSON'}
+- {n: '1', text: 'users → inbound-documents: Document capture'}
+- {n: '2', text: 'inbound-documents → textract-ocr-fn: Textract OCR'}
+- {n: '3', text: 'doc-type-classifier → categorized-documents: Categorized documents'}
+- {n: '4', text: 'categorized-documents → textract-analyze-fn: Textract: query, forms, tables and more'}
+- {n: '5', text: 'vector-db → claude-extraction: Claude: summary, normalization, Q&A'}
+- {n: '6', text: 'textract-analyze-fn → human-review-loop: Route low confidence predictions'}
+- {n: '7', text: 'textract-analyze-fn → post-processing-fn: Route high confidence predictions'}
+- {n: '8', text: 'post-processing-fn → downstream applications: Integrate into downstream databases / applications'}

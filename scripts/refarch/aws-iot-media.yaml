@@ -136,40 +136,76 @@
   category: industry
   tags: [agriculture, greengrass, kinesis, kinesis video streams, flink, opensearch, sagemaker]
   source: https://docs.aws.amazon.com/architecture-diagrams/latest/smart-farm-on-aws/smart-farm-on-aws.html
-  description: Field sensors and cameras send data through Greengrass stream manager into Kinesis Data Streams and Kinesis Video Streams; Managed Service for Apache Flink derives real-time insights and notifies users through SNS, while S3, Glue, Athena and OpenSearch form the analytics layer. SageMaker trains edge-inference models and a Lambda importer forwards Device Defender reports to Security Hub.
+  description: Third-party sensors, drones and FreeRTOS cameras and sensors send data to an IoT Greengrass gateway (with a Lambda protocol converter and a SageMaker edge model) that exports through stream manager into Kinesis Data Streams and Kinesis Video Streams; Kinesis Data Firehose loads the S3 data lake continuously while Managed Service for Apache Flink derives real-time insights and notifies users through SNS, and OpenSearch behind API Gateway serves queries to client, mobile and web users. Glue Data Catalog, Athena and QuickSight store, visualize and query the lake, SageMaker and Ground Truth train the edge models, IoT Core Device Management and Device Defender manage the fleet with a Lambda importer forwarding Defender reports to Security Hub, and Direct Connect and PrivateLink bring in existing on-premises data and third-party sensor data from S3.
   containers:
-    - datacenter: farm
     - region: us-east-1
-      groups: [{label: ingestion}, {label: analytics}, {label: ml}]
+      at: [1, 2, 4, 1]
+      groups:
+        - {label: AWS IoT Greengrass, at: [2, 1, 2, 1]}
+        - {label: AWS IoT Core, at: [1, 3]}
+        - {label: streaming data acquisition and analytics, at: [3, 2, 1, 5]}
   elements:
-    - {tf: aws_iot_thing, name: greengrass-gateway, in: datacenter}
-    - {tf: aws_lambda_function, name: protocol-converter, in: group:ingestion}
-    - {tf: aws_kinesis_stream, name: sensor-stream, in: group:ingestion}
-    - {tf: aws_kinesis_video_stream, name: field-camera-stream, in: group:ingestion}
-    - {tf: aws_kinesisanalyticsv2_application, name: flink-insights, in: group:analytics}
-    - {tf: aws_sns_topic, name: farmer-alerts, in: group:analytics}
-    - {tf: aws_opensearch_domain, name: farm-search, in: group:analytics}
-    - {tf: aws_s3_bucket, name: farm-data-lake, in: group:analytics}
-    - {tf: aws_glue_crawler, name: lake-crawler, in: group:analytics}
-    - {tf: aws_athena_workgroup, name: farm-athena, in: group:analytics}
-    - {tf: aws_api_gateway_rest_api, name: insights-api, in: group:analytics}
-    - {tf: aws_sagemaker_endpoint, name: crop-model-endpoint, in: group:ml}
-  actors: [device, users]
+    - {tf: aws_dx_connection, name: onprem-dx, in: region, at: [1, 1]}
+    - {tf: aws_vpc_endpoint, name: third-party-privatelink, in: region, at: [1, 2]}
+    - {tf: aws_iot_thing, name: greengrass-gateway, in: group:AWS IoT Greengrass, at: [1, 1]}
+    - {tf: aws_sagemaker_model, name: edge-inference-model, in: group:AWS IoT Greengrass, at: [2, 1]}
+    - {tf: aws_lambda_function, name: protocol-converter, in: group:AWS IoT Greengrass, at: [3, 1]}
+    - {tf: aws_iot_logging_options, name: device-defender-audit, in: group:AWS IoT Core, at: [1, 1]}
+    - {tf: aws_iot_indexing_configuration, name: device-management-fleet-index, in: group:AWS IoT Core, at: [2, 1]}
+    - {tf: aws_securityhub_account, name: farm-security-hub, in: region, at: [1, 4]}
+    - {tf: aws_lambda_function, name: defender-report-importer, in: region, at: [2, 4]}
+    - {tf: aws_sagemaker_model, name: crop-model, in: region, at: [2, 2]}
+    - {tf: aws_sagemaker_workteam, name: ground-truth-labeling, in: region, at: [2, 3]}
+    - {tf: aws_s3_bucket, name: farm-data-lake, in: region, at: [2, 5]}
+    - {tf: aws_glue_catalog_database, name: farm-data-catalog, in: region, at: [1, 5]}
+    - {tf: aws_athena_workgroup, name: farm-athena, in: region, at: [2, 6]}
+    - {tf: aws_quicksight_dashboard, name: farm-dashboards, in: region, at: [1, 6]}
+    - {tf: aws_kinesis_video_stream, name: field-camera-stream, in: group:streaming data acquisition and analytics, at: [1, 1]}
+    - {tf: aws_kinesis_stream, name: sensor-stream, in: group:streaming data acquisition and analytics, at: [2, 1]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: lake-firehose, in: group:streaming data acquisition and analytics, at: [1, 2]}
+    - {tf: aws_kinesisanalyticsv2_application, name: flink-insights, in: group:streaming data acquisition and analytics, at: [2, 2]}
+    - {tf: aws_opensearch_domain, name: farm-search, in: group:streaming data acquisition and analytics, at: [1, 3]}
+    - {tf: aws_sns_topic, name: farmer-alerts, in: group:streaming data acquisition and analytics, at: [2, 3]}
+    - {tf: aws_api_gateway_rest_api, name: insights-api, in: group:streaming data acquisition and analytics, at: [1, 4]}
+  actors:
+    - {type: database, name: on-premises database, at: [1, 1]}
+    - {type: saas, name: third-party sensor data in S3, at: [2, 1]}
+    - {type: device, name: third-party sensors and drones, at: [3, 1]}
+    - {type: device, name: FreeRTOS cameras and sensors, at: [4, 1]}
+    - {type: client, name: client, at: [1, 3]}
+    - {type: mobile, name: mobile, at: [2, 3]}
+    - {type: users, name: users, at: [3, 3]}
   flows:
-    - {from: device, to: protocol-converter, label: third-party sensors and drones, step: 1}
-    - {from: device, to: greengrass-gateway, label: FreeRTOS sensors and cameras, step: 2}
+    - {from: third-party sensors and drones, to: protocol-converter, label: third-party protocols, step: 1}
+    - {from: protocol-converter, to: greengrass-gateway, label: protocol conversion}
+    - {from: FreeRTOS cameras and sensors, to: greengrass-gateway, label: FreeRTOS telemetry and video, step: 2}
     - {from: greengrass-gateway, to: sensor-stream, label: stream manager export, step: 3}
-    - {from: greengrass-gateway, to: field-camera-stream, label: live video, step: 4}
-    - {from: protocol-converter, to: sensor-stream, label: normalised records}
-    - {from: sensor-stream, to: flink-insights, label: real-time analytics, step: 5}
+    - {from: greengrass-gateway, to: field-camera-stream, label: live video}
+    - {from: greengrass-gateway, to: device-management-fleet-index, label: fleet management}
+    - {from: greengrass-gateway, to: device-defender-audit, label: security audit and detect}
+    - {from: crop-model, to: edge-inference-model, label: enable ML and edge inference, step: 4}
+    - {from: ground-truth-labeling, to: crop-model, label: labelled training data}
+    - {from: farm-data-lake, to: crop-model, label: training data}
+    - {from: sensor-stream, to: flink-insights, label: streaming analytics}
+    - {from: sensor-stream, to: lake-firehose, label: streaming data acquisition}
+    - {from: field-camera-stream, to: farm-data-lake, label: video fragments}
+    - {from: lake-firehose, to: farm-data-lake, label: prepare and load data continuously}
     - {from: flink-insights, to: farmer-alerts, label: threshold notifications, step: 5}
-    - {from: flink-insights, to: farm-search, label: indexed events, step: 6}
-    - {from: sensor-stream, to: farm-data-lake, label: raw archive, step: 6}
-    - {from: lake-crawler, to: farm-data-lake, label: infer schema on new objects, step: 11}
-    - {from: farm-athena, to: farm-data-lake, label: on-demand SQL}
-    - {from: users, to: insights-api, label: insights and dashboards, step: 9}
-    - {from: farm-data-lake, to: crop-model-endpoint, label: labelled training data, step: 10}
-    - {from: crop-model-endpoint, to: greengrass-gateway, label: model deployed for edge inference}
+    - {from: farmer-alerts, to: users, label: alerts}
+    - {from: flink-insights, to: farm-search, label: indexed insights, step: 6}
+    - {from: farm-search, to: insights-api, label: search and insights}
+    - {from: insights-api, to: client, label: insights}
+    - {from: insights-api, to: mobile, label: insights}
+    - {from: on-premises database, to: onprem-dx, label: data enrichment, step: 7}
+    - {from: onprem-dx, to: farm-data-lake, label: integrate existing on-premises data}
+    - {from: third-party sensor data in S3, to: third-party-privatelink, label: third-party sensor data, step: 8}
+    - {from: third-party-privatelink, to: farm-data-lake, label: utilize private connections}
+    - {from: farm-dashboards, to: users, label: store, visualize and query data, step: 9}
+    - {from: farm-athena, to: farm-data-lake, label: SQL queries, step: 10}
+    - {from: farm-athena, to: farm-dashboards, label: query results}
+    - {from: farm-data-catalog, to: farm-data-lake, label: table schemas, step: 11}
+    - {from: device-defender-audit, to: defender-report-importer, label: Device Defender reports}
+    - {from: defender-report-importer, to: farm-security-hub, label: findings import, step: 12}
 
 - slug: connected-vehicle-ingestion-pipeline
   title: Connected vehicle ingestion pipeline
@@ -283,251 +319,246 @@
   category: media
   tags: [kinesis video streams, cameras, video analytics, sagemaker, computer vision]
   source: https://docs.aws.amazon.com/kinesisvideostreams/latest/dg/how-it-works.html
-  description: Cameras and other producers push time-encoded media into Kinesis video streams with the producer SDK; the service durably stores and time-indexes fragments for the configured retention. Consumer applications on EC2 read fragments with the parser library and call a SageMaker endpoint for frame-level inference, publishing detections to a Kinesis data stream that a Lambda function writes to DynamoDB and, for alerts, to SNS.
+  description: Cameras, mobile apps and other producers push time-encoded media data into Kinesis video streams with the producer SDK; the service durably stores and time-indexes fragments for the configured retention. Consumers read the media data either as batch consumers (archived fragments) or continuous consumers (live fragments), running on EC2 instances inside AWS or as applications on the public internet.
   containers:
     - region: us-west-2
+      at: [1, 2, 2, 1]
       vpcs:
         - name: analytics
           cidr: 10.30.0.0/16
+          at: [1, 2, 2, 1]
           subnets:
             - {name: consumers-a, cidr: 10.30.1.0/24, az: a, public: false}
   elements:
-    - {tf: aws_kinesis_video_stream, name: camera-stream, in: region}
-    - {tf: aws_instance, name: kvs-consumer-app, in: subnet:consumers-a}
-    - {tf: aws_sagemaker_endpoint, name: object-detection-endpoint, in: region}
-    - {tf: aws_kinesis_stream, name: detections-stream, in: region}
-    - {tf: aws_lambda_function, name: detections-writer, in: region}
-    - {tf: aws_dynamodb_table, name: detections-table, in: region}
-    - {tf: aws_sns_topic, name: security-alerts, in: region}
-    - {tf: aws_s3_bucket, name: clip-archive, in: region}
-  actors: [device, users]
+    - {tf: aws_kinesis_video_stream, name: camera-stream, in: region, at: [1, 1, 2, 1]}
+    - {tf: aws_instance, name: batch-consumer, in: subnet:consumers-a, at: [1, 1]}
+    - {tf: aws_instance, name: continuous-consumer, in: subnet:consumers-a, at: [2, 1]}
+  actors: [{type: mobile, name: mobile producer, at: [1, 1]}, {type: device, name: camera producer, at: [2, 1]}, {type: client, name: internet batch consumer, at: [1, 3]}, {type: client, name: internet continuous consumer, at: [2, 3]}]
   flows:
-    - {from: device, to: camera-stream, label: PutMedia via producer SDK, step: 1}
-    - {from: camera-stream, to: kvs-consumer-app, label: GetMedia fragments, step: 2}
-    - {from: kvs-consumer-app, to: object-detection-endpoint, label: frame inference, step: 3}
-    - {from: kvs-consumer-app, to: detections-stream, label: detection events, step: 4}
-    - {from: detections-stream, to: detections-writer, link: aws_lambda_event_source_mapping}
-    - {from: detections-writer, to: detections-table, label: persist detections, step: 5}
-    - {from: detections-writer, to: security-alerts, label: high-severity alert, step: 5}
-    - {from: kvs-consumer-app, to: clip-archive, label: export clips of interest}
-    - {from: users, to: camera-stream, label: HLS/DASH playback of live or archived video}
+    - {from: mobile producer, to: camera-stream, label: media data via producer SDK, step: 1}
+    - {from: camera producer, to: camera-stream, label: media data via producer SDK, step: 1}
+    - {from: camera-stream, to: batch-consumer, label: GetMedia archived fragments, step: 2}
+    - {from: camera-stream, to: continuous-consumer, label: GetMedia live fragments, step: 2}
+    - {from: camera-stream, to: internet batch consumer, label: media data over the public internet, step: 3}
+    - {from: camera-stream, to: internet continuous consumer, label: media data over the public internet, step: 3}
 
 - slug: live-streaming-on-aws
   title: Live Streaming on AWS
   category: media
   tags: [medialive, mediapackage, cloudfront, hls, dash, live streaming]
   source: https://docs.aws.amazon.com/solutions/latest/live-streaming-on-aws/architecture-overview.html
-  description: MediaLive ingests two redundant contribution feeds and transcodes them into adaptive bitrate HLS; MediaPackage packages the output into HLS, DASH and CMAF endpoints and acts as the origin. CloudFront delivers the stream to viewers, authenticating to MediaPackage with a CDN identifier header stored in Secrets Manager, and a demo player is hosted from an S3 bucket.
+  description: MediaLive ingests two redundant contribution feeds (primary and backup inputs) from the live channel source and transcodes them into adaptive bitrate HLS; MediaPackage packages the output just in time into HLS, DASH, MSS and CMAF endpoints and acts as the origin (MediaPackage channels are configuration in Terraform, so the packaging hop is drawn as the MediaLive to CloudFront edge). CloudFront delivers the stream to OTT playback devices, authenticating to MediaPackage with a CDN identifier header stored in Secrets Manager, and a demo preview player is hosted from an S3 bucket behind a second CloudFront distribution.
   containers:
     - region: us-east-1
-      groups: [{label: ingest and transcode}, {label: package and deliver}]
+      at: [1, 2, 2, 1]
+      groups: [{label: ingest and transcode, at: [1, 1]}, {label: package and deliver, at: [1, 2]}]
   elements:
-    - {tf: aws_medialive_input_security_group, name: contribution-allowlist, in: group:ingest and transcode}
-    - {tf: aws_medialive_input, name: primary-input, in: group:ingest and transcode}
-    - {tf: aws_medialive_channel, name: live-channel, in: group:ingest and transcode}
-    - {tf: aws_media_package_channel, name: live-package-channel, in: group:package and deliver}
-    - {tf: aws_secretsmanager_secret, name: cdn-identifier, in: group:package and deliver}
-    - {tf: aws_cloudfront_distribution, name: live-cdn, in: group:package and deliver}
-    - {tf: aws_s3_bucket, name: demo-player-site, in: group:package and deliver}
-    - {tf: aws_lambda_function, name: stack-custom-resources, in: group:package and deliver}
-  actors: [server, users]
+    - {tf: aws_medialive_input, name: primary-input, in: group:ingest and transcode, at: [1, 1]}
+    - {tf: aws_medialive_input, name: backup-input, in: group:ingest and transcode, at: [2, 1]}
+    - {tf: aws_medialive_channel, name: live-channel, in: group:ingest and transcode, at: [1, 2, 2, 1]}
+    - {tf: aws_secretsmanager_secret, name: cdn-identifier, in: group:package and deliver, at: [2, 1]}
+    - {tf: aws_cloudfront_distribution, name: live-cdn, in: group:package and deliver, at: [1, 1, 1, 2]}
+    - {tf: aws_s3_bucket, name: demo-player-site, in: group:package and deliver, at: [2, 2]}
+    - {tf: aws_cloudfront_distribution, name: demo-player-cdn, in: group:package and deliver, at: [2, 3]}
+  actors: [{type: server, name: live channel source, at: [1, 1]}, {type: mobile, name: OTT devices, at: [1, 3]}, {type: users, name: users, at: [2, 3]}]
   flows:
-    - {from: server, to: primary-input, label: RTMP/RTP/HLS primary and backup feeds, step: 1}
-    - {from: primary-input, to: contribution-allowlist, label: allowed encoder CIDRs}
-    - {from: primary-input, to: live-channel, label: attached input, step: 1}
-    - {from: live-channel, to: live-package-channel, label: ABR HLS output, step: 2}
-    - {from: live-package-channel, to: live-cdn, label: HLS, DASH and CMAF origin endpoints, step: 3}
-    - {from: live-cdn, to: cdn-identifier, label: CDN authorization header}
-    - {from: live-cdn, to: demo-player-site, label: static player origin, step: 5}
-    - {from: users, to: live-cdn, label: playback, step: 4}
-    - {from: stack-custom-resources, to: live-package-channel, label: configure endpoints at deploy}
+    - {from: live channel source, to: primary-input, label: primary contribution feed, step: 1}
+    - {from: live channel source, to: backup-input, label: backup feed (dual ingest), step: 1}
+    - {from: primary-input, to: live-channel, label: attached input}
+    - {from: backup-input, to: live-channel, label: attached input}
+    - {from: live-channel, to: live-cdn, label: "ABR HLS output packaged by MediaPackage into HLS, DASH, MSS and CMAF origin endpoints", step: 2}
+    - {from: live-cdn, to: cdn-identifier, label: CDN identifier header verification, step: 3}
+    - {from: live-cdn, to: OTT devices, label: live stream playback on multiple devices, step: 4}
+    - {from: demo-player-cdn, to: demo-player-site, label: demo preview player origin, step: 5}
+    - {from: users, to: demo-player-cdn, label: open demo player}
 
 - slug: video-on-demand-on-aws
   title: Video on Demand on AWS
   category: media
   tags: [mediaconvert, step functions, vod, transcoding, cloudfront, dynamodb]
   source: https://docs.aws.amazon.com/solutions/latest/video-on-demand-on-aws/architecture-overview.html
-  description: Uploading a source video or a video plus metadata file to the source S3 bucket starts Step Functions ingest, process and publish workflows implemented with Lambda functions. MediaConvert transcodes the asset into the destination bucket, EventBridge rules capture job status changes, DynamoDB tracks workflow state, SNS sends notifications, SQS captures outputs, and CloudFront delivers the encoded content.
+  description: Uploading a source video or a video plus metadata file to the source S3 bucket (with a lifecycle policy to S3 Glacier Flexible Retrieval) starts Step Functions ingest, process and publish workflows implemented with Lambda functions; MediaInfo probes the source during ingest. MediaConvert transcodes the asset into the destination bucket (MediaPackage VOD packaging is configuration and is not drawn), CloudWatch Events rules capture job status changes, DynamoDB tracks workflow state, SNS sends ingest, encoding and workflow summaries, SQS captures workflow outputs, and CloudFront delivers the encoded content.
   containers:
     - region: us-east-1
-      groups: [{label: ingest}, {label: process}, {label: publish}]
+      at: [1, 2]
+      groups: [{label: source, at: [2, 1]}, {label: ingest workflow, at: [2, 2]}, {label: process workflow, at: [2, 3]}, {label: publish workflow, at: [2, 4]}, {label: delivery, at: [2, 5]}]
   elements:
-    - {tf: aws_s3_bucket, name: source-bucket, in: group:ingest}
-    - {tf: aws_sfn_state_machine, name: ingest-workflow, in: group:ingest}
-    - {tf: aws_lambda_function, name: workflow-steps, in: group:ingest}
-    - {tf: aws_dynamodb_table, name: vod-workflow-table, in: group:ingest}
-    - {tf: aws_sfn_state_machine, name: process-workflow, in: group:process}
-    - {tf: aws_media_convert_queue, name: transcode-queue, in: group:process}
-    - {tf: aws_cloudwatch_event_rule, name: mediaconvert-status-rule, in: group:process}
-    - {tf: aws_sfn_state_machine, name: publish-workflow, in: group:publish}
-    - {tf: aws_s3_bucket, name: destination-bucket, in: group:publish}
-    - {tf: aws_cloudfront_distribution, name: vod-cdn, in: group:publish}
-    - {tf: aws_sns_topic, name: workflow-notifications, in: group:publish}
-    - {tf: aws_sqs_queue, name: workflow-outputs, in: group:publish}
-  actors: [users, client]
+    - {tf: aws_s3_bucket, name: source-bucket, in: group:source, at: [1, 1]}
+    - {tf: aws_glacier_vault, name: glacier-flexible-retrieval, in: group:source, at: [2, 1]}
+    - {tf: aws_lambda_function, name: workflow-steps, in: region, at: [1, 2]}
+    - {tf: aws_dynamodb_table, name: vod-workflow-table, in: region, at: [1, 3]}
+    - {tf: aws_sfn_state_machine, name: ingest-workflow, in: group:ingest workflow, at: [1, 1]}
+    - {tf: aws_lambda_function, name: mediainfo, in: group:ingest workflow, at: [2, 1]}
+    - {tf: aws_sfn_state_machine, name: process-workflow, in: group:process workflow, at: [1, 1]}
+    - {tf: aws_media_convert_queue, name: transcode-queue, in: group:process workflow, at: [2, 1]}
+    - {tf: aws_cloudwatch_event_rule, name: mediaconvert-status-rule, in: group:process workflow, at: [3, 1]}
+    - {tf: aws_sfn_state_machine, name: publish-workflow, in: group:publish workflow, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: destination-bucket, in: group:publish workflow, at: [2, 1]}
+    - {tf: aws_cloudfront_distribution, name: vod-cdn, in: group:delivery, at: [1, 1]}
+    - {tf: aws_sns_topic, name: workflow-notifications, in: region, at: [3, 2]}
+    - {tf: aws_sqs_queue, name: workflow-outputs, in: region, at: [3, 4]}
+  actors: [{type: client, name: source video, at: [1, 1]}]
   flows:
-    - {from: client, to: source-bucket, label: upload source video and metadata, step: 1}
+    - {from: source video, to: source-bucket, label: new video uploaded, step: 1}
+    - {from: source-bucket, to: glacier-flexible-retrieval, label: lifecycle policy}
     - {from: source-bucket, to: ingest-workflow, label: S3 event starts ingest, step: 2}
-    - {from: ingest-workflow, to: workflow-steps, label: Lambda tasks, step: 3}
-    - {from: workflow-steps, to: vod-workflow-table, label: record asset state, step: 4}
+    - {from: workflow-steps, to: ingest-workflow, label: Lambda tasks, step: 3}
+    - {from: workflow-steps, to: process-workflow, label: Lambda tasks}
+    - {from: workflow-steps, to: publish-workflow, label: Lambda tasks}
+    - {from: workflow-steps, to: vod-workflow-table, label: record workflow state, step: 4}
+    - {from: ingest-workflow, to: mediainfo, label: probe source media}
     - {from: ingest-workflow, to: process-workflow, label: encoding profile selected}
     - {from: process-workflow, to: transcode-queue, label: submit MediaConvert job, step: 5}
-    - {from: transcode-queue, to: destination-bucket, label: HLS/DASH/MP4 outputs, step: 9}
+    - {from: transcode-queue, to: mediaconvert-status-rule, label: logging and CloudWatch Events rules, step: 6}
+    - {from: ingest-workflow, to: workflow-notifications, label: ingest summary, step: 7}
+    - {from: mediaconvert-status-rule, to: workflow-notifications, label: encoding complete}
     - {from: mediaconvert-status-rule, to: publish-workflow, link: aws_cloudwatch_event_target}
-    - {from: publish-workflow, to: workflow-notifications, label: publish complete, step: 7}
-    - {from: workflow-notifications, to: workflow-outputs, link: aws_sns_topic_subscription}
-    - {from: vod-cdn, to: destination-bucket, label: origin access, step: 10}
-    - {from: users, to: vod-cdn, label: playback}
+    - {from: publish-workflow, to: destination-bucket, label: MediaPackage destination file storage, step: 8}
+    - {from: transcode-queue, to: destination-bucket, label: HLS/DASH/MP4 outputs, step: 9}
+    - {from: destination-bucket, to: vod-cdn, label: delivery origin, step: 10}
+    - {from: destination-bucket, to: workflow-outputs, label: workflow outputs, step: 11}
+    - {from: publish-workflow, to: workflow-notifications, label: workflow summary}
 
 - slug: media2cloud-asset-management
   title: Media asset management with Media2Cloud on AWS
   category: media
   tags: [media asset management, media2cloud, rekognition, transcribe, opensearch, step functions]
   source: https://docs.aws.amazon.com/solutions/latest/media2cloud-on-aws/architecture-overview.html
-  description: Uploaded media triggers a main Step Functions state machine whose ingestion sub-workflow creates proxies with MediaConvert and whose analysis sub-workflow runs Rekognition, Transcribe, Comprehend and Textract jobs. DynamoDB holds workflow artifacts, OpenSearch indexes the extracted metadata for search, an IoT Core topic pushes progress to the web app served through CloudFront and API Gateway behind Cognito, and SNS publishes ingest and analysis completion events.
+  description: Users sign in through Cognito and call API Gateway, which starts a main Step Functions state machine whose ingestion sub-workflow creates proxies with MediaConvert and open-source tools and whose analysis sub-workflow runs Rekognition, Transcribe, Comprehend and Textract jobs (Textract has no Terraform resource and is not drawn). DynamoDB holds workflow artifacts, OpenSearch indexes the extracted metadata, web, proxy, ingest and logs S3 buckets store the assets, CloudWatch and EventBridge capture job state changes for optional downstream integration, an IoT Core topic pushes progress over MQTT to the web app served through CloudFront, and SNS publishes ingest and analysis completion events.
   containers:
     - region: us-east-1
-      groups: [{label: web tier}, {label: workflows}, {label: storage and search}]
+      at: [1, 2, 2, 1]
+      groups:
+        - {label: main state machine, at: [1, 3, 2, 1]}
+        - {label: media services and tools, at: [1, 4]}
+        - {label: AI/ML services, at: [2, 4]}
+        - {label: datastore services, at: [3, 3]}
+        - {label: notification services, at: [3, 4]}
+        - {label: events services, at: [3, 5]}
+        - {label: storage services, at: [4, 3, 1, 2]}
   elements:
-    - {tf: aws_cognito_user_pool, name: m2c-users, in: group:web tier}
-    - {tf: aws_api_gateway_rest_api, name: m2c-api, in: group:web tier}
-    - {tf: aws_cloudfront_distribution, name: m2c-web, in: group:web tier}
-    - {tf: aws_iot_topic_rule, name: workflow-progress-topic, in: group:web tier}
-    - {tf: aws_sfn_state_machine, name: main-state-machine, in: group:workflows}
-    - {tf: aws_sfn_state_machine, name: ingestion-workflow, in: group:workflows}
-    - {tf: aws_sfn_state_machine, name: analysis-workflow, in: group:workflows}
-    - {tf: aws_media_convert_queue, name: proxy-transcode-queue, in: group:workflows}
-    - {tf: aws_rekognition_collection, name: face-collection, in: group:workflows}
-    - {tf: aws_cloudwatch_event_rule, name: job-state-change-rule, in: group:workflows}
-    - {tf: aws_s3_bucket, name: ingest-bucket, in: group:storage and search}
-    - {tf: aws_s3_bucket, name: proxy-bucket, in: group:storage and search}
-    - {tf: aws_dynamodb_table, name: ingest-table, in: group:storage and search}
-    - {tf: aws_opensearch_domain, name: media-search, in: group:storage and search}
-    - {tf: aws_sns_topic, name: m2c-events, in: group:storage and search}
-  actors: [users]
+    - {tf: aws_cognito_user_pool, name: m2c-users, in: region, at: [2, 1]}
+    - {tf: aws_api_gateway_rest_api, name: m2c-api, in: region, at: [2, 2]}
+    - {tf: aws_cloudfront_distribution, name: m2c-web, in: region, at: [3, 2]}
+    - {tf: aws_sfn_state_machine, name: main-state-machine, in: group:main state machine, at: [1, 1, 2, 1]}
+    - {tf: aws_sfn_state_machine, name: ingestion-workflow, in: group:main state machine, at: [1, 2]}
+    - {tf: aws_sfn_state_machine, name: analysis-workflow, in: group:main state machine, at: [2, 2]}
+    - {tf: aws_media_convert_queue, name: proxy-transcode-queue, in: group:media services and tools, at: [1, 1]}
+    - {tf: aws_lambda_function, name: open-source-tools, in: group:media services and tools, at: [1, 2]}
+    - {tf: aws_rekognition_collection, name: face-collection, in: group:AI/ML services, at: [1, 1]}
+    - {tf: aws_transcribe_vocabulary, name: transcribe-vocabulary, in: group:AI/ML services, at: [1, 2]}
+    - {tf: aws_comprehend_entity_recognizer, name: comprehend-recognizer, in: group:AI/ML services, at: [1, 3]}
+    - {tf: aws_dynamodb_table, name: ingest-table, in: group:datastore services, at: [1, 1]}
+    - {tf: aws_opensearch_domain, name: media-search, in: group:datastore services, at: [1, 2]}
+    - {tf: aws_iot_topic_rule, name: workflow-progress-topic, in: group:notification services, at: [1, 1]}
+    - {tf: aws_sns_topic, name: m2c-events, in: group:notification services, at: [1, 2]}
+    - {tf: aws_cloudwatch_log_group, name: m2c-logs, in: group:events services, at: [1, 1]}
+    - {tf: aws_cloudwatch_event_rule, name: job-state-change-rule, in: group:events services, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: web-bucket, in: group:storage services, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: proxy-bucket, in: group:storage services, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: ingest-bucket, in: group:storage services, at: [1, 3]}
+    - {tf: aws_s3_bucket, name: logs-bucket, in: group:storage services, at: [1, 4]}
+  actors: [{type: users, name: users, at: [1, 1]}, {type: server, name: downstream process, at: [2, 3]}]
   flows:
+    - {from: users, to: m2c-users, label: Cognito sign-in, step: 1}
+    - {from: m2c-users, to: m2c-api, label: authenticated REST calls, step: 2}
     - {from: users, to: m2c-web, label: web application, step: 3}
-    - {from: m2c-web, to: m2c-api, label: IAM-authenticated REST calls, step: 2}
-    - {from: m2c-api, to: m2c-users, label: Cognito sign-in, step: 1}
-    - {from: m2c-api, to: main-state-machine, label: start ingestion, step: 4}
-    - {from: users, to: ingest-bucket, label: upload media}
-    - {from: main-state-machine, to: ingestion-workflow, label: sub-state machine, step: 5}
+    - {from: m2c-web, to: web-bucket, label: static web app origin}
+    - {from: m2c-api, to: main-state-machine, label: start workflow, step: 4}
+    - {from: main-state-machine, to: ingestion-workflow, label: ingest sub-workflow, step: 5}
+    - {from: main-state-machine, to: analysis-workflow, label: analysis sub-workflow, step: 6}
     - {from: ingestion-workflow, to: proxy-transcode-queue, label: proxy generation}
+    - {from: ingestion-workflow, to: open-source-tools, label: media, image and document tools}
+    - {from: analysis-workflow, to: face-collection, label: Rekognition analysis}
+    - {from: analysis-workflow, to: transcribe-vocabulary, label: Transcribe jobs}
+    - {from: analysis-workflow, to: comprehend-recognizer, label: Comprehend jobs}
+    - {from: main-state-machine, to: ingest-table, label: workflow artifacts, step: 7}
+    - {from: main-state-machine, to: media-search, label: index ML metadata, step: 8}
+    - {from: main-state-machine, to: ingest-bucket, label: ingest, proxy and logs storage, step: 9}
     - {from: proxy-transcode-queue, to: proxy-bucket, label: proxies and thumbnails}
-    - {from: main-state-machine, to: analysis-workflow, label: sub-state machine, step: 6}
-    - {from: analysis-workflow, to: face-collection, label: Rekognition face search}
-    - {from: job-state-change-rule, to: analysis-workflow, link: aws_cloudwatch_event_target}
-    - {from: analysis-workflow, to: ingest-table, label: status and artifact pointers, step: 7}
-    - {from: analysis-workflow, to: media-search, label: index ML metadata, step: 8}
-    - {from: analysis-workflow, to: workflow-progress-topic, label: MQTT progress to front end, step: 12}
-    - {from: analysis-workflow, to: m2c-events, label: analysis_completed, step: 13}
+    - {from: main-state-machine, to: m2c-logs, label: workflow logs, step: 10}
+    - {from: job-state-change-rule, to: main-state-machine, link: aws_cloudwatch_event_target}
+    - {from: job-state-change-rule, to: downstream process, label: integration with optional downstream process, step: 11}
+    - {from: main-state-machine, to: workflow-progress-topic, label: progress over IoT MQTT protocol, step: 12}
+    - {from: workflow-progress-topic, to: users, label: IoT MQTT protocol}
+    - {from: main-state-machine, to: m2c-events, label: ingest and analysis completed events, step: 13}
 
 - slug: gamelift-multiplayer-backend
   title: Session-based multiplayer game backend with Amazon GameLift Servers
   category: industry
   tags: [gamelift, game servers, matchmaking, game backend, dynamodb, lambda]
   source: https://docs.aws.amazon.com/gamelift/latest/developerguide/gamelift-howitworks.html
-  description: Game clients authenticate to a serverless backend service that requests game session placements from GameLift Servers rather than holding AWS credentials themselves. A game session queue places sessions on managed EC2 fleets built from an uploaded server build, players connect directly to the assigned game server, and DynamoDB stores player profiles and session records.
+  description: Game clients call a backend service that requests game session placements from GameLift Servers rather than holding AWS credentials themselves; the backend service also talks to external services such as identity or storefront providers. GameLift host management tools (a game session queue and placement) place sessions on managed EC2 fleets running the game server, and players connect directly to the assigned game server.
   containers:
     - region: us-east-1
-      groups: [{label: backend service}, {label: game hosting}]
+      at: [2, 1]
+      groups: [{label: backend service, at: [1, 1]}, {label: game hosting, at: [2, 1]}]
   elements:
-    - {tf: aws_cognito_user_pool, name: player-identity, in: group:backend service}
-    - {tf: aws_api_gateway_rest_api, name: game-backend-api, in: group:backend service}
-    - {tf: aws_lambda_function, name: session-placement, in: group:backend service}
-    - {tf: aws_dynamodb_table, name: player-profiles, in: group:backend service}
-    - {tf: aws_dynamodb_table, name: game-sessions, in: group:backend service}
-    - {tf: aws_gamelift_build, name: server-build, in: group:game hosting}
-    - {tf: aws_gamelift_fleet, name: game-fleet, in: group:game hosting}
-    - {tf: aws_gamelift_alias, name: live-fleet-alias, in: group:game hosting}
-    - {tf: aws_gamelift_game_session_queue, name: placement-queue, in: group:game hosting}
-    - {tf: aws_s3_bucket, name: build-artifacts, in: group:game hosting}
-  actors: [client]
+    - {tf: aws_api_gateway_rest_api, name: game-backend-api, in: group:backend service, at: [1, 1]}
+    - {tf: aws_lambda_function, name: session-placement, in: group:backend service, at: [1, 2]}
+    - {tf: aws_gamelift_fleet, name: game-fleet, in: group:game hosting, at: [1, 1]}
+    - {tf: aws_gamelift_game_session_queue, name: placement-queue, in: group:game hosting, at: [1, 2]}
+  actors: [{type: client, name: game clients, at: [1, 1]}, {type: saas, name: external services, at: [1, 2]}]
   flows:
-    - {from: client, to: player-identity, label: sign in, step: 1}
-    - {from: client, to: game-backend-api, label: join request with latency data, step: 2}
+    - {from: game clients, to: game-backend-api, label: join request with latency data, step: 1}
     - {from: game-backend-api, to: session-placement, label: proxy integration}
-    - {from: session-placement, to: player-profiles, label: read player data, step: 3}
-    - {from: session-placement, to: placement-queue, label: StartGameSessionPlacement, step: 4}
-    - {from: placement-queue, to: live-fleet-alias, label: destination priority}
-    - {from: live-fleet-alias, to: game-fleet, label: routing alias}
-    - {from: build-artifacts, to: server-build, label: uploaded server binaries}
-    - {from: server-build, to: game-fleet, label: deployed to fleet instances, step: 0}
+    - {from: session-placement, to: external services, label: identity and other external services, step: 2}
+    - {from: session-placement, to: placement-queue, label: StartGameSessionPlacement, step: 3}
+    - {from: placement-queue, to: game-fleet, label: place game session on fleet, step: 4}
     - {from: game-fleet, to: session-placement, label: game session connection info, step: 5}
-    - {from: session-placement, to: game-sessions, label: record session and player sessions, step: 6}
-    - {from: client, to: game-fleet, label: connect directly to game server, step: 7}
+    - {from: game clients, to: game-fleet, label: connect directly to game server, step: 6}
 
 - slug: wavelength-5g-edge-application
   title: 5G edge application in an AWS Wavelength Zone
   category: edge
   tags: [wavelength, 5g, carrier gateway, edge compute, low latency]
   source: https://docs.aws.amazon.com/wavelength/latest/developerguide/how-wavelengths-work.html
-  description: A VPC in the parent region is extended with a subnet in a Wavelength Zone inside the carrier network; EC2 instances there serve mobile devices through a carrier gateway that NATs Carrier IP addresses and admits only traffic from the carrier network. Latency-sensitive inference runs at the edge while state, control plane and analytics stay in regional subnets reached over the VPC local route.
+  description: A VPC in the parent region spans two regional Availability Zones (A and B) and is extended with a subnet in a Wavelength Zone inside the communications service provider (CSP) network; each subnet hosts EC2 instances. A carrier gateway at the edge of the Wavelength Zone NATs Carrier IP addresses and admits only traffic from the CSP network, so mobile devices on the 5G network reach the edge instances with minimal latency while the regional subnets keep the rest of the application in the parent region.
   containers:
     - region: us-east-1
+      at: [1, 1, 2, 1]
       vpcs:
         - name: edge-app
           cidr: 10.40.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: wavelength-bos, cidr: 10.40.10.0/24, az: wl1-bos-wlz-1, public: true}
-            - {name: region-private-a, cidr: 10.40.1.0/24, az: a, public: false}
+            - {name: region-private-a, cidr: 10.40.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: region-private-b, cidr: 10.40.2.0/24, az: b, public: false, at: [1, 1]}
+            - {name: wavelength-bos, cidr: 10.40.10.0/24, az: wl1-bos-wlz-1, public: true, at: [1, 1]}
   elements:
-    - {tf: aws_ec2_carrier_gateway, name: carrier-gw, in: vpc:edge-app}
-    - {tf: aws_instance, name: edge-inference-server, in: subnet:wavelength-bos}
-    - {tf: aws_autoscaling_group, name: edge-server-asg, in: subnet:wavelength-bos}
-    - {tf: aws_ecs_cluster, name: edge-container-cluster, in: subnet:wavelength-bos}
-    - {tf: aws_instance, name: control-plane-api, in: subnet:region-private-a}
-    - {tf: aws_rds_cluster, name: session-db, in: subnet:region-private-a}
-    - {tf: aws_s3_bucket, name: model-artifacts, in: region}
-    - {tf: aws_route53_zone, name: edge-dns, in: region}
-  actors: [mobile]
+    - {tf: aws_instance, name: app-server-a, in: subnet:region-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: app-server-b, in: subnet:region-private-b, at: [1, 1]}
+    - {tf: aws_instance, name: edge-server, in: subnet:wavelength-bos, at: [1, 1]}
+    - {tf: aws_ec2_carrier_gateway, name: carrier-gw, in: vpc:edge-app, at: [1, 4]}
+  actors: [{type: internet, name: CSP network, at: [1, 2]}, {type: mobile, name: mobile device, at: [2, 2]}]
   flows:
-    - {from: mobile, to: carrier-gw, label: 5G traffic to Carrier IP, step: 1}
-    - {from: carrier-gw, to: edge-inference-server, label: NAT to instance private IP, step: 2}
-    - {from: edge-server-asg, to: edge-inference-server, label: scales edge instances}
-    - {from: edge-inference-server, to: control-plane-api, label: VPC local route to region, step: 3}
-    - {from: control-plane-api, to: session-db, label: session state, step: 4}
-    - {from: model-artifacts, to: edge-container-cluster, label: model pull at task start}
-    - {from: mobile, to: edge-dns, label: resolve edge endpoint}
-    - {from: edge-inference-server, to: carrier-gw, label: 0.0.0.0/0 route for outbound}
+    - {from: mobile device, to: CSP network, label: 5G access}
+    - {from: CSP network, to: carrier-gw, label: Carrier IP traffic from the carrier network}
+    - {from: carrier-gw, to: edge-server, label: NAT to instance private IP}
 
 - slug: local-zones-low-latency-application
   title: Low-latency application tier in an AWS Local Zone
   category: edge
   tags: [local zones, low latency, hybrid, direct connect, edge compute]
   source: https://docs.aws.amazon.com/local-zones/latest/ug/how-local-zones-work.html
-  description: A regional VPC is extended with a subnet in a Local Zone close to end users; an Application Load Balancer and EC2 instances there terminate user traffic through the Local Zone's own internet connection while the database and asynchronous processing remain in the parent region. Direct Connect from an on-premises site takes the shortest path to the Local Zone without hairpinning through the region.
+  description: A VPC in the parent region us-west-2 spans two regional Availability Zones (us-west-2a and us-west-2b) and is extended with a third subnet in the Local Zone us-west-2-lax-1, which is close to end users. Each subnet hosts EC2 instances; the Local Zone subnet terminates latency-sensitive traffic through the Local Zone's own internet connection while the regional subnets keep the rest of the application in the parent region.
   containers:
-    - datacenter: on-premises
     - region: us-west-2
+      at: [1, 1]
       vpcs:
         - name: app
           cidr: 10.50.0.0/16
+          at: [1, 1]
           subnets:
-            - {name: lax-public, cidr: 10.50.100.0/24, az: lax-1a, public: true}
-            - {name: lax-private, cidr: 10.50.101.0/24, az: lax-1a, public: false}
-            - {name: region-private-a, cidr: 10.50.1.0/24, az: a, public: false}
+            - {name: region-private-a, cidr: 10.50.1.0/24, az: a, public: false, at: [1, 1]}
+            - {name: region-private-b, cidr: 10.50.2.0/24, az: b, public: false, at: [1, 1]}
+            - {name: lax-subnet, cidr: 10.50.100.0/24, az: lax-1, public: true, at: [1, 1]}
   elements:
-    - {tf: aws_internet_gateway, name: app-igw, in: vpc:app}
-    - {tf: aws_lb, name: lax-alb, in: subnet:lax-public}
-    - {tf: aws_autoscaling_group, name: lax-web-asg, in: subnet:lax-private}
-    - {tf: aws_instance, name: lax-web-server, in: subnet:lax-private}
-    - {tf: aws_db_instance, name: app-db, in: subnet:region-private-a}
-    - {tf: aws_sqs_queue, name: async-jobs, in: region}
-    - {tf: aws_lambda_function, name: job-worker, in: region}
-    - {tf: aws_dx_connection, name: onprem-dx, in: region}
-    - {tf: aws_instance, name: legacy-app-server, in: datacenter}
-  actors: [users]
-  flows:
-    - {from: users, to: app-igw, label: HTTPS via Local Zone internet egress, step: 1}
-    - {from: app-igw, to: lax-alb, step: 1}
-    - {from: lax-alb, to: lax-web-server, label: target group, step: 2}
-    - {from: lax-web-asg, to: lax-web-server, label: capacity in Local Zone}
-    - {from: lax-web-server, to: app-db, label: reads and writes to parent region, step: 3}
-    - {from: lax-web-server, to: async-jobs, label: enqueue background work, step: 4}
-    - {from: async-jobs, to: job-worker, link: aws_lambda_event_source_mapping}
-    - {from: legacy-app-server, to: onprem-dx, label: private connectivity, step: 5}
-    - {from: onprem-dx, to: lax-web-server, label: shortest path to Local Zone subnet, step: 5}
+    - {tf: aws_instance, name: app-server-a, in: subnet:region-private-a, at: [1, 1]}
+    - {tf: aws_instance, name: app-server-b, in: subnet:region-private-b, at: [1, 1]}
+    - {tf: aws_instance, name: lax-app-server, in: subnet:lax-subnet, at: [1, 1]}
+  actors: []
+  flows: []
 
 - slug: outposts-on-premises-extension
   title: On-premises workloads on AWS Outposts racks

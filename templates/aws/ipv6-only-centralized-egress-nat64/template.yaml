@@ -10,43 +10,47 @@ tags:
 - centralized egress
 image: https://docs.aws.amazon.com/images/reference-architecture-diagrams/latest/ipv6-vpc-architectures/images/ipv6-vpc-architectures-11.png
 source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/ipv6-vpc-architectures/ipv6-centralized-egress-nat64.html
-description: Workloads in IPv6-only subnets enable DNS64 so that IPv4-only destinations resolve to synthesized addresses in the 64:ff9b::/96 well-known prefix, and a route for that prefix points at the
-  Transit Gateway. The Transit Gateway forwards to a central egress VPC where NAT gateways perform NAT64 to translate to IPv4 and send the traffic through the internet gateway, while native IPv6 traffic
-  exits through the egress VPC's egress-only internet gateway.
+description: An instance in the IPv6-only private subnet of spoke VPC A enables DNS64 so that IPv4-only destinations resolve to synthesized addresses in the 64:ff9b::/96 well-known prefix; the subnet route
+  table sends that prefix and "::/0" to the Transit Gateway ENI in the spoke's TGW subnet. The Transit Gateway route table forwards to the egress VPC, whose TGW subnet route table points 64:ff9b::/96 at
+  the NAT gateway in the public subnet; the NAT gateway performs NAT64 to translate to IPv4 and the public subnet route table sends the traffic through the internet gateway to the internet.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-egress, type: aws.vpc, name: egress, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 3]}
-- {id: az-egress-a, type: aws.availability_zone, name: a, parent: vpc-egress, props: {zone: a}, at: [2, 1]}
-- {id: sub-egress-public-a, type: aws.subnet, name: egress-public-a, parent: az-egress-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
-- {id: az-egress-b, type: aws.availability_zone, name: b, parent: vpc-egress, props: {zone: b}, at: [2, 2]}
-- {id: sub-egress-public-b, type: aws.subnet, name: egress-public-b, parent: az-egress-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
-- {id: sub-egress-tgw-a, type: aws.subnet, name: egress-tgw-a, parent: az-egress-a, props: {cidr: 10.0.10.0/28, az: a, public: false}, at: [2, 1]}
-- {id: vpc-spoke-ipv6, type: aws.vpc, name: spoke-ipv6, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: az-spoke-ipv6-a, type: aws.availability_zone, name: a, parent: vpc-spoke-ipv6, props: {zone: a}, at: [1, 1]}
-- {id: sub-ipv6-only-a, type: aws.subnet, name: ipv6-only-a, parent: az-spoke-ipv6-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-spoke-ipv6-b, type: aws.availability_zone, name: b, parent: vpc-spoke-ipv6, props: {zone: b}, at: [2, 1]}
-- {id: sub-ipv6-only-b, type: aws.subnet, name: ipv6-only-b, parent: az-spoke-ipv6-b, props: {cidr: 10.1.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: vpc-spoke-a, type: aws.vpc, name: spoke-a, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [2, 1]}
+- {id: az-spoke-a-a, type: aws.availability_zone, name: a, parent: vpc-spoke-a, props: {zone: a}, at: [1, 1]}
+- {id: sub-spoke-a-private, type: aws.subnet, name: spoke-a-private, parent: az-spoke-a-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: sub-spoke-a-tgw, type: aws.subnet, name: spoke-a-tgw, parent: az-spoke-a-a, props: {cidr: 10.0.0.224/28, az: a, public: false}, at: [2, 1]}
+- {id: vpc-egress, type: aws.vpc, name: egress, parent: reg-us-east-1, props: {cidr: 10.10.0.0/16}, at: [2, 3]}
+- {id: az-egress-a, type: aws.availability_zone, name: a, parent: vpc-egress, props: {zone: a}, at: [2, 1, 2, 1]}
+- {id: sub-egress-public, type: aws.subnet, name: egress-public, parent: az-egress-a, props: {cidr: 10.10.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: sub-egress-tgw, type: aws.subnet, name: egress-tgw, parent: az-egress-a, props: {cidr: 10.10.1.224/28, az: a, public: false}, at: [2, 1]}
 - {id: internet, type: common.internet, name: internet, at: [1, 2]}
-- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1, at: [1, 2]}
-- {id: nat64-a, type: aws.res.aws_nat_gateway, name: nat64-a, parent: sub-egress-public-a, at: [1, 1]}
-- {id: nat64-b, type: aws.res.aws_nat_gateway, name: nat64-b, parent: sub-egress-public-b, at: [1, 1]}
-- {id: egress-igw, type: aws.res.aws_internet_gateway, name: egress-igw, parent: vpc-egress, at: [1, 1]}
-- {id: egress-eigw, type: aws.res.aws_egress_only_internet_gateway, name: egress-eigw, parent: vpc-egress, props: {vpc_id: changeme}, at: [1, 2]}
-- {id: ipv6-app-a, type: aws.ec2_instance, name: ipv6-app-a, parent: sub-ipv6-only-a, at: [1, 1]}
-- {id: ipv6-app-b, type: aws.ec2_instance, name: ipv6-app-b, parent: sub-ipv6-only-b, at: [1, 1]}
+- {id: spoke-a-private-route-table, type: aws.res.aws_route_table, name: spoke-a-private-route-table, parent: reg-us-east-1, props: {vpc_id: changeme}, at: [1, 1]}
+- {id: ec2-instance-a, type: aws.ec2_instance, name: ec2-instance-a, parent: sub-spoke-a-private, at: [1, 1]}
+- {id: spoke-a-tgw-eni, type: aws.res.aws_network_interface, name: spoke-a-tgw-eni, parent: sub-spoke-a-tgw, props: {subnet_id: changeme}, at: [1, 1]}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1, at: [2, 2]}
+- {id: tgw-route-table, type: aws.res.aws_ec2_transit_gateway_route_table, name: tgw-route-table, parent: reg-us-east-1, props: {transit_gateway_id: changeme}, at: [3, 2]}
+- {id: egress-igw, type: aws.res.aws_internet_gateway, name: egress-igw, parent: vpc-egress, at: [1, 2]}
+- {id: nat64-gateway, type: aws.res.aws_nat_gateway, name: nat64-gateway, parent: sub-egress-public, at: [1, 1]}
+- {id: egress-tgw-eni, type: aws.res.aws_network_interface, name: egress-tgw-eni, parent: sub-egress-tgw, props: {subnet_id: changeme}, at: [1, 1]}
+- {id: egress-public-route-table, type: aws.res.aws_route_table, name: egress-public-route-table, parent: vpc-egress, props: {vpc_id: changeme}, at: [2, 2]}
+- {id: egress-tgw-route-table, type: aws.res.aws_route_table, name: egress-tgw-route-table, parent: vpc-egress, props: {vpc_id: changeme}, at: [3, 2]}
 edges:
-- {from: hub-tgw, to: vpc-spoke-ipv6, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: hub-tgw, to: vpc-egress, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: ipv6-app-a, to: hub-tgw, label: 'DNS64 answer 64:ff9b::/96 routed to TGW', step: '1'}
-- {from: hub-tgw, to: nat64-a, label: egress route table, step: '2'}
-- {from: nat64-a, to: egress-igw, label: NAT64 to IPv4 source, step: '3'}
-- {from: egress-igw, to: internet, label: IPv4-only destination, step: '4'}
-- {from: ipv6-app-b, to: hub-tgw, label: 'native IPv6 ::/0'}
-- {from: hub-tgw, to: egress-eigw, label: IPv6 destinations}
-- {from: egress-eigw, to: internet, label: IPv6}
+- {from: hub-tgw, to: vpc-spoke-a, label: TGW attachment, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: hub-tgw, to: vpc-egress, label: TGW attachment, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: ec2-instance-a, to: spoke-a-tgw-eni, label: 'DNS64 answer 64:ff9b::/96 and ::/0 -> TGW-ENI', step: '1'}
+- {from: spoke-a-tgw-eni, to: hub-tgw, label: TGW attachment, step: '2'}
+- {from: hub-tgw, to: egress-tgw-eni, label: 'TGW route table: 64:ff9b::/96 -> Egress VPC', step: '3'}
+- {from: egress-tgw-eni, to: nat64-gateway, label: 'TGW subnet route table: 64:ff9b::/96 -> NATGW-ID', step: '4'}
+- {from: nat64-gateway, to: egress-igw, label: 'NAT64 to IPv4 source, 0.0.0.0/0 -> IGW-ID', step: '5'}
+- {from: egress-igw, to: internet, label: IPv4-only destination}
+- {from: spoke-a-private-route-table, to: spoke-a-tgw-eni, label: spoke VPC A private subnet route table}
+- {from: tgw-route-table, to: hub-tgw, label: '10.0.0.0/16 -> Spoke VPC A, 64:ff9b::/96 -> Egress VPC'}
+- {from: egress-public-route-table, to: nat64-gateway, label: egress VPC public subnet route table}
+- {from: egress-tgw-route-table, to: egress-tgw-eni, label: egress VPC TGW subnet route table}
 steps:
-- {n: '1', text: 'ipv6-app-a → hub-tgw: DNS64 answer 64:ff9b::/96 routed to TGW'}
-- {n: '2', text: 'hub-tgw → nat64-a: egress route table'}
-- {n: '3', text: 'nat64-a → egress-igw: NAT64 to IPv4 source'}
-- {n: '4', text: 'egress-igw → internet: IPv4-only destination'}
+- {n: '1', text: 'ec2-instance-a → spoke-a-tgw-eni: DNS64 answer 64:ff9b::/96 and ::/0 -> TGW-ENI'}
+- {n: '2', text: 'spoke-a-tgw-eni → hub-tgw: TGW attachment'}
+- {n: '3', text: 'hub-tgw → egress-tgw-eni: TGW route table: 64:ff9b::/96 -> Egress VPC'}
+- {n: '4', text: 'egress-tgw-eni → nat64-gateway: TGW subnet route table: 64:ff9b::/96 -> NATGW-ID'}
+- {n: '5', text: 'nat64-gateway → egress-igw: NAT64 to IPv4 source, 0.0.0.0/0 -> IGW-ID'}

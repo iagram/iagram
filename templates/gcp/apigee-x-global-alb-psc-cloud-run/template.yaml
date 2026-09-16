@@ -10,43 +10,58 @@ tags:
 - api management
 image: https://docs.cloud.google.com/static/apigee/docs/api-platform/images/apigee-arch-diagrams/apigee-arch-b.png
 source: https://docs.cloud.google.com/apigee/docs/api-platform/architecture/overview
-description: The Apigee organization's runtime instance lives in a Google-managed tenant project and is reached from the customer VPC through a Private Service Connect service attachment; a PSC network
-  endpoint group makes that attachment the backend of a global external Application Load Balancer with a managed certificate. API proxies deployed to the Apigee environment forward to target services such
-  as a Cloud Run backend, and Cloud Armor on the backend service protects the public entry point.
+description: The Apigee organization's runtime instance lives in a Google-managed Apigee X runtime project and in Google's VPC, and is reached from the customer project's VPC through a Private Service Connect
+  service attachment; a PSC network endpoint group in the customer VPC makes that attachment the backend of a global external Application Load Balancer with a managed certificate. API consumers call the
+  load balancer from the internet, API proxies deployed to the Apigee environment forward to target services such as a Cloud Run backend in the customer project, and Cloud Armor on the backend service protects
+  the public entry point.
 nodes:
-- {id: prj-apigee-prj, type: gcp.project, name: apigee-prj, props: {project_id: apigee-prj-123456, project: changeme, region: europe-west1}, at: [1, 2]}
-- {id: vpc-apigee-vpc, type: gcp.vpc, name: apigee-vpc, parent: prj-apigee-prj, props: {cidr: 10.40.0.0/16}, at: [1, 6]}
-- {id: sub-psc-neg-sub, type: gcp.subnetwork, name: psc-neg-sub, parent: vpc-apigee-vpc, props: {cidr: 10.40.1.0/24, region: europe-west1}, at: [1, 1]}
-- {id: client, type: common.client, name: client, at: [1, 1]}
-- {id: api-ip, type: gcp.res.google_compute_global_address, name: api-ip, parent: prj-apigee-prj, props: {name: changeme}, at: [1, 1]}
-- {id: api-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: api-https-rule, parent: prj-apigee-prj, props: {name: changeme, target: changeme}, at: [1, 2]}
-- {id: api-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: api-https-proxy, parent: prj-apigee-prj, props: {name: changeme, url_map: changeme}, at: [1, 3]}
-- {id: api-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: api-cert, parent: prj-apigee-prj, at: [2, 3]}
-- {id: api-url-map, type: gcp.res.google_compute_url_map, name: api-url-map, parent: prj-apigee-prj, props: {name: changeme}, at: [1, 4]}
-- {id: apigee-backend, type: gcp.res.google_compute_backend_service, name: apigee-backend, parent: prj-apigee-prj, props: {name: changeme}, at: [1, 5]}
-- {id: api-armor-policy, type: gcp.res.google_compute_security_policy, name: api-armor-policy, parent: prj-apigee-prj, props: {name: changeme}, at: [2, 5]}
+- {id: prj-apigee-prj, type: gcp.project, name: apigee-prj, props: {project_id: apigee-prj-123456, project: changeme, region: europe-west1}, at: [1, 2, 2, 1]}
+- {id: vpc-customer-vpc, type: gcp.vpc, name: customer-vpc, parent: prj-apigee-prj, props: {cidr: 10.40.0.0/16}, at: [1, 5, 2, 1]}
+- {id: sub-psc-neg-sub, type: gcp.subnetwork, name: psc-neg-sub, parent: vpc-customer-vpc, props: {cidr: 10.40.1.0/24, region: europe-west1}, at: [1, 1]}
+- {id: prj-apigee-runtime-prj, type: gcp.project, name: apigee-runtime-prj, props: {project_id: apigee-runtime-prj-123456, project: changeme, region: europe-west1}, at: [1, 3, 2, 1]}
+- {id: vpc-google-vpc, type: gcp.vpc, name: google-vpc, parent: prj-apigee-runtime-prj, props: {cidr: 10.50.0.0/16}, at: [2, 1, 1, 2]}
+- {id: api-consumers, type: common.client, name: api-consumers, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [2, 1]}
+- {id: api-ip, type: gcp.res.google_compute_global_address, name: api-ip, parent: prj-apigee-prj, props: {name: changeme}, at: [2, 1]}
+- {id: api-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: api-https-rule, parent: prj-apigee-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
+- {id: api-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: api-https-proxy, parent: prj-apigee-prj, props: {name: changeme, url_map: changeme}, at: [1, 2]}
+- {id: api-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: api-cert, parent: prj-apigee-prj, at: [2, 2]}
+- {id: api-url-map, type: gcp.res.google_compute_url_map, name: api-url-map, parent: prj-apigee-prj, props: {name: changeme}, at: [1, 3]}
+- {id: apigee-backend, type: gcp.res.google_compute_backend_service, name: apigee-backend, parent: prj-apigee-prj, props: {name: changeme}, at: [1, 4]}
+- {id: api-armor-policy, type: gcp.res.google_compute_security_policy, name: api-armor-policy, parent: prj-apigee-prj, props: {name: changeme}, at: [2, 4]}
 - {id: apigee-psc-neg, type: gcp.res.google_compute_region_network_endpoint_group, name: apigee-psc-neg, parent: sub-psc-neg-sub, props: {name: changeme, region: eu-west-1}, at: [1, 1]}
-- {id: apigee-org, type: gcp.res.google_apigee_organization, name: apigee-org, parent: prj-apigee-prj, props: {project_id: my-project-123456}, at: [2, 7]}
-- {id: apigee-runtime-ew1, type: gcp.res.google_apigee_instance, name: apigee-runtime-ew1, parent: prj-apigee-prj, props: {location: westeurope, name: changeme, org_id: changeme}, at: [1, 7]}
-- {id: prod-env, type: gcp.res.google_apigee_environment, name: prod-env, parent: prj-apigee-prj, props: {name: changeme, org_id: changeme}, at: [3, 7]}
-- {id: orders-backend, type: gcp.cloud_run_service, name: orders-backend, parent: prj-apigee-prj, at: [1, 8]}
+- {id: orders-backend, type: gcp.cloud_run_service, name: orders-backend, parent: prj-apigee-prj, at: [2, 3]}
+- {id: apigee-org, type: gcp.res.google_apigee_organization, name: apigee-org, parent: prj-apigee-runtime-prj, props: {project_id: my-project-123456}, at: [1, 1]}
+- {id: prod-env, type: gcp.res.google_apigee_environment, name: prod-env, parent: prj-apigee-runtime-prj, props: {name: changeme, org_id: changeme}, at: [1, 2]}
+- id: apigee-psc-attachment
+  type: gcp.res.google_compute_service_attachment
+  name: apigee-psc-attachment
+  parent: vpc-google-vpc
+  props: {connection_preference: changeme, enable_proxy_protocol: true, name: changeme, nat_subnets: [], target_service: changeme}
+  at:
+  - 1
+  - 1
+- {id: apigee-runtime-ew1, type: gcp.res.google_apigee_instance, name: apigee-runtime-ew1, parent: vpc-google-vpc, props: {location: westeurope, name: changeme, org_id: changeme}, at: [1, 2]}
 edges:
-- {from: client, to: api-https-rule, label: HTTPS API call, step: '1'}
+- {from: api-consumers, to: internet}
+- {from: internet, to: api-https-rule, label: HTTPS API call, step: '1'}
+- {from: api-ip, to: api-https-rule}
 - {from: api-https-rule, to: api-https-proxy, step: '2'}
 - {from: api-cert, to: api-https-proxy}
 - {from: api-https-proxy, to: api-url-map, step: '3'}
 - {from: api-url-map, to: apigee-backend, step: '4'}
 - {from: api-armor-policy, to: apigee-backend, label: Cloud Armor}
 - {from: apigee-backend, to: apigee-psc-neg, step: '5'}
-- {from: apigee-psc-neg, to: apigee-runtime-ew1, label: PSC service attachment, step: '6'}
+- {from: apigee-psc-neg, to: apigee-psc-attachment, label: Private Service Connect, step: '6'}
+- {from: apigee-psc-attachment, to: apigee-runtime-ew1}
 - {from: apigee-org, to: apigee-runtime-ew1}
 - {from: prod-env, to: apigee-runtime-ew1, label: environment attached to instance}
 - {from: apigee-runtime-ew1, to: orders-backend, label: proxy target endpoint, step: '7'}
 steps:
-- {n: '1', text: 'client → api-https-rule: HTTPS API call'}
+- {n: '1', text: 'internet → api-https-rule: HTTPS API call'}
 - {n: '2', text: api-https-rule → api-https-proxy}
 - {n: '3', text: api-https-proxy → api-url-map}
 - {n: '4', text: api-url-map → apigee-backend}
 - {n: '5', text: apigee-backend → apigee-psc-neg}
-- {n: '6', text: 'apigee-psc-neg → apigee-runtime-ew1: PSC service attachment'}
+- {n: '6', text: 'apigee-psc-neg → apigee-psc-attachment: Private Service Connect'}
 - {n: '7', text: 'apigee-runtime-ew1 → orders-backend: proxy target endpoint'}

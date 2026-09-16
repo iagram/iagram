@@ -7,41 +7,85 @@
   category: industry
   tags: [retail, e-commerce, unified commerce, headless, mach, appsync, eventbridge]
   source: https://docs.aws.amazon.com/solutions/unified-commerce-on-aws/
-  description: Guidance for Unified Commerce on AWS applies MACH principles so web, mobile and store frontends call one AWS AppSync aggregation API that fronts differentiating microservices on DynamoDB and Neptune, SaaS commerce applications and COTS applications on EC2 and RDS. Every microservice publishes events to EventBridge custom buses; decoupled consumers stream them to an S3 data platform queried with Athena and feed SageMaker forecasts and real-time personalization back to the engagement channels.
+  description: Guidance for Unified Commerce on AWS applies MACH principles so web, mobile, store and in-game channels reach frontend experience apps (CloudFront, S3, Cognito, WAF), serverless web and POS apps on Lambda and DynamoDB, and one AWS AppSync aggregation API that fronts product, pricing and customer microservices on DynamoDB and Neptune, Internet SaaS applications, COTS order management on EC2 and RDS in a VPC, and enterprise WMS/ERP systems. Every service publishes events to an EventBridge custom bus; consumers stream them to an S3 data platform catalogued as a data lake and queried with Redshift and Athena, drive Pinpoint customer engagement, and feed SageMaker Canvas and SageMaker forecasts back to the channels.
   containers:
     - datacenter: on-premises
+      at: [3, 4]
     - region: us-east-1
-      groups: [{label: experience-api}, {label: microservices}, {label: cots-applications}, {label: data-platform}]
+      account_at: [2, 1, 1, 3]
+      groups:
+        - {label: frontend-experience-apps, at: [1, 1]}
+        - {label: web-app, at: [1, 2]}
+        - {label: pos-app, at: [1, 3]}
+        - {label: aggregation-api, at: [2, 2]}
+        - {label: microservices, at: [3, 2, 1, 2]}
+        - {label: personalization-marketing, at: [4, 3]}
+        - {label: data-platform, at: [5, 1, 1, 2]}
+        - {label: ai-ml, at: [5, 3]}
+      vpcs:
+        - name: cots-applications
+          cidr: 10.10.0.0/16
+          at: [3, 1]
+          subnets:
+            - {name: cots-private-a, cidr: 10.10.1.0/24, az: a, public: false, at: [1, 1]}
   elements:
-    - {tf: aws_cloudfront_distribution, name: storefront-cdn, in: region}
-    - {tf: aws_cognito_user_pool, name: shopper-identity, in: group:experience-api}
-    - {tf: aws_appsync_graphql_api, name: commerce-aggregation-api, in: group:experience-api}
-    - {tf: aws_lambda_function, name: cart-service, in: group:microservices}
-    - {tf: aws_dynamodb_table, name: cart-and-orders, in: group:microservices}
-    - {tf: aws_neptune_cluster, name: product-graph, in: group:microservices}
-    - {tf: aws_instance, name: oms-cots-app, in: group:cots-applications}
-    - {tf: aws_db_instance, name: oms-database, in: group:cots-applications}
-    - {tf: aws_cloudwatch_event_bus, name: commerce-events, in: region}
-    - {tf: aws_s3_bucket, name: commerce-data-lake, in: group:data-platform}
-    - {tf: aws_athena_workgroup, name: commerce-analytics, in: group:data-platform}
-    - {tf: aws_sagemaker_endpoint, name: demand-forecast-endpoint, in: group:data-platform}
-  actors: [users, mobile, saas, datacenter]
+    - {tf: aws_cloudfront_distribution, name: storefront-cdn, in: group:frontend-experience-apps, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: storefront-assets, in: group:frontend-experience-apps, at: [1, 2]}
+    - {tf: aws_cognito_user_pool, name: shopper-identity, in: group:frontend-experience-apps, at: [1, 3]}
+    - {tf: aws_wafv2_web_acl, name: storefront-waf, in: group:frontend-experience-apps, at: [1, 4]}
+    - {tf: aws_lambda_function, name: web-app-function, in: group:web-app, at: [1, 1]}
+    - {tf: aws_dynamodb_table, name: web-app-table, in: group:web-app, at: [1, 2]}
+    - {tf: aws_lambda_function, name: pos-app-function, in: group:pos-app, at: [1, 1]}
+    - {tf: aws_dynamodb_table, name: pos-app-table, in: group:pos-app, at: [1, 2]}
+    - {tf: aws_appsync_graphql_api, name: commerce-aggregation-api, in: group:aggregation-api, at: [1, 1]}
+    - {tf: aws_ecs_task_definition, name: product-service, in: group:microservices, at: [1, 1]}
+    - {tf: aws_dynamodb_table, name: product-table, in: group:microservices, at: [1, 2]}
+    - {tf: aws_ecs_task_definition, name: pricing-service, in: group:microservices, at: [1, 3]}
+    - {tf: aws_dynamodb_table, name: pricing-table, in: group:microservices, at: [1, 4]}
+    - {tf: aws_ecs_task_definition, name: customer-service, in: group:microservices, at: [1, 5]}
+    - {tf: aws_neptune_cluster, name: customer-graph, in: group:microservices, at: [1, 6]}
+    - {tf: aws_instance, name: oms-cots-app, in: subnet:cots-private-a, at: [1, 1]}
+    - {tf: aws_db_instance, name: oms-database, in: subnet:cots-private-a, at: [1, 2]}
+    - {tf: aws_cloudwatch_event_bus, name: commerce-events, in: region, at: [4, 2]}
+    - {tf: aws_s3_bucket, name: commerce-data-lake, in: group:data-platform, at: [1, 1]}
+    - {tf: aws_glue_catalog_database, name: data-lake-catalog, in: group:data-platform, at: [1, 2]}
+    - {tf: aws_redshift_cluster, name: commerce-warehouse, in: group:data-platform, at: [1, 3]}
+    - {tf: aws_athena_workgroup, name: commerce-analytics, in: group:data-platform, at: [1, 4]}
+    - {tf: aws_pinpoint_app, name: customer-engagement, in: group:personalization-marketing, at: [1, 1]}
+    - {tf: aws_sagemaker_domain, name: sagemaker-canvas, in: group:ai-ml, at: [1, 1]}
+    - {tf: aws_sagemaker_endpoint, name: demand-forecast-endpoint, in: group:ai-ml, at: [1, 2]}
+  actors: [{type: users, at: [1, 1]}, {type: mobile, at: [1, 2]}, {type: client, name: store-pos, at: [1, 3]}, {type: saas, at: [2, 4]}, datacenter]
   flows:
-    - {from: users, to: storefront-cdn, label: HTTPS storefront, step: 1}
-    - {from: storefront-cdn, to: commerce-aggregation-api, label: GraphQL, step: 2}
-    - {from: mobile, to: commerce-aggregation-api, label: GraphQL}
+    - {from: users, to: storefront-cdn, label: web storefront, step: 1}
+    - {from: mobile, to: storefront-cdn, label: mobile app, step: 1}
+    - {from: store-pos, to: pos-app-function, label: in-store and in-game sales, step: 1}
+    - {from: storefront-waf, to: storefront-cdn, link: aws_wafv2_web_acl_association}
+    - {from: storefront-cdn, to: storefront-assets, label: static assets}
+    - {from: storefront-cdn, to: web-app-function, label: web app}
+    - {from: web-app-function, to: web-app-table, label: session and cart state}
+    - {from: pos-app-function, to: pos-app-table, label: store transactions}
+    - {from: web-app-function, to: commerce-aggregation-api, label: GraphQL, step: 1}
+    - {from: pos-app-function, to: commerce-aggregation-api, label: GraphQL, step: 1}
     - {from: commerce-aggregation-api, to: shopper-identity, label: JWT validation}
-    - {from: commerce-aggregation-api, to: cart-service, label: resolver, step: 3}
-    - {from: cart-service, to: cart-and-orders, label: PutItem}
-    - {from: commerce-aggregation-api, to: product-graph, label: product relationships}
-    - {from: commerce-aggregation-api, to: saas, label: SaaS commerce APIs, step: 4}
-    - {from: commerce-aggregation-api, to: oms-cots-app, label: order management, step: 5}
+    - {from: commerce-aggregation-api, to: product-service, label: resolver, step: 2}
+    - {from: commerce-aggregation-api, to: pricing-service, label: resolver, step: 2}
+    - {from: commerce-aggregation-api, to: customer-service, label: resolver, step: 2}
+    - {from: product-service, to: product-table, label: product catalog}
+    - {from: pricing-service, to: pricing-table, label: prices and promotions}
+    - {from: customer-service, to: customer-graph, label: customer relationships}
+    - {from: commerce-aggregation-api, to: saas, label: service desk and content management APIs, step: 3}
+    - {from: commerce-aggregation-api, to: oms-cots-app, label: order management, step: 4}
     - {from: oms-cots-app, to: oms-database, label: SQL}
-    - {from: commerce-aggregation-api, to: datacenter, label: ERP and WMS integration}
-    - {from: cart-service, to: commerce-events, label: OrderPlaced event, step: 6}
+    - {from: commerce-aggregation-api, to: datacenter, label: warehouse management and ERP integration, step: 5}
+    - {from: product-service, to: commerce-events, label: domain events, step: 6}
+    - {from: oms-cots-app, to: commerce-events, label: OrderPlaced event, step: 6}
     - {from: commerce-events, to: commerce-data-lake, label: event archive, step: 7}
+    - {from: commerce-data-lake, to: data-lake-catalog, label: metadata}
+    - {from: commerce-data-lake, to: commerce-warehouse, label: COPY}
     - {from: commerce-data-lake, to: commerce-analytics, label: SQL over S3}
-    - {from: commerce-data-lake, to: demand-forecast-endpoint, label: training data, step: 8}
+    - {from: commerce-events, to: customer-engagement, label: engagement events, step: 8}
+    - {from: commerce-data-lake, to: sagemaker-canvas, label: training data, step: 9}
+    - {from: sagemaker-canvas, to: demand-forecast-endpoint, label: deploy forecast model}
 
 - slug: retail-product-substitutions-opensearch-knn
   title: Retail product substitutions with OpenSearch k-NN embeddings
@@ -79,77 +123,107 @@
   category: industry
   tags: [financial services, payments, iso 20022, event-driven, sqs, dynamodb, multi-region]
   source: https://docs.aws.amazon.com/solutions/iso-20022-messaging-workflows-on-aws/
-  description: Guidance for ISO 20022 Messaging Workflows on AWS receives payment messages through a Cognito-protected API Gateway, assigns a transaction ID recorded in DynamoDB, and passes the message through incoming, processing and releasing microservices connected by FIFO SQS queues. Each stage persists the ISO 20022 payload to S3 and updates the transaction status (ACCP, ACTC, ACSP, ACSC or RJCT); a timeout function rejects transactions that exceed the SLA and SNS notifies consumers when an outgoing message is ready.
+  description: Guidance for ISO 20022 Messaging Workflows on AWS receives payment messages through a Cognito-protected API Gateway reached via Route 53 and protected by AWS WAF, assigns a transaction ID recorded in DynamoDB, and passes the message through incoming, consuming and releasing microservices connected by FIFO SQS queues, with FIPS 140-2, KYC/AML and fraud/liquidity microservices invoked during consumption. Each stage persists the ISO 20022 payload to S3 and updates the transaction status (ACCP, ACTC, ACSP, ACSC or RJCT); a timeout function rejects transactions that exceed the SLA, SNS notifies consumers when an outgoing message is ready, and reader and writer MQ microservices bridge Amazon MQ to an on-premises messaging queue, mainframe and Db2 database over Direct Connect or Site-to-Site VPN.
   containers:
     - datacenter: on-premises
+      at: [2, 2]
     - region: us-east-1
-      groups: [{label: api-layer}, {label: workflow}]
+      at: [1, 2]
+      account_at: [1, 2, 1, 3]
+      groups:
+        - {label: api-layer, at: [1, 1, 3, 1]}
+        - {label: compliance-msas, at: [1, 2, 1, 3]}
+        - {label: api-consumers, at: [1, 6]}
+        - {label: workflow, at: [2, 2, 1, 5]}
+        - {label: data-layer, at: [3, 2, 1, 5]}
   elements:
-    - {tf: aws_cognito_user_pool, name: api-consumer-auth, in: group:api-layer}
-    - {tf: aws_api_gateway_rest_api, name: payments-api, in: group:api-layer}
-    - {tf: aws_lambda_function, name: transaction-msa, in: group:api-layer}
-    - {tf: aws_dynamodb_table, name: transaction-status, in: region}
-    - {tf: aws_sqs_queue, name: incoming-queue, in: group:workflow}
-    - {tf: aws_lambda_function, name: incoming-msa, in: group:workflow}
-    - {tf: aws_sqs_queue, name: processing-queue, in: group:workflow}
-    - {tf: aws_lambda_function, name: processing-msa, in: group:workflow}
-    - {tf: aws_sqs_queue, name: releasing-queue, in: group:workflow}
-    - {tf: aws_lambda_function, name: releasing-msa, in: group:workflow}
-    - {tf: aws_s3_bucket, name: iso20022-messages, in: region}
-    - {tf: aws_sns_topic, name: outgoing-notifications, in: region}
-    - {tf: aws_lambda_function, name: timeout-msa, in: group:workflow}
-    - {tf: aws_kms_key, name: payments-cmk, in: region}
-  actors: [client, datacenter]
+    - {tf: aws_route53_zone, name: api-dns, in: account, at: [1, 1]}
+    - {tf: aws_wafv2_web_acl, name: api-waf, in: group:api-layer, at: [1, 1]}
+    - {tf: aws_api_gateway_rest_api, name: payments-api, in: group:api-layer, at: [2, 1]}
+    - {tf: aws_cognito_user_pool, name: api-consumer-auth, in: group:api-layer, at: [3, 1]}
+    - {tf: aws_lambda_function, name: fips-msa, in: group:compliance-msas, at: [1, 1]}
+    - {tf: aws_lambda_function, name: kyc-aml-msa, in: group:compliance-msas, at: [1, 2]}
+    - {tf: aws_lambda_function, name: fraud-liquidity-msa, in: group:compliance-msas, at: [1, 3]}
+    - {tf: aws_lambda_function, name: outgoing-msa, in: region, at: [1, 5]}
+    - {tf: aws_lambda_function, name: writer-mq-msa, in: group:api-consumers, at: [1, 1]}
+    - {tf: aws_lambda_function, name: reader-mq-msa, in: group:api-consumers, at: [2, 1]}
+    - {tf: aws_lambda_function, name: incoming-msa, in: group:workflow, at: [1, 1]}
+    - {tf: aws_lambda_function, name: consuming-msa, in: group:workflow, at: [1, 2]}
+    - {tf: aws_lambda_function, name: releasing-msa, in: group:workflow, at: [1, 3]}
+    - {tf: aws_lambda_function, name: transaction-msa, in: group:workflow, at: [1, 4]}
+    - {tf: aws_lambda_function, name: timeout-msa, in: group:workflow, at: [1, 5]}
+    - {tf: aws_sqs_queue, name: incoming-queue, in: group:data-layer, at: [1, 1]}
+    - {tf: aws_sqs_queue, name: consuming-queue, in: group:data-layer, at: [1, 2]}
+    - {tf: aws_sqs_queue, name: releasing-queue, in: group:data-layer, at: [1, 3]}
+    - {tf: aws_sns_topic, name: outgoing-notifications, in: group:data-layer, at: [1, 4]}
+    - {tf: aws_dynamodb_table, name: transaction-status, in: group:data-layer, at: [1, 5]}
+    - {tf: aws_s3_bucket, name: iso20022-messages, in: region, at: [4, 3]}
+    - {tf: aws_mq_broker, name: messaging-queue, in: region, at: [3, 6]}
+  actors: [{type: client, at: [1, 1]}, datacenter, {type: server, name: mainframe, at: [2, 3]}, {type: database, name: db2, at: [2, 4]}]
   flows:
+    - {from: client, to: api-dns, label: resolve api.example.com and auth.example.com}
     - {from: client, to: api-consumer-auth, label: OAuth 2.0 token, step: 1}
     - {from: client, to: payments-api, label: POST transaction, step: 2}
-    - {from: payments-api, to: transaction-msa, label: create transaction ID, step: 3}
+    - {from: api-waf, to: payments-api, link: aws_wafv2_web_acl_association}
+    - {from: payments-api, to: transaction-msa, label: create transaction ID}
     - {from: transaction-msa, to: transaction-status, label: status ACCP}
+    - {from: transaction-msa, to: outgoing-notifications, label: subscribe consumer to notifications, step: 3}
     - {from: payments-api, to: incoming-queue, label: ISO 20022 pacs.008, step: 4}
     - {from: incoming-queue, to: incoming-msa, link: aws_lambda_event_source_mapping, step: 5}
     - {from: incoming-msa, to: iso20022-messages, label: incoming path}
-    - {from: incoming-msa, to: processing-queue, label: status ACTC}
-    - {from: processing-queue, to: processing-msa, link: aws_lambda_event_source_mapping, step: 6}
-    - {from: processing-msa, to: transaction-status, label: ACSP or RJCT}
-    - {from: processing-msa, to: releasing-queue, label: confirmation or rejection}
+    - {from: incoming-msa, to: consuming-queue, label: status ACTC}
+    - {from: consuming-queue, to: consuming-msa, link: aws_lambda_event_source_mapping, step: 6}
+    - {from: consuming-msa, to: fips-msa, label: FIPS 140-2 check}
+    - {from: consuming-msa, to: kyc-aml-msa, label: KYC and AML check}
+    - {from: consuming-msa, to: fraud-liquidity-msa, label: fraud and liquidity check}
+    - {from: consuming-msa, to: transaction-status, label: ACSP or RJCT}
+    - {from: consuming-msa, to: releasing-queue, label: confirmation or rejection}
     - {from: releasing-queue, to: releasing-msa, link: aws_lambda_event_source_mapping, step: 7}
     - {from: releasing-msa, to: iso20022-messages, label: outgoing path}
-    - {from: releasing-msa, to: outgoing-notifications, label: publish, step: 8}
+    - {from: releasing-msa, to: outgoing-notifications, label: outgoing message ready}
+    - {from: outgoing-notifications, to: outgoing-msa, link: aws_sns_topic_subscription, step: 8}
+    - {from: outgoing-msa, to: transaction-status, label: status ACSC}
     - {from: timeout-msa, to: transaction-status, label: SLA breach RJCT, step: 9}
-    - {from: iso20022-messages, to: payments-cmk, label: SSE-KMS}
-    - {from: datacenter, to: payments-api, label: MQ reader and writer bridge}
+    - {from: datacenter, to: messaging-queue, label: on-premises messaging queue over Direct Connect or Site-to-Site VPN, step: 10}
+    - {from: mainframe, to: datacenter, label: "firewall, Network Load Balancer and messaging queue"}
+    - {from: mainframe, to: db2, label: Db2 reads and writes}
+    - {from: messaging-queue, to: reader-mq-msa, label: read incoming MQ messages, step: 11}
+    - {from: reader-mq-msa, to: payments-api, label: POST transaction}
+    - {from: outgoing-notifications, to: writer-mq-msa, link: aws_sns_topic_subscription}
+    - {from: writer-mq-msa, to: messaging-queue, label: write outgoing message, step: 12}
 
 - slug: fraud-detection-sagemaker-realtime-inference
   title: Real-time transaction fraud detection with SageMaker endpoints
   category: industry
   tags: [financial services, fraud detection, sagemaker, xgboost, random cut forest, api gateway]
   source: https://aws.amazon.com/blogs/machine-learning/detect-fraudulent-transactions-using-machine-learning-with-amazon-sagemaker/
-  description: Historical card transactions in S3 train an unsupervised Random Cut Forest model and supervised XGBoost models in SageMaker, which are deployed to managed real-time endpoints. Client applications call an API Gateway REST API whose Lambda function invokes both endpoints and streams the anomaly score and fraud prediction through Kinesis Data Firehose to S3 for analysis.
+  description: Historical card transactions and the trained model artifacts live in one S3 bucket; an unsupervised Random Cut Forest anomaly detector and a supervised XGBoost fraud classifier trained in SageMaker are deployed to two managed real-time endpoints. Client applications call an API Gateway REST API whose Lambda function invokes both endpoints and streams the anomaly score and fraud prediction through Kinesis Data Firehose to a results S3 bucket, which an optional QuickSight dashboard visualises.
   containers:
     - region: us-east-1
-      groups: [{label: training}, {label: inference}]
+      groups:
+        - {label: anomaly-detection, at: [1, 3]}
+        - {label: fraud-detection, at: [2, 3]}
+        - {label: optional, at: [3, 4]}
   elements:
-    - {tf: aws_s3_bucket, name: transactions-training-data, in: group:training}
-    - {tf: aws_sagemaker_notebook_instance, name: fraud-model-notebook, in: group:training}
-    - {tf: aws_sagemaker_model, name: xgboost-fraud-model, in: group:training}
-    - {tf: aws_sagemaker_endpoint, name: rcf-anomaly-endpoint, in: group:inference}
-    - {tf: aws_sagemaker_endpoint, name: xgboost-fraud-endpoint, in: group:inference}
-    - {tf: aws_api_gateway_rest_api, name: fraud-scoring-api, in: group:inference}
-    - {tf: aws_lambda_function, name: invoke-models, in: group:inference}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: predictions-firehose, in: region}
-    - {tf: aws_s3_bucket, name: predictions-archive, in: region}
-  actors: [client]
+    - {tf: aws_api_gateway_rest_api, name: fraud-scoring-api, in: region, at: [1, 1, 2, 1]}
+    - {tf: aws_lambda_function, name: invoke-models, in: region, at: [1, 2, 2, 1]}
+    - {tf: aws_sagemaker_endpoint, name: rcf-anomaly-endpoint, in: group:anomaly-detection, at: [1, 1]}
+    - {tf: aws_sagemaker_endpoint, name: xgboost-fraud-endpoint, in: group:fraud-detection, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: model-and-data, in: region, at: [1, 4, 2, 1]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: predictions-firehose, in: region, at: [3, 2]}
+    - {tf: aws_s3_bucket, name: predictions-archive, in: region, at: [3, 3]}
+    - {tf: aws_quicksight_dashboard, name: fraud-results-dashboard, in: group:optional, at: [1, 1]}
+  actors: [{type: client, name: client, at: [1, 1]}]
   flows:
-    - {from: transactions-training-data, to: fraud-model-notebook, label: labelled transactions, step: 1}
-    - {from: fraud-model-notebook, to: xgboost-fraud-model, label: training job, step: 2}
-    - {from: xgboost-fraud-model, to: xgboost-fraud-endpoint, label: deploy, step: 3}
-    - {from: fraud-model-notebook, to: rcf-anomaly-endpoint, label: deploy RCF}
-    - {from: client, to: fraud-scoring-api, label: POST transaction, step: 4}
-    - {from: fraud-scoring-api, to: invoke-models, label: Lambda proxy, step: 5}
-    - {from: invoke-models, to: rcf-anomaly-endpoint, label: InvokeEndpoint anomaly score, step: 6}
+    - {from: client, to: fraud-scoring-api, label: POST transaction, step: 1}
+    - {from: fraud-scoring-api, to: invoke-models, label: Lambda proxy, step: 2}
+    - {from: invoke-models, to: rcf-anomaly-endpoint, label: InvokeEndpoint anomaly score, step: 3}
     - {from: invoke-models, to: xgboost-fraud-endpoint, label: InvokeEndpoint fraud probability}
-    - {from: invoke-models, to: predictions-firehose, label: PutRecord, step: 7}
-    - {from: predictions-firehose, to: predictions-archive, label: buffered delivery, step: 8}
+    - {from: model-and-data, to: rcf-anomaly-endpoint, label: RCF model artifact}
+    - {from: model-and-data, to: xgboost-fraud-endpoint, label: XGBoost model artifact}
+    - {from: invoke-models, to: predictions-firehose, label: PutRecord, step: 4}
+    - {from: predictions-firehose, to: predictions-archive, label: buffered delivery, step: 5}
+    - {from: predictions-archive, to: fraud-results-dashboard, label: optional analysis, step: 6}
 
 - slug: healthcare-hipaa-eligible-three-tier-web-app
   title: HIPAA-eligible three-tier patient web application
@@ -201,36 +275,40 @@
   category: industry
   tags: [healthcare, fhir, healthlake, interoperability, smart on fhir, athena]
   source: https://docs.aws.amazon.com/healthlake/latest/devguide/what-is-amazon-health-lake.html
-  description: Clinical systems land FHIR R4 bundles and legacy C-CDA or CSV exports in an S3 staging bucket, from which a Lambda function starts HealthLake import jobs into a managed FHIR data store; integrated NLP enriches unstructured notes and stores the extracted entities as FHIR resources. SMART on FHIR applications authenticate with Cognito and call the data store through API Gateway, EventBridge routes data store events, and Lake Formation governs Athena SQL analytics over the exported data.
+  description: Provider EHRs, HIEs, payors and monitoring devices land bulk FHIR R4 bundles and legacy C-CDA or CSV exports in S3 staging buckets, from which a Lambda function starts HealthLake bulk import jobs (via the HealthLake Data Transformation Agent for non-FHIR formats) into a managed FHIR data store. SMART on FHIR applications authenticate with an external identity provider and call the data store's FHIR APIs through API Gateway, while Lake Formation governs Redshift and Athena query engines and SageMaker and QuickSight analysis over the data store.
   containers:
-    - datacenter: hospital-ehr
+    - {datacenter: healthcare-data-sources, at: [1, 1]}
     - region: us-east-1
-      groups: [{label: ingestion}, {label: fhir-access}, {label: analytics}]
+      groups:
+        - {label: ingestion, at: [1, 1, 2, 1]}
+        - {label: fhir-access, at: [1, 2]}
+        - {label: query-engines, at: [2, 3]}
+        - {label: data-analysis, at: [2, 4]}
   elements:
-    - {tf: aws_s3_bucket, name: fhir-staging, in: group:ingestion}
-    - {tf: aws_lambda_function, name: start-import-job, in: group:ingestion}
-    - {tf: aws_kms_key, name: healthlake-cmk, in: region}
-    - {tf: aws_cognito_user_pool, name: smart-on-fhir-users, in: group:fhir-access}
-    - {tf: aws_api_gateway_rest_api, name: fhir-proxy-api, in: group:fhir-access}
-    - {tf: aws_lambda_function, name: fhir-request-signer, in: group:fhir-access}
-    - {tf: aws_cloudwatch_event_bus, name: healthlake-events, in: region}
-    - {tf: aws_s3_bucket, name: fhir-export, in: group:analytics}
-    - {tf: aws_glue_catalog_database, name: fhir-catalog, in: group:analytics}
-    - {tf: aws_athena_workgroup, name: population-health-queries, in: group:analytics}
-    - {tf: aws_cloudtrail, name: fhir-audit-trail, in: region}
-  actors: [datacenter, client]
+    - {tf: aws_s3_bucket, name: bulk-fhir-staging, in: group:ingestion, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: ccda-csv-staging, in: group:ingestion, at: [2, 1]}
+    - {tf: aws_lambda_function, name: healthlake-import, in: group:ingestion, at: [1, 2, 2, 1]}
+    - {tf: aws_api_gateway_rest_api, name: fhir-proxy-api, in: group:fhir-access, at: [1, 1]}
+    - {tf: aws_lambda_function, name: fhir-request-signer, in: group:fhir-access, at: [1, 2]}
+    - {tf: aws_lakeformation_resource, name: fhir-lake-formation, in: region, at: [2, 2]}
+    - {tf: aws_redshift_cluster, name: fhir-warehouse, in: group:query-engines, at: [1, 1]}
+    - {tf: aws_athena_workgroup, name: population-health-queries, in: group:query-engines, at: [2, 1]}
+    - {tf: aws_sagemaker_notebook_instance, name: clinical-ml-notebook, in: group:data-analysis, at: [1, 1]}
+    - {tf: aws_quicksight_dashboard, name: population-health-dashboard, in: group:data-analysis, at: [2, 1]}
+  actors: [datacenter, {type: idp, name: Identity Provider, at: [1, 3]}, {type: client, name: application, at: [2, 3]}]
   flows:
-    - {from: datacenter, to: fhir-staging, label: FHIR bundles and C-CDA exports, step: 1}
-    - {from: fhir-staging, to: start-import-job, label: S3 event, step: 2}
-    - {from: start-import-job, to: healthlake-cmk, label: encrypted data store import, step: 3}
-    - {from: client, to: smart-on-fhir-users, label: SMART App Launch OAuth 2.0, step: 4}
-    - {from: client, to: fhir-proxy-api, label: FHIR REST GET Patient, step: 5}
-    - {from: fhir-proxy-api, to: fhir-request-signer, label: SigV4 signing to data store, step: 6}
-    - {from: healthlake-events, to: start-import-job, label: import job status events}
-    - {from: fhir-request-signer, to: fhir-export, label: bulk data export, step: 7}
-    - {from: fhir-export, to: fhir-catalog, label: crawled schema}
-    - {from: fhir-catalog, to: population-health-queries, label: SQL over FHIR resources, step: 8}
-    - {from: fhir-audit-trail, to: fhir-export, label: API audit logs}
+    - {from: datacenter, to: bulk-fhir-staging, label: bulk FHIR, step: 1}
+    - {from: datacenter, to: ccda-csv-staging, label: C-CDA or CSV}
+    - {from: bulk-fhir-staging, to: healthlake-import, label: bulk import into the HealthLake data store, step: 2}
+    - {from: ccda-csv-staging, to: healthlake-import, label: HealthLake Data Transformation Agent}
+    - {from: application, to: Identity Provider, label: SMART on FHIR login, step: 3}
+    - {from: application, to: fhir-proxy-api, label: FHIR APIs, step: 4}
+    - {from: fhir-proxy-api, to: fhir-request-signer, label: SigV4-signed FHIR request to the data store, step: 5}
+    - {from: healthlake-import, to: fhir-lake-formation, label: HealthLake data store governed by Lake Formation, step: 6}
+    - {from: fhir-lake-formation, to: fhir-warehouse, label: Redshift queries}
+    - {from: fhir-lake-formation, to: population-health-queries, label: SQL over FHIR resources, step: 7}
+    - {from: fhir-lake-formation, to: clinical-ml-notebook, label: ML on de-identified data}
+    - {from: fhir-lake-formation, to: population-health-dashboard, label: dashboards}
 
 - slug: genomics-healthomics-secondary-analysis
   title: Genomics secondary analysis with AWS HealthOmics workflows and Batch
@@ -472,27 +550,48 @@
   category: industry
   tags: [automotive, adas, autonomous driving, data lake, batch, emr, mwaa, sagemaker ground truth]
   source: https://docs.aws.amazon.com/solutions/autonomous-driving-data-framework-on-aws/
-  description: Guidance for Autonomous Driving Data Framework on AWS bulk-uploads drive recordings from copy stations over Direct Connect into an S3 staging bucket registered through API Gateway, then runs quality checks and rosbag extraction in AWS Batch containers. EMR enriches sensor data with weather and map matching, SageMaker Ground Truth labels low-confidence frames, MWAA orchestrates the pipelines, and Iceberg tables in the Glue Data Catalog are queried with Athena, Redshift and OpenSearch, with DynamoDB holding drive-level metadata.
+  description: Guidance for Autonomous Driving Data Framework on AWS bulk-uploads drive recordings from test-vehicle copy stations over Direct Connect into an S3 staging bucket registered through API Gateway, then runs quality checks and rosbag extraction in AWS Batch containers. EMR enriches sensor data with weather and map matching, a Lambda function routes low-confidence frames to SageMaker Ground Truth for manual labelling, MWAA orchestrates the pipelines with Neptune recording data lineage, and Iceberg tables in the Glue Data Catalog are queried with Athena, Redshift, OpenSearch and QuickSight; Managed Grafana and SNS provide fleet monitoring and alerting, CodePipeline and CodeBuild deploy the framework modules, Step Functions orchestrate visualization instances on EKS and DynamoDB holds drive-level metadata.
   containers:
     - datacenter: test-fleet-copy-station
     - region: eu-central-1
-      groups: [{label: ingestion}, {label: processing}, {label: analytics}]
+      groups:
+        - {label: ingestion, at: [1, 1]}
+        - {label: processing, at: [1, 2]}
+        - {label: labelling, at: [1, 3]}
+        - {label: analytics, at: [1, 4, 2, 1]}
+        - {label: fleet-monitoring, at: [2, 2]}
+        - {label: orchestration-and-lineage, at: [2, 3]}
+        - {label: ci-cd, at: [3, 1]}
+        - {label: visualization-and-simulation, at: [3, 4]}
+      vpcs:
+        - {name: visualization, cidr: 10.70.0.0/16, at: [3, 2, 1, 2]}
   elements:
-    - {tf: aws_dx_gateway, name: fleet-dx-gateway, in: region}
-    - {tf: aws_api_gateway_rest_api, name: recording-registry-api, in: group:ingestion}
-    - {tf: aws_s3_bucket, name: raw-recordings-staging, in: group:ingestion}
-    - {tf: aws_dynamodb_table, name: drive-metadata, in: group:ingestion}
-    - {tf: aws_mwaa_environment, name: pipeline-orchestrator, in: group:processing}
-    - {tf: aws_batch_compute_environment, name: rosbag-extraction-ce, in: group:processing}
-    - {tf: aws_emr_cluster, name: scene-enrichment-emr, in: group:processing}
-    - {tf: aws_s3_bucket, name: processed-scenes, in: group:processing}
-    - {tf: aws_glue_catalog_database, name: iceberg-scene-catalog, in: group:analytics}
-    - {tf: aws_athena_workgroup, name: scene-search, in: group:analytics}
-    - {tf: aws_redshift_cluster, name: fleet-monitoring-warehouse, in: group:analytics}
-    - {tf: aws_opensearch_domain, name: scene-index, in: group:analytics}
-    - {tf: aws_eks_cluster, name: visualization-apps, in: region}
-  actors: [datacenter, users]
+    - {tf: aws_dx_gateway, name: fleet-dx-gateway, in: region, at: [2, 1]}
+    - {tf: aws_api_gateway_rest_api, name: recording-registry-api, in: group:ingestion, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: raw-recordings-staging, in: group:ingestion, at: [2, 1]}
+    - {tf: aws_dynamodb_table, name: drive-metadata, in: group:ingestion, at: [1, 2]}
+    - {tf: aws_batch_compute_environment, name: rosbag-extraction-ce, in: group:processing, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: processed-scenes, in: group:processing, at: [1, 2]}
+    - {tf: aws_emr_cluster, name: scene-enrichment-emr, in: group:processing, at: [1, 3]}
+    - {tf: aws_lambda_function, name: low-confidence-frame-filter, in: group:labelling, at: [1, 1]}
+    - {tf: aws_sagemaker_workteam, name: ground-truth-labelling, in: group:labelling, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: human-annotations, in: group:labelling, at: [1, 3]}
+    - {tf: aws_glue_catalog_database, name: iceberg-scene-catalog, in: group:analytics, at: [2, 1]}
+    - {tf: aws_athena_workgroup, name: scene-search, in: group:analytics, at: [1, 1]}
+    - {tf: aws_redshift_cluster, name: fleet-monitoring-warehouse, in: group:analytics, at: [2, 2]}
+    - {tf: aws_opensearch_domain, name: scene-index, in: group:analytics, at: [1, 2]}
+    - {tf: aws_grafana_workspace, name: fleet-dashboards, in: group:fleet-monitoring, at: [1, 1]}
+    - {tf: aws_sns_topic, name: fleet-alerts, in: group:fleet-monitoring, at: [1, 2]}
+    - {tf: aws_mwaa_environment, name: pipeline-orchestrator, in: group:orchestration-and-lineage, at: [1, 1]}
+    - {tf: aws_neptune_cluster, name: data-lineage, in: group:orchestration-and-lineage, at: [1, 2]}
+    - {tf: aws_codepipeline, name: addf-release-pipeline, in: group:ci-cd, at: [1, 1]}
+    - {tf: aws_codebuild_project, name: addf-module-build, in: group:ci-cd, at: [1, 2]}
+    - {tf: aws_sfn_state_machine, name: visualization-instance-orchestration, in: group:visualization-and-simulation, at: [1, 1]}
+    - {tf: aws_quicksight_dashboard, name: kpi-dashboard, in: group:visualization-and-simulation, at: [1, 2]}
+    - {tf: aws_eks_cluster, name: visualization-apps, in: vpc:visualization, at: [1, 1]}
+  actors: [datacenter, {type: device, name: test-vehicles, at: [2, 1]}, {type: users, name: developers, at: [1, 3]}]
   flows:
+    - {from: test-vehicles, to: datacenter, label: removable data logger media}
     - {from: datacenter, to: fleet-dx-gateway, label: Direct Connect bulk upload, step: 1}
     - {from: fleet-dx-gateway, to: raw-recordings-staging, label: recordings to S3, step: 2}
     - {from: datacenter, to: recording-registry-api, label: register and validate recording, step: 3}
@@ -502,11 +601,20 @@
     - {from: rosbag-extraction-ce, to: processed-scenes, label: extracted frames and topics, step: 5}
     - {from: pipeline-orchestrator, to: scene-enrichment-emr, label: enrichment step, step: 6}
     - {from: processed-scenes, to: scene-enrichment-emr, label: sensor data}
-    - {from: scene-enrichment-emr, to: iceberg-scene-catalog, label: Iceberg tables, step: 7}
+    - {from: processed-scenes, to: low-confidence-frame-filter, label: object and lane detection labels}
+    - {from: low-confidence-frame-filter, to: ground-truth-labelling, label: low-confidence images, step: 7}
+    - {from: ground-truth-labelling, to: human-annotations, label: human annotations}
+    - {from: scene-enrichment-emr, to: iceberg-scene-catalog, label: Iceberg scenes and labels, step: 8}
     - {from: iceberg-scene-catalog, to: scene-search, label: SQL}
     - {from: iceberg-scene-catalog, to: fleet-monitoring-warehouse, label: Spectrum}
     - {from: scene-enrichment-emr, to: scene-index, label: scene documents}
-    - {from: users, to: visualization-apps, label: on-demand visualization, step: 8}
+    - {from: fleet-monitoring-warehouse, to: fleet-dashboards, label: fleet monitoring}
+    - {from: fleet-dashboards, to: fleet-alerts, label: alerting}
+    - {from: pipeline-orchestrator, to: data-lineage, label: data lineage}
+    - {from: addf-release-pipeline, to: addf-module-build, label: build and deploy ADDF modules}
+    - {from: visualization-instance-orchestration, to: visualization-apps, label: instance orchestration}
+    - {from: iceberg-scene-catalog, to: kpi-dashboard, label: simulation and KPI results}
+    - {from: developers, to: visualization-apps, label: on-demand visualization, step: 9}
     - {from: visualization-apps, to: processed-scenes, label: read scenes}
 
 - slug: utilities-meter-data-analytics-platform
@@ -514,149 +622,177 @@
   category: industry
   tags: [energy, utilities, smart meter, mdms, timestream, glue, redshift, forecasting]
   source: https://docs.aws.amazon.com/solutions/meter-data-analytics-on-aws/
-  description: Guidance for Meter Data Analytics on AWS ingests interval reads from meter data management or head-end systems through Transfer Family SFTP for batch files and Kinesis for streaming, stores time series in Timestream and raw data in S3. Glue and EMR run ETL into a curated data lake catalogued in the Glue Data Catalog, Athena and Redshift serve SQL analytics, Grafana publishes dashboards and SageMaker models detect grid anomalies and forecast demand.
+  description: Guidance for Meter Data Analytics on AWS ingests data from a customer information system, weather feeds, the metering head-end and the MDMS through a custom Lambda adapter, Transfer Family SFTP and Storage Gateway for batch files, and Kinesis with SQS and SNS for streaming, then stores time series in Timestream and raw data in S3 with Glacier archival. Glue and EMR run ETL into a cleaned S3 bucket governed by Lake Formation and catalogued in the Glue Data Catalog; EMR, Athena and Redshift serve analytics, Managed Grafana and QuickSight publish dashboards to enterprise applications, and SageMaker predictions drive proactive customer engagement through Pinpoint.
   containers:
     - datacenter: utility-head-end
+      at: [1, 1]
     - region: us-east-1
-      groups: [{label: ingestion}, {label: storage}, {label: processing}, {label: analytics}]
+      account_at: [1, 2, 4, 1]
+      groups:
+        - {label: ingest, at: [1, 1]}
+        - {label: transform-and-store, at: [1, 2]}
+        - {label: serve-and-consume, at: [1, 3]}
   elements:
-    - {tf: aws_transfer_server, name: mdms-sftp, in: group:ingestion}
-    - {tf: aws_kinesis_stream, name: meter-reads-stream, in: group:ingestion}
-    - {tf: aws_lambda_function, name: read-adapter, in: group:ingestion}
-    - {tf: aws_timestreamwrite_database, name: interval-reads, in: group:storage}
-    - {tf: aws_s3_bucket, name: raw-meter-data, in: group:storage}
-    - {tf: aws_glue_job, name: curate-reads-etl, in: group:processing}
-    - {tf: aws_emr_cluster, name: meter-analytics-emr, in: group:processing}
-    - {tf: aws_s3_bucket, name: curated-data-lake, in: group:storage}
-    - {tf: aws_glue_catalog_database, name: meter-catalog, in: group:storage}
-    - {tf: aws_athena_workgroup, name: meter-queries, in: group:analytics}
-    - {tf: aws_redshift_cluster, name: utility-warehouse, in: group:analytics}
-    - {tf: aws_grafana_workspace, name: grid-dashboards, in: group:analytics}
-    - {tf: aws_sagemaker_endpoint, name: demand-forecast, in: group:analytics}
-  actors: [datacenter, users]
+    - {tf: aws_lambda_function, name: read-adapter, in: group:ingest, at: [1, 1, 1, 2]}
+    - {tf: aws_transfer_server, name: mdms-sftp, in: group:ingest, at: [2, 1]}
+    - {tf: aws_storagegateway_gateway, name: file-gateway, in: group:ingest, at: [2, 2]}
+    - {tf: aws_kinesis_stream, name: meter-reads-stream, in: group:ingest, at: [3, 1, 1, 2]}
+    - {tf: aws_sqs_queue, name: meter-events-queue, in: group:ingest, at: [4, 1]}
+    - {tf: aws_sns_topic, name: meter-events-topic, in: group:ingest, at: [4, 2]}
+    - {tf: aws_timestreamwrite_database, name: interval-reads, in: group:transform-and-store, at: [1, 1, 1, 2]}
+    - {tf: aws_s3_bucket, name: raw-meter-data, in: group:transform-and-store, at: [2, 1]}
+    - {tf: aws_glue_job, name: curate-reads-etl, in: group:transform-and-store, at: [2, 2]}
+    - {tf: aws_emr_cluster, name: meter-analytics-emr, in: group:transform-and-store, at: [2, 3]}
+    - {tf: aws_glacier_vault, name: raw-meter-archive, in: group:transform-and-store, at: [3, 1]}
+    - {tf: aws_s3_bucket, name: curated-data-lake, in: group:transform-and-store, at: [3, 2]}
+    - {tf: aws_lakeformation_resource, name: curated-data-permissions, in: group:transform-and-store, at: [3, 3]}
+    - {tf: aws_glue_catalog_database, name: meter-catalog, in: group:transform-and-store, at: [4, 2]}
+    - {tf: aws_emr_cluster, name: analytics-emr, in: group:serve-and-consume, at: [1, 1]}
+    - {tf: aws_athena_workgroup, name: meter-queries, in: group:serve-and-consume, at: [1, 2]}
+    - {tf: aws_redshift_cluster, name: utility-warehouse, in: group:serve-and-consume, at: [2, 1]}
+    - {tf: aws_grafana_workspace, name: grid-dashboards, in: group:serve-and-consume, at: [2, 2]}
+    - {tf: aws_sagemaker_endpoint, name: demand-forecast, in: group:serve-and-consume, at: [3, 1]}
+    - {tf: aws_quicksight_dashboard, name: meter-dashboards, in: group:serve-and-consume, at: [3, 2]}
+    - {tf: aws_pinpoint_app, name: customer-engagement, in: group:serve-and-consume, at: [4, 1, 1, 2]}
+  actors: [datacenter, {type: server, name: customer-information-system, at: [2, 1]}, {type: saas, name: weather-data, at: [3, 1]}, {type: database, name: mdms, at: [4, 1]}, {type: server, name: enterprise-applications, at: [1, 3]}, {type: users, at: [2, 3]}]
   flows:
-    - {from: datacenter, to: mdms-sftp, label: batch interval files, step: 1}
+    - {from: datacenter, to: read-adapter, label: metering head-end reads, step: 1}
     - {from: datacenter, to: meter-reads-stream, label: streaming reads, step: 1}
-    - {from: mdms-sftp, to: raw-meter-data, label: SFTP to S3}
-    - {from: meter-reads-stream, to: read-adapter, link: aws_lambda_event_source_mapping, step: 2}
-    - {from: read-adapter, to: interval-reads, label: WriteRecords, step: 3}
-    - {from: read-adapter, to: raw-meter-data, label: raw archive}
-    - {from: raw-meter-data, to: curate-reads-etl, label: ETL source, step: 4}
+    - {from: mdms, to: mdms-sftp, label: batch interval files, step: 1}
+    - {from: customer-information-system, to: file-gateway, label: customer master data, step: 1}
+    - {from: weather-data, to: meter-reads-stream, label: weather feeds, step: 1}
+    - {from: meter-reads-stream, to: meter-events-queue, label: buffered events}
+    - {from: meter-events-queue, to: meter-events-topic, label: fan-out notifications}
+    - {from: meter-reads-stream, to: read-adapter, link: aws_lambda_event_source_mapping}
+    - {from: read-adapter, to: interval-reads, label: WriteRecords, step: 2}
+    - {from: mdms-sftp, to: raw-meter-data, label: SFTP to S3, step: 2}
+    - {from: file-gateway, to: raw-meter-data, label: file share to S3}
+    - {from: meter-reads-stream, to: raw-meter-data, label: raw archive}
+    - {from: raw-meter-data, to: raw-meter-archive, label: lifecycle to Glacier}
+    - {from: raw-meter-data, to: curate-reads-etl, label: ETL source}
     - {from: raw-meter-data, to: meter-analytics-emr, label: value-add processing}
-    - {from: curate-reads-etl, to: curated-data-lake, label: curated datasets, step: 5}
-    - {from: curated-data-lake, to: meter-catalog, label: metadata}
-    - {from: meter-catalog, to: meter-queries, label: SQL, step: 6}
-    - {from: curated-data-lake, to: utility-warehouse, label: COPY, step: 7}
-    - {from: utility-warehouse, to: grid-dashboards, label: dashboards, step: 8}
-    - {from: curated-data-lake, to: demand-forecast, label: training and inference, step: 9}
-    - {from: users, to: grid-dashboards, label: grid analytics}
+    - {from: curate-reads-etl, to: curated-data-lake, label: cleaned data, step: 3}
+    - {from: curated-data-lake, to: curated-data-permissions, label: curated data governance}
+    - {from: curated-data-permissions, to: meter-catalog, label: metadata, step: 4}
+    - {from: meter-catalog, to: analytics-emr, label: Spark analytics, step: 5}
+    - {from: meter-catalog, to: meter-queries, label: SQL, step: 5}
+    - {from: curated-data-lake, to: utility-warehouse, label: COPY, step: 6}
+    - {from: utility-warehouse, to: grid-dashboards, label: dashboards, step: 7}
+    - {from: utility-warehouse, to: meter-dashboards, label: dashboards, step: 7}
+    - {from: curated-data-lake, to: demand-forecast, label: training and inference}
+    - {from: demand-forecast, to: customer-engagement, label: predictions, step: 8}
+    - {from: grid-dashboards, to: enterprise-applications, label: enterprise applications and processes}
+    - {from: meter-queries, to: enterprise-applications, label: query results}
+    - {from: customer-engagement, to: users, label: proactive customer engagement}
 
 - slug: telecom-5g-core-open5gs-eks
   title: Open source 4G/5G mobile core on Amazon EKS with Multus
   category: industry
   tags: [telecom, 5g core, open5gs, eks, multus, docdb, network functions]
   source: https://aws.amazon.com/blogs/opensource/open-source-mobile-core-network-implementation-on-amazon-elastic-kubernetes-service/
-  description: Open5GS control-plane network functions (MME, HSS, PCRF, SMF, AMF) and user-plane functions (SGW-U, UPF) run as containers on separate EKS managed node groups, with Multus CNI attaching additional ENIs for the S1, N2 and N3 interfaces. Subscriber profiles live in Amazon DocumentDB, Route 53 private hosted zones give the network functions service discovery, and custom controllers automate DNS records and secondary IP assignment on the worker instances.
+  description: Open5GS control-plane network functions (MME, HSS, PCRF, SGW-C, SMF/PGW-C, NRF and the Web-UI) run as pods on a control-plane EKS managed node group and the user-plane functions (SGW-U, UPF/PGW-U) on a separate user-plane node group, with Multus CNI attaching additional ENIs in the control-plane and user-plane subnets for the S1-MME, S1-U, Sx/N4 and N6/SGi interfaces. An srsLTE UE/eNodeB simulator attaches over S1, subscriber profiles live in Amazon DocumentDB reached through the default Kubernetes subnet, and Route 53 private hosted zones give the network functions service discovery.
   containers:
     - datacenter: radio-access-network
+      at: [3, 1]
     - region: eu-west-1
+      account_at: [1, 2, 3, 1]
       vpcs:
         - name: mobile-core
           cidr: 10.30.0.0/16
+          at: [1, 1, 2, 1]
           subnets:
-            - {name: public-a, cidr: 10.30.0.0/24, az: a, public: true}
-            - {name: control-plane-a, cidr: 10.30.10.0/24, az: a, public: false}
-            - {name: user-plane-a, cidr: 10.30.20.0/24, az: a, public: false}
-            - {name: multus-n3-a, cidr: 10.30.30.0/24, az: a, public: false}
-            - {name: data-a, cidr: 10.30.40.0/24, az: a, public: false}
+            - {name: data-a, cidr: 10.30.40.0/24, az: a, public: false, at: [1, 1]}
+            - {name: control-plane-a, cidr: 10.30.10.0/24, az: a, public: false, at: [2, 1]}
+            - {name: user-plane-a, cidr: 10.30.20.0/24, az: a, public: false, at: [3, 1]}
   elements:
-    - {tf: aws_eks_cluster, name: open5gs-cluster, in: vpc:mobile-core}
-    - {tf: aws_eks_node_group, name: control-plane-nfs, in: subnet:control-plane-a}
-    - {tf: aws_eks_node_group, name: user-plane-nfs, in: subnet:user-plane-a}
-    - {tf: aws_docdb_cluster, name: subscriber-db, in: subnet:data-a}
-    - {tf: aws_route53_zone, name: core-service-discovery, in: vpc:mobile-core}
-    - {tf: aws_lb, name: webui-nlb, in: subnet:public-a}
-    - {tf: aws_ecr_repository, name: open5gs-images, in: region}
-    - {tf: aws_nat_gateway, name: core-nat, in: subnet:public-a}
-  actors: [device, datacenter, users, internet]
+    - {tf: aws_eks_cluster, name: open5gs-cluster, in: vpc:mobile-core, at: [1, 1, 2, 1]}
+    - {tf: aws_eks_node_group, name: control-plane-nfs, in: subnet:control-plane-a, at: [1, 1]}
+    - {tf: aws_eks_node_group, name: user-plane-nfs, in: subnet:user-plane-a, at: [2, 1]}
+    - {tf: aws_docdb_cluster, name: subscriber-db, in: subnet:data-a, at: [1, 1]}
+    - {tf: aws_route53_zone, name: core-service-discovery, in: region, at: [1, 2]}
+  actors: [{type: device, at: [2, 1]}, datacenter, {type: internet, at: [3, 3]}]
   flows:
-    - {from: device, to: datacenter, label: UE attaches via gNodeB}
-    - {from: datacenter, to: control-plane-nfs, label: S1-MME / N2 signalling, step: 1}
-    - {from: control-plane-nfs, to: subscriber-db, label: HSS and UDR subscriber lookup, step: 2}
-    - {from: control-plane-nfs, to: user-plane-nfs, label: PFCP session setup, step: 3}
-    - {from: datacenter, to: user-plane-nfs, label: GTP-U / N3 via Multus ENI, step: 4}
-    - {from: user-plane-nfs, to: core-nat, label: N6 data network egress, step: 5}
-    - {from: user-plane-nfs, to: internet, label: user traffic}
-    - {from: control-plane-nfs, to: core-service-discovery, label: NF DNS registration}
-    - {from: open5gs-cluster, to: open5gs-images, label: pull NF images}
-    - {from: users, to: webui-nlb, label: Open5GS WebUI, step: 6}
-    - {from: webui-nlb, to: control-plane-nfs, label: subscriber provisioning}
+    - {from: device, to: datacenter, label: UE attaches via srsLTE UE/eNodeB simulator}
+    - {from: datacenter, to: control-plane-nfs, label: S1-MME to MME pod, step: 1}
+    - {from: control-plane-nfs, to: subscriber-db, label: HSS and PCRF subscriber profiles, step: 2}
+    - {from: control-plane-nfs, to: user-plane-nfs, label: Sx / N4 from SGW-C and SMF/PGW-C to SGW-U and UPF/PGW-U, step: 3}
+    - {from: datacenter, to: user-plane-nfs, label: S1-U to SGW-U via Multus ENI, step: 4}
+    - {from: user-plane-nfs, to: internet, label: N6 / SGi from UPF/PGW-U, step: 5}
+    - {from: control-plane-nfs, to: core-service-discovery, label: NRF and NF DNS registration (SBI Nnrf)}
 
 - slug: media-ott-live-streaming-medialive-mediapackage
   title: OTT live streaming with MediaLive, MediaPackage and CloudFront
   category: industry
   tags: [media, ott, live streaming, medialive, mediapackage, cloudfront, hls, dash]
   source: https://docs.aws.amazon.com/solutions/live-streaming-on-aws/
-  description: Guidance for Live Streaming on AWS ingests two redundant contribution feeds into an AWS Elemental MediaLive channel that transcodes them into adaptive bitrate HLS, then AWS Elemental MediaPackage packages the output into HLS, DASH and CMAF endpoints. A CloudFront distribution uses the MediaPackage endpoints as its origin and authenticates with a CDN identifier stored in Secrets Manager, and a demo player is hosted from an S3 bucket behind the same distribution.
+  description: Guidance for Live Streaming on AWS ingests two redundant contribution feeds from a live channel source into an AWS Elemental MediaLive channel that transcodes them into adaptive bitrate HLS, then AWS Elemental MediaPackage packages the output into HLS, DASH and CMAF endpoints. A CloudFront distribution uses the MediaPackage endpoints as its origin and authenticates with a CDN identifier stored in Secrets Manager to serve playback devices, and a demo preview player is hosted from an S3 bucket behind a second CloudFront distribution for users.
   containers:
-    - datacenter: production-venue
+    - {datacenter: live-channel-source, at: [1, 1]}
     - region: us-east-1
-      groups: [{label: ingest-and-transcode}, {label: packaging}, {label: delivery}]
+      groups:
+        - {label: ingest-and-transcode, at: [1, 1]}
+        - {label: packaging, at: [1, 2]}
+        - {label: delivery, at: [1, 3]}
   elements:
-    - {tf: aws_medialive_input, name: contribution-input, in: group:ingest-and-transcode}
-    - {tf: aws_medialive_channel, name: live-transcoder, in: group:ingest-and-transcode}
-    - {tf: aws_media_package_channel, name: live-packager, in: group:packaging}
-    - {tf: aws_secretsmanager_secret, name: cdn-identifier, in: group:packaging}
-    - {tf: aws_cloudfront_distribution, name: live-cdn, in: group:delivery}
-    - {tf: aws_s3_bucket, name: demo-player-site, in: group:delivery}
-    - {tf: aws_cloudwatch_dashboard, name: channel-health, in: region}
-  actors: [datacenter, users]
+    - {tf: aws_medialive_input, name: contribution-input, in: group:ingest-and-transcode, at: [1, 1]}
+    - {tf: aws_medialive_channel, name: live-transcoder, in: group:ingest-and-transcode, at: [1, 2]}
+    - {tf: aws_secretsmanager_secret, name: cdn-identifier, in: group:packaging, at: [2, 1]}
+    - {tf: aws_cloudfront_distribution, name: live-cdn, in: group:delivery, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: demo-player-site, in: group:delivery, at: [2, 1]}
+    - {tf: aws_cloudfront_distribution, name: demo-player-cdn, in: group:delivery, at: [2, 2]}
+  actors: [datacenter, {type: device, name: playback-devices, at: [1, 3]}, {type: users, name: users, at: [2, 3]}]
   flows:
     - {from: datacenter, to: contribution-input, label: RTMP or RTP-FEC, dual feeds, step: 1}
     - {from: contribution-input, to: live-transcoder, label: pipeline A and B}
-    - {from: live-transcoder, to: live-packager, label: ABR HLS output, step: 2}
-    - {from: live-packager, to: cdn-identifier, label: CDN authorization secret}
-    - {from: live-cdn, to: live-packager, label: HLS, DASH and CMAF origin requests, step: 3}
-    - {from: users, to: live-cdn, label: playback, step: 4}
-    - {from: live-cdn, to: demo-player-site, label: demo player origin, step: 5}
-    - {from: live-transcoder, to: channel-health, label: metrics}
+    - {from: live-transcoder, to: live-cdn, label: ABR HLS through MediaPackage HLS, DASH and CMAF endpoints, step: 2}
+    - {from: live-cdn, to: cdn-identifier, label: CDN identifier header checked by MediaPackage, step: 3}
+    - {from: playback-devices, to: live-cdn, label: live playback, step: 4}
+    - {from: demo-player-site, to: demo-player-cdn, label: demo preview player origin, step: 5}
+    - {from: users, to: demo-player-cdn, label: demo player playback}
 
 - slug: media-broadcast-vod-mediaconvert-workflow
   title: Broadcast video-on-demand processing with Step Functions and MediaConvert
   category: industry
   tags: [media, broadcast, video on demand, mediaconvert, step functions, mediapackage, cloudfront]
   source: https://docs.aws.amazon.com/solutions/video-on-demand-on-aws/
-  description: Guidance for Video on Demand on AWS stores source mezzanine files in an S3 bucket with a lifecycle policy to Glacier, and Step Functions state machines orchestrate Lambda functions for the ingest, processing and publishing stages. AWS Elemental MediaConvert transcodes to HLS and DASH, job metadata is recorded in DynamoDB, EventBridge rules capture MediaConvert notifications, SNS and SQS publish workflow outputs, optional MediaPackage repackages the assets and CloudFront delivers the distribution bucket to viewers.
+  description: Guidance for Video on Demand on AWS stores source mezzanine files in an S3 bucket with a lifecycle policy to S3 Glacier, and Step Functions state machines orchestrate Lambda functions for the ingest, processing and publishing stages. AWS Elemental MediaConvert transcodes to HLS and DASH, job metadata is recorded in DynamoDB, CloudWatch captures workflow logs and MediaConvert notifications, SNS and SQS publish workflow outputs, optional MediaPackage repackages the assets and CloudFront delivers the distribution bucket to viewers.
   containers:
     - region: us-east-1
-      groups: [{label: ingest}, {label: processing}, {label: publishing}]
+      groups:
+        - {label: ingest, at: [1, 2]}
+        - {label: processing, at: [1, 3]}
+        - {label: publishing, at: [1, 4]}
   elements:
-    - {tf: aws_s3_bucket, name: source-media, in: group:ingest}
-    - {tf: aws_sfn_state_machine, name: ingest-workflow, in: group:ingest}
-    - {tf: aws_lambda_function, name: validate-source, in: group:ingest}
-    - {tf: aws_sfn_state_machine, name: process-workflow, in: group:processing}
-    - {tf: aws_media_convert_queue, name: transcode-queue, in: group:processing}
-    - {tf: aws_dynamodb_table, name: workflow-metadata, in: group:processing}
-    - {tf: aws_cloudwatch_event_rule, name: mediaconvert-complete, in: group:processing}
-    - {tf: aws_sfn_state_machine, name: publish-workflow, in: group:publishing}
-    - {tf: aws_s3_bucket, name: distribution-media, in: group:publishing}
-    - {tf: aws_cloudfront_distribution, name: vod-cdn, in: group:publishing}
-    - {tf: aws_sns_topic, name: workflow-notifications, in: region}
-    - {tf: aws_sqs_queue, name: workflow-outputs, in: region}
+    - {tf: aws_s3_bucket, name: source-media, in: region, at: [1, 1]}
+    - {tf: aws_glacier_vault, name: source-archive, in: region, at: [2, 1]}
+    - {tf: aws_sfn_state_machine, name: ingest-workflow, in: group:ingest, at: [1, 1]}
+    - {tf: aws_lambda_function, name: validate-source, in: region, at: [2, 2]}
+    - {tf: aws_sfn_state_machine, name: process-workflow, in: group:processing, at: [1, 1]}
+    - {tf: aws_media_convert_queue, name: transcode-queue, in: group:processing, at: [1, 2]}
+    - {tf: aws_dynamodb_table, name: workflow-metadata, in: region, at: [2, 3]}
+    - {tf: aws_cloudwatch_log_group, name: workflow-logs, in: region, at: [2, 4]}
+    - {tf: aws_sfn_state_machine, name: publish-workflow, in: group:publishing, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: distribution-media, in: region, at: [1, 5]}
+    - {tf: aws_cloudfront_distribution, name: vod-cdn, in: region, at: [1, 6]}
+    - {tf: aws_sns_topic, name: workflow-notifications, in: region, at: [2, 5]}
+    - {tf: aws_sqs_queue, name: workflow-outputs, in: region, at: [2, 6]}
   actors: [users, client]
   flows:
     - {from: client, to: source-media, label: upload source file, step: 1}
+    - {from: source-media, to: source-archive, label: lifecycle policy to Glacier}
     - {from: source-media, to: ingest-workflow, label: S3 event starts execution, step: 2}
-    - {from: ingest-workflow, to: validate-source, label: MediaInfo task}
-    - {from: validate-source, to: workflow-metadata, label: PutItem}
-    - {from: ingest-workflow, to: process-workflow, label: encoding profile, step: 3}
-    - {from: process-workflow, to: transcode-queue, label: CreateJob HLS and DASH, step: 4}
-    - {from: transcode-queue, to: distribution-media, label: transcoded outputs, step: 5}
-    - {from: mediaconvert-complete, to: publish-workflow, link: aws_cloudwatch_event_target, step: 6}
+    - {from: ingest-workflow, to: validate-source, label: MediaInfo task, step: 4}
+    - {from: validate-source, to: workflow-metadata, label: PutItem, step: 5}
+    - {from: ingest-workflow, to: process-workflow, label: encoding profile}
+    - {from: process-workflow, to: transcode-queue, label: CreateJob HLS and DASH, step: 3}
+    - {from: process-workflow, to: workflow-logs, label: workflow logs and MediaConvert events, step: 6}
+    - {from: transcode-queue, to: publish-workflow, label: MediaConvert complete event via EventBridge}
     - {from: publish-workflow, to: workflow-metadata, label: update job status}
     - {from: publish-workflow, to: workflow-notifications, label: publish complete, step: 7}
-    - {from: workflow-notifications, to: workflow-outputs, link: aws_sns_topic_subscription}
-    - {from: users, to: vod-cdn, label: playback, step: 8}
+    - {from: workflow-notifications, to: workflow-outputs, link: aws_sns_topic_subscription, step: 11}
+    - {from: transcode-queue, to: distribution-media, label: transcoded outputs, step: 9}
+    - {from: publish-workflow, to: distribution-media, label: publish assets (optionally via MediaPackage)}
+    - {from: users, to: vod-cdn, label: playback, step: 10}
     - {from: vod-cdn, to: distribution-media, label: origin}
 
 - slug: gaming-session-based-multiplayer-gamelift-flexmatch
@@ -664,38 +800,36 @@
   category: industry
   tags: [gaming, game backend, gamelift, flexmatch, matchmaking, api gateway, dynamodb]
   source: https://docs.aws.amazon.com/solutions/multiplayer-session-based-game-hosting-on-aws/
-  description: Guidance for Multiplayer Session-Based Game Hosting on AWS has game clients measure Region latency, then call an API Gateway backend whose Lambda function submits a StartMatchmaking request to Amazon GameLift FlexMatch; the GameLift queue places the match on the lowest-latency fleet location. Matchmaking events flow to an SNS topic and a Lambda function records ticket status in DynamoDB, the client polls for the game session IP and port, connects directly to the game server and instances ship logs and metrics to CloudWatch.
+  description: Guidance for Multiplayer Session-Based Game Hosting on AWS has game clients read Regional endpoints from a DynamoDB table to measure latency, then call an API Gateway HTTP API that validates the player against a custom identity component and whose Lambda function submits a StartMatchmaking request to Amazon GameLift FlexMatch; the GameLift queue places the match on the lowest-latency location of a multi-location fleet. Matchmaking events flow to an SNS topic and a Lambda function records ticket status in a DynamoDB matchmaking table, the client polls for the game session IP and port through a second Lambda function, connects directly to the game server and the fleet instances ship logs and metrics to CloudWatch.
   containers:
     - region: us-east-1
-      groups: [{label: backend-api}, {label: game-hosting}]
   elements:
-    - {tf: aws_cognito_user_pool, name: player-identity, in: group:backend-api}
-    - {tf: aws_api_gateway_rest_api, name: matchmaking-api, in: group:backend-api}
-    - {tf: aws_lambda_function, name: request-matchmaking, in: group:backend-api}
-    - {tf: aws_lambda_function, name: get-match-status, in: group:backend-api}
-    - {tf: aws_dynamodb_table, name: matchmaking-tickets, in: group:backend-api}
-    - {tf: aws_gamelift_build, name: game-server-build, in: group:game-hosting}
-    - {tf: aws_gamelift_fleet, name: game-server-fleet, in: group:game-hosting}
-    - {tf: aws_gamelift_game_session_queue, name: placement-queue, in: group:game-hosting}
-    - {tf: aws_sns_topic, name: matchmaking-events, in: region}
-    - {tf: aws_lambda_function, name: process-matchmaking-events, in: region}
-    - {tf: aws_cloudwatch_log_group, name: game-server-logs, in: region}
-  actors: [client]
+    - {tf: aws_lambda_function, name: custom-identity-component, in: region, at: [1, 1]}
+    - {tf: aws_lambda_function, name: get-match-status, in: region, at: [1, 3]}
+    - {tf: aws_dynamodb_table, name: matchmaking-tickets, in: region, at: [1, 4]}
+    - {tf: aws_lambda_function, name: process-matchmaking-events, in: region, at: [1, 5]}
+    - {tf: aws_api_gateway_rest_api, name: matchmaking-api, in: region, at: [2, 2]}
+    - {tf: aws_lambda_function, name: request-matchmaking, in: region, at: [2, 3]}
+    - {tf: aws_gamelift_game_session_queue, name: placement-queue, in: region, at: [2, 4]}
+    - {tf: aws_sns_topic, name: matchmaking-events, in: region, at: [2, 5]}
+    - {tf: aws_dynamodb_table, name: regional-endpoints, in: region, at: [3, 2]}
+    - {tf: aws_gamelift_fleet, name: game-server-fleet, in: region, at: [3, 4]}
+    - {tf: aws_cloudwatch_log_group, name: game-server-logs, in: region, at: [3, 5]}
+  actors: [{type: client, name: game-client, at: [1, 1]}]
   flows:
-    - {from: client, to: matchmaking-tickets, label: latency probe to Regional endpoint, step: 1}
-    - {from: client, to: matchmaking-api, label: POST request-matchmaking with latencies, step: 2}
-    - {from: matchmaking-api, to: player-identity, label: JWT validation, step: 3}
-    - {from: matchmaking-api, to: request-matchmaking, label: Lambda proxy, step: 4}
-    - {from: request-matchmaking, to: placement-queue, label: StartMatchmaking via FlexMatch, step: 5}
-    - {from: placement-queue, to: game-server-fleet, label: game session placement, step: 6}
-    - {from: game-server-build, to: game-server-fleet, label: server build}
+    - {from: game-client, to: regional-endpoints, label: latency probe to Regional endpoints, step: 1}
+    - {from: game-client, to: matchmaking-api, label: POST request-matchmaking with latencies, step: 2}
+    - {from: matchmaking-api, to: custom-identity-component, label: validate player identity, step: 3}
+    - {from: matchmaking-api, to: request-matchmaking, label: Lambda proxy}
+    - {from: request-matchmaking, to: placement-queue, label: StartMatchmaking via FlexMatch, placed on the queue, step: 4}
+    - {from: placement-queue, to: game-server-fleet, label: game session placement on the lowest-latency location, step: 6}
     - {from: placement-queue, to: matchmaking-events, label: MatchmakingSucceeded event, step: 7}
     - {from: matchmaking-events, to: process-matchmaking-events, link: aws_sns_topic_subscription, step: 8}
-    - {from: process-matchmaking-events, to: matchmaking-tickets, label: update ticket status}
-    - {from: client, to: matchmaking-api, label: GET match status, step: 9}
+    - {from: process-matchmaking-events, to: matchmaking-tickets, label: write match result}
+    - {from: game-client, to: matchmaking-api, label: GET match status, step: 9}
     - {from: matchmaking-api, to: get-match-status, label: Lambda proxy}
     - {from: get-match-status, to: matchmaking-tickets, label: GetItem ticket, step: 10}
-    - {from: client, to: game-server-fleet, label: UDP or TCP game session connect, step: 11}
+    - {from: game-client, to: game-server-fleet, label: UDP or TCP game session connect, step: 11}
     - {from: game-server-fleet, to: game-server-logs, label: CloudWatch agent, step: 12}
 
 - slug: gaming-analytics-pipeline-telemetry
@@ -703,39 +837,42 @@
   category: industry
   tags: [gaming, game analytics, telemetry, kinesis, flink, opensearch, firehose, athena]
   source: https://docs.aws.amazon.com/solutions/game-analytics-pipeline-on-aws/
-  description: Guidance for Game Analytics Pipeline on AWS accepts telemetry from game clients and servers through an API Gateway backend backed by Lambda and DynamoDB for authentication and administration, and writes events to a Kinesis data stream. An optional real-time path processes the stream with Managed Service for Apache Flink into OpenSearch dashboards, while Kinesis Data Firehose batches events as Parquet into an S3 data lake with Glue tables queried by Athena, or alternatively streams them into Redshift Serverless.
+  description: Guidance for Game Analytics Pipeline on AWS accepts telemetry from game clients and servers through an API Gateway endpoint backed by Lambda and DynamoDB for authentication and administration. An optional real-time path writes events to a Kinesis data stream processed by Managed Service for Apache Flink into OpenSearch dashboards, the data lake mode batches events through Kinesis Data Firehose as Parquet into an S3 data lake with Glue tables queried by Athena, and the data warehouse mode streams events from a second Kinesis data stream into Redshift.
   containers:
     - region: us-east-1
-      groups: [{label: ingestion}, {label: real-time}, {label: data-lake}]
+      groups:
+        - {label: api-endpoint, at: [1, 1, 3, 1]}
+        - {label: optional-real-time-analytics, at: [1, 2]}
+        - {label: data-lake-mode, at: [2, 2]}
+        - {label: data-warehouse-mode, at: [3, 2]}
   elements:
-    - {tf: aws_api_gateway_rest_api, name: events-api, in: group:ingestion}
-    - {tf: aws_lambda_function, name: events-authorizer, in: group:ingestion}
-    - {tf: aws_dynamodb_table, name: applications-and-keys, in: group:ingestion}
-    - {tf: aws_kinesis_stream, name: game-events-stream, in: group:ingestion}
-    - {tf: aws_kinesisanalyticsv2_application, name: realtime-metrics-flink, in: group:real-time}
-    - {tf: aws_opensearch_domain, name: live-ops-dashboards, in: group:real-time}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: events-to-s3, in: group:data-lake}
-    - {tf: aws_s3_bucket, name: analytics-data-lake, in: group:data-lake}
-    - {tf: aws_glue_catalog_database, name: game-events-catalog, in: group:data-lake}
-    - {tf: aws_glue_job, name: events-etl, in: group:data-lake}
-    - {tf: aws_athena_workgroup, name: game-analytics-queries, in: group:data-lake}
-    - {tf: aws_redshift_cluster, name: game-warehouse, in: group:data-lake}
-  actors: [client, server, users]
+    - {tf: aws_api_gateway_rest_api, name: events-api, in: group:api-endpoint, at: [1, 1]}
+    - {tf: aws_lambda_function, name: events-authorizer, in: group:api-endpoint, at: [2, 1]}
+    - {tf: aws_dynamodb_table, name: applications-and-keys, in: group:api-endpoint, at: [3, 1]}
+    - {tf: aws_kinesis_stream, name: game-events-stream, in: group:optional-real-time-analytics, at: [1, 1]}
+    - {tf: aws_kinesisanalyticsv2_application, name: realtime-metrics-flink, in: group:optional-real-time-analytics, at: [1, 2]}
+    - {tf: aws_opensearch_domain, name: live-ops-dashboards, in: group:optional-real-time-analytics, at: [1, 3]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: events-to-s3, in: group:data-lake-mode, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: analytics-data-lake, in: group:data-lake-mode, at: [1, 2]}
+    - {tf: aws_glue_catalog_database, name: game-events-catalog, in: group:data-lake-mode, at: [1, 3]}
+    - {tf: aws_athena_workgroup, name: game-analytics-queries, in: group:data-lake-mode, at: [1, 4]}
+    - {tf: aws_kinesis_stream, name: warehouse-events-stream, in: group:data-warehouse-mode, at: [1, 1]}
+    - {tf: aws_redshift_cluster, name: game-warehouse, in: group:data-warehouse-mode, at: [1, 2]}
+  actors: [{type: client, name: game-clients, at: [1, 1]}, {type: server, name: game-servers, at: [2, 1]}]
   flows:
-    - {from: client, to: events-api, label: POST /events, step: 1}
-    - {from: server, to: events-api, label: server telemetry, step: 1}
+    - {from: game-clients, to: events-api, label: POST /events, step: 1}
+    - {from: game-servers, to: events-api, label: server telemetry, step: 1}
     - {from: events-api, to: events-authorizer, label: API key authorizer, step: 2}
     - {from: events-authorizer, to: applications-and-keys, label: GetItem}
     - {from: events-api, to: game-events-stream, label: PutRecords, step: 3}
-    - {from: game-events-stream, to: realtime-metrics-flink, label: Flink source, step: 4}
+    - {from: game-events-stream, to: realtime-metrics-flink, label: Flink source}
     - {from: realtime-metrics-flink, to: live-ops-dashboards, label: aggregated metrics}
-    - {from: game-events-stream, to: events-to-s3, label: Firehose source, step: 5}
-    - {from: events-to-s3, to: analytics-data-lake, label: Parquet partitions, step: 6}
-    - {from: analytics-data-lake, to: events-etl, label: ETL}
-    - {from: events-etl, to: game-events-catalog, label: Hive or Iceberg tables}
-    - {from: game-events-catalog, to: game-analytics-queries, label: SQL, step: 7}
-    - {from: game-events-stream, to: game-warehouse, label: streaming ingestion, step: 8}
-    - {from: users, to: live-ops-dashboards, label: live dashboards}
+    - {from: game-events-stream, to: events-to-s3, label: Firehose source, step: 4}
+    - {from: events-to-s3, to: analytics-data-lake, label: Parquet partitions}
+    - {from: analytics-data-lake, to: game-events-catalog, label: Glue tables}
+    - {from: game-events-catalog, to: game-analytics-queries, label: SQL}
+    - {from: events-api, to: warehouse-events-stream, label: PutRecords warehouse mode, step: 5}
+    - {from: warehouse-events-stream, to: game-warehouse, label: streaming ingestion}
 
 - slug: public-sector-govcloud-secure-web-application
   title: Secure public sector web application in AWS GovCloud (US)
@@ -787,44 +924,66 @@
   category: industry
   tags: [advertising, ad tech, real-time bidding, eks, dynamodb, kinesis, graviton]
   source: https://docs.aws.amazon.com/solutions/building-a-real-time-bidder-for-advertising-on-aws/
-  description: Guidance for Building a Real Time Bidder for Advertising on AWS receives OpenRTB bid requests from supply-side platforms on a public load balancer and routes them to bidder pods on an EKS cluster running Graviton instances. The bidder reads audience, campaign and budget tables in DynamoDB through VPC endpoints, updates budgets on wins, and sends compressed transaction micro-batches to Kinesis Data Streams and Firehose for delivery to S3, with KMS encryption and ECR-hosted container images.
+  description: Guidance for Building a Real Time Bidder for Advertising on AWS receives OpenRTB bid requests from a publisher's supply-side platform on a public load balancer and routes them to bidder pods on an EKS cluster running Graviton instances. Through three VPC endpoints the bidder reads audience, campaign and budget tables in DynamoDB (or an Aerospike cluster on EC2), updates budgets on wins, pulls container images from ECR and sends compressed transaction micro-batches to Kinesis Data Streams and Firehose for delivery to S3; KMS and IAM secure the stack, which CodePipeline, CodeBuild and CloudFormation deploy.
   containers:
     - region: us-east-1
+      groups:
+        - {label: nosql-database, at: [1, 2, 1, 2]}
+        - {label: data-pipeline, at: [2, 2, 1, 2]}
+        - {label: security-identity-compliance, at: [3, 3]}
+        - {label: deployment-pipeline, at: [4, 2, 1, 2]}
       vpcs:
         - name: rtb
           cidr: 10.60.0.0/16
+          at: [1, 1, 4, 1]
           subnets:
             - {name: public-a, cidr: 10.60.0.0/24, az: a, public: true}
             - {name: public-b, cidr: 10.60.1.0/24, az: b, public: true}
             - {name: bidder-a, cidr: 10.60.10.0/24, az: a, public: false}
             - {name: bidder-b, cidr: 10.60.11.0/24, az: b, public: false}
   elements:
-    - {tf: aws_lb, name: bid-request-nlb, in: subnet:public-a}
-    - {tf: aws_eks_cluster, name: bidder-cluster, in: vpc:rtb}
-    - {tf: aws_eks_node_group, name: graviton-bidder-nodes, in: subnet:bidder-a}
-    - {tf: aws_ecr_repository, name: bidder-images, in: region}
-    - {tf: aws_dynamodb_table, name: audiences, in: region}
-    - {tf: aws_dynamodb_table, name: campaigns, in: region}
-    - {tf: aws_dynamodb_table, name: budgets, in: region}
-    - {tf: aws_vpc_endpoint, name: dynamodb-endpoint, in: vpc:rtb}
-    - {tf: aws_kinesis_stream, name: bid-transactions, in: region}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: transactions-to-s3, in: region}
-    - {tf: aws_s3_bucket, name: bid-analytics, in: region}
-    - {tf: aws_kms_key, name: rtb-cmk, in: region}
-  actors: [saas]
+    - {tf: aws_lb, name: bid-request-nlb, in: subnet:public-a, at: [1, 1]}
+    - {tf: aws_eks_cluster, name: bidder-cluster, in: vpc:rtb, at: [1, 2, 3, 1]}
+    - {tf: aws_eks_node_group, name: graviton-bidder-nodes, in: subnet:bidder-a, at: [1, 1]}
+    - {tf: aws_vpc_endpoint, name: dynamodb-endpoint, in: vpc:rtb, at: [1, 3]}
+    - {tf: aws_vpc_endpoint, name: kinesis-endpoint, in: vpc:rtb, at: [2, 3]}
+    - {tf: aws_vpc_endpoint, name: ecr-endpoint, in: vpc:rtb, at: [3, 3]}
+    - {tf: aws_dynamodb_table, name: budgets, in: group:nosql-database, at: [1, 1]}
+    - {tf: aws_dynamodb_table, name: campaigns, in: group:nosql-database, at: [2, 1]}
+    - {tf: aws_dynamodb_table, name: audiences, in: group:nosql-database, at: [1, 2, 2, 1]}
+    - {tf: aws_instance, name: aerospike-cluster, in: subnet:bidder-b, at: [1, 1]}
+    - {tf: aws_kinesis_stream, name: bid-transactions, in: group:data-pipeline, at: [1, 1]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: transactions-to-s3, in: group:data-pipeline, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: bid-analytics, in: group:data-pipeline, at: [1, 3]}
+    - {tf: aws_ecr_repository, name: bidder-images, in: region, at: [3, 2]}
+    - {tf: aws_kms_key, name: rtb-cmk, in: group:security-identity-compliance, at: [1, 1]}
+    - {tf: aws_iam_role, name: bidder-service-role, in: group:security-identity-compliance, at: [1, 2]}
+    - {tf: aws_codebuild_project, name: bidder-image-build, in: group:deployment-pipeline, at: [1, 1]}
+    - {tf: aws_codepipeline, name: bidder-release-pipeline, in: group:deployment-pipeline, at: [1, 2]}
+    - {tf: aws_cloudformation_stack, name: bidder-infrastructure-stack, in: group:deployment-pipeline, at: [1, 3]}
+  actors: [{type: users, name: publisher, at: [1, 1]}, {type: saas, name: ssp-auction-server, at: [2, 1]}]
   flows:
-    - {from: saas, to: bid-request-nlb, label: OpenRTB bid request from SSP, step: 1}
-    - {from: bid-request-nlb, to: graviton-bidder-nodes, label: bidder pods, step: 2}
-    - {from: bidder-cluster, to: bidder-images, label: pull pre-built images}
+    - {from: publisher, to: ssp-auction-server, label: ad impression to sell}
+    - {from: ssp-auction-server, to: bid-request-nlb, label: OpenRTB bid request from SSP, step: 1}
+    - {from: bid-request-nlb, to: graviton-bidder-nodes, label: bidder pods 1 to n, step: 2}
     - {from: graviton-bidder-nodes, to: dynamodb-endpoint, label: private access}
-    - {from: dynamodb-endpoint, to: audiences, label: segment lookup, step: 3}
+    - {from: dynamodb-endpoint, to: budgets, label: budget check and win update, step: 3}
     - {from: dynamodb-endpoint, to: campaigns, label: campaign match}
-    - {from: dynamodb-endpoint, to: budgets, label: budget check and win update}
-    - {from: graviton-bidder-nodes, to: saas, label: bid response}
-    - {from: graviton-bidder-nodes, to: bid-transactions, label: compressed 25 KB micro-batches, step: 4}
-    - {from: bid-transactions, to: transactions-to-s3, label: Firehose source, step: 5}
-    - {from: transactions-to-s3, to: bid-analytics, label: analytics and reporting, step: 6}
+    - {from: dynamodb-endpoint, to: audiences, label: segment lookup}
+    - {from: graviton-bidder-nodes, to: aerospike-cluster, label: alternative key-value store}
+    - {from: graviton-bidder-nodes, to: ssp-auction-server, label: bid response}
+    - {from: graviton-bidder-nodes, to: kinesis-endpoint, label: compressed 25 KB micro-batches}
+    - {from: kinesis-endpoint, to: bid-transactions, label: PutRecords, step: 4}
+    - {from: bid-transactions, to: transactions-to-s3, label: Firehose source}
+    - {from: transactions-to-s3, to: bid-analytics, label: analytics and reporting}
+    - {from: graviton-bidder-nodes, to: ecr-endpoint, label: image pull}
+    - {from: ecr-endpoint, to: bidder-images, label: pull pre-built images}
     - {from: bid-analytics, to: rtb-cmk, label: SSE-KMS}
+    - {from: bidder-service-role, to: bidder-cluster, label: IAM roles for service accounts}
+    - {from: bidder-release-pipeline, to: bidder-image-build, label: build stage}
+    - {from: bidder-image-build, to: bidder-images, label: push images}
+    - {from: bidder-release-pipeline, to: bidder-infrastructure-stack, label: deploy stage}
+    - {from: bidder-infrastructure-stack, to: bidder-cluster, label: provisions the cluster}
 
 - slug: adtech-clean-rooms-advertiser-publisher-collaboration
   title: Advertiser and publisher data collaboration with AWS Clean Rooms

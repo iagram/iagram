@@ -9,42 +9,44 @@ tags:
 - multi-region
 image: https://d2908q01vomqb2.cloudfront.net/5b384ce32d8cdef02bc3a139d4cac0a22bb029e8/2023/10/28/Data-Flow-1.png
 source: https://aws.amazon.com/blogs/networking-and-content-delivery/hybrid-cloud-architectures-using-aws-direct-connect-gateway/
-description: A single Direct Connect connection carries a private virtual interface to a globally scoped Direct Connect gateway, which is associated with virtual private gateways attached to VPCs in two
-  different Regions. Routes for each VPC are advertised to the customer router over one BGP session, and the gateway does not forward traffic between the associated VPCs or back toward on-premises through
-  another VIF.
+description: Two Direct Connect connections at separate Direct Connect locations carry virtual interfaces to a single globally scoped Direct Connect gateway, which is associated with Transit Gateways in
+  us-east-1 and us-east-2 that each attach three VPCs. Routes for every VPC are advertised over BGP to the redundant customer gateway routers of the corporate WAN, and the gateway does not forward traffic
+  between the associated Regions or back toward on-premises through another virtual interface.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 1]}
+- {id: dc-corporate-wan, type: common.datacenter, name: corporate-wan, at: [2, 1]}
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-dx-location, type: common.group, name: dx-location, parent: reg-us-east-1, at: [3, 1]}
-- {id: vpc-east-app, type: aws.vpc, name: east-app, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: az-east-app-a, type: aws.availability_zone, name: a, parent: vpc-east-app, props: {zone: a}, at: [1, 1]}
-- {id: sub-east-private-a, type: aws.subnet, name: east-private-a, parent: az-east-app-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: reg-ap-southeast-1, type: aws.region, name: ap-southeast-1, parent: acct-prod, props: {region: ap-southeast-1}, at: [1, 2]}
-- {id: vpc-apac-app, type: aws.vpc, name: apac-app, parent: reg-ap-southeast-1, props: {cidr: 10.21.0.0/16}, at: [1, 1]}
-- {id: az-apac-app-a, type: aws.availability_zone, name: a, parent: vpc-apac-app, props: {zone: a}, at: [1, 1]}
-- {id: sub-apac-private-a, type: aws.subnet, name: apac-private-a, parent: az-apac-app-a, props: {cidr: 10.21.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: dx-connection, type: aws.res.aws_dx_connection, name: dx-connection, parent: grp-dx-location, props: {bandwidth: changeme, location: westeurope, name: changeme}, at: [2, 1]}
-- {id: private-vif, type: aws.res.aws_dx_private_virtual_interface, name: private-vif, parent: grp-dx-location, props: {address_family: changeme, connection_id: changeme, name: changeme, vlan: 1}, at: [1, 1]}
-- {id: dx-gateway, type: aws.res.aws_dx_gateway, name: dx-gateway, parent: reg-us-east-1, props: {amazon_side_asn: changeme, name: changeme}, at: [2, 1]}
-- {id: east-vgw, type: aws.res.aws_vpn_gateway, name: east-vgw, parent: vpc-east-app, at: [2, 1, 1, 2]}
-- {id: apac-vgw, type: aws.res.aws_vpn_gateway, name: apac-vgw, parent: vpc-apac-app, at: [2, 1, 1, 2]}
-- {id: east-server, type: aws.ec2_instance, name: east-server, parent: sub-east-private-a, at: [1, 1]}
-- {id: apac-server, type: aws.ec2_instance, name: apac-server, parent: sub-apac-private-a, at: [1, 1]}
-- {id: az-vpc-east-app-b, type: aws.availability_zone, name: b, parent: vpc-east-app, props: {zone: b}, at: [1, 2]}
-- {id: sub-vpc-east-app-b, type: aws.subnet, name: private-b, parent: az-vpc-east-app-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
-- {id: az-vpc-apac-app-b, type: aws.availability_zone, name: b, parent: vpc-apac-app, props: {zone: b}, at: [1, 2]}
-- {id: sub-vpc-apac-app-b, type: aws.subnet, name: private-b, parent: az-vpc-apac-app-b, props: {cidr: 10.21.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: vpc-east-1-vpc-1, type: aws.vpc, name: east-1-vpc-1, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: vpc-east-1-vpc-2, type: aws.vpc, name: east-1-vpc-2, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}, at: [1, 2]}
+- {id: vpc-east-1-vpc-3, type: aws.vpc, name: east-1-vpc-3, parent: reg-us-east-1, props: {cidr: 10.3.0.0/16}, at: [1, 3]}
+- {id: reg-us-east-2, type: aws.region, name: us-east-2, parent: acct-prod, props: {region: us-east-2}, at: [1, 2]}
+- {id: vpc-east-2-vpc-1, type: aws.vpc, name: east-2-vpc-1, parent: reg-us-east-2, props: {cidr: 10.11.0.0/16}, at: [1, 1]}
+- {id: vpc-east-2-vpc-2, type: aws.vpc, name: east-2-vpc-2, parent: reg-us-east-2, props: {cidr: 10.12.0.0/16}, at: [1, 2]}
+- {id: vpc-east-2-vpc-3, type: aws.vpc, name: east-2-vpc-3, parent: reg-us-east-2, props: {cidr: 10.13.0.0/16}, at: [1, 3]}
+- {id: tgw-us-east-1, type: aws.res.aws_ec2_transit_gateway, name: tgw-us-east-1, parent: reg-us-east-1, at: [2, 1, 1, 3]}
+- {id: tgw-us-east-2, type: aws.res.aws_ec2_transit_gateway, name: tgw-us-east-2, parent: reg-us-east-2, at: [2, 1, 1, 3]}
+- {id: dxgw, type: aws.res.aws_dx_gateway, name: dxgw, parent: acct-prod, props: {amazon_side_asn: changeme, name: changeme}, at: [2, 1, 1, 2]}
+- {id: dx-connection-1, type: aws.res.aws_dx_connection, name: dx-connection-1, parent: acct-prod, props: {bandwidth: changeme, location: westeurope, name: changeme}, at: [3, 1]}
+- {id: dx-connection-2, type: aws.res.aws_dx_connection, name: dx-connection-2, parent: acct-prod, props: {bandwidth: changeme, location: westeurope, name: changeme}, at: [3, 2]}
+- {id: cgw-1, type: aws.res.aws_customer_gateway, name: cgw-1, parent: acct-prod, props: {type: changeme}, at: [4, 1]}
+- {id: cgw-2, type: aws.res.aws_customer_gateway, name: cgw-2, parent: acct-prod, props: {type: changeme}, at: [4, 2]}
 edges:
-- {from: dc-on-premises, to: dx-connection, label: 1 or 10 Gbps cross-connect, step: '1'}
-- {from: dx-connection, to: private-vif, label: '802.1Q VLAN, BGP', step: '2'}
-- {from: private-vif, to: dx-gateway, step: '3'}
-- {from: dx-gateway, to: east-vgw, link: aws_dx_gateway_association}
-- {from: dx-gateway, to: apac-vgw, link: aws_dx_gateway_association}
-- {from: east-vgw, to: east-server, label: propagated route, step: '4'}
-- {from: apac-vgw, to: apac-server, label: cross-Region over AWS backbone}
+- {from: dc-corporate-wan, to: cgw-1, label: corporate WAN router}
+- {from: dc-corporate-wan, to: cgw-2, label: corporate WAN router}
+- {from: cgw-1, to: cgw-2, label: corporate WAN}
+- {from: cgw-1, to: dx-connection-1, label: cross-connect at Direct Connect location 1, step: '1'}
+- {from: cgw-2, to: dx-connection-2, label: cross-connect at Direct Connect location 2}
+- {from: dx-connection-1, to: dxgw, label: 'virtual interface, BGP', step: '2'}
+- {from: dx-connection-2, to: dxgw, label: 'virtual interface, BGP'}
+- {from: dxgw, to: tgw-us-east-1, step: '3', link: aws_dx_gateway_association}
+- {from: dxgw, to: tgw-us-east-2, link: aws_dx_gateway_association}
+- {from: tgw-us-east-1, to: vpc-east-1-vpc-1, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: tgw-us-east-1, to: vpc-east-1-vpc-2, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: tgw-us-east-1, to: vpc-east-1-vpc-3, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: tgw-us-east-2, to: vpc-east-2-vpc-1, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: tgw-us-east-2, to: vpc-east-2-vpc-2, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: tgw-us-east-2, to: vpc-east-2-vpc-3, link: aws_ec2_transit_gateway_vpc_attachment}
 steps:
-- {n: '1', text: 'datacenter → dx-connection: 1 or 10 Gbps cross-connect'}
-- {n: '2', text: 'dx-connection → private-vif: 802.1Q VLAN, BGP'}
-- {n: '3', text: private-vif → dx-gateway}
-- {n: '4', text: 'east-vgw → east-server: propagated route'}
+- {n: '1', text: 'cgw-1 → dx-connection-1: cross-connect at Direct Connect location 1'}
+- {n: '2', text: 'dx-connection-1 → dxgw: virtual interface, BGP'}
+- {n: '3', text: dxgw → tgw-us-east-1}

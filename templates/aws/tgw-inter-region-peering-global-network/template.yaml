@@ -9,51 +9,41 @@ tags:
 - encrypted backbone
 image: https://d2908q01vomqb2.cloudfront.net/5b384ce32d8cdef02bc3a139d4cac0a22bb029e8/2020/06/23/2-blog-post-tgw-enterprise-network-architecture-1024x869.jpg
 source: https://aws.amazon.com/blogs/networking-and-content-delivery/building-a-global-network-using-aws-transit-gateway-inter-region-peering/
-description: Each Region runs its own Transit Gateway hub with local VPC attachments, and the two hubs are joined by a peering attachment that carries traffic over the encrypted AWS global backbone rather
-  than the public internet. Peering attachments do not propagate routes, so each TGW route table holds static routes for the remote Region's CIDRs; on-premises sites connected to one hub can reach VPCs
-  in the other Region through the peering.
+description: Transit Gateways in eu-west-2 and ap-northeast-2 each attach two VPCs (192.168.0.0/20 and 192.168.16.0/20 in London, 192.168.128.0/20 and 192.168.144.0/20 in Seoul) and are joined by an inter-Region
+  peering attachment that rides the encrypted AWS global network instead of the public internet. Branch offices in LA, London and Seoul reach the nearest Transit Gateway over accelerated Site-to-Site VPN
+  tunnels that enter at an AWS edge location, the London data centre lands on a Direct Connect gateway associated with the London Transit Gateway, and because peering attachments do not propagate routes
+  each TGW route table carries static routes for the remote Region's prefixes.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1]}
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-east-app, type: aws.vpc, name: east-app, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 3]}
-- {id: az-east-app-a, type: aws.availability_zone, name: a, parent: vpc-east-app, props: {zone: a}, at: [1, 1]}
-- {id: sub-east-app-private-a, type: aws.subnet, name: east-app-private-a, parent: az-east-app-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: vpc-east-shared, type: aws.vpc, name: east-shared, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}, at: [2, 3]}
-- {id: az-east-shared-a, type: aws.availability_zone, name: a, parent: vpc-east-shared, props: {zone: a}, at: [1, 1]}
-- {id: sub-east-shared-private-a, type: aws.subnet, name: east-shared-private-a, parent: az-east-shared-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [2, 1]}
-- {id: vpc-eu-app, type: aws.vpc, name: eu-app, parent: reg-eu-west-1, props: {cidr: 10.11.0.0/16}, at: [1, 2]}
-- {id: az-eu-app-a, type: aws.availability_zone, name: a, parent: vpc-eu-app, props: {zone: a}, at: [1, 1]}
-- {id: sub-eu-app-private-a, type: aws.subnet, name: eu-app-private-a, parent: az-eu-app-a, props: {cidr: 10.11.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: tgw-east, type: aws.res.aws_ec2_transit_gateway, name: tgw-east, parent: reg-us-east-1, at: [1, 2, 2, 1]}
-- {id: tgw-eu, type: aws.res.aws_ec2_transit_gateway, name: tgw-eu, parent: reg-eu-west-1, at: [1, 1]}
-- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}, at: [1, 1, 2, 1]}
-- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}, at: [2, 1]}
-- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-us-east-1-a, props: {type: changeme}, at: [1, 1]}
-- {id: east-app-server, type: aws.ec2_instance, name: east-app-server, parent: sub-east-app-private-a, at: [1, 1]}
-- {id: east-directory, type: aws.ec2_instance, name: east-directory, parent: sub-east-shared-private-a, at: [1, 1]}
-- {id: eu-app-server, type: aws.ec2_instance, name: eu-app-server, parent: sub-eu-app-private-a, at: [1, 1]}
-- {id: az-vpc-east-app-b, type: aws.availability_zone, name: b, parent: vpc-east-app, props: {zone: b}, at: [2, 1]}
-- {id: sub-vpc-east-app-b, type: aws.subnet, name: private-b, parent: az-vpc-east-app-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
-- {id: az-vpc-east-shared-b, type: aws.availability_zone, name: b, parent: vpc-east-shared, props: {zone: b}, at: [2, 1]}
-- {id: sub-vpc-east-shared-b, type: aws.subnet, name: private-b, parent: az-vpc-east-shared-b, props: {cidr: 10.2.251.0/24, az: b, public: false}, at: [1, 1]}
-- {id: az-vpc-eu-app-b, type: aws.availability_zone, name: b, parent: vpc-eu-app, props: {zone: b}, at: [2, 1]}
-- {id: sub-vpc-eu-app-b, type: aws.subnet, name: private-b, parent: az-vpc-eu-app-b, props: {cidr: 10.11.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 4, 2, 1]}
+- {id: reg-eu-west-2, type: aws.region, name: eu-west-2, parent: acct-prod, props: {region: eu-west-2}, at: [1, 2]}
+- {id: vpc-vpc-a-eu-west-2, type: aws.vpc, name: vpc-a-eu-west-2, parent: reg-eu-west-2, props: {cidr: 192.168.0.0/20}, at: [1, 3]}
+- {id: vpc-vpc-b-eu-west-2, type: aws.vpc, name: vpc-b-eu-west-2, parent: reg-eu-west-2, props: {cidr: 192.168.16.0/20}, at: [2, 3]}
+- {id: reg-ap-northeast-2, type: aws.region, name: ap-northeast-2, parent: acct-prod, props: {region: ap-northeast-2}, at: [3, 2]}
+- {id: vpc-vpc-a-ap-northeast-2, type: aws.vpc, name: vpc-a-ap-northeast-2, parent: reg-ap-northeast-2, props: {cidr: 192.168.128.0/20}, at: [1, 2]}
+- {id: vpc-vpc-b-ap-northeast-2, type: aws.vpc, name: vpc-b-ap-northeast-2, parent: reg-ap-northeast-2, props: {cidr: 192.168.144.0/20}, at: [2, 2]}
+- {id: branch-la, type: common.server, name: branch-la, at: [1, 1]}
+- {id: branch-london, type: common.server, name: branch-london, at: [1, 2]}
+- {id: dc-on-premises, type: common.datacenter, name: data-centre-london, at: [1, 3]}
+- {id: branch-seoul, type: common.server, name: branch-seoul, at: [2, 1]}
+- {id: tgw-eu-west-2, type: aws.res.aws_ec2_transit_gateway, name: tgw-eu-west-2, parent: reg-eu-west-2, at: [1, 2]}
+- {id: tgw-ap-northeast-2, type: aws.res.aws_ec2_transit_gateway, name: tgw-ap-northeast-2, parent: reg-ap-northeast-2, at: [2, 1]}
+- {id: dxgw-eu-west-2, type: aws.res.aws_dx_gateway, name: dxgw-eu-west-2, parent: acct-prod, props: {amazon_side_asn: changeme, name: changeme}, at: [1, 1]}
+- {id: aws-global-network, type: aws.res.aws_networkmanager_global_network, name: aws-global-network, parent: acct-prod, at: [2, 1, 1, 2]}
 edges:
-- {from: tgw-east, to: vpc-east-app, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: tgw-east, to: vpc-east-shared, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: tgw-eu, to: vpc-eu-app, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: tgw-east, to: tgw-eu, label: inter-Region peering (static routes), link: aws_ec2_transit_gateway_peering_attachment}
-- {from: dc-on-premises, to: dc-cgw, label: IPsec}
-- {from: eu-app-server, to: tgw-eu, label: 10.2.0.0/16 via peering, step: '1'}
-- {from: tgw-eu, to: tgw-east, label: 'AWS backbone, encrypted', step: '2'}
-- {from: tgw-east, to: east-directory, step: '3'}
-- {from: dc-cgw, to: tgw-east, link: aws_vpn_connection}
+- {from: tgw-eu-west-2, to: vpc-vpc-a-eu-west-2, label: static route 192.168.128.0/20 -> peering, step: '3', link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: tgw-eu-west-2, to: vpc-vpc-b-eu-west-2, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: tgw-ap-northeast-2, to: vpc-vpc-a-ap-northeast-2, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: tgw-ap-northeast-2, to: vpc-vpc-b-ap-northeast-2, link: aws_ec2_transit_gateway_vpc_attachment}
+- {from: vpc-vpc-a-ap-northeast-2, to: tgw-ap-northeast-2, label: static route 192.168.0.0/20 -> peering attachment, step: '1'}
+- {from: tgw-ap-northeast-2, to: tgw-eu-west-2, label: inter-region peering over the AWS global network (encrypted), step: '2', link: aws_ec2_transit_gateway_peering_attachment}
+- {from: branch-la, to: tgw-eu-west-2, label: IPsec accelerated Site-to-Site VPN vpn-lax (172.16.0.0/24}
+- {from: branch-london, to: tgw-eu-west-2, label: IPsec accelerated Site-to-Site VPN vpn-lhr (172.16.1.0/24}
+- {from: branch-seoul, to: tgw-ap-northeast-2, label: IPsec accelerated Site-to-Site VPN vpn-icn (172.16.2.0/24}
+- {from: dc-on-premises, to: dxgw-eu-west-2, label: Direct Connect (10.0.0.0/8)}
+- {from: dxgw-eu-west-2, to: tgw-eu-west-2, link: aws_dx_gateway_association}
+- {from: aws-global-network, to: tgw-eu-west-2, label: registered transit gateway}
+- {from: aws-global-network, to: tgw-ap-northeast-2, label: registered transit gateway}
 steps:
-- {n: '1', text: 'eu-app-server → tgw-eu: 10.2.0.0/16 via peering'}
-- {n: '2', text: 'tgw-eu → tgw-east: AWS backbone, encrypted'}
-- {n: '3', text: tgw-east → east-directory}
+- {n: '1', text: 'vpc:vpc-a-ap-northeast-2 → tgw-ap-northeast-2: static route 192.168.0.0/20 -> peering attachment'}
+- {n: '2', text: 'tgw-ap-northeast-2 → tgw-eu-west-2: inter-region peering over the AWS global network (encrypted)'}
+- {n: '3', text: 'tgw-eu-west-2 → vpc:vpc-a-eu-west-2: static route 192.168.128.0/20 -> peering'}

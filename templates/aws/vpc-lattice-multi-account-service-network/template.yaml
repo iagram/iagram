@@ -10,48 +10,54 @@ tags:
 - iam auth
 image: https://d2908q01vomqb2.cloudfront.net/5b384ce32d8cdef02bc3a139d4cac0a22bb029e8/2023/04/02/Figure-1.png
 source: https://aws.amazon.com/blogs/networking-and-content-delivery/build-secure-multi-account-multi-vpc-connectivity-for-your-applications-with-amazon-vpc-lattice/
-description: A central networking account owns a VPC Lattice service network and shares it with workload accounts through AWS RAM; each workload account associates its VPC with the service network and registers
-  its own services with target groups pointing at instances, containers, or Lambda functions. Consumers call services by their Lattice DNS names through the link-local Lattice prefix, with IAM auth policies
-  on the service network and services controlling who may invoke what, independent of VPC CIDRs.
+description: Four applications live in three AWS accounts in us-west-2 with overlapping-prone, independent VPCs. App1 and App2 run as pods on Amazon EKS clusters with EC2 worker nodes in VPC-1 (10.1.0.0/16)
+  and VPC-2 (10.2.0.0/16), App3 is a Lambda function in VPC-3 (10.3.0.0/16) and App4 an EC2 Auto Scaling group in VPC-4 (10.4.0.0/16). Account 1 owns a VPC Lattice service network and shares it with the
+  other accounts through AWS RAM; each VPC is associated with the service network so the applications call each other by Lattice DNS names through the link-local Lattice prefix, with IAM auth policies deciding
+  who may invoke what independently of VPC CIDRs.
 nodes:
-- {id: acct-networking, type: aws.account, name: networking, at: [2, 1, 1, 2]}
-- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-networking, props: {region: us-west-2}, at: [1, 1]}
-- {id: acct-payments, type: aws.account, name: payments, at: [1, 1]}
-- {id: reg-us-west-2-2, type: aws.region, name: us-west-2, parent: acct-payments, props: {region: us-west-2}, at: [2, 1]}
-- {id: vpc-payments, type: aws.vpc, name: payments, parent: reg-us-west-2-2, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: az-payments-a, type: aws.availability_zone, name: a, parent: vpc-payments, props: {zone: a}, at: [2, 1]}
-- {id: sub-payments-private-a, type: aws.subnet, name: payments-private-a, parent: az-payments-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: acct-orders, type: aws.account, name: orders, at: [1, 2]}
-- {id: reg-us-west-2-3, type: aws.region, name: us-west-2, parent: acct-orders, props: {region: us-west-2}, at: [2, 1]}
-- {id: vpc-orders, type: aws.vpc, name: orders, parent: reg-us-west-2-3, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: az-orders-a, type: aws.availability_zone, name: a, parent: vpc-orders, props: {zone: a}, at: [1, 1]}
-- {id: sub-orders-private-a, type: aws.subnet, name: orders-private-a, parent: az-orders-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: corp-service-network, type: aws.res.aws_vpclattice_service_network, name: corp-service-network, parent: acct-networking, props: {name: changeme}, at: [1, 2]}
-- {id: service-network-share, type: aws.res.aws_ram_resource_share, name: service-network-share, parent: acct-networking, props: {name: changeme}, at: [1, 3]}
-- {id: payments-service, type: aws.res.aws_vpclattice_service, name: payments-service, parent: acct-payments, props: {name: changeme}, at: [1, 1]}
-- {id: payments-targets, type: aws.res.aws_vpclattice_target_group, name: payments-targets, parent: vpc-payments, props: {name: changeme, type: changeme}, at: [1, 1, 1, 2]}
-- {id: payments-api, type: aws.ec2_instance, name: payments-api, parent: sub-payments-private-a, at: [1, 1]}
-- {id: orders-service, type: aws.res.aws_vpclattice_service, name: orders-service, parent: acct-orders, props: {name: changeme}, at: [1, 1]}
-- {id: orders-handler, type: aws.lambda_function, name: orders-handler, parent: reg-us-west-2-3, at: [1, 2]}
-- {id: orders-client, type: aws.ec2_instance, name: orders-client, parent: sub-orders-private-a, at: [1, 1]}
-- {id: az-vpc-payments-b, type: aws.availability_zone, name: b, parent: vpc-payments, props: {zone: b}, at: [2, 2]}
-- {id: sub-vpc-payments-b, type: aws.subnet, name: private-b, parent: az-vpc-payments-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
-- {id: az-vpc-orders-b, type: aws.availability_zone, name: b, parent: vpc-orders, props: {zone: b}, at: [1, 2]}
-- {id: sub-vpc-orders-b, type: aws.subnet, name: private-b, parent: az-vpc-orders-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: acct-account-1, type: aws.account, name: account-1, at: [1, 1]}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-account-1, props: {region: us-west-2}, at: [1, 1, 2, 1]}
+- {id: vpc-vpc-1, type: aws.vpc, name: vpc-1, parent: reg-us-west-2, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-vpc-1-a, type: aws.availability_zone, name: a, parent: vpc-vpc-1, props: {zone: a}, at: [2, 1]}
+- {id: sub-vpc-1-worker-a, type: aws.subnet, name: vpc-1-worker-a, parent: az-vpc-1-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-vpc-1-b, type: aws.availability_zone, name: b, parent: vpc-vpc-1, props: {zone: b}, at: [2, 2]}
+- {id: sub-vpc-1-worker-b, type: aws.subnet, name: vpc-1-worker-b, parent: az-vpc-1-b, props: {cidr: 10.1.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: acct-account-2, type: aws.account, name: account-2, at: [1, 2]}
+- {id: reg-us-west-2-2, type: aws.region, name: us-west-2, parent: acct-account-2, props: {region: us-west-2}, at: [1, 1]}
+- {id: vpc-vpc-2, type: aws.vpc, name: vpc-2, parent: reg-us-west-2-2, props: {cidr: 10.2.0.0/16}, at: [1, 1]}
+- {id: az-vpc-2-a, type: aws.availability_zone, name: a, parent: vpc-vpc-2, props: {zone: a}, at: [2, 1]}
+- {id: sub-vpc-2-worker-a, type: aws.subnet, name: vpc-2-worker-a, parent: az-vpc-2-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-vpc-2-b, type: aws.availability_zone, name: b, parent: vpc-vpc-2, props: {zone: b}, at: [2, 2]}
+- {id: sub-vpc-2-worker-b, type: aws.subnet, name: vpc-2-worker-b, parent: az-vpc-2-b, props: {cidr: 10.2.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: acct-account-3, type: aws.account, name: account-3, at: [2, 1, 1, 2]}
+- {id: reg-us-west-2-3, type: aws.region, name: us-west-2, parent: acct-account-3, props: {region: us-west-2}, at: [1, 1]}
+- {id: vpc-vpc-3, type: aws.vpc, name: vpc-3, parent: reg-us-west-2-3, props: {cidr: 10.3.0.0/16}, at: [1, 1]}
+- {id: az-vpc-3-a, type: aws.availability_zone, name: a, parent: vpc-vpc-3, props: {zone: a}, at: [1, 1]}
+- {id: sub-vpc-3-private-a, type: aws.subnet, name: vpc-3-private-a, parent: az-vpc-3-a, props: {cidr: 10.3.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-vpc-4, type: aws.vpc, name: vpc-4, parent: reg-us-west-2-3, props: {cidr: 10.4.0.0/16}, at: [1, 2]}
+- {id: eks-cluster-1, type: aws.eks_cluster, name: eks-cluster-1, parent: vpc-vpc-1, at: [1, 1, 1, 2]}
+- {id: app1-worker-node-1, type: aws.ec2_instance, name: app1-worker-node-1, parent: sub-vpc-1-worker-a, at: [1, 1]}
+- {id: app1-worker-node-2, type: aws.ec2_instance, name: app1-worker-node-2, parent: sub-vpc-1-worker-b, at: [1, 1]}
+- {id: eks-cluster-2, type: aws.eks_cluster, name: eks-cluster-2, parent: vpc-vpc-2, at: [1, 1, 1, 2]}
+- {id: app2-worker-node-1, type: aws.ec2_instance, name: app2-worker-node-1, parent: sub-vpc-2-worker-a, at: [1, 1]}
+- {id: app2-worker-node-2, type: aws.ec2_instance, name: app2-worker-node-2, parent: sub-vpc-2-worker-b, at: [1, 1]}
+- {id: app3-lambda-function, type: aws.lambda_function, name: app3-lambda-function, parent: sub-vpc-3-private-a, at: [1, 1]}
+- {id: app4-auto-scaling-group, type: aws.res.aws_autoscaling_group, name: app4-auto-scaling-group, parent: vpc-vpc-4, props: {max_size: 1, min_size: 1}, at: [1, 1]}
+- {id: corp-service-network, type: aws.res.aws_vpclattice_service_network, name: corp-service-network, parent: acct-account-1, props: {name: changeme}, at: [1, 2]}
+- {id: service-network-share, type: aws.res.aws_ram_resource_share, name: service-network-share, parent: acct-account-1, props: {name: changeme}, at: [2, 2]}
 edges:
-- {from: corp-service-network, to: vpc-payments, label: vpclattice service network vpc association}
-- {from: corp-service-network, to: vpc-orders, label: vpclattice service network vpc association}
-- {from: corp-service-network, to: payments-service, label: vpclattice service network service association}
-- {from: corp-service-network, to: orders-service, label: vpclattice service network service association}
-- {from: service-network-share, to: acct-payments, label: RAM share}
-- {from: service-network-share, to: acct-orders, label: RAM share}
-- {from: orders-client, to: corp-service-network, label: 'HTTPS to payments Lattice DNS name, SigV4', step: '1'}
-- {from: corp-service-network, to: payments-service, label: auth policy evaluated, step: '2'}
-- {from: payments-service, to: payments-targets, step: '3'}
-- {from: payments-targets, to: payments-api, step: '4'}
-- {from: orders-service, to: orders-handler, label: Lambda target}
+- {from: corp-service-network, to: vpc-vpc-1, label: VPC association}
+- {from: corp-service-network, to: vpc-vpc-2, label: VPC association}
+- {from: corp-service-network, to: vpc-vpc-3, label: VPC association}
+- {from: corp-service-network, to: vpc-vpc-4, label: VPC association}
+- {from: service-network-share, to: acct-account-2, label: RAM share of the service network}
+- {from: service-network-share, to: acct-account-3, label: RAM share of the service network}
+- {from: app2-worker-node-1, to: corp-service-network, label: 'HTTPS to App1 Lattice DNS name, SigV4', step: '1'}
+- {from: corp-service-network, to: app1-worker-node-1, label: auth policy evaluated, step: '2'}
+- {from: app3-lambda-function, to: corp-service-network, label: App3 calls App4, step: '3'}
+- {from: corp-service-network, to: app4-auto-scaling-group, step: '4'}
 steps:
-- {n: '1', text: 'orders-client → corp-service-network: HTTPS to payments Lattice DNS name, SigV4'}
-- {n: '2', text: 'corp-service-network → payments-service: auth policy evaluated'}
-- {n: '3', text: payments-service → payments-targets}
-- {n: '4', text: payments-targets → payments-api}
+- {n: '1', text: 'app2-worker-node-1 → corp-service-network: HTTPS to App1 Lattice DNS name, SigV4'}
+- {n: '2', text: 'corp-service-network → app1-worker-node-1: auth policy evaluated'}
+- {n: '3', text: 'app3-lambda-function → corp-service-network: App3 calls App4'}
+- {n: '4', text: corp-service-network → app4-auto-scaling-group}

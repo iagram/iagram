@@ -9,50 +9,60 @@ tags:
 - centralized egress
 image: https://d2908q01vomqb2.cloudfront.net/5b384ce32d8cdef02bc3a139d4cac0a22bb029e8/2023/03/19/figure-1-1.png
 source: https://aws.amazon.com/blogs/networking-and-content-delivery/centralized-outbound-inspection-architecture-in-aws-cloud-wan/
-description: Inspection VPCs hosting AWS Network Firewall endpoints and NAT gateways are attached to the core network as a network function group instead of a segment. A send-to action in the core network
-  policy steers the default route of the production and development segments into the network function group, so internet-bound traffic is inspected in the local Region before leaving through the inspection
-  VPC's NAT gateways.
+description: A production VPC and an outbound inspection VPC hosting AWS Network Firewall endpoints and NAT gateways in two Availability Zones are attached to an AWS Cloud WAN core network through core
+  network ENIs in dedicated subnets. The production segment's route table carries a static 0.0.0.0/0 route to the inspection VPC attachment while the security segment learns both attachments by propagation,
+  so internet-bound traffic from the production workload is steered through the firewall endpoint and NAT gateway and leaves through the inspection VPC's internet gateway in the same Region.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-inspection-east, type: aws.vpc, name: inspection-east, parent: reg-us-east-1, props: {cidr: 100.64.0.0/16}, at: [1, 3]}
-- {id: az-inspection-east-a, type: aws.availability_zone, name: a, parent: vpc-inspection-east, props: {zone: a}, at: [1, 1]}
-- {id: sub-insp-cwan-a, type: aws.subnet, name: insp-cwan-a, parent: az-inspection-east-a, props: {cidr: 100.64.0.0/28, az: a, public: false}, at: [3, 1]}
-- {id: sub-insp-firewall-a, type: aws.subnet, name: insp-firewall-a, parent: az-inspection-east-a, props: {cidr: 100.64.1.0/28, az: a, public: false}, at: [2, 1]}
-- {id: sub-insp-public-a, type: aws.subnet, name: insp-public-a, parent: az-inspection-east-a, props: {cidr: 100.64.2.0/24, az: a, public: true}, at: [1, 1]}
-- {id: vpc-prod-east, type: aws.vpc, name: prod-east, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: az-prod-east-a, type: aws.availability_zone, name: a, parent: vpc-prod-east, props: {zone: a}, at: [1, 1]}
-- {id: sub-prod-private-a, type: aws.subnet, name: prod-private-a, parent: az-prod-east-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: vpc-dev-east, type: aws.vpc, name: dev-east, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}, at: [1, 2]}
-- {id: az-dev-east-a, type: aws.availability_zone, name: a, parent: vpc-dev-east, props: {zone: a}, at: [1, 1]}
-- {id: sub-dev-private-a, type: aws.subnet, name: dev-private-a, parent: az-dev-east-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: grp-security-segment, type: common.group, name: security-segment, parent: reg-us-east-1, at: [3, 1, 1, 2]}
+- {id: grp-production-segment, type: common.group, name: production-segment, parent: reg-us-east-1, at: [4, 1, 1, 2]}
+- {id: vpc-prod, type: aws.vpc, name: prod, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-prod-a, type: aws.availability_zone, name: a, parent: vpc-prod, props: {zone: a}, at: [1, 1]}
+- {id: sub-prod-private-a, type: aws.subnet, name: prod-private-a, parent: az-prod-a, props: {cidr: 10.1.0.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-prod-b, type: aws.availability_zone, name: b, parent: vpc-prod, props: {zone: b}, at: [1, 2]}
+- {id: sub-prod-private-b, type: aws.subnet, name: prod-private-b, parent: az-prod-b, props: {cidr: 10.1.1.0/24, az: b, public: false}, at: [1, 1]}
+- {id: vpc-outbound-inspection, type: aws.vpc, name: outbound-inspection, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}, at: [1, 2]}
+- {id: az-outbound-inspection-a, type: aws.availability_zone, name: a, parent: vpc-outbound-inspection, props: {zone: a}, at: [1, 1]}
+- {id: sub-natgw-a, type: aws.subnet, name: natgw-a, parent: az-outbound-inspection-a, props: {cidr: 10.2.3.0/28, az: a, public: true}, at: [1, 1]}
+- {id: sub-network-firewall-a, type: aws.subnet, name: network-firewall-a, parent: az-outbound-inspection-a, props: {cidr: 10.2.2.0/28, az: a, public: false}, at: [2, 1]}
+- {id: sub-core-network-a, type: aws.subnet, name: core-network-a, parent: az-outbound-inspection-a, props: {cidr: 10.2.1.0/28, az: a, public: false}, at: [3, 1]}
+- {id: az-outbound-inspection-b, type: aws.availability_zone, name: b, parent: vpc-outbound-inspection, props: {zone: b}, at: [1, 2]}
+- {id: sub-natgw-b, type: aws.subnet, name: natgw-b, parent: az-outbound-inspection-b, props: {cidr: 10.2.13.0/28, az: b, public: true}, at: [1, 1]}
+- {id: sub-network-firewall-b, type: aws.subnet, name: network-firewall-b, parent: az-outbound-inspection-b, props: {cidr: 10.2.12.0/28, az: b, public: false}, at: [2, 1]}
+- {id: sub-core-network-b, type: aws.subnet, name: core-network-b, parent: az-outbound-inspection-b, props: {cidr: 10.2.11.0/28, az: b, public: false}, at: [3, 1]}
 - {id: internet, type: common.internet, name: internet, at: [1, 2]}
-- {id: global-network, type: aws.res.aws_networkmanager_global_network, name: global-network, parent: reg-us-east-1, at: [2, 1]}
-- {id: core-network, type: aws.res.aws_networkmanager_core_network, name: core-network, parent: reg-us-east-1, props: {global_network_id: changeme}, at: [2, 2, 1, 2]}
-- {id: inspection-firewall, type: aws.res.aws_networkfirewall_firewall, name: inspection-firewall, parent: sub-insp-firewall-a, props: {firewall_policy_arn: changeme, name: changeme}, at: [1, 1]}
-- {id: inspection-nat, type: aws.res.aws_nat_gateway, name: inspection-nat, parent: sub-insp-public-a, at: [1, 1]}
-- {id: inspection-igw, type: aws.res.aws_internet_gateway, name: inspection-igw, parent: vpc-inspection-east, at: [1, 3]}
-- {id: prod-app, type: aws.ec2_instance, name: prod-app, parent: sub-prod-private-a, at: [1, 1]}
-- {id: dev-app, type: aws.ec2_instance, name: dev-app, parent: sub-dev-private-a, at: [1, 1]}
-- {id: az-vpc-inspection-east-b, type: aws.availability_zone, name: b, parent: vpc-inspection-east, props: {zone: b}, at: [1, 2]}
-- {id: sub-vpc-inspection-east-b, type: aws.subnet, name: private-b, parent: az-vpc-inspection-east-b, props: {cidr: 100.64.251.0/24, az: b, public: false}, at: [1, 1]}
-- {id: az-vpc-prod-east-b, type: aws.availability_zone, name: b, parent: vpc-prod-east, props: {zone: b}, at: [1, 2]}
-- {id: sub-vpc-prod-east-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-east-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
-- {id: az-vpc-dev-east-b, type: aws.availability_zone, name: b, parent: vpc-dev-east, props: {zone: b}, at: [1, 2]}
-- {id: sub-vpc-dev-east-b, type: aws.subnet, name: private-b, parent: az-vpc-dev-east-b, props: {cidr: 10.2.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: core-network, type: aws.res.aws_networkmanager_core_network, name: core-network, parent: reg-us-east-1, props: {global_network_id: changeme}, at: [2, 1, 1, 2]}
+- {id: security-segment-routes, type: aws.res.aws_ec2_transit_gateway_route_table, name: security-segment-routes, parent: grp-security-segment, props: {transit_gateway_id: changeme}, at: [1, 1]}
+- {id: production-segment-routes, type: aws.res.aws_ec2_transit_gateway_route_table, name: production-segment-routes, parent: grp-production-segment, props: {transit_gateway_id: changeme}, at: [1, 1]}
+- {id: prod-app-a, type: aws.ec2_instance, name: prod-app-a, parent: sub-prod-private-a, at: [1, 1]}
+- {id: prod-core-network-eni-a, type: aws.res.aws_network_interface, name: prod-core-network-eni-a, parent: sub-prod-private-a, props: {subnet_id: changeme}, at: [1, 2]}
+- {id: prod-app-b, type: aws.ec2_instance, name: prod-app-b, parent: sub-prod-private-b, at: [1, 1]}
+- {id: prod-core-network-eni-b, type: aws.res.aws_network_interface, name: prod-core-network-eni-b, parent: sub-prod-private-b, props: {subnet_id: changeme}, at: [1, 2]}
+- {id: nat-gateway-a, type: aws.res.aws_nat_gateway, name: nat-gateway-a, parent: sub-natgw-a, at: [1, 1]}
+- {id: nat-gateway-b, type: aws.res.aws_nat_gateway, name: nat-gateway-b, parent: sub-natgw-b, at: [1, 1]}
+- {id: firewall-endpoint-a, type: aws.res.aws_networkfirewall_firewall, name: firewall-endpoint-a, parent: sub-network-firewall-a, props: {firewall_policy_arn: changeme, name: changeme}, at: [1, 1]}
+- {id: firewall-endpoint-b, type: aws.res.aws_networkfirewall_firewall, name: firewall-endpoint-b, parent: sub-network-firewall-b, props: {firewall_policy_arn: changeme, name: changeme}, at: [1, 1]}
+- {id: inspection-core-network-eni-a, type: aws.res.aws_network_interface, name: inspection-core-network-eni-a, parent: sub-core-network-a, props: {subnet_id: changeme}, at: [1, 1]}
+- {id: inspection-core-network-eni-b, type: aws.res.aws_network_interface, name: inspection-core-network-eni-b, parent: sub-core-network-b, props: {subnet_id: changeme}, at: [1, 1]}
+- {id: internet-gateway, type: aws.res.aws_internet_gateway, name: internet-gateway, parent: vpc-outbound-inspection, at: [1, 3]}
 edges:
-- {from: core-network, to: vpc-prod-east, label: 'segment: production', link: aws_networkmanager_vpc_attachment}
-- {from: core-network, to: vpc-dev-east, label: 'segment: development', link: aws_networkmanager_vpc_attachment}
-- {from: core-network, to: vpc-inspection-east, label: network function group, link: aws_networkmanager_vpc_attachment}
-- {from: global-network, to: core-network}
-- {from: prod-app, to: core-network, label: 0.0.0.0/0, step: '1'}
-- {from: core-network, to: inspection-firewall, label: send-to network function group, step: '2'}
-- {from: inspection-firewall, to: inspection-nat, step: '3'}
-- {from: inspection-nat, to: inspection-igw, step: '4'}
-- {from: inspection-igw, to: internet, step: '5'}
+- {from: core-network, to: vpc-prod, label: production segment, link: aws_networkmanager_vpc_attachment}
+- {from: core-network, to: vpc-outbound-inspection, label: security segment, link: aws_networkmanager_vpc_attachment}
+- {from: production-segment-routes, to: core-network, label: static 0.0.0.0/0 to inspection VPC attachment}
+- {from: security-segment-routes, to: core-network, label: propagated prod and inspection attachments}
+- {from: prod-app-a, to: prod-core-network-eni-a, label: 0.0.0.0/0 to core network, step: '1'}
+- {from: prod-core-network-eni-a, to: core-network, label: production segment, step: '2'}
+- {from: core-network, to: inspection-core-network-eni-a, label: security segment, step: '3'}
+- {from: inspection-core-network-eni-a, to: firewall-endpoint-a, step: '4'}
+- {from: firewall-endpoint-a, to: nat-gateway-a, step: '5'}
+- {from: nat-gateway-a, to: internet-gateway, step: '6'}
+- {from: internet-gateway, to: internet, step: '7'}
 steps:
-- {n: '1', text: 'prod-app → core-network: 0.0.0.0/0'}
-- {n: '2', text: 'core-network → inspection-firewall: send-to network function group'}
-- {n: '3', text: inspection-firewall → inspection-nat}
-- {n: '4', text: inspection-nat → inspection-igw}
-- {n: '5', text: inspection-igw → internet}
+- {n: '1', text: 'prod-app-a → prod-core-network-eni-a: 0.0.0.0/0 to core network'}
+- {n: '2', text: 'prod-core-network-eni-a → core-network: production segment'}
+- {n: '3', text: 'core-network → inspection-core-network-eni-a: security segment'}
+- {n: '4', text: inspection-core-network-eni-a → firewall-endpoint-a}
+- {n: '5', text: firewall-endpoint-a → nat-gateway-a}
+- {n: '6', text: nat-gateway-a → internet-gateway}
+- {n: '7', text: internet-gateway → internet}

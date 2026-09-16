@@ -11,41 +11,36 @@ tags:
 image: https://d2908q01vomqb2.cloudfront.net/b6692ea5df920cad691c20319a6fffd7a4a766b8/2023/12/01/solution-overview.png
 source: https://aws.amazon.com/blogs/big-data/orchestrate-amazon-emr-serverless-spark-jobs-with-amazon-mwaa-and-data-validation-using-amazon-athena/
 description: An Airflow DAG in MWAA submits three sequential PySpark jobs to an EMR Serverless application, which scales workers up and down per job without a managed cluster. The jobs join and aggregate
-  taxi trip data from an input bucket into Parquet in an output bucket, register tables in the Glue Data Catalog and the DAG runs an Athena query to validate the summary table.
+  taxi trip data from an input bucket into Parquet in an output bucket, register tables in the Glue Data Catalog and the DAG runs an Athena query to validate the summary table for the user.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-mwaa, type: aws.vpc, name: mwaa, parent: reg-us-east-1, props: {cidr: 10.90.0.0/16}, at: [1, 1]}
-- {id: az-mwaa-a, type: aws.availability_zone, name: a, parent: vpc-mwaa, props: {zone: a}, at: [1, 1]}
-- {id: sub-mwaa-private-a, type: aws.subnet, name: mwaa-private-a, parent: az-mwaa-a, props: {cidr: 10.90.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-mwaa-b, type: aws.availability_zone, name: b, parent: vpc-mwaa, props: {zone: b}, at: [1, 2]}
-- {id: sub-mwaa-private-b, type: aws.subnet, name: mwaa-private-b, parent: az-mwaa-b, props: {cidr: 10.90.2.0/24, az: b, public: false}, at: [1, 1]}
 - {id: user, type: common.user, name: user, at: [1, 2]}
 - id: airflow
   type: aws.res.aws_mwaa_environment
   name: airflow
-  parent: sub-mwaa-private-a
-  at: [1, 1]
+  parent: reg-us-east-1
   props: {dag_s3_path: changeme, execution_role_arn: changeme, name: changeme, network_configuration: {}, source_bucket_arn: changeme}
-- {id: dags-bucket, type: aws.s3_bucket, name: dags-bucket, parent: reg-us-east-1, at: [1, 2]}
-- {id: spark-app, type: aws.res.aws_emrserverless_application, name: spark-app, parent: reg-us-east-1, props: {name: changeme, release_label: changeme, type: changeme}, at: [2, 2]}
+  at:
+  - 1
+  - 1
 - {id: taxi-input, type: aws.s3_bucket, name: taxi-input, parent: reg-us-east-1, at: [2, 1]}
+- {id: spark-app, type: aws.res.aws_emrserverless_application, name: spark-app, parent: reg-us-east-1, props: {name: changeme, release_label: changeme, type: changeme}, at: [2, 2]}
 - {id: taxi-output, type: aws.s3_bucket, name: taxi-output, parent: reg-us-east-1, at: [2, 3]}
 - {id: taxi-db, type: aws.res.aws_glue_catalog_database, name: taxi-db, parent: reg-us-east-1, props: {name: changeme}, at: [1, 3]}
 - {id: validation-athena, type: aws.res.aws_athena_workgroup, name: validation-athena, parent: reg-us-east-1, props: {name: changeme}, at: [2, 4]}
 edges:
-- {from: user, to: dags-bucket, label: upload DAG and scripts, step: '1'}
-- {from: airflow, to: dags-bucket, label: load DAG, step: '1'}
-- {from: airflow, to: spark-app, label: 'EmrServerlessStartJobOperator: green, yellow, summary', step: '2'}
-- {from: spark-app, to: taxi-input, label: read raw trips and zones, step: '3'}
-- {from: spark-app, to: taxi-output, label: write Parquet, step: '4'}
-- {from: spark-app, to: taxi-db, label: create external tables, step: '4'}
-- {from: airflow, to: validation-athena, label: AthenaOperator query, step: '5'}
-- {from: validation-athena, to: taxi-db, label: SELECT ny_taxi_summary, step: '5'}
-- {from: validation-athena, to: taxi-output, label: scan Parquet, step: '5'}
+- {from: airflow, to: spark-app, label: 'EmrServerlessStartJobOperator: green, yellow, summary', step: '1'}
+- {from: taxi-input, to: spark-app, label: read raw trips and zones, step: '2'}
+- {from: spark-app, to: taxi-output, label: write Parquet, step: '3'}
+- {from: taxi-output, to: taxi-db, label: external tables, step: '3'}
+- {from: airflow, to: validation-athena, label: AthenaOperator query, step: '4'}
+- {from: taxi-db, to: validation-athena, label: ny_taxi_summary metadata, step: '4'}
+- {from: taxi-output, to: validation-athena, label: scan Parquet, step: '4'}
+- {from: validation-athena, to: user, label: validation result, step: '5'}
 steps:
-- {n: '1', text: 'user → dags-bucket: upload DAG and scripts'}
-- {n: '2', text: 'airflow → spark-app: EmrServerlessStartJobOperator: green, yellow, summary'}
-- {n: '3', text: 'spark-app → taxi-input: read raw trips and zones'}
-- {n: '4', text: 'spark-app → taxi-output: write Parquet'}
-- {n: '5', text: 'airflow → validation-athena: AthenaOperator query'}
+- {n: '1', text: 'airflow → spark-app: EmrServerlessStartJobOperator: green, yellow, summary'}
+- {n: '2', text: 'taxi-input → spark-app: read raw trips and zones'}
+- {n: '3', text: 'spark-app → taxi-output: write Parquet'}
+- {n: '4', text: 'airflow → validation-athena: AthenaOperator query'}
+- {n: '5', text: 'validation-athena → user: validation result'}

@@ -10,37 +10,34 @@ tags:
 - glue catalog
 image: https://d2908q01vomqb2.cloudfront.net/b6692ea5df920cad691c20319a6fffd7a4a766b8/2023/05/23/BDB-3398-image001.png
 source: https://aws.amazon.com/blogs/big-data/set-up-alerts-and-orchestrate-data-quality-rules-with-aws-glue-data-quality/
-description: A Step Functions workflow starts a Glue Data Quality evaluation of a ruleset against a Glue Data Catalog table backed by Parquet in S3. When the evaluation result event reaches EventBridge,
-  a rule invokes a Lambda that formats the scores and failed rules, stores the results in S3 and publishes an email notification through SNS.
+description: Users start a Step Functions workflow that runs a Glue Data Quality evaluation of a ruleset against a Glue Data Catalog table. When the evaluation result event reaches EventBridge, a rule invokes
+  a Lambda that formats the scores and failed rules, stores the results in S3 and publishes an email notification through SNS to the target recipients.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: user, type: common.user, name: user, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 3]}
-- {id: staging-data, type: aws.s3_bucket, name: staging-data, parent: reg-us-east-1, at: [2, 2]}
-- {id: staging-db, type: aws.res.aws_glue_catalog_database, name: staging-db, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: target-recipients, type: common.users, name: target-recipients, at: [1, 3]}
 - {id: orders-ruleset, type: aws.res.aws_glue_data_quality_ruleset, name: orders-ruleset, parent: reg-us-east-1, props: {name: changeme, ruleset: changeme}, at: [1, 1]}
+- {id: staging-db, type: aws.res.aws_glue_catalog_database, name: staging-db, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
 - {id: dq-orchestrator, type: aws.res.aws_sfn_state_machine, name: dq-orchestrator, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}, at: [2, 1]}
 - {id: dq-results-available, type: aws.res.aws_cloudwatch_event_rule, name: dq-results-available, parent: reg-us-east-1, at: [1, 3]}
 - {id: format-results, type: aws.lambda_function, name: format-results, parent: reg-us-east-1, at: [1, 4]}
 - {id: dq-results, type: aws.s3_bucket, name: dq-results, parent: reg-us-east-1, at: [1, 5]}
 - {id: dq-alerts, type: aws.res.aws_sns_topic, name: dq-alerts, parent: reg-us-east-1, at: [2, 4]}
 edges:
-- {from: user, to: staging-data, label: upload Parquet, step: '1'}
-- {from: staging-data, to: staging-db, label: catalogued table, step: '1'}
-- {from: user, to: dq-orchestrator, label: start with table and ruleset, step: '2'}
-- {from: dq-orchestrator, to: orders-ruleset, label: StartDataQualityRulesetEvaluationRun, step: '3'}
-- {from: orders-ruleset, to: staging-db, label: evaluate rules, step: '3'}
-- {from: orders-ruleset, to: dq-results-available, label: Data Quality Evaluations Results Available, step: '4'}
-- {from: dq-results-available, to: format-results, link: aws_cloudwatch_event_target}
-- {from: format-results, to: dq-results, label: write results JSON, step: '5'}
-- {from: format-results, to: dq-alerts, label: publish score and failed rules, step: '6'}
-- {from: dq-alerts, to: users, label: email, step: '7'}
+- {from: target-recipients, to: dq-orchestrator, label: start execution, step: '1'}
+- {from: dq-orchestrator, to: orders-ruleset, label: StartDataQualityRulesetEvaluationRun, step: '2'}
+- {from: orders-ruleset, to: staging-db, label: data quality job run, step: '2'}
+- {from: orders-ruleset, to: dq-results-available, label: Data Quality Evaluations Results Available, step: '3'}
+- {from: dq-results-available, to: format-results, step: '4', link: aws_cloudwatch_event_target}
+- {from: format-results, to: dq-alerts, label: publish score and failed rules, step: '5'}
+- {from: format-results, to: dq-results, label: data quality result, step: '6'}
+- {from: dq-alerts, to: target-recipients, label: email notification, step: '7'}
 steps:
-- {n: '1', text: 'user → staging-data: upload Parquet'}
-- {n: '2', text: 'user → dq-orchestrator: start with table and ruleset'}
-- {n: '3', text: 'dq-orchestrator → orders-ruleset: StartDataQualityRulesetEvaluationRun'}
-- {n: '4', text: 'orders-ruleset → dq-results-available: Data Quality Evaluations Results Available'}
-- {n: '5', text: 'format-results → dq-results: write results JSON'}
-- {n: '6', text: 'format-results → dq-alerts: publish score and failed rules'}
-- {n: '7', text: 'dq-alerts → users: email'}
+- {n: '1', text: 'users → dq-orchestrator: start execution'}
+- {n: '2', text: 'dq-orchestrator → orders-ruleset: StartDataQualityRulesetEvaluationRun'}
+- {n: '3', text: 'orders-ruleset → dq-results-available: Data Quality Evaluations Results Available'}
+- {n: '4', text: dq-results-available → format-results}
+- {n: '5', text: 'format-results → dq-alerts: publish score and failed rules'}
+- {n: '6', text: 'format-results → dq-results: data quality result'}
+- {n: '7', text: 'dq-alerts → target-recipients: email notification'}

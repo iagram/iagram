@@ -10,40 +10,57 @@ tags:
 - hybrid dns
 image: https://docs.cloud.google.com/static/dns/images/hybrid-arch-using-hub-vpc-to-spoke-vpc.svg
 source: https://docs.cloud.google.com/dns/docs/best-practices
-description: A hub VPC hosts the hybrid connectivity, a forwarding zone that sends corp.example.com queries to on-premises DNS servers, and an inbound server policy that lets on-premises resolvers query
-  Cloud DNS private zones through a proxy IP in the hub. Spoke VPCs use peering zones that point at the hub VPC so their workloads resolve on-premises and shared private names without their own forwarding
-  configuration.
+description: A hub VPC hosts the Cloud Interconnect connectivity, a forwarding zone that sends corp.example.com queries to the on-premises DNS servers, peering zones for each spoke's private zone (project1.gcp.example.com,
+  project2.gcp.example.com), and an inbound server policy that lets the on-premises resolvers query those zones through an inbound forwarder IP in the hub, with the Cloud Router advertising 35.199.192.0/19
+  back to on-premises as a custom route. Each spoke project runs its own private zone next to a peering zone for example.com that points at the hub VPC, so spoke workloads resolve on-premises and shared
+  private names without their own forwarding configuration.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1, 2, 1]}
-- {id: prj-dns-hub, type: gcp.project, name: dns-hub, props: {project_id: dns-hub-123456, project: changeme, region: europe-west1}, at: [1, 2]}
-- {id: vpc-hub-vpc, type: gcp.vpc, name: hub-vpc, parent: prj-dns-hub, props: {cidr: 10.160.0.0/16}, at: [1, 2, 2, 1]}
-- {id: sub-hub-ew1, type: gcp.subnetwork, name: hub-ew1, parent: vpc-hub-vpc, props: {cidr: 10.160.0.0/24, region: europe-west1}, at: [1, 2]}
+- {id: prj-dns-hub, type: gcp.project, name: dns-hub, props: {project_id: dns-hub-123456, project: changeme, region: europe-west1}, at: [1, 2, 1, 2]}
+- {id: vpc-hub-vpc, type: gcp.vpc, name: hub-vpc, parent: prj-dns-hub, props: {cidr: 10.160.0.0/16}, at: [1, 1, 2, 1]}
+- {id: sub-hub-ew1, type: gcp.subnetwork, name: hub-ew1, parent: vpc-hub-vpc, props: {cidr: 10.160.0.0/24, region: europe-west1}, at: [2, 1]}
 - {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: europe-west1}, at: [2, 2]}
-- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-workload-a, props: {cidr: 10.161.0.0/16}, at: [2, 1]}
+- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-workload-a, props: {cidr: 10.161.0.0/16}, at: [2, 1, 1, 2]}
 - {id: sub-spoke-a-ew1, type: gcp.subnetwork, name: spoke-a-ew1, parent: vpc-spoke-a, props: {cidr: 10.161.0.0/24, region: europe-west1}, at: [1, 1]}
-- {id: hub-private-zone, type: gcp.cloud_dns_zone, name: hub-private-zone, parent: prj-dns-hub, props: {domain: example.com}, at: [1, 3]}
-- {id: onprem-forwarding-zone, type: gcp.cloud_dns_zone, name: onprem-forwarding-zone, parent: prj-dns-hub, props: {domain: example.com}, at: [2, 3]}
-- {id: hub-inbound-policy, type: gcp.res.google_dns_policy, name: hub-inbound-policy, parent: vpc-hub-vpc, props: {name: changeme}, at: [2, 2]}
-- {id: spoke-a-peering-zone, type: gcp.cloud_dns_zone, name: spoke-a-peering-zone, parent: prj-workload-a, props: {domain: example.com}, at: [1, 1]}
-- {id: hub-vpn-gw, type: gcp.res.google_compute_ha_vpn_gateway, name: hub-vpn-gw, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}, at: [1, 1]}
-- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}, at: [2, 1]}
-- {id: vpc-prj-dns-hub, type: gcp.vpc, name: main, parent: prj-dns-hub, at: [1, 1, 2, 1]}
-- {id: sub-prj-dns-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-dns-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}, at: [1, 1]}
-- {id: onprem-peer-gw, type: gcp.res.google_compute_external_vpn_gateway, name: onprem-peer-gw, parent: sub-prj-dns-hub, props: {name: changeme}, at: [1, 2]}
-- {id: onprem-dns-server, type: gcp.compute_instance, name: onprem-dns-server, parent: sub-prj-dns-hub, at: [1, 1]}
+- {id: prj-workload-b, type: gcp.project, name: workload-b, props: {project_id: workload-b-123456, project: changeme, region: europe-west1}, at: [2, 3]}
+- {id: vpc-spoke-b, type: gcp.vpc, name: spoke-b, parent: prj-workload-b, props: {cidr: 10.162.0.0/16}, at: [2, 1, 1, 2]}
+- {id: sub-spoke-b-ew1, type: gcp.subnetwork, name: spoke-b-ew1, parent: vpc-spoke-b, props: {cidr: 10.162.0.0/24, region: europe-west1}, at: [1, 1]}
+- {id: on-premises-hosts, type: common.client, name: on-premises hosts, at: [1, 1]}
+- {id: on-premises-dns-servers, type: common.server, name: on-premises DNS servers, at: [2, 1]}
+- {id: hub-inbound-policy, type: gcp.res.google_dns_policy, name: hub-inbound-policy, parent: vpc-hub-vpc, props: {name: changeme}, at: [1, 1]}
+- {id: hub-interconnect, type: gcp.res.google_compute_interconnect_attachment, name: hub-interconnect, parent: vpc-hub-vpc, props: {name: changeme, router: changeme}, at: [1, 2]}
+- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}, at: [2, 2]}
+- {id: onprem-forwarding-zone, type: gcp.cloud_dns_zone, name: onprem-forwarding-zone, parent: prj-dns-hub, props: {domain: example.com}, at: [1, 2]}
+- {id: hub-private-zone, type: gcp.cloud_dns_zone, name: hub-private-zone, parent: prj-dns-hub, props: {domain: example.com}, at: [2, 2]}
+- {id: hub-peering-zone-project1, type: gcp.cloud_dns_zone, name: hub-peering-zone-project1, parent: prj-dns-hub, props: {domain: example.com}, at: [1, 3]}
+- {id: hub-peering-zone-project2, type: gcp.cloud_dns_zone, name: hub-peering-zone-project2, parent: prj-dns-hub, props: {domain: example.com}, at: [2, 3]}
+- {id: spoke-a-private-zone, type: gcp.cloud_dns_zone, name: spoke-a-private-zone, parent: prj-workload-a, props: {domain: example.com}, at: [1, 1]}
+- {id: spoke-a-peering-zone, type: gcp.cloud_dns_zone, name: spoke-a-peering-zone, parent: prj-workload-a, props: {domain: example.com}, at: [1, 2]}
 - {id: app-a, type: gcp.compute_instance, name: app-a, parent: sub-spoke-a-ew1, at: [1, 1]}
+- {id: spoke-b-private-zone, type: gcp.cloud_dns_zone, name: spoke-b-private-zone, parent: prj-workload-b, props: {domain: example.com}, at: [1, 1]}
+- {id: spoke-b-peering-zone, type: gcp.cloud_dns_zone, name: spoke-b-peering-zone, parent: prj-workload-b, props: {domain: example.com}, at: [1, 2]}
+- {id: app-b, type: gcp.compute_instance, name: app-b, parent: sub-spoke-b-ew1, at: [1, 1]}
 edges:
-- {from: vpc-hub-vpc, to: vpc-spoke-a, link: google_compute_network_peering}
-- {from: onprem-peer-gw, to: hub-vpn-gw, label: IPsec, step: '1'}
-- {from: app-a, to: spoke-a-peering-zone, label: query corp.example.com, step: '2'}
-- {from: spoke-a-peering-zone, to: onprem-forwarding-zone, label: DNS peering to hub VPC, step: '3'}
-- {from: onprem-forwarding-zone, to: onprem-dns-server, label: forward via 35.199.192.0/19, step: '4'}
-- {from: onprem-dns-server, to: hub-inbound-policy, label: query gcp.example.com via inbound proxy IP, step: '5'}
-- {from: hub-inbound-policy, to: hub-private-zone, label: resolve private zone, step: '6'}
+- {from: vpc-hub-vpc, to: vpc-spoke-a, label: VPC Network Peering, link: google_compute_network_peering}
+- {from: vpc-hub-vpc, to: vpc-spoke-b, label: VPC Network Peering, link: google_compute_network_peering}
+- {from: app-a, to: spoke-a-peering-zone, label: query corp.example.com, step: '1'}
+- {from: app-b, to: spoke-b-peering-zone, label: query corp.example.com, step: '1'}
+- {from: spoke-a-peering-zone, to: onprem-forwarding-zone, label: DNS peer example.com to hub VPC, step: '2'}
+- {from: spoke-b-peering-zone, to: onprem-forwarding-zone, label: DNS peer example.com to hub VPC, step: '2'}
+- {from: onprem-forwarding-zone, to: on-premises-dns-servers, label: forward corp.example.com queries from 35.199.192.0/19, step: '3'}
+- {from: hub-interconnect, to: on-premises-dns-servers, label: Cloud Interconnect}
+- {from: hub-router, to: on-premises-dns-servers, label: custom route advertisement for 35.199.192.0/19, step: '4'}
+- {from: on-premises-hosts, to: on-premises-dns-servers, label: query gcp.example.com, step: '5'}
+- {from: on-premises-dns-servers, to: hub-inbound-policy, label: inbound forwarding to the hub inbound forwarder IP, step: '6'}
+- {from: hub-inbound-policy, to: hub-peering-zone-project1, label: DNS peer project1.gcp.example.com, step: '7'}
+- {from: hub-inbound-policy, to: hub-peering-zone-project2, label: DNS peer project2.gcp.example.com, step: '7'}
+- {from: hub-peering-zone-project1, to: spoke-a-private-zone, label: resolve in spoke VPC 1, step: '8'}
+- {from: hub-peering-zone-project2, to: spoke-b-private-zone, label: resolve in spoke VPC 2, step: '8'}
 steps:
-- {n: '1', text: 'onprem-peer-gw → hub-vpn-gw: IPsec'}
-- {n: '2', text: 'app-a → spoke-a-peering-zone: query corp.example.com'}
-- {n: '3', text: 'spoke-a-peering-zone → onprem-forwarding-zone: DNS peering to hub VPC'}
-- {n: '4', text: 'onprem-forwarding-zone → onprem-dns-server: forward via 35.199.192.0/19'}
-- {n: '5', text: 'onprem-dns-server → hub-inbound-policy: query gcp.example.com via inbound proxy IP'}
-- {n: '6', text: 'hub-inbound-policy → hub-private-zone: resolve private zone'}
+- {n: '1', text: 'app-a → spoke-a-peering-zone: query corp.example.com'}
+- {n: '2', text: 'spoke-a-peering-zone → onprem-forwarding-zone: DNS peer example.com to hub VPC'}
+- {n: '3', text: 'onprem-forwarding-zone → on-premises DNS servers: forward corp.example.com queries from 35.199.192.0/19'}
+- {n: '4', text: 'hub-router → on-premises DNS servers: custom route advertisement for 35.199.192.0/19'}
+- {n: '5', text: 'on-premises hosts → on-premises DNS servers: query gcp.example.com'}
+- {n: '6', text: 'on-premises DNS servers → hub-inbound-policy: inbound forwarding to the hub inbound forwarder IP'}
+- {n: '7', text: 'hub-inbound-policy → hub-peering-zone-project1: DNS peer project1.gcp.example.com'}
+- {n: '8', text: 'hub-peering-zone-project1 → spoke-a-private-zone: resolve in spoke VPC 1'}

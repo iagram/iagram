@@ -9,43 +9,49 @@ tags:
 - data lake
 image: https://d2908q01vomqb2.cloudfront.net/b6692ea5df920cad691c20319a6fffd7a4a766b8/2021/12/30/BDB-962-image001.png
 source: https://aws.amazon.com/blogs/big-data/centralize-governance-for-your-data-lake-using-aws-lake-formation-while-enabling-a-modern-data-architecture-with-amazon-redshift-spectrum
-description: An S3 data lake registered with Lake Formation is catalogued by a Glue crawler, and Lake Formation grants table and column permissions to an IAM role used by a Redshift cluster. Redshift Spectrum
-  creates an external schema over the Glue database so warehouse users join hot data in Redshift with lake data in S3 while Lake Formation enforces the same policies that Athena and Glue honour.
+description: In a single AWS account an S3 data lake is crawled into the Glue Data Catalog and registered with Lake Formation, which grants table and column permissions on the marketing and finance tables
+  to admin, marketing and finance IAM roles. A Redshift cluster assumes those roles and exposes the lake through per-department external schemas (Redshift Spectrum) so marketing and finance users querying
+  from SQL interfaces only see the columns Lake Formation allows their group.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1, 2, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-governed-data-lake, type: common.group, name: governed data lake, parent: reg-us-east-1, at: [1, 1, 2, 1]}
-- {id: vpc-warehouse, type: aws.vpc, name: warehouse, parent: reg-us-east-1, props: {cidr: 10.40.0.0/16}, at: [2, 2, 1, 2]}
-- {id: az-warehouse-a, type: aws.availability_zone, name: a, parent: vpc-warehouse, props: {zone: a}, at: [1, 1]}
-- {id: sub-dw-private-a, type: aws.subnet, name: dw-private-a, parent: az-warehouse-a, props: {cidr: 10.40.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-warehouse-b, type: aws.availability_zone, name: b, parent: vpc-warehouse, props: {zone: b}, at: [2, 1]}
-- {id: sub-dw-private-b, type: aws.subnet, name: dw-private-b, parent: az-warehouse-b, props: {cidr: 10.40.2.0/24, az: b, public: false}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 2]}
-- {id: lake-bucket, type: aws.s3_bucket, name: lake-bucket, parent: grp-governed-data-lake, at: [1, 1, 2, 1]}
-- {id: lake-registration, type: aws.res.aws_lakeformation_resource, name: lake-registration, parent: grp-governed-data-lake, props: {arn: changeme}, at: [1, 3, 2, 1]}
-- {id: lake-crawler, type: aws.res.aws_glue_crawler, name: lake-crawler, parent: grp-governed-data-lake, props: {database_name: changeme, name: changeme, role: changeme}, at: [1, 2]}
-- {id: lake-db, type: aws.res.aws_glue_catalog_database, name: lake-db, parent: grp-governed-data-lake, props: {name: changeme}, at: [2, 2]}
-- {id: analytics-dw, type: aws.res.aws_redshift_cluster, name: analytics-dw, parent: sub-dw-private-a, props: {cluster_identifier: changeme, node_type: changeme}, at: [1, 1]}
-- {id: adhoc-athena, type: aws.res.aws_athena_workgroup, name: adhoc-athena, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
-- id: bi-dashboards
-  type: aws.res.aws_quicksight_data_source
-  name: bi-dashboards
-  parent: reg-us-east-1
-  at: [1, 3]
-  props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
+- {id: grp-aws-glue, type: common.group, name: AWS Glue, parent: reg-us-east-1, at: [1, 2, 2, 1]}
+- {id: grp-iam, type: common.group, name: IAM, parent: reg-us-east-1, at: [1, 4]}
+- {id: grp-amazon-redshift, type: common.group, name: Amazon Redshift, parent: reg-us-east-1, at: [2, 3, 1, 2]}
+- {id: sql-interfaces, type: common.client, name: SQL Interfaces, at: [1, 2, 2, 1]}
+- {id: marketing-users, type: common.users, name: Marketing Users, at: [1, 3]}
+- {id: finance-users, type: common.users, name: Finance Users, at: [2, 3]}
+- {id: lake-bucket, type: aws.s3_bucket, name: lake-bucket, parent: reg-us-east-1, at: [1, 1]}
+- {id: lake-crawler, type: aws.res.aws_glue_crawler, name: lake-crawler, parent: grp-aws-glue, props: {database_name: changeme, name: changeme, role: changeme}, at: [1, 1]}
+- {id: lake-db, type: aws.res.aws_glue_catalog_database, name: lake-db, parent: grp-aws-glue, props: {name: changeme}, at: [2, 1]}
+- {id: lake-registration, type: aws.res.aws_lakeformation_resource, name: lake-registration, parent: reg-us-east-1, props: {arn: changeme}, at: [1, 3]}
+- {id: admin-role, type: aws.res.aws_iam_role, name: admin-role, parent: grp-iam, props: {assume_role_policy: changeme}, at: [1, 1, 1, 2]}
+- {id: marketing-role, type: aws.res.aws_iam_role, name: marketing-role, parent: grp-iam, props: {assume_role_policy: changeme}, at: [2, 1]}
+- {id: finance-role, type: aws.res.aws_iam_role, name: finance-role, parent: grp-iam, props: {assume_role_policy: changeme}, at: [2, 2]}
+- {id: analytics-dw, type: aws.res.aws_redshift_cluster, name: analytics-dw, parent: grp-amazon-redshift, props: {cluster_identifier: changeme, node_type: changeme}, at: [1, 1]}
+- {id: admin-group, type: aws.res.aws_redshiftdata_statement, name: admin-group, parent: grp-amazon-redshift, props: {database: changeme, sql: changeme}, at: [1, 2]}
+- {id: marketing-group, type: aws.res.aws_redshiftdata_statement, name: marketing-group, parent: grp-amazon-redshift, props: {database: changeme, sql: changeme}, at: [2, 1]}
+- {id: finance-group, type: aws.res.aws_redshiftdata_statement, name: finance-group, parent: grp-amazon-redshift, props: {database: changeme, sql: changeme}, at: [2, 2]}
+- {id: marketing-external-schema, type: aws.res.aws_redshiftdata_statement, name: marketing-external-schema, parent: grp-amazon-redshift, props: {database: changeme, sql: changeme}, at: [3, 1]}
+- {id: finance-external-schema, type: aws.res.aws_redshiftdata_statement, name: finance-external-schema, parent: grp-amazon-redshift, props: {database: changeme, sql: changeme}, at: [3, 2]}
 edges:
-- {from: lake-registration, to: lake-bucket, label: register S3 location, step: '1'}
-- {from: lake-crawler, to: lake-bucket, label: crawl Parquet, step: '2'}
-- {from: lake-crawler, to: lake-db, label: create tables, step: '2'}
-- {from: analytics-dw, to: lake-db, label: external schema (Spectrum), step: '3'}
-- {from: analytics-dw, to: lake-bucket, label: Spectrum scans governed columns, step: '4'}
-- {from: adhoc-athena, to: lake-db, label: same Lake Formation grants, step: '4'}
-- {from: bi-dashboards, to: analytics-dw, label: JDBC, step: '5'}
-- {from: users, to: bi-dashboards, step: '6'}
+- {from: lake-crawler, to: lake-bucket, label: crawl marketing and finance data, step: '1'}
+- {from: lake-crawler, to: lake-db, label: create marketing and finance tables, step: '2'}
+- {from: lake-db, to: lake-registration, label: Lake Formation governs the catalog, step: '3'}
+- {from: lake-registration, to: admin-role, label: grant table permissions, step: '4'}
+- {from: lake-registration, to: marketing-role, label: grant marketing columns, step: '4'}
+- {from: lake-registration, to: finance-role, label: grant finance columns, step: '4'}
+- {from: marketing-external-schema, to: lake-db, label: external schema over marketing tables, step: '5'}
+- {from: finance-external-schema, to: lake-db, label: external schema over finance tables, step: '5'}
+- {from: admin-group, to: admin-role, label: cluster assumes chained roles, step: '6'}
+- {from: sql-interfaces, to: analytics-dw, label: query as group member, step: '7'}
+- {from: marketing-users, to: sql-interfaces}
+- {from: finance-users, to: sql-interfaces}
 steps:
-- {n: '1', text: 'lake-registration → lake-bucket: register S3 location'}
-- {n: '2', text: 'lake-crawler → lake-bucket: crawl Parquet'}
-- {n: '3', text: 'analytics-dw → lake-db: external schema (Spectrum)'}
-- {n: '4', text: 'analytics-dw → lake-bucket: Spectrum scans governed columns'}
-- {n: '5', text: 'bi-dashboards → analytics-dw: JDBC'}
-- {n: '6', text: users → bi-dashboards}
+- {n: '1', text: 'lake-crawler → lake-bucket: crawl marketing and finance data'}
+- {n: '2', text: 'lake-crawler → lake-db: create marketing and finance tables'}
+- {n: '3', text: 'lake-db → lake-registration: Lake Formation governs the catalog'}
+- {n: '4', text: 'lake-registration → admin-role: grant table permissions'}
+- {n: '5', text: 'marketing-external-schema → lake-db: external schema over marketing tables'}
+- {n: '6', text: 'admin-group → admin-role: cluster assumes chained roles'}
+- {n: '7', text: 'SQL Interfaces → analytics-dw: query as group member'}

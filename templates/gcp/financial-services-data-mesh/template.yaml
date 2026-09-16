@@ -10,49 +10,74 @@ tags:
 - domain ownership
 image: https://docs.cloud.google.com/static/architecture/images/data-mesh-self-service-data-platform.svg
 source: https://docs.cloud.google.com/architecture/design-self-service-data-platform-data-mesh
-description: Business domains (for example payments and risk) each own a project where Pub/Sub and Dataflow feed BigQuery data products that are catalogued as Dataplex lake assets and exposed through authorized
-  views. A central platform team provides Terraform project templates via Cloud Build, an Analytics Hub exchange for cross-domain sharing, and common observability such as freshness alerts on data products.
+description: A central data platform team runs a self-service data platform whose common services are a metadata and discovery layer (Data Catalog tag templates and lineage, Knowledge Catalog logical data
+  organisation and glossary) and central policy management (policy tag taxonomies), plus a data products development environment template that bundles data operations (IAM groups, Cloud Logging, Cloud Monitoring
+  freshness alerts), data storage (Cloud Storage, BigQuery, Bigtable, Pub/Sub), data processing (Dataflow, Managed Service for Apache Spark), an Agent Platform endpoint and a Cloud Run data product interface.
+  A data workspace project factory built from Cloud Build and Terraform templates provisions the domain projects (for example payments) where Pub/Sub and Dataflow feed BigQuery data products catalogued
+  as Dataplex lake assets and shared through an Analytics Hub exchange.
 nodes:
-- {id: prj-data-platform-prj, type: gcp.project, name: data-platform-prj, props: {project_id: data-platform-prj-123456, project: changeme, region: europe-west1}, at: [1, 2, 2, 1]}
-- {id: prj-payments-domain-prj, type: gcp.project, name: payments-domain-prj, props: {project_id: payments-domain-prj-123456, project: changeme, region: europe-west1}, at: [1, 3]}
-- {id: prj-risk-domain-prj, type: gcp.project, name: risk-domain-prj, props: {project_id: risk-domain-prj-123456, project: changeme, region: europe-west1}, at: [2, 3]}
-- {id: users, type: common.users, name: users, at: [2, 4]}
-- {id: server, type: common.server, name: server, at: [1, 1]}
-- {id: domain-provisioning-trigger, type: gcp.res.google_cloudbuild_trigger, name: domain-provisioning-trigger, parent: prj-data-platform-prj, at: [3, 2]}
-- {id: platform-templates, type: gcp.storage_bucket, name: platform-templates, parent: prj-data-platform-prj, at: [3, 1]}
-- {id: fsi-data-exchange, type: gcp.res.google_bigquery_analytics_hub_data_exchange, name: fsi-data-exchange, parent: prj-data-platform-prj, props: {data_exchange_id: changeme, display_name: changeme, location: westeurope}, at: [1, 1]}
+- {id: prj-data-platform-prj, type: gcp.project, name: data-platform-prj, props: {project_id: data-platform-prj-123456, project: changeme, region: europe-west1}, at: [1, 1, 2, 1]}
+- {id: grp-metadata-discovery, type: common.group, name: metadata-discovery, parent: prj-data-platform-prj, at: [1, 1]}
+- {id: grp-central-policy, type: common.group, name: central-policy, parent: prj-data-platform-prj, at: [1, 2]}
+- {id: grp-product-template, type: common.group, name: product-template, parent: prj-data-platform-prj, at: [2, 1, 1, 2]}
+- {id: grp-project-factory, type: common.group, name: project-factory, parent: prj-data-platform-prj, at: [3, 1]}
+- {id: prj-payments-domain-prj, type: gcp.project, name: payments-domain-prj, props: {project_id: payments-domain-prj-123456, project: changeme, region: europe-west1}, at: [1, 2]}
+- {id: catalog-tag-templates, type: gcp.res.google_dataplex_aspect_type, name: catalog-tag-templates, parent: grp-metadata-discovery, at: [1, 1]}
+- {id: catalog-lineage-entries, type: gcp.res.google_data_catalog_entry, name: catalog-lineage-entries, parent: grp-metadata-discovery, props: {entry_group: changeme, entry_id: changeme}, at: [1, 2]}
+- {id: logical-data-glossary, type: gcp.res.google_dataplex_glossary, name: logical-data-glossary, parent: grp-metadata-discovery, props: {glossary_id: changeme, location: westeurope}, at: [1, 3]}
+- {id: policy-tag-taxonomy, type: gcp.res.google_data_catalog_taxonomy, name: policy-tag-taxonomy, parent: grp-central-policy, props: {display_name: changeme}, at: [1, 1]}
+- id: data-ops-iam-groups
+  type: gcp.res.google_cloud_identity_group
+  name: data-ops-iam-groups
+  parent: grp-product-template
+  props: {group_key: {}, labels: {}, parent: changeme}
+  at:
+  - 1
+  - 1
+- {id: template-logs, type: gcp.res.google_logging_project_bucket_config, name: template-logs, parent: grp-product-template, props: {bucket_id: changeme, location: westeurope, project: changeme}, at: [
+    1, 2]}
 - id: product-freshness-alert
   type: gcp.res.google_monitoring_alert_policy
   name: product-freshness-alert
-  parent: prj-data-platform-prj
-  at: [2, 1]
-  props:
-    combiner: changeme
-    conditions: []
-    display_name: changeme
+  parent: grp-product-template
+  props: {combiner: changeme, conditions: [], display_name: changeme}
+  at:
+  - 1
+  - 3
+- {id: template-storage, type: gcp.storage_bucket, name: template-storage, parent: grp-product-template, at: [2, 1]}
+- {id: template-bigquery, type: gcp.bigquery_dataset, name: template-bigquery, parent: grp-product-template, at: [2, 2]}
+- {id: template-bigtable, type: gcp.res.google_bigtable_instance, name: template-bigtable, parent: grp-product-template, props: {name: changeme}, at: [2, 3]}
+- {id: template-pubsub, type: gcp.pubsub_topic, name: template-pubsub, parent: grp-product-template, at: [2, 4]}
+- {id: template-dataflow, type: gcp.res.google_dataflow_job, name: template-dataflow, parent: grp-product-template, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}, at: [
+    3, 1]}
+- {id: template-managed-spark, type: gcp.res.google_dataproc_batch, name: template-managed-spark, parent: grp-product-template, at: [3, 2]}
+- {id: template-agent-platform, type: gcp.res.google_vertex_ai_endpoint, name: template-agent-platform, parent: grp-product-template, props: {display_name: changeme, location: westeurope, name: changeme},
+  at: [3, 3]}
+- {id: template-product-interface, type: gcp.cloud_run_service, name: template-product-interface, parent: grp-product-template, at: [3, 4]}
+- {id: domain-provisioning-trigger, type: gcp.res.google_cloudbuild_trigger, name: domain-provisioning-trigger, parent: grp-project-factory, at: [1, 1]}
+- {id: platform-templates, type: gcp.storage_bucket, name: platform-templates, parent: grp-project-factory, at: [1, 2]}
+- {id: fsi-data-exchange, type: gcp.res.google_bigquery_analytics_hub_data_exchange, name: fsi-data-exchange, parent: prj-data-platform-prj, props: {data_exchange_id: changeme, display_name: changeme, location: westeurope},
+  at: [3, 2]}
 - {id: payment-events, type: gcp.pubsub_topic, name: payment-events, parent: prj-payments-domain-prj, at: [1, 1]}
-- {id: payments-ingest-job, type: gcp.res.google_dataflow_job, name: payments-ingest-job, parent: prj-payments-domain-prj, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}, at: [1, 2]}
+- {id: payments-ingest-job, type: gcp.res.google_dataflow_job, name: payments-ingest-job, parent: prj-payments-domain-prj, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme},
+  at: [1, 2]}
 - {id: payments-data-product, type: gcp.bigquery_dataset, name: payments-data-product, parent: prj-payments-domain-prj, at: [1, 3]}
 - {id: payments-lake, type: gcp.res.google_dataplex_lake, name: payments-lake, parent: prj-payments-domain-prj, props: {location: westeurope, name: changeme}, at: [2, 3]}
-- {id: risk-consumer-ds, type: gcp.bigquery_dataset, name: risk-consumer-ds, parent: prj-risk-domain-prj, at: [1, 1]}
-- {id: risk-scoring-job, type: gcp.res.google_dataflow_job, name: risk-scoring-job, parent: prj-risk-domain-prj, props: {name: changeme, temp_gcs_location: changeme, template_gcs_path: changeme}, at: [1, 2]}
 edges:
-- {from: server, to: payment-events, label: core banking events, step: '1'}
-- {from: payment-events, to: payments-ingest-job, label: pubsub subscription}
-- {from: payments-ingest-job, to: payments-data-product, label: curated tables, step: '2'}
-- {from: payments-lake, to: payments-data-product, label: Dataplex asset, step: '3'}
-- {from: payments-data-product, to: fsi-data-exchange, label: bigquery analytics hub listing}
-- {from: fsi-data-exchange, to: risk-consumer-ds, label: linked dataset subscription, step: '4'}
-- {from: risk-consumer-ds, to: risk-scoring-job, label: cross-domain read, step: '5'}
-- {from: product-freshness-alert, to: payments-data-product, label: freshness SLI, step: '6'}
 - {from: platform-templates, to: domain-provisioning-trigger, label: Terraform templates}
-- {from: domain-provisioning-trigger, to: prj-payments-domain-prj, label: provision domain project}
-- {from: users, to: risk-consumer-ds, label: analysts, step: '7'}
+- {from: domain-provisioning-trigger, to: prj-payments-domain-prj, label: provision domain project, step: '1'}
+- {from: grp-product-template, to: prj-payments-domain-prj, label: development environment template, step: '2'}
+- {from: payment-events, to: payments-ingest-job, label: pubsub subscription}
+- {from: payments-ingest-job, to: payments-data-product, label: curated tables, step: '3'}
+- {from: payments-lake, to: payments-data-product, label: Dataplex asset, step: '4'}
+- {from: catalog-tag-templates, to: payments-data-product, label: tag and lineage metadata, step: '5'}
+- {from: policy-tag-taxonomy, to: payments-data-product, label: column-level policy tags}
+- {from: payments-data-product, to: fsi-data-exchange, label: bigquery analytics hub listing}
+- {from: product-freshness-alert, to: payments-data-product, label: freshness SLI, step: '6'}
 steps:
-- {n: '1', text: 'server → payment-events: core banking events'}
-- {n: '2', text: 'payments-ingest-job → payments-data-product: curated tables'}
-- {n: '3', text: 'payments-lake → payments-data-product: Dataplex asset'}
-- {n: '4', text: 'fsi-data-exchange → risk-consumer-ds: linked dataset subscription'}
-- {n: '5', text: 'risk-consumer-ds → risk-scoring-job: cross-domain read'}
+- {n: '1', text: 'domain-provisioning-trigger → project:payments-domain-prj: provision domain project'}
+- {n: '2', text: 'group:product-template → project:payments-domain-prj: development environment template'}
+- {n: '3', text: 'payments-ingest-job → payments-data-product: curated tables'}
+- {n: '4', text: 'payments-lake → payments-data-product: Dataplex asset'}
+- {n: '5', text: 'catalog-tag-templates → payments-data-product: tag and lineage metadata'}
 - {n: '6', text: 'product-freshness-alert → payments-data-product: freshness SLI'}
-- {n: '7', text: 'users → risk-consumer-ds: analysts'}

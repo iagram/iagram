@@ -10,8 +10,9 @@ tags:
 - streamlit
 image: https://docs.aws.amazon.com/images/prescriptive-guidance/latest/patterns/images/pattern-img/15372718-3a5d-4918-9cfa-422c455f288d/images/ff19152e-0bb6-4758-a6dd-4f6140e55113.png
 source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/develop-a-fully-automated-chat-based-assistant-by-using-amazon-bedrock-agents-and-knowledge-bases.html
-description: A Streamlit front end on ECS Fargate behind an Application Load Balancer calls an Invocation Lambda that talks to a Bedrock agent. The agent answers documentation questions from a knowledge
-  base on OpenSearch Serverless and delegates database questions to an action-group Lambda that generates SQL and runs it in Athena against a Glue Data Catalog database.
+description: A Streamlit task on an ECS cluster behind an Application Load Balancer calls an Invocation Lambda that sends prompts to a Bedrock agent. The agent answers documentation questions from a knowledge
+  base on OpenSearch Serverless fed by an S3 documentation bucket, and delegates database questions through an OpenAPI action-group schema to an executor Lambda that generates SQL and runs it in Athena
+  against a Glue Data Catalog table that a Glue crawler loads from a CSV bucket.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [2, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
@@ -22,34 +23,38 @@ nodes:
 - {id: users, type: common.users, name: users, at: [1, 1]}
 - {id: streamlit-alb, type: aws.alb, name: streamlit-alb, parent: az-app-a, at: [1, 1]}
 - {id: streamlit-cluster, type: aws.res.aws_ecs_cluster, name: streamlit-cluster, parent: sub-private-a, props: {name: changeme}, at: [1, 1]}
-- {id: streamlit-image, type: aws.res.aws_ecr_repository, name: streamlit-image, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1]}
+- {id: streamlit-app, type: aws.res.aws_ecs_task_definition, name: streamlit-app, parent: sub-private-a, props: {container_definitions: changeme, family: changeme}, at: [1, 2]}
 - {id: invocation-fn, type: aws.lambda_function, name: invocation-fn, parent: reg-us-east-1, at: [2, 2]}
-- {id: chatbot-agent, type: aws.res.aws_bedrockagent_agent, name: chatbot-agent, parent: reg-us-east-1, props: {agent_name: changeme, agent_resource_role_arn: changeme, foundation_model: changeme}, at: [3, 3]}
+- {id: chatbot-agent, type: aws.res.aws_bedrockagent_agent, name: chatbot-agent, parent: reg-us-east-1, props: {agent_name: changeme, agent_resource_role_arn: changeme, foundation_model: changeme}, at: [
+    3, 3]}
 - {id: agent-executor-fn, type: aws.lambda_function, name: agent-executor-fn, parent: reg-us-east-1, at: [3, 4]}
 - {id: docs-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: docs-kb, parent: reg-us-east-1, props: {name: changeme, role_arn: changeme}, at: [3, 2]}
 - {id: kb-vectors, type: aws.res.aws_opensearchserverless_collection, name: kb-vectors, parent: reg-us-east-1, props: {name: changeme}, at: [4, 2]}
 - {id: chatbot-athena, type: aws.res.aws_athena_workgroup, name: chatbot-athena, parent: reg-us-east-1, props: {name: changeme}, at: [3, 5]}
 - {id: tabular-db, type: aws.res.aws_glue_catalog_database, name: tabular-db, parent: reg-us-east-1, props: {name: changeme}, at: [3, 6]}
+- {id: csv-crawler, type: aws.res.aws_glue_crawler, name: csv-crawler, parent: reg-us-east-1, props: {database_name: changeme, name: changeme, role: changeme}, at: [3, 7]}
 - {id: assets-bucket, type: aws.s3_bucket, name: assets-bucket, parent: reg-us-east-1, at: [3, 1]}
-- {id: assets-key, type: aws.res.aws_kms_key, name: assets-key, parent: reg-us-east-1, at: [4, 1]}
+- {id: csv-data-bucket, type: aws.s3_bucket, name: csv-data-bucket, parent: reg-us-east-1, at: [4, 7]}
 - {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}, at: [1, 2]}
 - {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.30.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: users, to: streamlit-alb, label: HTTP, step: '1'}
 - {from: streamlit-alb, to: streamlit-cluster, step: '2'}
-- {from: streamlit-image, to: streamlit-cluster, label: task image}
-- {from: streamlit-cluster, to: invocation-fn, label: Invoke, step: '3'}
-- {from: invocation-fn, to: chatbot-agent, label: InvokeAgent, step: '4'}
-- {from: chatbot-agent, to: docs-kb, label: bedrockagent agent knowledge base association}
-- {from: docs-kb, to: kb-vectors, label: vector retrieval}
-- {from: chatbot-agent, to: agent-executor-fn, label: bedrockagent agent action group}
-- {from: agent-executor-fn, to: chatbot-athena, label: generated SQL, step: '5'}
-- {from: chatbot-athena, to: tabular-db, label: table metadata}
-- {from: chatbot-athena, to: assets-bucket, label: scan CSV dataset}
+- {from: streamlit-cluster, to: streamlit-app, label: runs task}
+- {from: streamlit-app, to: invocation-fn, label: Invoke, step: '3'}
+- {from: invocation-fn, to: chatbot-agent, label: Prompt request / Response, step: '4'}
 - {from: assets-bucket, to: docs-kb, label: bedrockagent data source}
+- {from: docs-kb, to: chatbot-agent, label: bedrockagent agent knowledge base association}
+- {from: docs-kb, to: kb-vectors, label: vector index}
+- {from: chatbot-agent, to: agent-executor-fn, label: Agent actions API schema}
+- {from: agent-executor-fn, to: chatbot-athena, label: Text to SQL request, step: '5'}
+- {from: chatbot-athena, to: tabular-db, label: Data Catalog table}
+- {from: chatbot-athena, to: csv-data-bucket, label: scan CSV files}
+- {from: csv-data-bucket, to: csv-crawler, label: crawl CSV data files}
+- {from: csv-crawler, to: tabular-db, label: load Glue database}
 steps:
 - {n: '1', text: 'users → streamlit-alb: HTTP'}
 - {n: '2', text: streamlit-alb → streamlit-cluster}
-- {n: '3', text: 'streamlit-cluster → invocation-fn: Invoke'}
-- {n: '4', text: 'invocation-fn → chatbot-agent: InvokeAgent'}
-- {n: '5', text: 'agent-executor-fn → chatbot-athena: generated SQL'}
+- {n: '3', text: 'streamlit-app → invocation-fn: Invoke'}
+- {n: '4', text: 'invocation-fn → chatbot-agent: Prompt request / Response'}
+- {n: '5', text: 'agent-executor-fn → chatbot-athena: Text to SQL request'}

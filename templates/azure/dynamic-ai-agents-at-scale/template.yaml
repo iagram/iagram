@@ -12,87 +12,164 @@ tags:
 - orchestration
 image: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/media/ai-agents-at-scale-architecture.svg
 source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/ai-agents-at-scale
-description: An agent service on AKS receives user queries behind Application Gateway, and an agent selector queries an AI Search semantic cache of sample utterances to shortlist candidate agents before
-  an LLM picks one or the top-scoring agent is invoked directly. An agent factory instantiates the selected agent, which calls Azure OpenAI models in Foundry, keeps multiturn context in Azure Managed Redis,
-  and reaches external APIs or MCP servers through a firewall or NAT gateway.
+description: An agent service on AKS receives user queries behind Application Gateway with WAF policies that forward to load balancer front-end IPs in a private subnet, and an agent selector queries an
+  AI Search semantic cache of sample utterances to shortlist candidate agents before an LLM picks one or the top-scoring agent is invoked directly. An agent factory instantiates the selected agent, which
+  calls Azure OpenAI models through a Foundry project with a managed identity, keeps multiturn context in Azure Managed Redis and reaches Container Registry, Cosmos DB, Data Lake Storage and Key Vault over
+  per-service private endpoints resolved by private DNS in a DDoS-protected virtual network; external APIs and MCP servers are reached through Azure Firewall.
 nodes:
 - {id: sub-agents-prod, type: azure.subscription, name: agents-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
 - {id: rg-rg-agents-scale, type: azure.resource_group, name: rg-agents-scale, parent: sub-agents-prod, props: {location: westus3}, at: [1, 1]}
 - {id: vpc-vnet-agents, type: azure.vnet, name: vnet-agents, parent: rg-rg-agents-scale, props: {cidr: 10.20.0.0/16}, at: [1, 1, 1, 6]}
 - {id: sub-snet-gateway, type: azure.subnet, name: snet-gateway, parent: vpc-vnet-agents, props: {cidr: 10.20.0.0/24}, at: [1, 1]}
-- {id: sub-snet-cluster, type: azure.subnet, name: snet-cluster, parent: vpc-vnet-agents, props: {cidr: 10.20.16.0/20}, at: [2, 1]}
-- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-agents, props: {cidr: 10.20.1.0/24}, at: [3, 1]}
+- {id: sub-snet-private, type: azure.subnet, name: snet-private, parent: vpc-vnet-agents, props: {cidr: 10.20.3.0/24}, at: [1, 2]}
+- {id: sub-snet-cluster, type: azure.subnet, name: snet-cluster, parent: vpc-vnet-agents, props: {cidr: 10.20.16.0/20}, at: [2, 1, 1, 2]}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-agents, props: {cidr: 10.20.1.0/24}, at: [3, 1, 1, 2]}
 - {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-agents, props: {cidr: 10.20.2.0/26}, at: [4, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
 - {id: internet, type: common.internet, name: internet, at: [2, 2]}
+- {id: microsoft-entra-id, type: common.idp, name: Microsoft Entra ID, at: [2, 3]}
 - id: agw-agents
   type: azure.res.azurerm_application_gateway
   name: agw-agents
   parent: sub-snet-gateway
-  at: [1, 1]
-  props:
-    backend_address_pool: []
-    frontend_ip_configuration: []
-    frontend_port: []
-    gateway_ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: {}
+  props: {backend_address_pool: [], frontend_ip_configuration: [], frontend_port: [], gateway_ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 1
+  - 1
+- id: waf-agents
+  type: azure.res.azurerm_web_application_firewall_policy
+  name: waf-agents
+  parent: sub-snet-gateway
+  props: {location: westeurope, managed_rules: {}, name: changeme, resource_group_name: changeme}
+  at:
+  - 1
+  - 2
+- {id: ilb-agents, type: azure.res.azurerm_lb, name: ilb-agents, parent: sub-snet-private, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
 - {id: aks-agents, type: azure.aks_cluster, name: aks-agents, parent: sub-snet-cluster, at: [1, 1]}
-- {id: acragents, type: azure.container_registry, name: acragents, parent: rg-rg-agents-scale, at: [2, 1]}
-- {id: srch-semantic-cache, type: azure.res.azurerm_search_service, name: srch-semantic-cache, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}, at: [2, 2]}
-- {id: foundry-agents, type: azure.res.azurerm_cognitive_account, name: foundry-agents, parent: rg-rg-agents-scale, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
-    sku_name: changeme}, at: [1, 7]}
-- id: gpt-4o-agents
-  type: azure.res.azurerm_cognitive_deployment
-  name: gpt-4o-agents
-  parent: rg-rg-agents-scale
-  at: [2, 7]
-  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
-- {id: redis-conversation, type: azure.res.azurerm_redis_cache, name: redis-conversation, parent: rg-rg-agents-scale, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
-    sku_name: changeme}, at: [2, 3]}
-- id: cosmos-agent-registry
-  type: azure.res.azurerm_cosmosdb_account
-  name: cosmos-agent-registry
-  parent: rg-rg-agents-scale
-  at: [2, 5]
-  props:
-    consistency_policy: {}
-    geo_location: []
-    location: westeurope
-    name: changeme
-    offer_type: changeme
-    resource_group_name: changeme
-- {id: stagentlogs, type: azure.storage_account, name: stagentlogs, parent: rg-rg-agents-scale, at: [2, 4]}
-- {id: kv-agents, type: azure.key_vault, name: kv-agents, parent: rg-rg-agents-scale, at: [2, 6]}
+- id: pe-acr
+  type: azure.res.azurerm_private_endpoint
+  name: pe-acr
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 1
 - id: pe-search-cache
   type: azure.res.azurerm_private_endpoint
   name: pe-search-cache
   parent: sub-snet-privateendpoints
-  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: afw-agents, type: azure.res.azurerm_firewall, name: afw-agents, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [1, 1]}
-- {id: appi-agents, type: azure.res.azurerm_application_insights, name: appi-agents, parent: rg-rg-agents-scale, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 6]}
-- {id: law-agents, type: azure.res.azurerm_log_analytics_workspace, name: law-agents, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 7]}
+  at:
+  - 1
+  - 2
+- id: pe-foundry
+  type: azure.res.azurerm_private_endpoint
+  name: pe-foundry
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 3
+- id: pe-redis
+  type: azure.res.azurerm_private_endpoint
+  name: pe-redis
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 4
+- id: pe-storage
+  type: azure.res.azurerm_private_endpoint
+  name: pe-storage
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 5
+- id: pe-cosmos
+  type: azure.res.azurerm_private_endpoint
+  name: pe-cosmos
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 6
+- id: pe-keyvault
+  type: azure.res.azurerm_private_endpoint
+  name: pe-keyvault
+  parent: sub-snet-privateendpoints
+  props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
+  at:
+  - 1
+  - 7
+- {id: afw-agents, type: azure.res.azurerm_firewall, name: afw-agents, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme},
+  at: [1, 1]}
+- {id: acragents, type: azure.container_registry, name: acragents, parent: rg-rg-agents-scale, at: [2, 1]}
+- {id: srch-semantic-cache, type: azure.res.azurerm_search_service, name: srch-semantic-cache, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme},
+  at: [2, 2]}
+- {id: redis-conversation, type: azure.res.azurerm_redis_cache, name: redis-conversation, parent: rg-rg-agents-scale, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}, at: [2, 3]}
+- {id: stagentlogs, type: azure.storage_account, name: stagentlogs, parent: rg-rg-agents-scale, at: [2, 4]}
+- id: cosmos-agent-registry
+  type: azure.res.azurerm_cosmosdb_account
+  name: cosmos-agent-registry
+  parent: rg-rg-agents-scale
+  props: {consistency_policy: {}, geo_location: [], location: westeurope, name: changeme, offer_type: changeme, resource_group_name: changeme}
+  at:
+  - 2
+  - 5
+- {id: kv-agents, type: azure.key_vault, name: kv-agents, parent: rg-rg-agents-scale, at: [2, 6]}
+- {id: ddos-agents, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-agents, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [
+    1, 7]}
+- {id: pdz-agents, type: azure.res.azurerm_private_dns_zone, name: pdz-agents, parent: rg-rg-agents-scale, props: {name: changeme, resource_group_name: changeme}, at: [1, 8]}
+- {id: foundry-agents, type: azure.res.azurerm_cognitive_account, name: foundry-agents, parent: rg-rg-agents-scale, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
+    sku_name: changeme}, at: [2, 7]}
+- {id: id-foundry-agents, type: azure.res.azurerm_user_assigned_identity, name: id-foundry-agents, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [2, 8]}
+- id: gpt-4o-agents
+  type: azure.res.azurerm_cognitive_deployment
+  name: gpt-4o-agents
+  parent: rg-rg-agents-scale
+  props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
+  at:
+  - 3
+  - 7
+- {id: appi-agents, type: azure.res.azurerm_application_insights, name: appi-agents, parent: rg-rg-agents-scale, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [4, 7]}
+- {id: law-agents, type: azure.res.azurerm_log_analytics_workspace, name: law-agents, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [4, 8]}
 edges:
 - {from: users, to: agw-agents, label: HTTPS (WAF), step: '1'}
+- {from: waf-agents, to: agw-agents, label: WAF policies}
+- {from: agw-agents, to: ilb-agents, label: front-end IP addresses on load balancer}
+- {from: ilb-agents, to: aks-agents, label: internal ingress}
 - {from: agw-agents, to: aks-agents, label: AI agent service, step: '2'}
 - {from: aks-agents, to: pe-search-cache, label: vector similarity on utterances, step: '3'}
 - {from: pe-search-cache, to: srch-semantic-cache, label: private link}
-- {from: aks-agents, to: cosmos-agent-registry, label: agent definitions (code / YAML), step: '4'}
-- {from: aks-agents, to: gpt-4o-agents, label: agent selection and response, step: '5'}
-- {from: gpt-4o-agents, to: foundry-agents, label: hosted in Foundry}
-- {from: aks-agents, to: redis-conversation, label: chat history (TTL)}
+- {from: aks-agents, to: pe-foundry, label: agent factory invokes Foundry project, step: '4'}
+- {from: pe-foundry, to: foundry-agents, label: private link}
+- {from: foundry-agents, to: id-foundry-agents, label: Foundry project managed identity}
+- {from: id-foundry-agents, to: microsoft-entra-id, label: managed identity tokens}
+- {from: foundry-agents, to: gpt-4o-agents, label: Azure OpenAI models, step: '5'}
+- {from: aks-agents, to: pe-cosmos, label: agent definitions (code / YAML)}
+- {from: pe-cosmos, to: cosmos-agent-registry, label: private link}
+- {from: aks-agents, to: pe-redis, label: chat history (TTL)}
+- {from: pe-redis, to: redis-conversation, label: private link}
+- {from: aks-agents, to: pe-storage, label: agent logs and data}
+- {from: pe-storage, to: stagentlogs, label: private link}
+- {from: aks-agents, to: pe-keyvault, label: secrets}
+- {from: pe-keyvault, to: kv-agents, label: private link}
+- {from: aks-agents, to: pe-acr, label: agent images}
+- {from: pe-acr, to: acragents, label: private link}
 - {from: aks-agents, to: afw-agents, label: external APIs / MCP, step: '6'}
-- {from: afw-agents, to: internet, label: static outbound IP}
-- {from: acragents, to: aks-agents, label: agent images}
+- {from: afw-agents, to: internet, label: 'external APIs, MCP servers, internet'}
+- {from: pdz-agents, to: vpc-vnet-agents, label: private DNS, link: azurerm_private_dns_zone_virtual_network_link}
+- {from: ddos-agents, to: vpc-vnet-agents, label: DDoS Protection}
 - {from: aks-agents, to: appi-agents, label: OpenTelemetry traces}
 - {from: appi-agents, to: law-agents, label: logs and KQL}
 steps:
 - {n: '1', text: 'users → agw-agents: HTTPS (WAF)'}
 - {n: '2', text: 'agw-agents → aks-agents: AI agent service'}
 - {n: '3', text: 'aks-agents → pe-search-cache: vector similarity on utterances'}
-- {n: '4', text: 'aks-agents → cosmos-agent-registry: agent definitions (code / YAML)'}
-- {n: '5', text: 'aks-agents → gpt-4o-agents: agent selection and response'}
+- {n: '4', text: 'aks-agents → pe-foundry: agent factory invokes Foundry project'}
+- {n: '5', text: 'foundry-agents → gpt-4o-agents: Azure OpenAI models'}
 - {n: '6', text: 'aks-agents → afw-agents: external APIs / MCP'}

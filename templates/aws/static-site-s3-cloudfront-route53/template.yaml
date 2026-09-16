@@ -11,7 +11,7 @@ tags:
 image: https://docs.aws.amazon.com/images/AmazonCloudFront/latest/DeveloperGuide/images/cloudfront-secure-static-website-overview-github.png
 source: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/getting-started-secure-static-website-cloudformation-template.html
 description: Static assets live in a private S3 bucket that only CloudFront can read through origin access control. Route 53 alias records point the apex and www names at the CloudFront distribution, which
-  terminates TLS with an ACM certificate issued in us-east-1 and caches content at edge locations worldwide.
+  terminates TLS with an ACM certificate issued in us-east-1, fetches objects from the bucket on a cache miss and serves them from edge locations worldwide.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
@@ -21,16 +21,17 @@ nodes:
 - {id: site-cert, type: aws.res.aws_acm_certificate, name: site-cert, parent: reg-us-east-1, at: [2, 2]}
 - {id: site-cdn, type: aws.cloudfront_distribution, name: site-cdn, parent: grp-global-edge, at: [1, 1]}
 - {id: site-content, type: aws.s3_bucket, name: site-content, parent: reg-us-east-1, at: [1, 3]}
-- {id: cdn-logs, type: aws.s3_bucket, name: cdn-logs, parent: reg-us-east-1, at: [2, 3]}
 edges:
 - {from: users, to: example-com, label: DNS lookup, step: '1'}
-- {from: example-com, to: site-cdn, label: alias A/AAAA, step: '2'}
-- {from: users, to: site-cdn, label: HTTPS (ACM cert), step: '3'}
-- {from: site-cdn, to: site-content, label: origin fetch via OAC on cache miss, step: '4'}
-- {from: site-cdn, to: cdn-logs, label: access logs}
+- {from: example-com, to: site-cdn, label: alias A/AAAA}
+- {from: users, to: site-cdn, label: HTTPS GET (ACM cert), step: '2'}
+- {from: site-cdn, to: site-content, label: origin fetch via OAC on cache miss, step: '3'}
+- {from: site-content, to: site-cdn, label: object, step: '4'}
+- {from: site-cdn, to: users, label: response cached at the edge, step: '5'}
 - {from: site-cert, to: site-cdn, label: TLS certificate}
 steps:
 - {n: '1', text: 'users → example-com: DNS lookup'}
-- {n: '2', text: 'example-com → site-cdn: alias A/AAAA'}
-- {n: '3', text: 'users → site-cdn: HTTPS (ACM cert)'}
-- {n: '4', text: 'site-cdn → site-content: origin fetch via OAC on cache miss'}
+- {n: '2', text: 'users → site-cdn: HTTPS GET (ACM cert)'}
+- {n: '3', text: 'site-cdn → site-content: origin fetch via OAC on cache miss'}
+- {n: '4', text: 'site-content → site-cdn: object'}
+- {n: '5', text: 'site-cdn → users: response cached at the edge'}

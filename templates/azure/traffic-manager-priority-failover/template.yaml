@@ -10,102 +10,69 @@ tags:
 - multi-region
 image: https://learn.microsoft.com/en-us/azure/traffic-manager/media/traffic-manager-routing-methods/priority.png
 source: https://learn.microsoft.com/en-us/azure/traffic-manager/traffic-manager-routing-methods
-description: A Traffic Manager profile with the Priority routing method returns the primary region's Application Gateway for every DNS query while endpoint monitoring reports it healthy, and returns the
-  secondary region's endpoint when probes fail or the endpoint is disabled. Clients connect directly to the returned endpoint because Traffic Manager is DNS-based and never sits in the data path.
+description: A browser asks its recursive DNS service for www.contoso.com, the resolver follows the CNAME to the Traffic Manager profile, and the Priority routing method answers with the available endpoint
+  of highest priority, here the Failover A Application Gateway (priority 2) because health checks report the Primary endpoint (priority 1) degraded while Failover B (priority 3) stays online in reserve.
+  The client then connects directly to the returned endpoint because Traffic Manager is DNS-based and never sits in the data path.
 nodes:
-- {id: sub-web-prod, type: azure.subscription, name: web-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
-- {id: rg-rg-traffic-manager, type: azure.resource_group, name: rg-traffic-manager, parent: sub-web-prod, props: {location: westeurope}, at: [1, 1, 1, 2]}
+- {id: sub-web-prod, type: azure.subscription, name: web-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1, 1, 3]}
+- {id: rg-rg-traffic-manager, type: azure.resource_group, name: rg-traffic-manager, parent: sub-web-prod, props: {location: westeurope}, at: [1, 1, 1, 3]}
 - {id: rg-rg-web-primary, type: azure.resource_group, name: rg-web-primary, parent: sub-web-prod, props: {location: westeurope}, at: [2, 1]}
 - {id: vpc-vnet-primary, type: azure.vnet, name: vnet-primary, parent: rg-rg-web-primary, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
 - {id: sub-snet-agw-primary, type: azure.subnet, name: snet-agw-primary, parent: vpc-vnet-primary, props: {cidr: 10.1.0.0/24}, at: [1, 1]}
-- {id: sub-snet-web-primary, type: azure.subnet, name: snet-web-primary, parent: vpc-vnet-primary, props: {cidr: 10.1.1.0/24}, at: [2, 1]}
-- {id: rg-rg-web-secondary, type: azure.resource_group, name: rg-web-secondary, parent: sub-web-prod, props: {location: northeurope}, at: [2, 2]}
-- {id: vpc-vnet-secondary, type: azure.vnet, name: vnet-secondary, parent: rg-rg-web-secondary, props: {cidr: 10.2.0.0/16}, at: [1, 1]}
-- {id: sub-snet-agw-secondary, type: azure.subnet, name: snet-agw-secondary, parent: vpc-vnet-secondary, props: {cidr: 10.2.0.0/24}, at: [1, 1]}
-- {id: sub-snet-web-secondary, type: azure.subnet, name: snet-web-secondary, parent: vpc-vnet-secondary, props: {cidr: 10.2.1.0/24}, at: [2, 1]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: rg-rg-web-failover-a, type: azure.resource_group, name: rg-web-failover-a, parent: sub-web-prod, props: {location: northeurope}, at: [2, 2]}
+- {id: vpc-vnet-failover-a, type: azure.vnet, name: vnet-failover-a, parent: rg-rg-web-failover-a, props: {cidr: 10.2.0.0/16}, at: [1, 1]}
+- {id: sub-snet-agw-failover-a, type: azure.subnet, name: snet-agw-failover-a, parent: vpc-vnet-failover-a, props: {cidr: 10.2.0.0/24}, at: [1, 1]}
+- {id: rg-rg-web-failover-b, type: azure.resource_group, name: rg-web-failover-b, parent: sub-web-prod, props: {location: francecentral}, at: [2, 3]}
+- {id: vpc-vnet-failover-b, type: azure.vnet, name: vnet-failover-b, parent: rg-rg-web-failover-b, props: {cidr: 10.3.0.0/16}, at: [1, 1]}
+- {id: sub-snet-agw-failover-b, type: azure.subnet, name: snet-agw-failover-b, parent: vpc-vnet-failover-b, props: {cidr: 10.3.0.0/24}, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: browser, type: common.client, name: browser, at: [1, 2]}
+- {id: recursive-dns-service, type: common.server, name: recursive-dns-service, at: [1, 3]}
+- {id: dns-contoso, type: azure.dns_zone, name: dns-contoso, parent: rg-rg-traffic-manager, props: {domain: example.com}, at: [1, 1]}
 - id: tm-priority
   type: azure.res.azurerm_traffic_manager_profile
   name: tm-priority
   parent: rg-rg-traffic-manager
-  at: [1, 2]
   props: {dns_config: {}, monitor_config: {}, name: changeme, resource_group_name: changeme, traffic_routing_method: changeme}
-- {id: dns-contoso, type: azure.dns_zone, name: dns-contoso, parent: rg-rg-traffic-manager, props: {domain: example.com}, at: [1, 1]}
-- id: waf-web
-  type: azure.res.azurerm_web_application_firewall_policy
-  name: waf-web
-  parent: rg-rg-traffic-manager
-  at: [1, 3]
-  props: {location: westeurope, managed_rules: {}, name: changeme, resource_group_name: changeme}
-- {id: law-tm, type: azure.res.azurerm_log_analytics_workspace, name: law-tm, parent: rg-rg-traffic-manager, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 4]}
+  at:
+  - 1
+  - 2
 - id: agw-primary
   type: azure.res.azurerm_application_gateway
   name: agw-primary
   parent: sub-snet-agw-primary
-  at: [1, 1]
-  props:
-    backend_address_pool: []
-    frontend_ip_configuration: []
-    frontend_port: []
-    gateway_ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: {}
-- id: vmss-primary
-  type: azure.res.azurerm_linux_virtual_machine_scale_set
-  name: vmss-primary
-  parent: sub-snet-web-primary
-  at: [1, 1]
-  props:
-    admin_username: changeme
-    location: westeurope
-    name: changeme
-    network_interface: []
-    os_disk: {}
-    resource_group_name: changeme
-    sku: changeme
-- id: agw-secondary
+  props: {backend_address_pool: [], frontend_ip_configuration: [], frontend_port: [], gateway_ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 1
+  - 1
+- id: agw-failover-a
   type: azure.res.azurerm_application_gateway
-  name: agw-secondary
-  parent: sub-snet-agw-secondary
-  at: [1, 1]
-  props:
-    backend_address_pool: []
-    frontend_ip_configuration: []
-    frontend_port: []
-    gateway_ip_configuration: []
-    location: westeurope
-    name: changeme
-    resource_group_name: changeme
-    sku: {}
-- id: vmss-secondary
-  type: azure.res.azurerm_linux_virtual_machine_scale_set
-  name: vmss-secondary
-  parent: sub-snet-web-secondary
-  at: [1, 1]
-  props:
-    admin_username: changeme
-    location: westeurope
-    name: changeme
-    network_interface: []
-    os_disk: {}
-    resource_group_name: changeme
-    sku: changeme
+  name: agw-failover-a
+  parent: sub-snet-agw-failover-a
+  props: {backend_address_pool: [], frontend_ip_configuration: [], frontend_port: [], gateway_ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 1
+  - 1
+- id: agw-failover-b
+  type: azure.res.azurerm_application_gateway
+  name: agw-failover-b
+  parent: sub-snet-agw-failover-b
+  props: {backend_address_pool: [], frontend_ip_configuration: [], frontend_port: [], gateway_ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 1
+  - 1
 edges:
-- {from: users, to: dns-contoso, label: resolve www.contoso.com, step: '1'}
-- {from: dns-contoso, to: tm-priority, label: CNAME to trafficmanager.net, step: '2'}
-- {from: tm-priority, to: agw-primary, label: priority 1 (healthy), step: '3'}
-- {from: tm-priority, to: agw-secondary, label: priority 2 (failover on probe failure)}
-- {from: users, to: agw-primary, label: HTTPS to returned endpoint, step: '4'}
-- {from: agw-primary, to: vmss-primary, label: backend pool, step: '5'}
-- {from: agw-secondary, to: vmss-secondary, label: backend pool}
-- {from: waf-web, to: agw-primary, label: WAF policy}
-- {from: waf-web, to: agw-secondary, label: WAF policy}
-- {from: tm-priority, to: law-tm, label: probe health logs}
+- {from: user, to: browser, label: opens www.contoso.com}
+- {from: browser, to: recursive-dns-service, label: DNS query, step: '1'}
+- {from: recursive-dns-service, to: dns-contoso, label: CNAME www.contoso.com to trafficmanager.net}
+- {from: recursive-dns-service, to: tm-priority, label: choose available endpoint with highest priority, step: '2'}
+- {from: recursive-dns-service, to: browser, label: DNS response, step: '3'}
+- {from: browser, to: agw-failover-a, label: 'client connects directly to selected endpoint, not through Traffic Manager', step: '4'}
+- {from: tm-priority, to: agw-primary, label: 'health checks: Primary, priority 1, degraded'}
+- {from: tm-priority, to: agw-failover-a, label: 'health checks: Failover A, priority 2, online'}
+- {from: tm-priority, to: agw-failover-b, label: 'health checks: Failover B, priority 3, online'}
 steps:
-- {n: '1', text: 'users → dns-contoso: resolve www.contoso.com'}
-- {n: '2', text: 'dns-contoso → tm-priority: CNAME to trafficmanager.net'}
-- {n: '3', text: 'tm-priority → agw-primary: priority 1 (healthy)'}
-- {n: '4', text: 'users → agw-primary: HTTPS to returned endpoint'}
-- {n: '5', text: 'agw-primary → vmss-primary: backend pool'}
+- {n: '1', text: 'browser → recursive-dns-service: DNS query'}
+- {n: '2', text: 'recursive-dns-service → tm-priority: choose available endpoint with highest priority'}
+- {n: '3', text: 'recursive-dns-service → browser: DNS response'}
+- {n: '4', text: 'browser → agw-failover-a: client connects directly to selected endpoint, not through Traffic Manager'}

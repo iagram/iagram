@@ -11,29 +11,39 @@ tags:
 - redundancy
 image: https://docs.cloud.google.com/static/network-connectivity/docs/interconnect/images/99.99.svg
 source: https://docs.cloud.google.com/network-connectivity/docs/interconnect/concepts/cci-overview
-description: Google provisions dedicated physical ports between its network and a remote cloud provider such as AWS or Azure in a supported location; the customer orders a primary and a redundant port in
-  different edge availability domains, then configures VLAN attachments and Cloud Router BGP sessions to the remote provider's gateway. Ninety-nine point nine percent availability needs two connections
-  in one metro and 99.99% needs pairs in two metros.
+description: Google provisions dedicated physical ports between its network and a remote cloud provider such as AWS or Azure in colocation facilities; in each of two metropolitan areas the customer orders
+  a primary and a redundant Cross-Cloud Interconnect connection in separate edge availability domains, each linking a Google router to a router run by the remote cloud. Cloud Routers in two regions of the
+  VPC run BGP over VLAN attachments on those connections so Compute Engine VMs reach the remote virtual network with 99.99% availability, while a single metro pair gives 99.9%.
 nodes:
-- {id: dc-other-cloud-provider, type: common.datacenter, name: other-cloud-provider, at: [1, 2]}
+- {id: dc-remote-cloud, type: common.datacenter, name: remote-cloud, at: [1, 2]}
 - {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-east4}, at: [1, 1]}
-- {id: vpc-multicloud-vpc, type: gcp.vpc, name: multicloud-vpc, parent: prj-net-hub, props: {cidr: 10.180.0.0/16}, at: [1, 1]}
-- {id: sub-multicloud-use4, type: gcp.subnetwork, name: multicloud-use4, parent: vpc-multicloud-vpc, props: {cidr: 10.180.0.0/24, region: us-east4}, at: [1, 1, 2, 1]}
-- {id: cci-router, type: gcp.res.google_compute_router, name: cci-router, parent: vpc-multicloud-vpc, props: {name: changeme, network: changeme}, at: [1, 2]}
-- {id: cci-vlan-primary, type: gcp.res.google_compute_interconnect_attachment, name: cci-vlan-primary, parent: vpc-multicloud-vpc, props: {name: changeme, router: changeme}, at: [1, 3]}
-- {id: cci-vlan-redundant, type: gcp.res.google_compute_interconnect_attachment, name: cci-vlan-redundant, parent: vpc-multicloud-vpc, props: {name: changeme, router: changeme}, at: [2, 3]}
-- {id: gcp-app, type: gcp.compute_instance, name: gcp-app, parent: sub-multicloud-use4, at: [1, 1]}
-- {id: allow-remote-cloud, type: gcp.firewall_rule, name: allow-remote-cloud, parent: vpc-multicloud-vpc, at: [2, 2]}
-- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub, at: [1, 2]}
-- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}, at: [1, 1]}
-- {id: remote-cloud-gateway, type: gcp.res.google_compute_router, name: remote-cloud-gateway, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}, at: [1, 1]}
-- {id: remote-cloud-workload, type: gcp.compute_instance, name: remote-cloud-workload, parent: sub-prj-net-hub, at: [1, 2]}
+- {id: grp-colocation-facility-in-first-metro, type: common.group, name: Colocation facility in first metro, parent: prj-net-hub, at: [1, 2]}
+- {id: grp-colocation-facility-in-second-metro, type: common.group, name: Colocation facility in second metro, parent: prj-net-hub, at: [2, 2]}
+- {id: vpc-multicloud-vpc, type: gcp.vpc, name: multicloud-vpc, parent: prj-net-hub, props: {cidr: 10.180.0.0/16}, at: [1, 1, 2, 1]}
+- {id: sub-region-1, type: gcp.subnetwork, name: region-1, parent: vpc-multicloud-vpc, props: {cidr: 10.180.0.0/24, region: us-east4}, at: [1, 1]}
+- {id: sub-region-2, type: gcp.subnetwork, name: region-2, parent: vpc-multicloud-vpc, props: {cidr: 10.180.1.0/24, region: us-west2}, at: [2, 1]}
+- {id: cloud-router-region-1, type: gcp.res.google_compute_router, name: cloud-router-region-1, parent: sub-region-1, props: {name: changeme, network: changeme}, at: [1, 1]}
+- {id: cloud-router-region-2, type: gcp.res.google_compute_router, name: cloud-router-region-2, parent: sub-region-2, props: {name: changeme, network: changeme}, at: [1, 1]}
+- {id: compute-engine-vms, type: gcp.compute_instance, name: compute-engine-vms, parent: sub-region-2, at: [2, 1]}
+- {id: google-router-metro1-ead1, type: gcp.res.google_compute_interconnect, name: google-router-metro1-ead1, parent: grp-colocation-facility-in-first-metro, props: {interconnect_type: changeme, link_type: changeme,
+    location: westeurope, name: changeme, requested_link_count: 1}, at: [1, 1]}
+- {id: google-router-metro1-ead2, type: gcp.res.google_compute_interconnect, name: google-router-metro1-ead2, parent: grp-colocation-facility-in-first-metro, props: {interconnect_type: changeme, link_type: changeme,
+    location: westeurope, name: changeme, requested_link_count: 1}, at: [2, 1]}
+- {id: google-router-metro2-ead1, type: gcp.res.google_compute_interconnect, name: google-router-metro2-ead1, parent: grp-colocation-facility-in-second-metro, props: {interconnect_type: changeme, link_type: changeme,
+    location: westeurope, name: changeme, requested_link_count: 1}, at: [1, 1]}
+- {id: google-router-metro2-ead2, type: gcp.res.google_compute_interconnect, name: google-router-metro2-ead2, parent: grp-colocation-facility-in-second-metro, props: {interconnect_type: changeme, link_type: changeme,
+    location: westeurope, name: changeme, requested_link_count: 1}, at: [2, 1]}
 edges:
-- {from: remote-cloud-gateway, to: cci-vlan-primary, label: Cross-Cloud Interconnect primary port, step: '1'}
-- {from: remote-cloud-gateway, to: cci-vlan-redundant, label: Cross-Cloud Interconnect redundant port, step: '1'}
-- {from: cci-router, to: remote-cloud-gateway, label: BGP, step: '2'}
-- {from: gcp-app, to: remote-cloud-workload, label: private inter-cloud traffic, step: '3'}
+- {from: cloud-router-region-1, to: google-router-metro1-ead1, label: VLAN attachment and BGP session, step: '1'}
+- {from: cloud-router-region-1, to: google-router-metro1-ead2, label: VLAN attachment and BGP session, step: '1'}
+- {from: cloud-router-region-2, to: google-router-metro2-ead1, label: VLAN attachment and BGP session, step: '1'}
+- {from: cloud-router-region-2, to: google-router-metro2-ead2, label: VLAN attachment and BGP session, step: '1'}
+- {from: google-router-metro1-ead1, to: dc-remote-cloud, label: primary Cross-Cloud Interconnect connection to a router run by the remote cloud (EAD 1), step: '2'}
+- {from: google-router-metro1-ead2, to: dc-remote-cloud, label: redundant Cross-Cloud Interconnect connection to a router run by the remote cloud (EAD 2), step: '2'}
+- {from: google-router-metro2-ead1, to: dc-remote-cloud, label: primary Cross-Cloud Interconnect connection to a router run by the remote cloud (EAD 1), step: '2'}
+- {from: google-router-metro2-ead2, to: dc-remote-cloud, label: redundant Cross-Cloud Interconnect connection to a router run by the remote cloud (EAD 2), step: '2'}
+- {from: compute-engine-vms, to: cloud-router-region-2, label: private inter-cloud traffic to the remote virtual network, step: '3'}
 steps:
-- {n: '1', text: 'remote-cloud-gateway → cci-vlan-primary: Cross-Cloud Interconnect primary port'}
-- {n: '2', text: 'cci-router → remote-cloud-gateway: BGP'}
-- {n: '3', text: 'gcp-app → remote-cloud-workload: private inter-cloud traffic'}
+- {n: '1', text: 'cloud-router-region-1 → google-router-metro1-ead1: VLAN attachment and BGP session'}
+- {n: '2', text: 'google-router-metro1-ead1 → datacenter: primary Cross-Cloud Interconnect connection to a router run by the remote cloud (EAD 1)'}
+- {n: '3', text: 'compute-engine-vms → cloud-router-region-2: private inter-cloud traffic to the remote virtual network'}

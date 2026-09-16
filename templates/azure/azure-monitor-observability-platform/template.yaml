@@ -13,48 +13,124 @@ tags:
 - grafana
 image: https://learn.microsoft.com/en-us/azure/azure-monitor/fundamentals/media/overview/overview.png
 source: https://learn.microsoft.com/en-us/azure/azure-monitor/fundamentals/overview
-description: Azure Monitor collects metrics, logs, traces and events from Azure resources, VMs, Kubernetes clusters and applications into two workspace types, a Log Analytics workspace for logs and traces
-  queried with KQL and an Azure Monitor workspace for Prometheus and OpenTelemetry metrics queried with PromQL. Application Insights provides OpenTelemetry-based APM, workbooks and Grafana dashboards visualize
-  the data, and alerts drive action groups that run Logic Apps or Automation runbooks and autoscale.
+description: Azure Monitor collects metrics, logs and traces from applications and workloads, infrastructure, the Azure platform and custom sources into an Azure Monitor workspace for Prometheus metrics,
+  a Log Analytics workspace for logs queried with KQL and Application Insights for distributed traces. Insights (Application, Kubernetes, VM, Network) curate that data, workbooks, Azure dashboards, Grafana
+  and Power BI visualize it, Log Analytics query packs analyze it, and metric and log alerts drive action groups that notify or automate a response.
 nodes:
 - {id: sub-platform, type: azure.subscription, name: platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1]}
 - {id: rg-rg-monitoring, type: azure.resource_group, name: rg-monitoring, parent: sub-platform, props: {location: westeurope}, at: [1, 1]}
-- {id: grp-data-sources, type: common.group, name: Data sources, parent: rg-rg-monitoring, at: [1, 1]}
-- {id: grp-data-platform, type: common.group, name: Data platform, parent: rg-rg-monitoring, at: [1, 2, 2, 1]}
-- {id: grp-consume-and-respond, type: common.group, name: Consume and respond, parent: rg-rg-monitoring, at: [1, 3, 2, 1]}
-- {id: user, type: common.user, name: user, at: [1, 2]}
-- {id: vpc-rg-rg-monitoring, type: azure.vnet, name: main, parent: rg-rg-monitoring, props: {cidr: 10.200.0.0/16}, at: [2, 1]}
-- {id: sub-rg-rg-monitoring, type: azure.subnet, name: main, parent: vpc-rg-rg-monitoring, props: {cidr: 10.200.0.0/24}, at: [1, 1]}
-- {id: vm-app-server, type: azure.virtual_machine, name: vm-app-server, parent: sub-rg-rg-monitoring, at: [1, 1]}
-- {id: aks-workload, type: azure.aks_cluster, name: aks-workload, parent: sub-rg-rg-monitoring, at: [1, 2]}
-- id: app-web
+- {id: grp-data-sources, type: common.group, name: Data sources, parent: rg-rg-monitoring, at: [1, 1, 4, 1]}
+- {id: grp-data-platform, type: common.group, name: Data platform, parent: rg-rg-monitoring, at: [1, 2, 4, 1]}
+- {id: grp-insights, type: common.group, name: Insights, parent: rg-rg-monitoring, at: [1, 3]}
+- {id: grp-visualize, type: common.group, name: Visualize, parent: rg-rg-monitoring, at: [2, 3]}
+- {id: grp-analyze, type: common.group, name: Analyze, parent: rg-rg-monitoring, at: [3, 3]}
+- {id: grp-respond, type: common.group, name: Respond, parent: rg-rg-monitoring, at: [4, 3]}
+- id: app-workloads
   type: azure.res.azurerm_linux_web_app
-  name: app-web
+  name: app-workloads
   parent: grp-data-sources
-  at: [1, 1]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
-- {id: appi-web, type: azure.res.azurerm_application_insights, name: appi-web, parent: grp-data-platform, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 1]}
-- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: grp-data-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
+  at:
+  - 1
+  - 1
+- id: vmss-infrastructure
+  type: azure.res.azurerm_linux_virtual_machine_scale_set
+  name: vmss-infrastructure
+  parent: grp-data-sources
+  props: {admin_username: changeme, location: westeurope, name: changeme, network_interface: [], os_disk: {}, resource_group_name: changeme, sku: changeme}
+  at:
+  - 2
+  - 1
+- {id: st-azure-platform, type: azure.storage_account, name: st-azure-platform, parent: grp-data-sources, at: [3, 1]}
+- {id: dce-custom-sources, type: azure.res.azurerm_monitor_data_collection_endpoint, name: dce-custom-sources, parent: grp-data-sources, props: {location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [4, 1]}
 - {id: amw-metrics, type: azure.res.azurerm_monitor_workspace, name: amw-metrics, parent: grp-data-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
-- {id: grafana-central, type: azure.res.azurerm_dashboard_grafana, name: grafana-central, parent: grp-consume-and-respond, props: {grafana_major_version: changeme, location: westeurope, name: changeme,
-    resource_group_name: changeme}, at: [1, 1, 1, 2]}
-- {id: ag-oncall, type: azure.res.azurerm_monitor_action_group, name: ag-oncall, parent: grp-consume-and-respond, props: {name: changeme, resource_group_name: changeme, short_name: changeme}, at: [2, 1, 1, 2]}
-- {id: logic-remediate, type: azure.res.azurerm_logic_app_workflow, name: logic-remediate, parent: grp-consume-and-respond, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 1]}
-- {id: aa-runbooks, type: azure.res.azurerm_automation_account, name: aa-runbooks, parent: grp-consume-and-respond, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}, at: [3, 2]}
+- {id: law-logs, type: azure.res.azurerm_log_analytics_workspace, name: law-logs, parent: grp-data-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
+- {id: appi-traces, type: azure.res.azurerm_application_insights, name: appi-traces, parent: grp-data-platform, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [3, 1]}
+- id: dcr-application-insights
+  type: azure.res.azurerm_monitor_data_collection_rule
+  name: dcr-application-insights
+  parent: grp-insights
+  props: {data_flow: [], destinations: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+  at:
+  - 1
+  - 1
+- id: dcr-container-insights
+  type: azure.res.azurerm_monitor_data_collection_rule
+  name: dcr-container-insights
+  parent: grp-insights
+  props: {data_flow: [], destinations: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+  at:
+  - 1
+  - 2
+- id: dcr-vm-insights
+  type: azure.res.azurerm_monitor_data_collection_rule
+  name: dcr-vm-insights
+  parent: grp-insights
+  props: {data_flow: [], destinations: {}, location: westeurope, name: changeme, resource_group_name: changeme}
+  at:
+  - 1
+  - 3
+- {id: nw-network-insights, type: azure.res.azurerm_network_watcher, name: nw-network-insights, parent: grp-insights, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [
+    1, 4]}
+- {id: dashboard-workbooks, type: azure.res.azurerm_portal_dashboard, name: dashboard-workbooks, parent: grp-visualize, props: {dashboard_properties: changeme, location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [1, 1]}
+- {id: dashboard-azure, type: azure.res.azurerm_portal_dashboard, name: dashboard-azure, parent: grp-visualize, props: {dashboard_properties: changeme, location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [1, 2]}
+- {id: grafana-central, type: azure.res.azurerm_dashboard_grafana, name: grafana-central, parent: grp-visualize, props: {grafana_major_version: changeme, location: westeurope, name: changeme, resource_group_name: changeme},
+  at: [1, 3]}
+- id: pbi-reports
+  type: azure.res.azurerm_powerbi_embedded
+  name: pbi-reports
+  parent: grp-visualize
+  props: {administrators: [], location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}
+  at:
+  - 1
+  - 4
+- id: alert-metric-explorer
+  type: azure.res.azurerm_monitor_metric_alert
+  name: alert-metric-explorer
+  parent: grp-analyze
+  props: {name: changeme, resource_group_name: changeme, scopes: []}
+  at:
+  - 1
+  - 1
+- {id: qp-log-analytics, type: azure.res.azurerm_log_analytics_query_pack, name: qp-log-analytics, parent: grp-analyze, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [
+    1, 2]}
+- id: alert-log-search
+  type: azure.res.azurerm_monitor_scheduled_query_rules_alert
+  name: alert-log-search
+  parent: grp-respond
+  props: {action: {}, data_source_id: changeme, frequency: 1, location: westeurope, name: changeme, query: changeme, resource_group_name: changeme, time_window: 1, trigger: {}}
+  at:
+  - 1
+  - 1
+- {id: ag-actions, type: azure.res.azurerm_monitor_action_group, name: ag-actions, parent: grp-respond, props: {name: changeme, resource_group_name: changeme, short_name: changeme}, at: [1, 2]}
 edges:
-- {from: vm-app-server, to: law-central, label: Azure Monitor Agent + data collection rules, step: '1'}
-- {from: aks-workload, to: amw-metrics, label: Managed Prometheus metrics, step: '1'}
-- {from: aks-workload, to: law-central, label: container logs}
-- {from: app-web, to: appi-web, label: OpenTelemetry traces and requests, step: '1'}
-- {from: appi-web, to: law-central, label: workspace-based Application Insights}
-- {from: law-central, to: grafana-central, label: KQL data source, step: '2'}
+- {from: app-workloads, to: appi-traces, label: OpenTelemetry traces, step: '1'}
+- {from: app-workloads, to: law-logs, label: application logs, step: '1'}
+- {from: vmss-infrastructure, to: amw-metrics, label: Prometheus and platform metrics, step: '1'}
+- {from: vmss-infrastructure, to: law-logs, label: Azure Monitor Agent logs, step: '1'}
+- {from: st-azure-platform, to: law-logs, label: resource logs and activity log via diagnostic settings, step: '1'}
+- {from: dce-custom-sources, to: law-logs, label: Logs Ingestion API, step: '1'}
+- {from: appi-traces, to: law-logs, label: workspace-based Application Insights}
+- {from: law-logs, to: dcr-application-insights, label: Application Insights, step: '2'}
+- {from: law-logs, to: dcr-container-insights, label: Kubernetes (Container insights), step: '2'}
+- {from: law-logs, to: dcr-vm-insights, label: VM insights, step: '2'}
+- {from: law-logs, to: nw-network-insights, label: Network insights, step: '2'}
+- {from: law-logs, to: dashboard-workbooks, label: workbooks, step: '2'}
+- {from: law-logs, to: dashboard-azure, label: dashboards, step: '2'}
 - {from: amw-metrics, to: grafana-central, label: PromQL data source, step: '2'}
-- {from: law-central, to: ag-oncall, label: log and metric alerts, step: '3'}
-- {from: ag-oncall, to: logic-remediate, label: no-code workflow}
-- {from: ag-oncall, to: aa-runbooks, label: low-code runbook}
-- {from: ag-oncall, to: user, label: email / SMS / push}
-- {from: user, to: grafana-central, label: dashboards and workbooks}
+- {from: law-logs, to: grafana-central, label: KQL data source, step: '2'}
+- {from: law-logs, to: pbi-reports, label: Power BI export, step: '2'}
+- {from: amw-metrics, to: alert-metric-explorer, label: metrics explorer, step: '2'}
+- {from: law-logs, to: qp-log-analytics, label: Log Analytics KQL queries, step: '2'}
+- {from: law-logs, to: alert-log-search, label: log search alerts, step: '3'}
+- {from: alert-metric-explorer, to: ag-actions, label: metric alert fires}
+- {from: alert-log-search, to: ag-actions, label: alert fires}
+- {from: ag-actions, to: app-workloads, label: actions (notify, step: '3'}
 steps:
-- {n: '1', text: 'vm-app-server → law-central: Azure Monitor Agent + data collection rules'}
-- {n: '2', text: 'law-central → grafana-central: KQL data source'}
-- {n: '3', text: 'law-central → ag-oncall: log and metric alerts'}
+- {n: '1', text: 'app-workloads → appi-traces: OpenTelemetry traces'}
+- {n: '2', text: 'law-logs → dcr-application-insights: Application Insights'}
+- {n: '3', text: 'law-logs → alert-log-search: log search alerts'}

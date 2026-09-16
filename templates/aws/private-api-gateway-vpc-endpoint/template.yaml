@@ -9,38 +9,31 @@ tags:
 - cross-account
 image: https://d2908q01vomqb2.cloudfront.net/1b6453892473a467d07372d45eb05abc2031647a/2022/12/14/Screen-Shot-2022-12-14-at-10.06.01-AM.png
 source: https://aws.amazon.com/blogs/compute/architecture-patterns-for-consuming-private-apis-cross-account/
-description: A producer account exposes a private API Gateway REST API backed by Lambda; its resource policy allows calls only from a named execute-api interface endpoint. A consumer account creates that
-  endpoint in its VPC, resolves the API hostname through a Route 53 private hosted zone, and applications in private subnets call the API over PrivateLink without traversing the internet.
+description: A producer account exposes a private API Gateway REST API whose resource policy allows calls only from a named execute-api interface endpoint. A consumer account creates that endpoint in its
+  VPC, and its callers, a regional API Gateway, a Lambda function, an ECS service and an EC2 instance, reach the private API over PrivateLink without traversing the internet.
 nodes:
-- {id: acct-api-producer, type: aws.account, name: api-producer, at: [1, 2]}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-api-producer, props: {region: eu-west-1}, at: [1, 2]}
 - {id: acct-api-consumer, type: aws.account, name: api-consumer, at: [1, 1]}
-- {id: reg-eu-west-1-2, type: aws.region, name: eu-west-1, parent: acct-api-consumer, props: {region: eu-west-1}, at: [2, 1]}
-- {id: vpc-consumer, type: aws.vpc, name: consumer, parent: reg-eu-west-1-2, props: {cidr: 10.60.0.0/16}, at: [1, 1]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-api-consumer, props: {region: eu-west-1}, at: [2, 1]}
+- {id: vpc-consumer, type: aws.vpc, name: consumer, parent: reg-eu-west-1, props: {cidr: 10.60.0.0/16}, at: [2, 1]}
 - {id: az-consumer-a, type: aws.availability_zone, name: a, parent: vpc-consumer, props: {zone: a}, at: [1, 1]}
 - {id: sub-consumer-private-a, type: aws.subnet, name: consumer-private-a, parent: az-consumer-a, props: {cidr: 10.60.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-consumer-b, type: aws.availability_zone, name: b, parent: vpc-consumer, props: {zone: b}, at: [2, 1]}
-- {id: sub-consumer-private-b, type: aws.subnet, name: consumer-private-b, parent: az-consumer-b, props: {cidr: 10.60.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: acct-api-producer, type: aws.account, name: api-producer, at: [1, 2]}
+- {id: reg-eu-west-1-2, type: aws.region, name: eu-west-1, parent: acct-api-producer, props: {region: eu-west-1}, at: [2, 1]}
+- {id: consumer-regional-api, type: aws.res.aws_api_gateway_rest_api, name: consumer-regional-api, parent: acct-api-consumer, props: {name: changeme}, at: [1, 1]}
+- {id: consumer-lambda, type: aws.lambda_function, name: consumer-lambda, parent: reg-eu-west-1, at: [1, 1]}
+- {id: consumer-ecs-cluster, type: aws.res.aws_ecs_cluster, name: consumer-ecs-cluster, parent: sub-consumer-private-a, props: {name: changeme}, at: [1, 1]}
+- {id: consumer-app, type: aws.ec2_instance, name: consumer-app, parent: sub-consumer-private-a, at: [2, 1]}
+- {id: execute-api-endpoint, type: aws.res.aws_vpc_endpoint, name: execute-api-endpoint, parent: acct-api-consumer, props: {vpc_id: changeme}, at: [1, 2, 2, 1]}
 - {id: private-orders-api, type: aws.res.aws_api_gateway_rest_api, name: private-orders-api, parent: acct-api-producer, props: {name: changeme}, at: [1, 1]}
-- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}, at: [1, 1]}
-- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}, at: [2, 1]}
-- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: orders-backend, type: aws.lambda_function, name: orders-backend, parent: sub-reg-eu-west-1-a, at: [1, 1]}
-- {id: orders, type: aws.dynamodb_table, name: orders, parent: reg-eu-west-1, at: [1, 2]}
-- {id: execute-api-endpoint, type: aws.res.aws_vpc_endpoint, name: execute-api-endpoint, parent: sub-consumer-private-a, props: {vpc_id: changeme}, at: [1, 1]}
-- {id: api-private-zone, type: aws.route53_zone, name: api-private-zone, parent: acct-api-consumer, props: {domain: example.com}, at: [1, 1]}
-- {id: consumer-app, type: aws.ec2_instance, name: consumer-app, parent: sub-consumer-private-b, at: [1, 1]}
 edges:
-- {from: consumer-app, to: api-private-zone, label: resolve api.internal alias, step: '1'}
-- {from: consumer-app, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: '2'}
-- {from: execute-api-endpoint, to: private-orders-api, label: 'resource policy allows aws:SourceVpce', step: '3'}
-- {from: private-orders-api, to: orders-backend, step: '4'}
-- {from: orders-backend, to: orders, label: Query, step: '5'}
+- {from: consumer-regional-api, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: '1'}
+- {from: consumer-lambda, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: '2'}
+- {from: consumer-ecs-cluster, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: '3'}
+- {from: consumer-app, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: '4'}
+- {from: execute-api-endpoint, to: private-orders-api, label: 'resource policy allows aws:SourceVpce', step: '5'}
 steps:
-- {n: '1', text: 'consumer-app → api-private-zone: resolve api.internal alias'}
-- {n: '2', text: 'consumer-app → execute-api-endpoint: HTTPS via PrivateLink'}
-- {n: '3', text: 'execute-api-endpoint → private-orders-api: resource policy allows aws:SourceVpce'}
-- {n: '4', text: private-orders-api → orders-backend}
-- {n: '5', text: 'orders-backend → orders: Query'}
+- {n: '1', text: 'consumer-regional-api → execute-api-endpoint: HTTPS via PrivateLink'}
+- {n: '2', text: 'consumer-lambda → execute-api-endpoint: HTTPS via PrivateLink'}
+- {n: '3', text: 'consumer-ecs-cluster → execute-api-endpoint: HTTPS via PrivateLink'}
+- {n: '4', text: 'consumer-app → execute-api-endpoint: HTTPS via PrivateLink'}
+- {n: '5', text: 'execute-api-endpoint → private-orders-api: resource policy allows aws:SourceVpce'}

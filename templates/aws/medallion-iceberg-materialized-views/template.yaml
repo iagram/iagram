@@ -12,58 +12,52 @@ tags:
 - redshift
 image: https://d2908q01vomqb2.cloudfront.net/b6692ea5df920cad691c20319a6fffd7a4a766b8/2026/08/31/BDB-5987-1.png
 source: https://aws.amazon.com/blogs/big-data/building-medallion-architecture-with-iceberg-materialized-views-in-amazon-sagemaker/
-description: Raw bronze data is ingested into Iceberg tables in an S3 table bucket, and the silver and gold layers are each defined as a scheduled Iceberg materialized view authored in SageMaker Unified
-  Studio. Glue uses Iceberg change-tracking metadata to refresh only changed rows through Spark, nested views give implicit lineage, and Athena and Redshift query the gold layer.
+description: Raw trips are appended to a bronze Iceberg table in an S3 table bucket, the silver layer is a scheduled Iceberg materialized view that cleans and enriches only new or changed rows, and two
+  gold materialized views (city daily metrics and vehicle performance) refresh daily from it; all views are authored in SageMaker Unified Studio and nested views give implicit lineage. Athena, Amazon Quick,
+  Redshift and Iceberg REST API clients query the gold layer.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 3, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-bronze, type: common.group, name: bronze, parent: reg-us-east-1, at: [1, 2]}
-- {id: grp-silver, type: common.group, name: silver, parent: reg-us-east-1, at: [2, 2]}
-- {id: grp-gold, type: common.group, name: gold, parent: reg-us-east-1, at: [3, 2]}
+- {id: grp-bronze, type: common.group, name: bronze, parent: reg-us-east-1, at: [1, 2, 1, 2]}
+- {id: grp-silver, type: common.group, name: silver, parent: reg-us-east-1, at: [2, 2, 1, 2]}
+- {id: grp-gold, type: common.group, name: gold, parent: reg-us-east-1, at: [3, 2, 1, 2]}
 - {id: device, type: common.device, name: device, at: [1, 1]}
 - {id: users, type: common.users, name: users, at: [2, 1]}
-- {id: bronze-ingest, type: aws.res.aws_kinesis_firehose_delivery_stream, name: bronze-ingest, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [1, 1]}
-- {id: lakehouse-tables, type: aws.res.aws_s3tables_table_bucket, name: lakehouse-tables, parent: reg-us-east-1, props: {name: changeme}, at: [1, 3]}
-- {id: bronze-orders, type: aws.res.aws_s3tables_table, name: bronze-orders, parent: grp-bronze, props: {format: changeme, name: changeme, namespace: changeme, table_bucket_arn: changeme}, at: [1, 1]}
-- {id: silver-orders-mv, type: aws.res.aws_s3tables_table, name: silver-orders-mv, parent: grp-silver, props: {format: changeme, name: changeme, namespace: changeme, table_bucket_arn: changeme}, at: [1, 1]}
-- {id: gold-daily-kpis-mv, type: aws.res.aws_s3tables_table, name: gold-daily-kpis-mv, parent: grp-gold, props: {format: changeme, name: changeme, namespace: changeme, table_bucket_arn: changeme}, at: [1, 1]}
-- {id: lakehouse-catalog, type: aws.res.aws_glue_catalog_database, name: lakehouse-catalog, parent: reg-us-east-1, props: {name: changeme}, at: [2, 3]}
-- id: mv-refresh-spark
-  type: aws.res.aws_glue_job
-  name: mv-refresh-spark
-  parent: reg-us-east-1
-  at: [2, 1]
-  props: {command: {}, name: changeme, role_arn: changeme}
+- {id: iceberg-rest-clients, type: common.client, name: iceberg-rest-clients, at: [3, 1]}
+- {id: lakehouse-tables, type: aws.res.aws_s3tables_table_bucket, name: lakehouse-tables, parent: reg-us-east-1, props: {name: changeme}, at: [1, 4]}
+- {id: trips-bronze, type: aws.res.aws_s3tables_table, name: trips-bronze, parent: grp-bronze, props: {format: changeme, name: changeme, namespace: changeme, table_bucket_arn: changeme}, at: [1, 1]}
+- {id: trips-silver-mv, type: aws.res.aws_s3tables_table, name: trips-silver-mv, parent: grp-silver, props: {format: changeme, name: changeme, namespace: changeme, table_bucket_arn: changeme}, at: [1, 1]}
+- {id: city-daily-metrics-mv, type: aws.res.aws_s3tables_table, name: city-daily-metrics-mv, parent: grp-gold, props: {format: changeme, name: changeme, namespace: changeme, table_bucket_arn: changeme},
+  at: [1, 1]}
+- {id: vehicle-performance-mv, type: aws.res.aws_s3tables_table, name: vehicle-performance-mv, parent: grp-gold, props: {format: changeme, name: changeme, namespace: changeme, table_bucket_arn: changeme},
+  at: [1, 2]}
 - id: unified-studio
   type: aws.res.aws_sagemaker_domain
   name: unified-studio
   parent: reg-us-east-1
-  at: [3, 1]
-  props:
-    auth_mode: changeme
-    default_user_settings: {}
-    domain_name: changeme
-    subnet_ids: []
-    vpc_id: changeme
-- {id: gold-athena, type: aws.res.aws_athena_workgroup, name: gold-athena, parent: reg-us-east-1, props: {name: changeme}, at: [4, 2]}
+  props: {auth_mode: changeme, default_user_settings: {}, domain_name: changeme, subnet_ids: [], vpc_id: changeme}
+  at:
+  - 1
+  - 1
+- {id: gold-athena, type: aws.res.aws_athena_workgroup, name: gold-athena, parent: reg-us-east-1, props: {name: changeme}, at: [4, 1]}
+- {id: gold-quick, type: aws.res.aws_quicksight_dashboard, name: gold-quick, parent: reg-us-east-1, props: {dashboard_id: changeme, name: changeme, version_description: changeme}, at: [4, 2]}
 - {id: gold-redshift, type: aws.res.aws_redshiftserverless_workgroup, name: gold-redshift, parent: reg-us-east-1, props: {namespace_name: changeme, workgroup_name: changeme}, at: [4, 3]}
 edges:
-- {from: device, to: bronze-ingest, label: raw events, step: '1'}
-- {from: bronze-ingest, to: bronze-orders, label: append to Iceberg, step: '2'}
-- {from: bronze-orders, to: lakehouse-tables, label: stored in table bucket}
-- {from: unified-studio, to: lakehouse-catalog, label: CREATE MATERIALIZED VIEW with SCHEDULE REFRESH, step: '3'}
-- {from: mv-refresh-spark, to: bronze-orders, label: read changed rows only, step: '4'}
-- {from: mv-refresh-spark, to: silver-orders-mv, label: clean and deduplicate, step: '4'}
-- {from: mv-refresh-spark, to: gold-daily-kpis-mv, label: aggregate KPIs, step: '5'}
-- {from: silver-orders-mv, to: gold-daily-kpis-mv, label: nested view lineage}
-- {from: gold-athena, to: gold-daily-kpis-mv, label: SQL, step: '6'}
-- {from: gold-redshift, to: gold-daily-kpis-mv, label: SQL, step: '6'}
-- {from: users, to: gold-athena, step: '7'}
+- {from: device, to: trips-bronze, label: INSERT / append, step: '1'}
+- {from: trips-bronze, to: lakehouse-tables, label: Iceberg on S3 Tables}
+- {from: unified-studio, to: trips-silver-mv, label: CREATE MATERIALIZED VIEW with SCHEDULE REFRESH, step: '2'}
+- {from: trips-bronze, to: trips-silver-mv, label: REFRESH (incremental), step: '3'}
+- {from: trips-silver-mv, to: city-daily-metrics-mv, label: REFRESH every 1 day, step: '4'}
+- {from: trips-silver-mv, to: vehicle-performance-mv, label: REFRESH every 1 day, step: '4'}
+- {from: gold-athena, to: city-daily-metrics-mv, label: SQL, step: '5'}
+- {from: gold-quick, to: city-daily-metrics-mv, label: dashboards, step: '5'}
+- {from: gold-redshift, to: vehicle-performance-mv, label: SQL, step: '5'}
+- {from: iceberg-rest-clients, to: vehicle-performance-mv, label: Iceberg REST API, step: '5'}
+- {from: users, to: gold-quick, step: '6'}
 steps:
-- {n: '1', text: 'device → bronze-ingest: raw events'}
-- {n: '2', text: 'bronze-ingest → bronze-orders: append to Iceberg'}
-- {n: '3', text: 'unified-studio → lakehouse-catalog: CREATE MATERIALIZED VIEW with SCHEDULE REFRESH'}
-- {n: '4', text: 'mv-refresh-spark → bronze-orders: read changed rows only'}
-- {n: '5', text: 'mv-refresh-spark → gold-daily-kpis-mv: aggregate KPIs'}
-- {n: '6', text: 'gold-athena → gold-daily-kpis-mv: SQL'}
-- {n: '7', text: users → gold-athena}
+- {n: '1', text: 'device → trips-bronze: INSERT / append'}
+- {n: '2', text: 'unified-studio → trips-silver-mv: CREATE MATERIALIZED VIEW with SCHEDULE REFRESH'}
+- {n: '3', text: 'trips-bronze → trips-silver-mv: REFRESH (incremental)'}
+- {n: '4', text: 'trips-silver-mv → city-daily-metrics-mv: REFRESH every 1 day'}
+- {n: '5', text: 'gold-athena → city-daily-metrics-mv: SQL'}
+- {n: '6', text: users → gold-quick}

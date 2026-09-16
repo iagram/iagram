@@ -12,41 +12,42 @@ tags:
 - dash
 image: https://docs.aws.amazon.com/images/solutions/live-streaming-on-aws/images/live-streaming-on-aws-1.png
 source: https://docs.aws.amazon.com/solutions/live-streaming-on-aws/
-description: Guidance for Live Streaming on AWS ingests two redundant contribution feeds into an AWS Elemental MediaLive channel that transcodes them into adaptive bitrate HLS, then AWS Elemental MediaPackage
-  packages the output into HLS, DASH and CMAF endpoints. A CloudFront distribution uses the MediaPackage endpoints as its origin and authenticates with a CDN identifier stored in Secrets Manager, and a
-  demo player is hosted from an S3 bucket behind the same distribution.
+description: Guidance for Live Streaming on AWS ingests two redundant contribution feeds from a live channel source into an AWS Elemental MediaLive channel that transcodes them into adaptive bitrate HLS,
+  then AWS Elemental MediaPackage packages the output into HLS, DASH and CMAF endpoints. A CloudFront distribution uses the MediaPackage endpoints as its origin and authenticates with a CDN identifier stored
+  in Secrets Manager to serve playback devices, and a demo preview player is hosted from an S3 bucket behind a second CloudFront distribution for users.
 nodes:
-- {id: dc-production-venue, type: common.datacenter, name: production-venue, at: [1, 1]}
+- {id: dc-live-channel-source, type: common.datacenter, name: live-channel-source, at: [1, 1]}
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
 - {id: grp-ingest-and-transcode, type: common.group, name: ingest-and-transcode, parent: reg-us-east-1, at: [1, 1]}
 - {id: grp-packaging, type: common.group, name: packaging, parent: reg-us-east-1, at: [1, 2]}
 - {id: grp-delivery, type: common.group, name: delivery, parent: reg-us-east-1, at: [1, 3]}
-- {id: users, type: common.users, name: users, at: [1, 3]}
+- {id: playback-devices, type: common.device, name: playback-devices, at: [1, 3]}
+- {id: users, type: common.users, name: users, at: [2, 3]}
 - {id: contribution-input, type: aws.res.aws_medialive_input, name: contribution-input, parent: grp-ingest-and-transcode, props: {name: changeme, type: changeme}, at: [1, 1]}
 - id: live-transcoder
   type: aws.res.aws_medialive_channel
   name: live-transcoder
   parent: grp-ingest-and-transcode
-  at: [1, 2]
-  props:
-    channel_class: changeme
-    destinations: []
-    encoder_settings: {}
-    input_attachments: []
-    input_specification: {}
-    name: changeme
-- {id: cdn-identifier, type: aws.res.aws_secretsmanager_secret, name: cdn-identifier, parent: grp-packaging, at: [1, 1]}
-- {id: live-cdn, type: aws.cloudfront_distribution, name: live-cdn, parent: grp-delivery, at: [1, 1]}
+  props: {channel_class: changeme, destinations: [], encoder_settings: {}, input_attachments: [], input_specification: {}, name: changeme}
+  at:
+  - 1
+  - 2
+- {id: cdn-identifier, type: aws.res.aws_secretsmanager_secret, name: cdn-identifier, parent: grp-packaging, at: [2, 1]}
+- {id: live-cdn, type: aws.cloudfront_distribution, name: live-cdn, parent: grp-delivery, at: [1, 2]}
 - {id: demo-player-site, type: aws.s3_bucket, name: demo-player-site, parent: grp-delivery, at: [2, 1]}
-- {id: channel-health, type: aws.res.aws_cloudwatch_dashboard, name: channel-health, parent: reg-us-east-1, props: {dashboard_body: changeme, dashboard_name: changeme}, at: [2, 1, 1, 3]}
+- {id: demo-player-cdn, type: aws.cloudfront_distribution, name: demo-player-cdn, parent: grp-delivery, at: [2, 2]}
 edges:
-- {from: dc-production-venue, to: contribution-input, label: RTMP or RTP-FEC, step: '1'}
+- {from: dc-live-channel-source, to: contribution-input, label: RTMP or RTP-FEC, step: '1'}
 - {from: contribution-input, to: live-transcoder, label: pipeline A and B}
-- {from: users, to: live-cdn, label: playback, step: '4'}
-- {from: live-cdn, to: demo-player-site, label: demo player origin, step: '5'}
-- {from: live-transcoder, to: channel-health, label: metrics}
+- {from: live-transcoder, to: live-cdn, label: ABR HLS through MediaPackage HLS, step: '2'}
+- {from: live-cdn, to: cdn-identifier, label: CDN identifier header checked by MediaPackage, step: '3'}
+- {from: playback-devices, to: live-cdn, label: live playback, step: '4'}
+- {from: demo-player-site, to: demo-player-cdn, label: demo preview player origin, step: '5'}
+- {from: users, to: demo-player-cdn, label: demo player playback}
 steps:
 - {n: '1', text: 'datacenter → contribution-input: RTMP or RTP-FEC'}
-- {n: '4', text: 'users → live-cdn: playback'}
-- {n: '5', text: 'live-cdn → demo-player-site: demo player origin'}
+- {n: '2', text: 'live-transcoder → live-cdn: ABR HLS through MediaPackage HLS'}
+- {n: '3', text: 'live-cdn → cdn-identifier: CDN identifier header checked by MediaPackage'}
+- {n: '4', text: 'playback-devices → live-cdn: live playback'}
+- {n: '5', text: 'demo-player-site → demo-player-cdn: demo preview player origin'}

@@ -10,44 +10,45 @@ tags:
 - evaluation
 image: https://docs.cloud.google.com/static/architecture/images/rag-capable-gen-ai-app-using-vertex-ai-architecture.svg
 source: https://docs.cloud.google.com/architecture/rag-capable-gen-ai-app-using-vertex-ai
-description: Uploaded data lands in Cloud Storage, a Pub/Sub message triggers a Cloud Run function that chunks the content and stores Vertex AI embeddings as pgvector columns in an AlloyDB cluster. The
-  serving path embeds the user query, runs a semantic search in AlloyDB, builds a grounded prompt for the Vertex AI LLM, and an asynchronous evaluation function scores responses and loads the results into
-  BigQuery.
+description: Uploaded RAG data and evaluation prompts land in Cloud Storage in the data ingestion subsystem, a Pub/Sub message triggers a Cloud Run function that chunks the content and stores Vertex AI
+  embeddings as pgvector columns in an AlloyDB cluster. The serving subsystem embeds the application user's query, runs a semantic search in AlloyDB and builds a grounded prompt for the Vertex AI LLM, while
+  the quality evaluation subsystem, started by an evaluation trigger or by served responses, scores answers asynchronously and loads the results into BigQuery.
 nodes:
-- {id: prj-rag-alloydb-prj, type: gcp.project, name: rag-alloydb-prj, props: {project_id: rag-alloydb-prj-123456, project: changeme, region: europe-west4}, at: [1, 1]}
-- {id: vpc-rag-vpc, type: gcp.vpc, name: rag-vpc, parent: prj-rag-alloydb-prj, props: {cidr: 10.30.0.0/16}, at: [2, 1, 1, 2]}
+- {id: prj-rag-alloydb-prj, type: gcp.project, name: rag-alloydb-prj, props: {project_id: rag-alloydb-prj-123456, project: changeme, region: europe-west4}, at: [2, 2, 2, 2]}
+- {id: grp-data-ingestion, type: common.group, name: data-ingestion, parent: prj-rag-alloydb-prj, at: [1, 1, 1, 3]}
+- {id: grp-quality-evaluation, type: common.group, name: quality-evaluation, parent: prj-rag-alloydb-prj, at: [3, 1, 1, 3]}
+- {id: grp-serving, type: common.group, name: serving, parent: prj-rag-alloydb-prj, at: [1, 4, 3, 1]}
+- {id: vpc-rag-vpc, type: gcp.vpc, name: rag-vpc, parent: prj-rag-alloydb-prj, props: {cidr: 10.30.0.0/16}, at: [2, 1, 1, 3]}
 - {id: sub-db-sub, type: gcp.subnetwork, name: db-sub, parent: vpc-rag-vpc, props: {cidr: 10.30.1.0/24, region: europe-west4}, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 2]}
-- {id: source-data-bucket, type: gcp.storage_bucket, name: source-data-bucket, parent: prj-rag-alloydb-prj, at: [1, 1]}
-- {id: ingest-topic, type: gcp.pubsub_topic, name: ingest-topic, parent: prj-rag-alloydb-prj, at: [1, 2]}
-- {id: chunk-embed-fn, type: gcp.res.google_cloudfunctions2_function, name: chunk-embed-fn, parent: prj-rag-alloydb-prj, props: {location: westeurope, name: changeme}, at: [1, 3]}
+- {id: application-users, type: common.users, name: application users, at: [1, 3]}
+- {id: data-upload, type: common.user, name: data upload, at: [2, 1]}
+- {id: evaluation-trigger, type: common.client, name: evaluation trigger, at: [3, 1]}
+- {id: source-data-bucket, type: gcp.storage_bucket, name: source-data-bucket, parent: grp-data-ingestion, at: [1, 1]}
+- {id: ingest-topic, type: gcp.pubsub_topic, name: ingest-topic, parent: grp-data-ingestion, at: [1, 2]}
+- {id: chunk-embed-fn, type: gcp.res.google_cloudfunctions2_function, name: chunk-embed-fn, parent: grp-data-ingestion, props: {location: westeurope, name: changeme}, at: [1, 3]}
 - {id: vector-store, type: gcp.res.google_alloydb_cluster, name: vector-store, parent: sub-db-sub, props: {cluster_id: changeme, location: westeurope}, at: [1, 1]}
-- {id: rag-app, type: gcp.cloud_run_service, name: rag-app, parent: prj-rag-alloydb-prj, at: [1, 4, 3, 1]}
-- {id: eval-topic, type: gcp.pubsub_topic, name: eval-topic, parent: prj-rag-alloydb-prj, at: [3, 1]}
-- {id: eval-fn, type: gcp.res.google_cloudfunctions2_function, name: eval-fn, parent: prj-rag-alloydb-prj, props: {location: westeurope, name: changeme}, at: [3, 2]}
-- {id: eval-dataset, type: gcp.bigquery_dataset, name: eval-dataset, parent: prj-rag-alloydb-prj, at: [3, 3]}
-- id: db-password
-  type: gcp.res.google_secret_manager_secret
-  name: db-password
-  parent: prj-rag-alloydb-prj
-  at: [2, 3]
-  props: {replication: {}, secret_id: changeme}
+- {id: rag-app, type: gcp.cloud_run_service, name: rag-app, parent: grp-serving, at: [1, 1]}
+- {id: eval-topic, type: gcp.pubsub_topic, name: eval-topic, parent: grp-quality-evaluation, at: [1, 1]}
+- {id: eval-fn, type: gcp.res.google_cloudfunctions2_function, name: eval-fn, parent: grp-quality-evaluation, props: {location: westeurope, name: changeme}, at: [1, 2]}
+- {id: eval-dataset, type: gcp.bigquery_dataset, name: eval-dataset, parent: grp-quality-evaluation, at: [1, 3]}
 edges:
-- {from: source-data-bucket, to: ingest-topic, label: object notification, step: '1'}
-- {from: ingest-topic, to: chunk-embed-fn, label: trigger, step: '2'}
-- {from: chunk-embed-fn, to: vector-store, label: INSERT embeddings (pgvector), step: '3'}
-- {from: users, to: rag-app, label: HTTPS question, step: '4'}
-- {from: rag-app, to: vector-store, label: similarity search, step: '5'}
-- {from: rag-app, to: db-password, label: fetch credentials}
-- {from: rag-app, to: eval-topic, label: publish response for scoring, step: '6'}
-- {from: eval-topic, to: eval-fn, label: trigger, step: '7'}
-- {from: eval-fn, to: eval-dataset, label: load evaluation scores, step: '8'}
+- {from: data-upload, to: source-data-bucket, label: 'upload RAG data, evaluation prompts', step: '1'}
+- {from: source-data-bucket, to: ingest-topic, label: object notification, step: '2'}
+- {from: ingest-topic, to: chunk-embed-fn, label: trigger, step: '3'}
+- {from: chunk-embed-fn, to: vector-store, label: INSERT embeddings (pgvector), step: '4'}
+- {from: application-users, to: rag-app, label: request / response, step: '5'}
+- {from: rag-app, to: vector-store, label: similarity search, step: '6'}
+- {from: rag-app, to: eval-topic, label: publish response for scoring, step: '7'}
+- {from: evaluation-trigger, to: eval-topic, label: evaluation trigger}
+- {from: eval-topic, to: eval-fn, label: trigger, step: '8'}
+- {from: eval-fn, to: eval-dataset, label: load evaluation scores, step: '9'}
 steps:
-- {n: '1', text: 'source-data-bucket → ingest-topic: object notification'}
-- {n: '2', text: 'ingest-topic → chunk-embed-fn: trigger'}
-- {n: '3', text: 'chunk-embed-fn → vector-store: INSERT embeddings (pgvector)'}
-- {n: '4', text: 'users → rag-app: HTTPS question'}
-- {n: '5', text: 'rag-app → vector-store: similarity search'}
-- {n: '6', text: 'rag-app → eval-topic: publish response for scoring'}
-- {n: '7', text: 'eval-topic → eval-fn: trigger'}
-- {n: '8', text: 'eval-fn → eval-dataset: load evaluation scores'}
+- {n: '1', text: 'data upload → source-data-bucket: upload RAG data, evaluation prompts'}
+- {n: '2', text: 'source-data-bucket → ingest-topic: object notification'}
+- {n: '3', text: 'ingest-topic → chunk-embed-fn: trigger'}
+- {n: '4', text: 'chunk-embed-fn → vector-store: INSERT embeddings (pgvector)'}
+- {n: '5', text: 'application users → rag-app: request / response'}
+- {n: '6', text: 'rag-app → vector-store: similarity search'}
+- {n: '7', text: 'rag-app → eval-topic: publish response for scoring'}
+- {n: '8', text: 'eval-topic → eval-fn: trigger'}
+- {n: '9', text: 'eval-fn → eval-dataset: load evaluation scores'}

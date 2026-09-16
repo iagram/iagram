@@ -11,52 +11,34 @@ tags:
 - alb
 image: https://docs.aws.amazon.com/images/apigateway/latest/developerguide/images/private-integration.png
 source: https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-private-integration.html
-description: An API Gateway HTTP API terminates client requests and forwards them through a VPC Link into private subnets, either to an internal ALB in front of ECS services or directly to task IPs registered
-  in a Cloud Map service. The ECS tasks never receive internet traffic, and API Gateway supplies authorization, throttling and routing while a single VPC link fans out to many backend routes.
+description: An API Gateway HTTP API terminates client requests and forwards them through a VPC Link into the VPC, where an internal Application Load Balancer fronts an ECS Fargate service. The tasks never
+  receive internet traffic, and API Gateway supplies authorization, throttling and routing while a single VPC link can fan out to many backend routes.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-main, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 2, 2, 1]}
-- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}, at: [1, 1]}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 2]}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}, at: [2, 1]}
-- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [1, 1]}
-- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 2]}
+- {id: clients, type: common.client, name: clients, at: [1, 1]}
 - {id: shop-http-api, type: aws.res.aws_apigatewayv2_api, name: shop-http-api, parent: reg-us-east-1, props: {name: changeme, protocol_type: changeme}, at: [1, 1]}
 - id: private-vpc-link
   type: aws.res.aws_apigatewayv2_vpc_link
   name: private-vpc-link
-  parent: sub-private-a
-  at: [1, 1]
-  props:
-    name: changeme
-    security_group_ids: []
-    subnet_ids: []
+  parent: vpc-main
+  props: {name: changeme, security_group_ids: [], subnet_ids: []}
+  at:
+  - 1
+  - 1
 - {id: internal-alb, type: aws.alb, name: internal-alb, parent: vpc-main, at: [1, 2]}
-- {id: orders-tg, type: aws.res.aws_lb_target_group, name: orders-tg, parent: vpc-main, at: [1, 3]}
-- {id: api-cluster, type: aws.res.aws_ecs_cluster, name: api-cluster, parent: vpc-main, props: {name: changeme}, at: [1, 4, 2, 1]}
-- {id: orders-service, type: aws.res.aws_ecs_service, name: orders-service, parent: api-cluster, props: {name: changeme}, at: [1, 1]}
-- {id: inventory-service, type: aws.res.aws_ecs_service, name: inventory-service, parent: api-cluster, props: {name: changeme}, at: [2, 1]}
-- {id: api-namespace, type: aws.res.aws_service_discovery_private_dns_namespace, name: api-namespace, parent: vpc-main, props: {name: changeme, vpc: changeme}, at: [2, 2, 1, 2]}
-- {id: inventory-discovery, type: aws.res.aws_service_discovery_service, name: inventory-discovery, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
-- {id: orders-aurora, type: aws.res.aws_rds_cluster, name: orders-aurora, parent: sub-private-b, props: {engine: changeme}, at: [1, 1]}
+- {id: api-cluster, type: aws.res.aws_ecs_cluster, name: api-cluster, parent: vpc-main, props: {name: changeme}, at: [1, 3]}
+- {id: fargate-service, type: aws.res.aws_ecs_service, name: fargate-service, parent: api-cluster, props: {name: changeme}, at: [1, 1]}
+- {id: sub-vpc-main-a, type: aws.subnet, name: private-a, parent: vpc-main, props: {cidr: 10.0.250.0/24, az: a, public: false}}
+- {id: sub-vpc-main-b, type: aws.subnet, name: private-b, parent: vpc-main, props: {cidr: 10.0.251.0/24, az: b, public: false}}
 edges:
-- {from: client, to: shop-http-api, label: HTTPS /orders, step: '1'}
+- {from: clients, to: shop-http-api, label: HTTPS, step: '1'}
 - {from: shop-http-api, to: private-vpc-link, label: private integration, step: '2'}
-- {from: private-vpc-link, to: internal-alb, label: route /orders -> ALB listener, step: '3'}
-- {from: internal-alb, to: orders-tg, step: '4'}
-- {from: orders-tg, to: orders-service, label: 'HTTP :8080', step: '5'}
-- {from: private-vpc-link, to: inventory-discovery, label: route /inventory -> Cloud Map DiscoverInstances, step: '3'}
-- {from: inventory-discovery, to: inventory-service, label: healthy task IPs (SRV), step: '5'}
-- {from: inventory-service, to: api-namespace, label: registers tasks}
-- {from: orders-service, to: orders-aurora, label: SQL, step: '6'}
-- {from: orders-service, to: nat-a, label: outbound}
+- {from: private-vpc-link, to: internal-alb, label: route -> ALB listener, step: '3'}
+- {from: internal-alb, to: fargate-service, label: 'HTTP :8080', step: '4'}
 steps:
-- {n: '1', text: 'client → shop-http-api: HTTPS /orders'}
+- {n: '1', text: 'clients → shop-http-api: HTTPS'}
 - {n: '2', text: 'shop-http-api → private-vpc-link: private integration'}
-- {n: '3', text: 'private-vpc-link → internal-alb: route /orders -> ALB listener'}
-- {n: '4', text: internal-alb → orders-tg}
-- {n: '5', text: 'orders-tg → orders-service: HTTP :8080'}
-- {n: '6', text: 'orders-service → orders-aurora: SQL'}
+- {n: '3', text: 'private-vpc-link → internal-alb: route -> ALB listener'}
+- {n: '4', text: 'internal-alb → fargate-service: HTTP :8080'}

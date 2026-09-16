@@ -10,47 +10,80 @@ tags:
 - delegated administrator
 image: https://d2908q01vomqb2.cloudfront.net/22d200f8670dbdb3e253a90eee5098477c95c23d/2023/11/13/img1.jpg
 source: https://aws.amazon.com/blogs/security/building-sensitive-data-remediation-workflows-in-multi-account-aws-environments/
-description: Macie in the delegated administrator account scans S3 buckets in member accounts and emits findings to EventBridge, which forwards them to a Step Functions state machine. The workflow either
-  notifies analysts through Lambda or automatically moves the object to a quarantine prefix, tracks status in DynamoDB, and lets security staff release objects through an API Gateway endpoint.
+description: An Organizations tag policy from the management account and an AWS Config rule in the development/production account enforce bucket tagging, with compliance events forwarded over EventBridge
+  to the security account, where a Lambda function posts notifications to a Microsoft Teams DLP channel. Macie in the delegated administrator account publishes findings for the scanned bucket to EventBridge
+  and a results bucket; a Step Functions workflow records the object in a DynamoDB quarantine tracker, moves it to quarantine and notifies the channel through Lambda, and the DLP admin releases objects
+  through an API Gateway endpoint that starts a release workflow.
 nodes:
-- {id: acct-security, type: aws.account, name: security, at: [2, 1]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security, props: {region: us-east-1}, at: [2, 1, 1, 2]}
-- {id: acct-member, type: aws.account, name: member, at: [1, 1]}
-- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-member, props: {region: us-east-1}, at: [1, 3]}
-- {id: users, type: common.users, name: users, at: [2, 2]}
-- {id: macie-admin, type: aws.res.aws_macie2_account, name: macie-admin, parent: acct-security, at: [1, 1]}
-- {id: findings-bus, type: aws.res.aws_cloudwatch_event_bus, name: findings-bus, parent: acct-security, props: {name: changeme}, at: [1, 2]}
-- {id: macie-finding-rule, type: aws.res.aws_cloudwatch_event_rule, name: macie-finding-rule, parent: acct-security, at: [1, 3]}
-- {id: remediation-workflow, type: aws.res.aws_sfn_state_machine, name: remediation-workflow, parent: acct-security, props: {definition: changeme, role_arn: changeme}, at: [2, 3]}
-- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}, at: [1, 3]}
-- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}, at: [1, 2]}
-- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: notify-lambda, type: aws.lambda_function, name: notify-lambda, parent: sub-reg-us-east-1-a, at: [1, 1]}
-- {id: quarantine-lambda, type: aws.lambda_function, name: quarantine-lambda, parent: sub-reg-us-east-1-a, at: [2, 1]}
-- {id: quarantine-tracker, type: aws.dynamodb_table, name: quarantine-tracker, parent: reg-us-east-1, at: [1, 2]}
-- {id: release-api, type: aws.res.aws_api_gateway_rest_api, name: release-api, parent: acct-security, props: {name: changeme}, at: [3, 3]}
+- {id: acct-management, type: aws.account, name: management, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-management, props: {region: us-east-1}, at: [1, 2]}
+- {id: acct-member, type: aws.account, name: member, at: [2, 1]}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-member, props: {region: us-east-1}, at: [1, 2]}
+- {id: acct-security, type: aws.account, name: security, at: [3, 1]}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-security, props: {region: us-east-1}, at: [1, 1]}
+- {id: microsoft-teams, type: common.saas, name: Microsoft Teams, at: [3, 2]}
+- {id: dlp-admin, type: common.user, name: DLP admin, at: [3, 3]}
+- {id: tag-policy, type: aws.res.aws_organizations_policy, name: tag-policy, parent: acct-management, props: {content: changeme, name: changeme}, at: [1, 1]}
 - {id: macie-member, type: aws.res.aws_macie2_account, name: macie-member, parent: acct-member, at: [1, 1]}
-- {id: data-bucket, type: aws.s3_bucket, name: data-bucket, parent: reg-us-east-1, at: [1, 1]}
-- {id: quarantine-role, type: aws.res.aws_iam_role, name: quarantine-role, parent: acct-member, props: {assume_role_policy: changeme}, at: [1, 2]}
+- {id: scanned-bucket, type: aws.s3_bucket, name: scanned-bucket, parent: reg-us-east-1-2, at: [1, 1]}
+- id: tag-compliance-rule
+  type: aws.res.aws_config_config_rule
+  name: tag-compliance-rule
+  parent: acct-member
+  props: {name: changeme, source: {}}
+  at:
+  - 1
+  - 3
+- {id: member-event-bus, type: aws.res.aws_cloudwatch_event_bus, name: member-event-bus, parent: acct-member, props: {name: changeme}, at: [1, 4]}
+- {id: macie-admin, type: aws.res.aws_macie2_account, name: macie-admin, parent: reg-us-east-1-3, at: [1, 1]}
+- {id: security-event-bus, type: aws.res.aws_cloudwatch_event_bus, name: security-event-bus, parent: reg-us-east-1-3, props: {name: changeme}, at: [1, 2]}
+- {id: tag-compliance-notifier, type: aws.lambda_function, name: tag-compliance-notifier, parent: reg-us-east-1-3, at: [1, 4]}
+- {id: results-bucket, type: aws.s3_bucket, name: results-bucket, parent: reg-us-east-1-3, at: [2, 1]}
+- {id: quarantine-tracker, type: aws.dynamodb_table, name: quarantine-tracker, parent: reg-us-east-1-3, at: [2, 2]}
+- {id: process-findings-workflow, type: aws.res.aws_sfn_state_machine, name: process-findings-workflow, parent: reg-us-east-1-3, props: {definition: changeme, role_arn: changeme}, at: [2, 3]}
+- {id: macie-finding-notifier, type: aws.lambda_function, name: macie-finding-notifier, parent: reg-us-east-1-3, at: [2, 4]}
+- {id: quarantine-notifier, type: aws.lambda_function, name: quarantine-notifier, parent: reg-us-east-1-3, at: [3, 4]}
+- {id: release-workflow, type: aws.res.aws_sfn_state_machine, name: release-workflow, parent: reg-us-east-1-3, props: {definition: changeme, role_arn: changeme}, at: [4, 2]}
+- {id: release-api, type: aws.res.aws_api_gateway_rest_api, name: release-api, parent: reg-us-east-1-3, props: {name: changeme}, at: [4, 4]}
 edges:
-- {from: macie-member, to: data-bucket, label: classification job, step: '1'}
-- {from: macie-member, to: macie-admin, label: findings, step: '2'}
-- {from: macie-admin, to: findings-bus, label: finding event, step: '3'}
-- {from: macie-finding-rule, to: remediation-workflow, link: aws_cloudwatch_event_target}
-- {from: remediation-workflow, to: notify-lambda, label: notify path, step: '4'}
-- {from: remediation-workflow, to: quarantine-lambda, label: quarantine path, step: '5'}
-- {from: quarantine-lambda, to: quarantine-role, label: AssumeRole, step: '6'}
-- {from: quarantine-role, to: data-bucket, label: move to quarantine prefix, step: '7'}
-- {from: quarantine-lambda, to: quarantine-tracker, label: record status}
-- {from: users, to: release-api, label: release object, step: '8'}
+- {from: tag-policy, to: scanned-bucket, label: enforce tag policy, step: '1'}
+- {from: tag-compliance-rule, to: scanned-bucket, label: evaluate tag compliance, step: '2'}
+- {from: tag-compliance-rule, to: member-event-bus, label: send Config events, step: '3'}
+- {from: member-event-bus, to: security-event-bus, label: send Config events, step: '4'}
+- {from: security-event-bus, to: tag-compliance-notifier, label: notify of compliance change, step: '5'}
+- {from: tag-compliance-notifier, to: microsoft-teams, label: notify admins, step: '6'}
+- {from: macie-member, to: scanned-bucket, label: scan bucket, step: '7'}
+- {from: macie-admin, to: security-event-bus, label: publish findings, step: '8'}
+- {from: macie-admin, to: results-bucket, label: discovery results}
+- {from: security-event-bus, to: process-findings-workflow, label: process findings, step: '9'}
+- {from: process-findings-workflow, to: macie-finding-notifier, label: notify of Macie finding, step: '10'}
+- {from: macie-finding-notifier, to: microsoft-teams, label: notify admins, step: '11'}
+- {from: process-findings-workflow, to: quarantine-tracker, label: add object to tracking DB, step: '12'}
+- {from: process-findings-workflow, to: scanned-bucket, label: move object to quarantine, step: '13'}
+- {from: process-findings-workflow, to: quarantine-notifier, label: notify of quarantine, step: '14'}
+- {from: quarantine-notifier, to: microsoft-teams, label: notify admins, step: '15'}
+- {from: microsoft-teams, to: dlp-admin, label: DLP channel notification}
+- {from: dlp-admin, to: release-api, label: release object, step: '16'}
+- {from: release-api, to: release-workflow, label: release object from quarantine, step: '17'}
+- {from: release-workflow, to: quarantine-tracker, label: update quarantine tracking DB, step: '18'}
+- {from: release-workflow, to: scanned-bucket, label: release object from quarantine, step: '19'}
 steps:
-- {n: '1', text: 'macie-member → data-bucket: classification job'}
-- {n: '2', text: 'macie-member → macie-admin: findings'}
-- {n: '3', text: 'macie-admin → findings-bus: finding event'}
-- {n: '4', text: 'remediation-workflow → notify-lambda: notify path'}
-- {n: '5', text: 'remediation-workflow → quarantine-lambda: quarantine path'}
-- {n: '6', text: 'quarantine-lambda → quarantine-role: AssumeRole'}
-- {n: '7', text: 'quarantine-role → data-bucket: move to quarantine prefix'}
-- {n: '8', text: 'users → release-api: release object'}
+- {n: '1', text: 'tag-policy → scanned-bucket: enforce tag policy'}
+- {n: '2', text: 'tag-compliance-rule → scanned-bucket: evaluate tag compliance'}
+- {n: '3', text: 'tag-compliance-rule → member-event-bus: send Config events'}
+- {n: '4', text: 'member-event-bus → security-event-bus: send Config events'}
+- {n: '5', text: 'security-event-bus → tag-compliance-notifier: notify of compliance change'}
+- {n: '6', text: 'tag-compliance-notifier → Microsoft Teams: notify admins'}
+- {n: '7', text: 'macie-member → scanned-bucket: scan bucket'}
+- {n: '8', text: 'macie-admin → security-event-bus: publish findings'}
+- {n: '9', text: 'security-event-bus → process-findings-workflow: process findings'}
+- {n: '10', text: 'process-findings-workflow → macie-finding-notifier: notify of Macie finding'}
+- {n: '11', text: 'macie-finding-notifier → Microsoft Teams: notify admins'}
+- {n: '12', text: 'process-findings-workflow → quarantine-tracker: add object to tracking DB'}
+- {n: '13', text: 'process-findings-workflow → scanned-bucket: move object to quarantine'}
+- {n: '14', text: 'process-findings-workflow → quarantine-notifier: notify of quarantine'}
+- {n: '15', text: 'quarantine-notifier → Microsoft Teams: notify admins'}
+- {n: '16', text: 'DLP admin → release-api: release object'}
+- {n: '17', text: 'release-api → release-workflow: release object from quarantine'}
+- {n: '18', text: 'release-workflow → quarantine-tracker: update quarantine tracking DB'}
+- {n: '19', text: 'release-workflow → scanned-bucket: release object from quarantine'}

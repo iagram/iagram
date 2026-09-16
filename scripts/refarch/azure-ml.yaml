@@ -6,7 +6,7 @@
   category: ml
   tags: [rag, azure-openai, ai-search, app-service, private-endpoint, application-gateway, foundry-agent]
   source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-microsoft-foundry-chat
-  description: A zone-redundant App Service chat UI behind Application Gateway with WAF calls a Foundry Agent Service prompt agent over a private endpoint; the agent grounds Azure OpenAI completions with vector results from Azure AI Search and persists conversation state in Cosmos DB and Blob Storage. Every PaaS dependency is reached through private endpoints in a segmented virtual network, and agent egress to public tools and MCP servers is forced through Azure Firewall FQDN rules.
+  description: A zone-redundant App Service chat UI behind Application Gateway with WAF is reached through its private endpoint and uses a user-assigned managed identity to call a Foundry Agent Service prompt agent over another private endpoint; the agent grounds Azure OpenAI completions with vector results from Azure AI Search and persists conversation state in Cosmos DB and Blob Storage. Key Vault, Storage, Foundry and AI Search each expose a private endpoint in a dedicated subnet of a DDoS-protected virtual network with linked private DNS zones, users and workload identities authenticate with Microsoft Entra ID, and agent egress to public tools and MCP servers is forced through Azure Firewall FQDN rules.
   containers:
     - subscription: workload-prod
       resource_group: {name: rg-chat-baseline, location: eastus2}
@@ -14,38 +14,56 @@
         - name: vnet-chat
           cidr: 10.0.0.0/16
           subnets:
-            - {name: snet-appGateway, cidr: 10.0.1.0/24, public: true}
-            - {name: snet-appServicePlan, cidr: 10.0.2.0/24}
-            - {name: snet-privateEndpoints, cidr: 10.0.3.0/24}
-            - {name: snet-agentsEgress, cidr: 10.0.4.0/24}
-            - {name: AzureFirewallSubnet, cidr: 10.0.5.0/26}
+            - {name: snet-appGateway, cidr: 10.0.1.0/24, public: true, at: [1, 1, 2, 1]}
+            - {name: snet-appServicePlan, cidr: 10.0.2.0/24, at: [1, 2]}
+            - {name: snet-agentsEgress, cidr: 10.0.4.0/24, at: [1, 3]}
+            - {name: snet-privateEndpoints, cidr: 10.0.3.0/24, at: [2, 2, 1, 2]}
+            - {name: AzureFirewallSubnet, cidr: 10.0.5.0/26, at: [1, 4, 2, 1]}
   elements:
-    - {tf: azurerm_application_gateway, name: agw-chat, in: subnet:snet-appGateway}
-    - {tf: azurerm_service_plan, name: asp-chat, in: subnet:snet-appServicePlan}
-    - {tf: azurerm_linux_web_app, name: app-chat-ui, in: subnet:snet-appServicePlan}
-    - {tf: azurerm_private_endpoint, name: pe-foundry, in: subnet:snet-privateEndpoints}
-    - {tf: azurerm_cognitive_account, name: foundry-chat, in: resource_group:rg-chat-baseline}
-    - {tf: azurerm_cognitive_deployment, name: gpt-4o-deployment, in: resource_group:rg-chat-baseline}
-    - {tf: azurerm_search_service, name: srch-grounding, in: resource_group:rg-chat-baseline}
-    - {tf: azurerm_cosmosdb_account, name: cosmos-enterprise-memory, in: resource_group:rg-chat-baseline}
-    - {tf: azurerm_storage_account, name: stchatfiles, in: resource_group:rg-chat-baseline}
-    - {tf: azurerm_key_vault, name: kv-chat-tls, in: resource_group:rg-chat-baseline}
-    - {tf: azurerm_firewall, name: afw-egress, in: subnet:AzureFirewallSubnet}
-    - {tf: azurerm_application_insights, name: appi-chat, in: resource_group:rg-chat-baseline}
-    - {tf: azurerm_log_analytics_workspace, name: law-chat, in: resource_group:rg-chat-baseline}
-  actors: [users, internet]
+    - {tf: azurerm_application_gateway, name: agw-chat, in: subnet:snet-appGateway, at: [1, 1]}
+    - {tf: azurerm_service_plan, name: asp-chat, in: subnet:snet-appServicePlan, at: [1, 1]}
+    - {tf: azurerm_linux_web_app, name: app-chat-ui, in: subnet:snet-appServicePlan, at: [1, 2]}
+    - {tf: azurerm_private_endpoint, name: pe-app-chat, in: subnet:snet-privateEndpoints, at: [1, 1]}
+    - {tf: azurerm_private_endpoint, name: pe-keyvault, in: subnet:snet-privateEndpoints, at: [1, 2]}
+    - {tf: azurerm_private_endpoint, name: pe-storage, in: subnet:snet-privateEndpoints, at: [1, 3]}
+    - {tf: azurerm_private_endpoint, name: pe-foundry, in: subnet:snet-privateEndpoints, at: [1, 4]}
+    - {tf: azurerm_private_endpoint, name: pe-search, in: subnet:snet-privateEndpoints, at: [1, 5]}
+    - {tf: azurerm_firewall, name: afw-egress, in: subnet:AzureFirewallSubnet, at: [1, 1]}
+    - {tf: azurerm_private_dns_zone, name: pdz-chat, in: resource_group:rg-chat-baseline, at: [2, 1]}
+    - {tf: azurerm_user_assigned_identity, name: id-chat-ui, in: resource_group:rg-chat-baseline, at: [2, 2]}
+    - {tf: azurerm_key_vault, name: kv-chat-tls, in: resource_group:rg-chat-baseline, at: [2, 3]}
+    - {tf: azurerm_storage_account, name: stchatfiles, in: resource_group:rg-chat-baseline, at: [2, 4]}
+    - {tf: azurerm_cognitive_account, name: foundry-chat, in: resource_group:rg-chat-baseline, at: [2, 5]}
+    - {tf: azurerm_search_service, name: srch-grounding, in: resource_group:rg-chat-baseline, at: [2, 6]}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-enterprise-memory, in: resource_group:rg-chat-baseline, at: [2, 7]}
+    - {tf: azurerm_network_ddos_protection_plan, name: ddos-chat, in: resource_group:rg-chat-baseline, at: [3, 1]}
+    - {tf: azurerm_application_insights, name: appi-chat, in: resource_group:rg-chat-baseline, at: [3, 2]}
+    - {tf: azurerm_log_analytics_workspace, name: law-chat, in: resource_group:rg-chat-baseline, at: [3, 3]}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-deployment, in: resource_group:rg-chat-baseline, at: [3, 5]}
+  actors: [users, internet, {type: idp, name: Microsoft Entra ID, at: [2, 1]}]
   flows:
     - {from: users, to: agw-chat, label: HTTPS (WAF), step: 1}
-    - {from: agw-chat, to: app-chat-ui, label: route to chat UI, step: 2}
+    - {from: users, to: Microsoft Entra ID, label: sign-in (Easy Auth)}
+    - {from: agw-chat, to: pe-app-chat, label: route to chat UI, step: 2}
+    - {from: pe-app-chat, to: app-chat-ui, label: private link}
+    - {from: app-chat-ui, to: id-chat-ui, label: user-assigned managed identity}
+    - {from: id-chat-ui, to: Microsoft Entra ID, label: managed identity tokens}
     - {from: app-chat-ui, to: pe-foundry, label: Responses API (managed identity), step: 3}
     - {from: pe-foundry, to: foundry-chat, label: private link}
-    - {from: foundry-chat, to: srch-grounding, label: AI Search tool (vector + semantic), step: 4}
+    - {from: app-chat-ui, to: pe-keyvault, label: app secrets}
+    - {from: pe-keyvault, to: kv-chat-tls, label: private link}
+    - {from: app-chat-ui, to: pe-storage, label: client app deployment package}
+    - {from: pe-storage, to: stchatfiles, label: private link}
+    - {from: foundry-chat, to: pe-search, label: AI Search tool (vector + semantic), step: 4}
+    - {from: pe-search, to: srch-grounding, label: private link}
     - {from: foundry-chat, to: afw-egress, label: public tool / MCP egress, step: 5}
     - {from: afw-egress, to: internet, label: FQDN-allowed egress}
     - {from: foundry-chat, to: gpt-4o-deployment, label: model inference, step: 6}
     - {from: foundry-chat, to: cosmos-enterprise-memory, label: persist conversation items, step: 7}
     - {from: foundry-chat, to: stchatfiles, label: uploaded files}
     - {from: agw-chat, to: kv-chat-tls, label: TLS certificate}
+    - {from: pdz-chat, to: vnet:vnet-chat, link: azurerm_private_dns_zone_virtual_network_link, label: linked}
+    - {from: ddos-chat, to: vnet:vnet-chat, label: DDoS Protection}
     - {from: app-chat-ui, to: appi-chat, label: telemetry}
     - {from: appi-chat, to: law-chat, label: logs}
 
@@ -108,7 +126,7 @@
   category: ml
   tags: [multi-agent, aks, ai-search, semantic-cache, redis, foundry, azure-openai, orchestration]
   source: https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/ai-agents-at-scale
-  description: An agent service on AKS receives user queries behind Application Gateway, and an agent selector queries an AI Search semantic cache of sample utterances to shortlist candidate agents before an LLM picks one or the top-scoring agent is invoked directly. An agent factory instantiates the selected agent, which calls Azure OpenAI models in Foundry, keeps multiturn context in Azure Managed Redis, and reaches external APIs or MCP servers through a firewall or NAT gateway.
+  description: An agent service on AKS receives user queries behind Application Gateway with WAF policies that forward to load balancer front-end IPs in a private subnet, and an agent selector queries an AI Search semantic cache of sample utterances to shortlist candidate agents before an LLM picks one or the top-scoring agent is invoked directly. An agent factory instantiates the selected agent, which calls Azure OpenAI models through a Foundry project with a managed identity, keeps multiturn context in Azure Managed Redis and reaches Container Registry, Cosmos DB, Data Lake Storage and Key Vault over per-service private endpoints resolved by private DNS in a DDoS-protected virtual network; external APIs and MCP servers are reached through Azure Firewall.
   containers:
     - subscription: agents-prod
       resource_group: {name: rg-agents-scale, location: westus3}
@@ -116,38 +134,65 @@
         - name: vnet-agents
           cidr: 10.20.0.0/16
           subnets:
-            - {name: snet-gateway, cidr: 10.20.0.0/24, public: true}
-            - {name: snet-cluster, cidr: 10.20.16.0/20}
-            - {name: snet-privateEndpoints, cidr: 10.20.1.0/24}
-            - {name: AzureFirewallSubnet, cidr: 10.20.2.0/26}
+            - {name: snet-gateway, cidr: 10.20.0.0/24, public: true, at: [1, 1]}
+            - {name: snet-private, cidr: 10.20.3.0/24, at: [1, 2]}
+            - {name: snet-cluster, cidr: 10.20.16.0/20, at: [2, 1, 1, 2]}
+            - {name: snet-privateEndpoints, cidr: 10.20.1.0/24, at: [3, 1, 1, 2]}
+            - {name: AzureFirewallSubnet, cidr: 10.20.2.0/26, at: [4, 1]}
   elements:
-    - {tf: azurerm_application_gateway, name: agw-agents, in: subnet:snet-gateway}
-    - {tf: azurerm_kubernetes_cluster, name: aks-agents, in: subnet:snet-cluster}
-    - {tf: azurerm_container_registry, name: acragents, in: resource_group:rg-agents-scale}
-    - {tf: azurerm_search_service, name: srch-semantic-cache, in: resource_group:rg-agents-scale}
-    - {tf: azurerm_cognitive_account, name: foundry-agents, in: resource_group:rg-agents-scale}
-    - {tf: azurerm_cognitive_deployment, name: gpt-4o-agents, in: resource_group:rg-agents-scale}
-    - {tf: azurerm_redis_cache, name: redis-conversation, in: resource_group:rg-agents-scale}
-    - {tf: azurerm_cosmosdb_account, name: cosmos-agent-registry, in: resource_group:rg-agents-scale}
-    - {tf: azurerm_storage_account, name: stagentlogs, in: resource_group:rg-agents-scale}
-    - {tf: azurerm_key_vault, name: kv-agents, in: resource_group:rg-agents-scale}
-    - {tf: azurerm_private_endpoint, name: pe-search-cache, in: subnet:snet-privateEndpoints}
-    - {tf: azurerm_firewall, name: afw-agents, in: subnet:AzureFirewallSubnet}
-    - {tf: azurerm_application_insights, name: appi-agents, in: resource_group:rg-agents-scale}
-    - {tf: azurerm_log_analytics_workspace, name: law-agents, in: resource_group:rg-agents-scale}
-  actors: [users, internet]
+    - {tf: azurerm_application_gateway, name: agw-agents, in: subnet:snet-gateway, at: [1, 1]}
+    - {tf: azurerm_web_application_firewall_policy, name: waf-agents, in: subnet:snet-gateway, at: [1, 2]}
+    - {tf: azurerm_lb, name: ilb-agents, in: subnet:snet-private, at: [1, 1]}
+    - {tf: azurerm_kubernetes_cluster, name: aks-agents, in: subnet:snet-cluster, at: [1, 1]}
+    - {tf: azurerm_private_endpoint, name: pe-acr, in: subnet:snet-privateEndpoints, at: [1, 1]}
+    - {tf: azurerm_private_endpoint, name: pe-search-cache, in: subnet:snet-privateEndpoints, at: [1, 2]}
+    - {tf: azurerm_private_endpoint, name: pe-foundry, in: subnet:snet-privateEndpoints, at: [1, 3]}
+    - {tf: azurerm_private_endpoint, name: pe-redis, in: subnet:snet-privateEndpoints, at: [1, 4]}
+    - {tf: azurerm_private_endpoint, name: pe-storage, in: subnet:snet-privateEndpoints, at: [1, 5]}
+    - {tf: azurerm_private_endpoint, name: pe-cosmos, in: subnet:snet-privateEndpoints, at: [1, 6]}
+    - {tf: azurerm_private_endpoint, name: pe-keyvault, in: subnet:snet-privateEndpoints, at: [1, 7]}
+    - {tf: azurerm_firewall, name: afw-agents, in: subnet:AzureFirewallSubnet, at: [1, 1]}
+    - {tf: azurerm_container_registry, name: acragents, in: resource_group:rg-agents-scale, at: [2, 1]}
+    - {tf: azurerm_search_service, name: srch-semantic-cache, in: resource_group:rg-agents-scale, at: [2, 2]}
+    - {tf: azurerm_redis_cache, name: redis-conversation, in: resource_group:rg-agents-scale, at: [2, 3]}
+    - {tf: azurerm_storage_account, name: stagentlogs, in: resource_group:rg-agents-scale, at: [2, 4]}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-agent-registry, in: resource_group:rg-agents-scale, at: [2, 5]}
+    - {tf: azurerm_key_vault, name: kv-agents, in: resource_group:rg-agents-scale, at: [2, 6]}
+    - {tf: azurerm_network_ddos_protection_plan, name: ddos-agents, in: resource_group:rg-agents-scale, at: [1, 7]}
+    - {tf: azurerm_private_dns_zone, name: pdz-agents, in: resource_group:rg-agents-scale, at: [1, 8]}
+    - {tf: azurerm_cognitive_account, name: foundry-agents, in: resource_group:rg-agents-scale, at: [2, 7]}
+    - {tf: azurerm_user_assigned_identity, name: id-foundry-agents, in: resource_group:rg-agents-scale, at: [2, 8]}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-agents, in: resource_group:rg-agents-scale, at: [3, 7]}
+    - {tf: azurerm_application_insights, name: appi-agents, in: resource_group:rg-agents-scale, at: [4, 7]}
+    - {tf: azurerm_log_analytics_workspace, name: law-agents, in: resource_group:rg-agents-scale, at: [4, 8]}
+  actors: [users, internet, {type: idp, name: Microsoft Entra ID, at: [2, 3]}]
   flows:
     - {from: users, to: agw-agents, label: HTTPS (WAF), step: 1}
+    - {from: waf-agents, to: agw-agents, label: WAF policies}
+    - {from: agw-agents, to: ilb-agents, label: front-end IP addresses on load balancer}
+    - {from: ilb-agents, to: aks-agents, label: internal ingress}
     - {from: agw-agents, to: aks-agents, label: AI agent service, step: 2}
     - {from: aks-agents, to: pe-search-cache, label: vector similarity on utterances, step: 3}
     - {from: pe-search-cache, to: srch-semantic-cache, label: private link}
-    - {from: aks-agents, to: cosmos-agent-registry, label: agent definitions (code / YAML), step: 4}
-    - {from: aks-agents, to: gpt-4o-agents, label: agent selection and response, step: 5}
-    - {from: gpt-4o-agents, to: foundry-agents, label: hosted in Foundry}
-    - {from: aks-agents, to: redis-conversation, label: chat history (TTL)}
+    - {from: aks-agents, to: pe-foundry, label: agent factory invokes Foundry project, step: 4}
+    - {from: pe-foundry, to: foundry-agents, label: private link}
+    - {from: foundry-agents, to: id-foundry-agents, label: Foundry project managed identity}
+    - {from: id-foundry-agents, to: Microsoft Entra ID, label: managed identity tokens}
+    - {from: foundry-agents, to: gpt-4o-agents, label: Azure OpenAI models, step: 5}
+    - {from: aks-agents, to: pe-cosmos, label: agent definitions (code / YAML)}
+    - {from: pe-cosmos, to: cosmos-agent-registry, label: private link}
+    - {from: aks-agents, to: pe-redis, label: chat history (TTL)}
+    - {from: pe-redis, to: redis-conversation, label: private link}
+    - {from: aks-agents, to: pe-storage, label: agent logs and data}
+    - {from: pe-storage, to: stagentlogs, label: private link}
+    - {from: aks-agents, to: pe-keyvault, label: secrets}
+    - {from: pe-keyvault, to: kv-agents, label: private link}
+    - {from: aks-agents, to: pe-acr, label: agent images}
+    - {from: pe-acr, to: acragents, label: private link}
     - {from: aks-agents, to: afw-agents, label: external APIs / MCP, step: 6}
-    - {from: afw-agents, to: internet, label: static outbound IP}
-    - {from: acragents, to: aks-agents, label: agent images}
+    - {from: afw-agents, to: internet, label: "external APIs, MCP servers, internet"}
+    - {from: pdz-agents, to: vnet:vnet-agents, link: azurerm_private_dns_zone_virtual_network_link, label: private DNS}
+    - {from: ddos-agents, to: vnet:vnet-agents, label: DDoS Protection}
     - {from: aks-agents, to: appi-agents, label: OpenTelemetry traces}
     - {from: appi-agents, to: law-agents, label: logs and KQL}
 
@@ -193,46 +238,63 @@
   category: ml
   tags: [mlops, azure-machine-learning, ci-cd, model-registry, compute-cluster, online-endpoint, monitoring]
   source: https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/machine-learning-operations-v2
-  description: Data scientists iterate in a development workspace, and a CI/CD pipeline promotes code and trained models through a shared Azure Machine Learning registry into a production workspace where a compute cluster retrains and a managed online endpoint serves predictions. Data drift and model performance monitoring in Azure Monitor and Application Insights close the loop by triggering retraining, with Data Lake Storage, Key Vault, and Container Registry as the workspace dependencies.
+  description: Data scientists pull tabular data from the data estate (Storage, Data Lake Storage, SQL Database, Cosmos DB, Event Hubs and Fabric) into a development workspace for the inner loop, and a CI/CD pipeline promotes code and trained models through the Azure Machine Learning model registry into a staging workspace and, after gated approval, a production workspace where a compute cluster retrains, a batch cluster serves the batch managed endpoint and Kubernetes Services serve the online managed endpoint behind a private endpoint. Application Insights and Azure Monitor feed model, data and infrastructure monitoring whose action groups trigger scheduled metrics, availability and latency alerts and automated retraining, with Container Registry as the workspace dependency.
   containers:
     - subscription: ml-platform
       resource_group: {name: rg-mlops-dev, location: westeurope}
+      groups: [{label: Data estate, at: [1, 1]}]
     - subscription: ml-platform
       resource_group: {name: rg-mlops-prod, location: westeurope}
+      groups: [{label: Staging and test, at: [1, 1]}]
       vnets:
         - name: vnet-mlops-prod
           cidr: 10.30.0.0/16
+          at: [1, 2, 3, 1]
           subnets:
-            - {name: snet-training, cidr: 10.30.1.0/24}
-            - {name: snet-privateEndpoints, cidr: 10.30.2.0/24}
+            - {name: snet-training, cidr: 10.30.1.0/24, at: [1, 1]}
+            - {name: snet-privateEndpoints, cidr: 10.30.2.0/24, at: [1, 2]}
   elements:
-    - {tf: azurerm_machine_learning_workspace, name: mlw-dev, in: resource_group:rg-mlops-dev}
-    - {tf: azurerm_machine_learning_compute_instance, name: ci-datascientist, in: resource_group:rg-mlops-dev}
-    - {tf: azurerm_storage_account, name: stmlopsdev, in: resource_group:rg-mlops-dev}
-    - {tf: azurerm_machine_learning_workspace, name: mlw-prod, in: resource_group:rg-mlops-prod}
-    - {tf: azurerm_machine_learning_compute_cluster, name: cpu-cluster-prod, in: subnet:snet-training}
-    - {tf: azurerm_machine_learning_inference_cluster, name: aks-inference-prod, in: subnet:snet-training}
-    - {tf: azurerm_private_endpoint, name: pe-mlw-prod, in: subnet:snet-privateEndpoints}
-    - {tf: azurerm_storage_account, name: stmlopsdatalake, in: resource_group:rg-mlops-prod}
-    - {tf: azurerm_container_registry, name: acrmlops, in: resource_group:rg-mlops-prod}
-    - {tf: azurerm_key_vault, name: kv-mlops-prod, in: resource_group:rg-mlops-prod}
-    - {tf: azurerm_application_insights, name: appi-mlops-prod, in: resource_group:rg-mlops-prod}
-    - {tf: azurerm_log_analytics_workspace, name: law-mlops, in: resource_group:rg-mlops-prod}
+    - {tf: azurerm_storage_account, name: stmlopsdev, in: group:Data estate, at: [1, 1]}
+    - {tf: azurerm_storage_account, name: stmlopsdatalake, in: group:Data estate, at: [2, 1]}
+    - {tf: azurerm_mssql_database, name: sqldb-mlops, in: group:Data estate, at: [3, 1]}
+    - {tf: azurerm_cosmosdb_account, name: cosmos-mlops, in: group:Data estate, at: [4, 1]}
+    - {tf: azurerm_eventhub_namespace, name: evhns-mlops, in: group:Data estate, at: [5, 1]}
+    - {tf: azurerm_fabric_capacity, name: fabric-mlops, in: group:Data estate, at: [6, 1]}
+    - {tf: azurerm_machine_learning_compute_instance, name: ci-datascientist, in: resource_group:rg-mlops-dev, at: [1, 2]}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-dev, in: resource_group:rg-mlops-dev, at: [1, 3]}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-staging, in: group:Staging and test, at: [1, 1]}
+    - {tf: azurerm_machine_learning_workspace, name: mlw-prod, in: resource_group:rg-mlops-prod, at: [2, 1]}
+    - {tf: azurerm_machine_learning_compute_cluster, name: cpu-cluster-prod, in: subnet:snet-training, at: [1, 1]}
+    - {tf: azurerm_machine_learning_compute_cluster, name: batch-cluster-prod, in: subnet:snet-training, at: [1, 2]}
+    - {tf: azurerm_machine_learning_inference_cluster, name: aks-inference-prod, in: subnet:snet-training, at: [1, 3]}
+    - {tf: azurerm_private_endpoint, name: pe-mlw-prod, in: subnet:snet-privateEndpoints, at: [1, 1]}
+    - {tf: azurerm_container_registry, name: acrmlops, in: resource_group:rg-mlops-prod, at: [3, 1]}
+    - {tf: azurerm_application_insights, name: appi-mlops-prod, in: resource_group:rg-mlops-prod, at: [1, 3]}
+    - {tf: azurerm_monitor_action_group, name: ag-model-monitoring, in: resource_group:rg-mlops-prod, at: [1, 4]}
+    - {tf: azurerm_log_analytics_workspace, name: law-mlops, in: resource_group:rg-mlops-prod, at: [2, 3]}
+    - {tf: azurerm_monitor_action_group, name: ag-infra-monitoring, in: resource_group:rg-mlops-prod, at: [2, 4]}
   actors: [user, client, saas]
   flows:
     - {from: user, to: ci-datascientist, label: experiment (inner loop), step: 1}
-    - {from: ci-datascientist, to: mlw-dev, label: track runs and register model, step: 2}
-    - {from: stmlopsdev, to: ci-datascientist, label: sample data}
-    - {from: saas, to: mlw-prod, label: "CI/CD: promote pipeline and model", step: 3}
-    - {from: mlw-prod, to: cpu-cluster-prod, label: retraining pipeline job, step: 4}
+    - {from: stmlopsdev, to: ci-datascientist, label: tabular data from the data estate}
+    - {from: ci-datascientist, to: mlw-dev, label: "EDA, feature engineering, train, evaluate", step: 2}
+    - {from: mlw-dev, to: saas, label: register model, step: 3}
+    - {from: saas, to: mlw-staging, label: "continuous integration: model registry, GitHub / Azure DevOps", step: 4}
+    - {from: mlw-staging, to: mlw-prod, label: gated approval (continuous deployment), step: 5}
+    - {from: mlw-prod, to: cpu-cluster-prod, label: retraining pipeline job}
     - {from: stmlopsdatalake, to: cpu-cluster-prod, label: training data}
     - {from: acrmlops, to: aks-inference-prod, label: scoring environment image}
-    - {from: mlw-prod, to: aks-inference-prod, label: deploy registered model, step: 5}
-    - {from: client, to: pe-mlw-prod, label: score request (private), step: 6}
+    - {from: mlw-prod, to: batch-cluster-prod, label: batch inference (batch managed endpoint), step: 6}
+    - {from: mlw-prod, to: aks-inference-prod, label: near real-time inference (online managed endpoint), step: 7}
+    - {from: client, to: pe-mlw-prod, label: score request (private)}
     - {from: pe-mlw-prod, to: aks-inference-prod, label: online scoring}
-    - {from: aks-inference-prod, to: appi-mlops-prod, label: inference telemetry and drift signals, step: 7}
-    - {from: appi-mlops-prod, to: law-mlops, label: logs}
-    - {from: mlw-prod, to: kv-mlops-prod, label: secrets}
+    - {from: aks-inference-prod, to: appi-mlops-prod, label: inference telemetry and drift signals, step: 8}
+    - {from: appi-mlops-prod, to: law-mlops, label: logs (Azure Monitor)}
+    - {from: appi-mlops-prod, to: ag-model-monitoring, label: "model and data monitoring: schedule metrics, notifications", step: 9}
+    - {from: law-mlops, to: ag-infra-monitoring, label: "infrastructure and resource monitoring: availability, latency", step: 10}
+    - {from: ag-model-monitoring, to: mlw-prod, label: automated retrain}
+    - {from: ag-model-monitoring, to: mlw-dev, label: model performance review}
+    - {from: ag-infra-monitoring, to: user, label: infrastructure performance review}
 
 - slug: many-models-batch-scoring
   title: Many-models training and batch scoring with Azure Machine Learning
@@ -658,31 +720,21 @@
     - subscription: knowledge-apps
       resource_group: {name: rg-rag-search, location: eastus}
   elements:
-    - {tf: azurerm_storage_account, name: stragsources, in: resource_group:rg-rag-search}
-    - {tf: azurerm_linux_function_app, name: func-rag-pipeline, in: resource_group:rg-rag-search}
-    - {tf: azurerm_cognitive_account, name: docintel-layout, in: resource_group:rg-rag-search}
-    - {tf: azurerm_cognitive_account, name: foundry-rag, in: resource_group:rg-rag-search}
-    - {tf: azurerm_cognitive_deployment, name: text-embedding-3-large, in: resource_group:rg-rag-search}
-    - {tf: azurerm_cognitive_deployment, name: gpt-4o-chat, in: resource_group:rg-rag-search}
-    - {tf: azurerm_search_service, name: srch-hybrid-index, in: resource_group:rg-rag-search}
-    - {tf: azurerm_service_plan, name: asp-rag, in: resource_group:rg-rag-search}
-    - {tf: azurerm_linux_web_app, name: app-rag-orchestrator, in: resource_group:rg-rag-search}
-    - {tf: azurerm_key_vault, name: kv-rag, in: resource_group:rg-rag-search}
-    - {tf: azurerm_application_insights, name: appi-rag, in: resource_group:rg-rag-search}
+    - {tf: azurerm_linux_web_app, name: app-rag-orchestrator, in: resource_group:rg-rag-search, at: [1, 2]}
+    - {tf: azurerm_cognitive_deployment, name: gpt-4o-chat, in: resource_group:rg-rag-search, at: [1, 3]}
+    - {tf: azurerm_storage_account, name: stragsources, in: resource_group:rg-rag-search, at: [2, 1]}
+    - {tf: azurerm_linux_function_app, name: func-rag-pipeline, in: resource_group:rg-rag-search, at: [2, 2]}
+    - {tf: azurerm_cognitive_deployment, name: text-embedding-3-large, in: resource_group:rg-rag-search, at: [2, 3]}
+    - {tf: azurerm_search_service, name: srch-hybrid-index, in: resource_group:rg-rag-search, at: [2, 4]}
   actors: [users, client]
   flows:
-    - {from: stragsources, to: func-rag-pipeline, label: documents pushed / pulled, step: 1}
-    - {from: func-rag-pipeline, to: docintel-layout, label: document layout analysis for chunking, step: 2}
-    - {from: func-rag-pipeline, to: text-embedding-3-large, label: embed chunks and metadata, step: 3}
-    - {from: text-embedding-3-large, to: foundry-rag, label: model deployment}
-    - {from: func-rag-pipeline, to: srch-hybrid-index, label: persist chunks (vector + text fields), step: 4}
-    - {from: users, to: client, label: intelligent application UI}
-    - {from: client, to: app-rag-orchestrator, label: query API, step: 5}
-    - {from: app-rag-orchestrator, to: srch-hybrid-index, label: hybrid search + semantic ranker, step: 6}
-    - {from: app-rag-orchestrator, to: gpt-4o-chat, label: prompt with top-N chunks, step: 7}
-    - {from: gpt-4o-chat, to: foundry-rag, label: model deployment}
-    - {from: app-rag-orchestrator, to: kv-rag, label: secrets}
-    - {from: app-rag-orchestrator, to: appi-rag, label: telemetry}
+    - {from: stragsources, to: func-rag-pipeline, label: "documents: chunk documents, enrich chunks", step: 1}
+    - {from: func-rag-pipeline, to: text-embedding-3-large, label: embed chunks, step: 2}
+    - {from: func-rag-pipeline, to: srch-hybrid-index, label: persist chunks (vector + text fields), step: 3}
+    - {from: users, to: client, label: intelligent application}
+    - {from: client, to: app-rag-orchestrator, label: user and test queries, step: 4}
+    - {from: app-rag-orchestrator, to: srch-hybrid-index, label: hybrid search + semantic ranker, step: 5}
+    - {from: app-rag-orchestrator, to: gpt-4o-chat, label: prompt with top-N chunks, step: 6}
 
 - slug: next-order-forecasting-recommendation
   title: Next-order forecasting and product recommendations with Azure Machine Learning

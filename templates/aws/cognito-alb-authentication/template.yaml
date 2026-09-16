@@ -9,50 +9,43 @@ tags:
 - auto scaling
 image: https://docs.aws.amazon.com/images/elasticloadbalancing/latest/application/images/alb-user-auth-flow.png
 source: https://docs.aws.amazon.com/elasticloadbalancing/latest/application/listener-authenticate-users.html
-description: An HTTPS listener on the Application Load Balancer redirects unauthenticated users to the Cognito hosted UI, exchanges the returned authorization code for tokens, and sets an encrypted session
-  cookie. Subsequent requests are validated by the load balancer and forwarded to backend instances with the user claims in headers, so the application code carries no login logic.
+description: An HTTPS listener on the Application Load Balancer redirects unauthenticated users to the identity provider's authorization endpoint, exchanges the returned authorization code at the token
+  endpoint, fetches claims from the user-info endpoint, and sets an encrypted session cookie. Subsequent requests are validated by the load balancer and forwarded to the target with the user claims in headers,
+  so the application code carries no login logic; here the identity provider is a Cognito user pool.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
 - {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}, at: [1, 1]}
-- {id: grp-identity, type: common.group, name: identity, parent: reg-eu-central-1, at: [3, 1, 1, 2]}
-- {id: vpc-app, type: aws.vpc, name: app, parent: reg-eu-central-1, props: {cidr: 10.0.0.0/16}, at: [1, 2, 2, 1]}
+- {id: grp-identity-provider, type: common.group, name: identity provider, parent: reg-eu-central-1, at: [2, 1, 1, 2]}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-eu-central-1, props: {cidr: 10.0.0.0/16}, at: [1, 2]}
 - {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}, at: [1, 2]}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-app-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
-- {id: az-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}, at: [2, 2]}
-- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-app-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
-- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-app-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 2]}
-- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-app-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [1, 2]}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-app-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: idp, type: common.idp, name: idp, at: [2, 1, 1, 2]}
-- {id: app-zone, type: aws.route53_zone, name: app-zone, parent: reg-eu-central-1, props: {domain: example.com}, at: [1, 1]}
-- {id: alb-cert, type: aws.res.aws_acm_certificate, name: alb-cert, parent: reg-eu-central-1, at: [2, 1]}
-- {id: employee-pool, type: aws.res.aws_cognito_user_pool, name: employee-pool, parent: grp-identity, props: {name: changeme}, at: [1, 1]}
-- {id: app-igw, type: aws.res.aws_internet_gateway, name: app-igw, parent: vpc-app, at: [1, 1]}
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
-- {id: app-alb, type: aws.alb, name: app-alb, parent: vpc-app, at: [2, 1]}
-- {id: app-asg, type: aws.res.aws_autoscaling_group, name: app-asg, parent: vpc-app, props: {max_size: 1, min_size: 1}}
-- {id: app-a, type: aws.ec2_instance, name: app-a, parent: sub-app-a, at: [1, 1]}
-- {id: app-b, type: aws.ec2_instance, name: app-b, parent: sub-app-b, at: [1, 1]}
+- {id: app-alb, type: aws.alb, name: app-alb, parent: vpc-app, at: [1, 1]}
+- {id: target, type: aws.res.aws_lb_target_group, name: target, parent: sub-app-a, at: [1, 1]}
+- {id: employee-pool, type: aws.res.aws_cognito_user_pool, name: employee-pool, parent: grp-identity-provider, props: {name: changeme}, at: [1, 1]}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
 edges:
-- {from: users, to: app-zone, label: DNS, step: '1'}
-- {from: users, to: app-alb, label: HTTPS request without session cookie, step: '2'}
-- {from: alb-cert, to: app-alb, label: TLS certificate}
-- {from: app-alb, to: employee-pool, label: redirect to hosted UI, step: '3'}
-- {from: employee-pool, to: idp, label: federated SAML/OIDC login, step: '4'}
-- {from: employee-pool, to: app-alb, label: authorization code, step: '5'}
-- {from: app-alb, to: employee-pool, label: token and userinfo endpoints, step: '6'}
-- {from: app-alb, to: users, label: set AWSELBAuthSessionCookie, step: '7'}
-- {from: app-alb, to: app-a, label: forward with x-amzn-oidc-* headers, step: '8'}
-- {from: app-alb, to: app-b, label: forward with x-amzn-oidc-* headers}
-- {from: app-asg, to: app-a, label: scales}
-- {from: app-a, to: nat-a}
-- {from: nat-a, to: app-igw}
+- {from: users, to: app-alb, label: HTTPS request without session cookie, step: '1'}
+- {from: app-alb, to: employee-pool, label: redirect the browser to the authorization endpoint, step: '2'}
+- {from: employee-pool, to: app-alb, label: browser redirected back with authorization code, step: '3'}
+- {from: app-alb, to: employee-pool, label: authorization code to the token endpoint, step: '4'}
+- {from: employee-pool, to: app-alb, label: ID and access tokens, step: '5'}
+- {from: app-alb, to: employee-pool, label: access token to the user-info endpoint, step: '6'}
+- {from: employee-pool, to: app-alb, label: user claims, step: '7'}
+- {from: app-alb, to: users, label: set AWSELBAuthSessionCookie and redirect to the original URL, step: '8'}
+- {from: app-alb, to: target, label: forward with x-amzn-oidc-* headers, step: '9'}
+- {from: target, to: app-alb, label: response, step: '10'}
+- {from: app-alb, to: users, label: response, step: '11'}
 steps:
-- {n: '1', text: 'users → app-zone: DNS'}
-- {n: '2', text: 'users → app-alb: HTTPS request without session cookie'}
-- {n: '3', text: 'app-alb → employee-pool: redirect to hosted UI'}
-- {n: '4', text: 'employee-pool → idp: federated SAML/OIDC login'}
-- {n: '5', text: 'employee-pool → app-alb: authorization code'}
-- {n: '6', text: 'app-alb → employee-pool: token and userinfo endpoints'}
-- {n: '7', text: 'app-alb → users: set AWSELBAuthSessionCookie'}
-- {n: '8', text: 'app-alb → app-a: forward with x-amzn-oidc-* headers'}
+- {n: '1', text: 'users → app-alb: HTTPS request without session cookie'}
+- {n: '2', text: 'app-alb → employee-pool: redirect the browser to the authorization endpoint'}
+- {n: '3', text: 'employee-pool → app-alb: browser redirected back with authorization code'}
+- {n: '4', text: 'app-alb → employee-pool: authorization code to the token endpoint'}
+- {n: '5', text: 'employee-pool → app-alb: ID and access tokens'}
+- {n: '6', text: 'app-alb → employee-pool: access token to the user-info endpoint'}
+- {n: '7', text: 'employee-pool → app-alb: user claims'}
+- {n: '8', text: 'app-alb → users: set AWSELBAuthSessionCookie and redirect to the original URL'}
+- {n: '9', text: 'app-alb → target: forward with x-amzn-oidc-* headers'}
+- {n: '10', text: 'target → app-alb: response'}
+- {n: '11', text: 'app-alb → users: response'}

@@ -3,27 +3,26 @@
   category: ml
   tags: [rag, bedrock knowledge bases, opensearch serverless, vector search, generative ai]
   source: https://docs.aws.amazon.com/prescriptive-guidance/latest/retrieval-augmented-generation-options/rag-fully-managed-bedrock.html
-  description: Documents in S3 are chunked, embedded and indexed by a Bedrock knowledge base into an OpenSearch Serverless vector collection during ingestion. A Lambda function behind API Gateway calls RetrieveAndGenerate so the foundation model answers with retrieved passages as context; Cognito authenticates callers and DynamoDB keeps chat history.
+  description: Documents in S3 are chunked, embedded and indexed by a Bedrock knowledge base into an OpenSearch Serverless vector collection during ingestion. At query time a Bedrock agent retrieves the relevant passages from the knowledge base, passes them with the user's query to the foundation model and returns the generated response to the user.
   containers:
     - region: us-east-1
-      groups: [{label: ingestion}, {label: retrieval}]
+      account_at: [1, 2]
+      groups: [{label: amazon-bedrock, at: [1, 1, 2, 1]}]
   elements:
-    - {tf: aws_s3_bucket, name: source-docs, in: group:ingestion}
-    - {tf: aws_bedrockagent_knowledge_base, name: docs-kb, in: group:ingestion}
-    - {tf: aws_opensearchserverless_collection, name: vector-collection, in: group:ingestion}
-    - {tf: aws_cognito_user_pool, name: app-users, in: group:retrieval}
-    - {tf: aws_api_gateway_rest_api, name: chat-api, in: group:retrieval}
-    - {tf: aws_lambda_function, name: query-fn, in: group:retrieval}
-    - {tf: aws_dynamodb_table, name: chat-history, in: group:retrieval}
-  actors: [users]
+    - {tf: aws_bedrockagent_agent, name: agent, in: group:amazon-bedrock, at: [1, 1]}
+    - {tf: aws_bedrockagent_knowledge_base, name: docs-kb, in: group:amazon-bedrock, at: [1, 2]}
+    - {tf: aws_bedrock_inference_profile, name: llm, in: group:amazon-bedrock, at: [2, 1]}
+    - {tf: aws_opensearchserverless_collection, name: vector-collection, in: region, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: source-docs, in: region, at: [2, 2]}
+  actors: [{type: user, at: [1, 1]}]
   flows:
     - {from: source-docs, to: docs-kb, link: aws_bedrockagent_data_source}
-    - {from: docs-kb, to: vector-collection, label: Titan embeddings written to vector index, step: 1}
-    - {from: users, to: chat-api, label: HTTPS with Cognito JWT, step: 2}
-    - {from: chat-api, to: query-fn, step: 3}
-    - {from: query-fn, to: docs-kb, label: RetrieveAndGenerate, step: 4}
-    - {from: docs-kb, to: vector-collection, label: k-NN similarity search, step: 5}
-    - {from: query-fn, to: chat-history, label: store turn}
+    - {from: docs-kb, to: vector-collection, label: Titan embeddings written to vector index}
+    - {from: user, to: agent, label: query, step: 1}
+    - {from: agent, to: docs-kb, label: Retrieve, step: 2}
+    - {from: docs-kb, to: vector-collection, label: k-NN similarity search, step: 3}
+    - {from: agent, to: llm, label: prompt with retrieved passages, step: 4}
+    - {from: llm, to: user, label: response, step: 5}
 
 - slug: rag-kb-aurora-pgvector
   title: RAG with Bedrock Knowledge Bases on Aurora PostgreSQL pgvector
@@ -88,7 +87,7 @@
   category: ml
   tags: [bedrock agents, action groups, lambda, athena, text-to-sql, streamlit]
   source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/develop-a-fully-automated-chat-based-assistant-by-using-amazon-bedrock-agents-and-knowledge-bases.html
-  description: A Streamlit front end on ECS Fargate behind an Application Load Balancer calls an Invocation Lambda that talks to a Bedrock agent. The agent answers documentation questions from a knowledge base on OpenSearch Serverless and delegates database questions to an action-group Lambda that generates SQL and runs it in Athena against a Glue Data Catalog database.
+  description: A Streamlit task on an ECS cluster behind an Application Load Balancer calls an Invocation Lambda that sends prompts to a Bedrock agent. The agent answers documentation questions from a knowledge base on OpenSearch Serverless fed by an S3 documentation bucket, and delegates database questions through an OpenAPI action-group schema to an executor Lambda that generates SQL and runs it in Athena against a Glue Data Catalog table that a Glue crawler loads from a CSV bucket.
   containers:
     - region: us-east-1
       vpcs:
@@ -99,8 +98,8 @@
             - {name: private-a, cidr: 10.30.10.0/24, az: a, public: false}
   elements:
     - {tf: aws_lb, name: streamlit-alb, in: subnet:public-a}
-    - {tf: aws_ecs_cluster, name: streamlit-cluster, in: subnet:private-a}
-    - {tf: aws_ecr_repository, name: streamlit-image, in: region}
+    - {tf: aws_ecs_cluster, name: streamlit-cluster, in: subnet:private-a, at: [1, 1]}
+    - {tf: aws_ecs_task_definition, name: streamlit-app, in: subnet:private-a, at: [1, 2]}
     - {tf: aws_lambda_function, name: invocation-fn, in: region}
     - {tf: aws_bedrockagent_agent, name: chatbot-agent, in: region}
     - {tf: aws_lambda_function, name: agent-executor-fn, in: region}
@@ -108,23 +107,25 @@
     - {tf: aws_opensearchserverless_collection, name: kb-vectors, in: region}
     - {tf: aws_athena_workgroup, name: chatbot-athena, in: region}
     - {tf: aws_glue_catalog_database, name: tabular-db, in: region}
+    - {tf: aws_glue_crawler, name: csv-crawler, in: region, at: [3, 7]}
     - {tf: aws_s3_bucket, name: assets-bucket, in: region}
-    - {tf: aws_kms_key, name: assets-key, in: region}
+    - {tf: aws_s3_bucket, name: csv-data-bucket, in: region, at: [4, 7]}
   actors: [users]
   flows:
     - {from: users, to: streamlit-alb, label: HTTP, step: 1}
     - {from: streamlit-alb, to: streamlit-cluster, step: 2}
-    - {from: streamlit-image, to: streamlit-cluster, label: task image}
-    - {from: streamlit-cluster, to: invocation-fn, label: Invoke, step: 3}
-    - {from: invocation-fn, to: chatbot-agent, label: InvokeAgent, step: 4}
-    - {from: chatbot-agent, to: docs-kb, link: aws_bedrockagent_agent_knowledge_base_association}
-    - {from: docs-kb, to: kb-vectors, label: vector retrieval}
-    - {from: chatbot-agent, to: agent-executor-fn, link: aws_bedrockagent_agent_action_group}
-    - {from: agent-executor-fn, to: chatbot-athena, label: generated SQL, step: 5}
-    - {from: chatbot-athena, to: tabular-db, label: table metadata}
-    - {from: chatbot-athena, to: assets-bucket, label: scan CSV dataset}
+    - {from: streamlit-cluster, to: streamlit-app, label: runs task}
+    - {from: streamlit-app, to: invocation-fn, label: Invoke, step: 3}
+    - {from: invocation-fn, to: chatbot-agent, label: Prompt request / Response, step: 4}
     - {from: assets-bucket, to: docs-kb, link: aws_bedrockagent_data_source}
-
+    - {from: docs-kb, to: chatbot-agent, link: aws_bedrockagent_agent_knowledge_base_association}
+    - {from: docs-kb, to: kb-vectors, label: vector index}
+    - {from: chatbot-agent, to: agent-executor-fn, label: Agent actions API schema, link: aws_bedrockagent_agent_action_group}
+    - {from: agent-executor-fn, to: chatbot-athena, label: Text to SQL request, step: 5}
+    - {from: chatbot-athena, to: tabular-db, label: Data Catalog table}
+    - {from: chatbot-athena, to: csv-data-bucket, label: scan CSV files}
+    - {from: csv-data-bucket, to: csv-crawler, label: crawl CSV data files}
+    - {from: csv-crawler, to: tabular-db, label: load Glue database}
 - slug: bedrock-guardrails-chat-api
   title: Guardrailed chat API with Amazon Bedrock Guardrails
   category: ml
@@ -158,17 +159,25 @@
   category: ml
   tags: [solutions library, chatbot, bedrock, websocket, cognito, cloudfront]
   source: https://docs.aws.amazon.com/solutions/latest/generative-ai-application-builder-on-aws/architecture-overview.html
-  description: CloudFront serves a React web UI from S3 and Cognito authenticates users of both the deployment dashboard and the chat use case. A REST API drives use-case management Lambdas that record configurations in DynamoDB, while a WebSocket API queues chat messages in SQS for a chat Lambda that calls Bedrock, optionally grounded by a Bedrock knowledge base or Kendra index.
+  description: Admin users open the deployment dashboard, a React web app served by CloudFront from S3 with its runtime settings in Parameter Store; REST calls pass AWS WAF and API Gateway, where a Lambda custom authorizer checks the Cognito token against a DynamoDB policy store before backing Lambdas record use cases in DynamoDB, launch a CloudFormation stack per use case from nested templates in the solutions artifact bucket and store the LLM configuration, all watched by a CloudWatch custom dashboard. In the deployed text use case a WebSocket API queues chat messages in SQS for a chat Lambda that calls Bedrock, optionally grounded by a Bedrock knowledge base or Kendra index.
   containers:
     - region: us-east-1
       groups: [{label: deployment-dashboard}, {label: text-use-case}]
   elements:
-    - {tf: aws_cloudfront_distribution, name: web-ui-cdn, in: group:deployment-dashboard}
-    - {tf: aws_s3_bucket, name: web-ui-bucket, in: group:deployment-dashboard}
-    - {tf: aws_cognito_user_pool, name: solution-users, in: group:deployment-dashboard}
-    - {tf: aws_api_gateway_rest_api, name: deployment-api, in: group:deployment-dashboard}
-    - {tf: aws_lambda_function, name: use-case-mgmt-fn, in: group:deployment-dashboard}
-    - {tf: aws_dynamodb_table, name: use-case-configs, in: group:deployment-dashboard}
+    - {tf: aws_s3_bucket, name: solutions-artifacts, in: group:deployment-dashboard, at: [1, 5]}
+    - {tf: aws_cloudwatch_dashboard, name: ops-dashboard, in: group:deployment-dashboard, at: [1, 6]}
+    - {tf: aws_wafv2_web_acl, name: web-acl, in: group:deployment-dashboard, at: [2, 1]}
+    - {tf: aws_api_gateway_rest_api, name: deployment-api, in: group:deployment-dashboard, at: [2, 2]}
+    - {tf: aws_lambda_function, name: authorizer-fn, in: group:deployment-dashboard, at: [2, 3]}
+    - {tf: aws_lambda_function, name: use-case-mgmt-fn, in: group:deployment-dashboard, at: [2, 4]}
+    - {tf: aws_cloudformation_stack, name: use-case-stacks, in: group:deployment-dashboard, at: [2, 5]}
+    - {tf: aws_cloudfront_distribution, name: web-ui-cdn, in: group:deployment-dashboard, at: [3, 1]}
+    - {tf: aws_cognito_user_pool, name: solution-users, in: group:deployment-dashboard, at: [3, 2]}
+    - {tf: aws_dynamodb_table, name: policy-store, in: group:deployment-dashboard, at: [3, 3]}
+    - {tf: aws_dynamodb_table, name: use-case-configs, in: group:deployment-dashboard, at: [3, 4]}
+    - {tf: aws_dynamodb_table, name: llm-config-store, in: group:deployment-dashboard, at: [3, 5]}
+    - {tf: aws_s3_bucket, name: web-ui-bucket, in: group:deployment-dashboard, at: [4, 1]}
+    - {tf: aws_ssm_parameter, name: web-ui-parameters, in: group:deployment-dashboard, at: [4, 2]}
     - {tf: aws_apigatewayv2_api, name: chat-websocket-api, in: group:text-use-case}
     - {tf: aws_sqs_queue, name: chat-request-queue, in: group:text-use-case}
     - {tf: aws_lambda_function, name: chat-fn, in: group:text-use-case}
@@ -177,47 +186,63 @@
     - {tf: aws_kendra_index, name: use-case-kendra, in: group:text-use-case}
   actors: [users, user]
   flows:
-    - {from: user, to: web-ui-cdn, label: admin deploys use case, step: 1}
-    - {from: web-ui-cdn, to: web-ui-bucket, label: static assets}
-    - {from: web-ui-cdn, to: deployment-api, label: REST with Cognito token, step: 2}
-    - {from: deployment-api, to: use-case-mgmt-fn, step: 3}
-    - {from: use-case-mgmt-fn, to: use-case-configs, label: CloudFormation stack per use case}
-    - {from: users, to: chat-websocket-api, label: WSS chat, step: 4}
-    - {from: chat-websocket-api, to: chat-request-queue, step: 5}
+    - {from: user, to: web-ui-cdn, label: admin opens dashboard, step: 1}
+    - {from: web-ui-cdn, to: web-ui-bucket, label: Web app (UI), step: 2}
+    - {from: web-ui-parameters, to: web-ui-bucket, label: runtime configuration}
+    - {from: user, to: web-acl, label: REST API calls, step: 3}
+    - {from: web-acl, to: deployment-api, step: 4}
+    - {from: deployment-api, to: authorizer-fn, label: custom authorizer, step: 5}
+    - {from: authorizer-fn, to: solution-users, label: validate token}
+    - {from: authorizer-fn, to: policy-store, label: policies for authenticated users}
+    - {from: deployment-api, to: use-case-mgmt-fn, label: backing functions, step: 6}
+    - {from: use-case-mgmt-fn, to: use-case-configs, label: use cases store, step: 7}
+    - {from: use-case-mgmt-fn, to: use-case-stacks, label: Stack ID, step: 8}
+    - {from: solutions-artifacts, to: use-case-stacks, label: use case and nested templates}
+    - {from: use-case-mgmt-fn, to: llm-config-store, label: 'Store LLM configuration: prompt, temperature, model parameters', step: 9}
+    - {from: use-case-stacks, to: ops-dashboard, label: custom dashboard, step: 10}
+    - {from: users, to: chat-websocket-api, label: WSS chat, step: 11}
+    - {from: chat-websocket-api, to: chat-request-queue, step: 12}
     - {from: chat-request-queue, to: chat-fn, link: aws_lambda_event_source_mapping}
-    - {from: chat-fn, to: use-case-kb, label: Retrieve, step: 6}
+    - {from: chat-fn, to: use-case-kb, label: Retrieve, step: 13}
     - {from: chat-fn, to: use-case-kendra, label: alternative retriever}
     - {from: chat-fn, to: conversation-history, label: memory}
-    - {from: chat-fn, to: chat-websocket-api, label: streamed tokens, step: 7}
-
+    - {from: chat-fn, to: chat-websocket-api, label: streamed tokens, step: 14}
 - slug: lex-lambda-genai-agent-kendra
   title: Lex chatbot with a Lambda LangChain agent over Bedrock, DynamoDB and Kendra
   category: ml
   tags: [amazon lex, lambda fulfillment, langchain, bedrock, kendra, dynamodb]
   source: https://aws.amazon.com/blogs/machine-learning/build-generative-ai-agents-with-amazon-bedrock-amazon-dynamodb-amazon-kendra-amazon-lex-and-langchain/
-  description: A Lex V2 bot handles intents and slot filling and hands fulfillment to a Lambda function that runs a LangChain conversational agent on a Bedrock model. The agent reads customer records from DynamoDB, retrieves curated answers from documents indexed by Kendra and falls back to model knowledge; the web chat UI is served by CloudFront with Cognito identity-pool credentials.
+  description: Customers reach a Lex V2 natural-language chatbot over the web through an Amplify-hosted website, over SMS, over voice through an Amazon Connect contact center, or from Slack. Lex hands fulfillment to a Lambda bot logic handler that runs a LangChain agent on a fine-tunable Bedrock Anthropic Claude 2.1 model, reads user account information from DynamoDB and retrieves FAQ answers from a Kendra index whose web crawler ingests public pages; customer data in S3 can fine-tune the model.
   containers:
     - region: us-east-1
+      groups:
+        - {label: your-company.com, at: [1, 1, 3, 1]}
   elements:
-    - {tf: aws_cloudfront_distribution, name: lex-web-ui, in: region}
-    - {tf: aws_s3_bucket, name: web-ui-bucket, in: region}
-    - {tf: aws_cognito_identity_pool, name: web-ui-identity, in: region}
-    - {tf: aws_lexv2models_bot, name: financial-services-bot, in: region}
-    - {tf: aws_lambda_function, name: agent-executor-fn, in: region}
-    - {tf: aws_dynamodb_table, name: user-accounts, in: region}
-    - {tf: aws_kendra_index, name: fs-documents-index, in: region}
-    - {tf: aws_s3_bucket, name: fs-documents, in: region}
-  actors: [users]
+    - {tf: aws_amplify_app, name: company-website, in: group:your-company.com, at: [1, 1]}
+    - {tf: aws_lexv2models_bot, name: financial-services-bot, in: group:your-company.com, at: [2, 1]}
+    - {tf: aws_lambda_function, name: bot-logic-handler-fn, in: group:your-company.com, at: [1, 2, 2, 1]}
+    - {tf: aws_connect_instance, name: contact-center, in: region, at: [4, 1]}
+    - {tf: aws_dynamodb_table, name: user-accounts, in: region, at: [1, 2]}
+    - {tf: aws_bedrock_custom_model, name: claude-2-1-fm, in: region, at: [2, 2]}
+    - {tf: aws_s3_bucket, name: customer-data, in: region, at: [2, 3]}
+    - {tf: aws_kendra_index, name: faq-search-index, in: region, at: [3, 2]}
+  actors:
+    - {type: user, name: Customer, at: [1, 1]}
+    - {type: saas, name: Slack, at: [2, 1]}
+    - {type: internet, at: [1, 3]}
   flows:
-    - {from: users, to: lex-web-ui, label: HTTPS chat UI, step: 1}
-    - {from: lex-web-ui, to: web-ui-bucket, label: static assets}
-    - {from: lex-web-ui, to: web-ui-identity, label: temporary credentials, step: 2}
-    - {from: lex-web-ui, to: financial-services-bot, label: RecognizeText, step: 3}
-    - {from: financial-services-bot, to: agent-executor-fn, label: fulfillment code hook, step: 4}
-    - {from: agent-executor-fn, to: user-accounts, label: GetItem customer data, step: 5}
-    - {from: agent-executor-fn, to: fs-documents-index, label: Kendra Retrieve, step: 6}
-    - {from: fs-documents, to: fs-documents-index, link: aws_kendra_data_source}
-
+    - {from: Customer, to: company-website, label: Web, step: 1}
+    - {from: Customer, to: financial-services-bot, label: SMS}
+    - {from: Customer, to: contact-center, label: Voice}
+    - {from: company-website, to: financial-services-bot, label: chat widget}
+    - {from: contact-center, to: financial-services-bot, label: voice conversation}
+    - {from: Slack, to: financial-services-bot, label: Slack channel}
+    - {from: financial-services-bot, to: bot-logic-handler-fn, label: Lex bot logic handler, step: 2}
+    - {from: bot-logic-handler-fn, to: user-accounts, label: User account information, step: 3}
+    - {from: bot-logic-handler-fn, to: claude-2-1-fm, label: Anthropic Claude 2.1 FM}
+    - {from: customer-data, to: claude-2-1-fm, label: fine-tunable}
+    - {from: bot-logic-handler-fn, to: faq-search-index, label: FAQ search index}
+    - {from: internet, to: faq-search-index, label: Web Crawler}
 - slug: sagemaker-realtime-inference-apigw-lambda
   title: Real-time SageMaker inference behind API Gateway and Lambda
   category: ml
@@ -281,37 +306,56 @@
   category: devops
   tags: [mlops, codepipeline, codebuild, sagemaker projects, model registry, staging production]
   source: https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-projects-templates-sm.html
-  description: The SageMaker-provided MLOps template creates a model-build CodePipeline whose CodeBuild step upserts and runs a SageMaker pipeline from a third-party Git repository, registering models in the Model Registry. An EventBridge rule on model approval starts a model-deploy CodePipeline that builds CloudFormation stacks and deploys endpoints to staging and, after manual approval, to production.
+  description: The SageMaker-provided MLOps template with third-party Git repositories seeds a model-build and a model-deploy GitHub repository through a CodeBuild project and a Lambda check-in function, then a model-build pipeline (CodePipeline or Jenkins) checks out the build repository through a CodeStar connection, installs the AWS CLI and runs a SageMaker pipeline whose processing, training and evaluation steps write model artifacts to S3 and register the model in the Model Registry. On model approval an EventBridge rule invokes a Lambda that triggers the model-deploy pipeline, which builds CloudFormation templates into S3 and deploys the stack to a staging endpoint and, after testing and manual approval, to production.
   containers:
     - region: eu-west-1
-      groups: [{label: model-build}, {label: model-deploy}]
+      groups:
+        - {label: model-build, at: [1, 2]}
+        - {label: model-deploy, at: [1, 3, 1, 2]}
+        - {label: seeding, at: [2, 1]}
+        - {label: sagemaker pipelines, at: [2, 2]}
+        - {label: model registry, at: [2, 3]}
+        - {label: hosting, at: [2, 4]}
   elements:
-    - {tf: aws_codestarconnections_connection, name: github-connection, in: region}
-    - {tf: aws_codepipeline, name: model-build-pipeline, in: group:model-build}
-    - {tf: aws_codebuild_project, name: build-pipeline-project, in: group:model-build}
-    - {tf: aws_sagemaker_pipeline, name: abalone-pipeline, in: group:model-build}
-    - {tf: aws_sagemaker_model_package_group, name: abalone-models, in: group:model-build}
-    - {tf: aws_s3_bucket, name: mlops-artifacts, in: region}
-    - {tf: aws_cloudwatch_event_rule, name: model-approved-rule, in: group:model-deploy}
-    - {tf: aws_codepipeline, name: model-deploy-pipeline, in: group:model-deploy}
-    - {tf: aws_codebuild_project, name: deploy-build-project, in: group:model-deploy}
-    - {tf: aws_sagemaker_endpoint, name: staging-endpoint, in: group:model-deploy}
-    - {tf: aws_sagemaker_endpoint, name: prod-endpoint, in: group:model-deploy}
-  actors: [user, saas]
+    - {tf: aws_codestarconnections_connection, name: github-connection, in: region, at: [1, 1]}
+    - {tf: aws_codepipeline, name: model-build-pipeline, in: group:model-build, at: [1, 1]}
+    - {tf: aws_codepipeline, name: model-deploy-pipeline, in: group:model-deploy, at: [1, 1, 1, 2]}
+    - {tf: aws_lambda_function, name: model-deploy-trigger-fn, in: group:model-deploy, at: [2, 1]}
+    - {tf: aws_cloudwatch_event_rule, name: model-approved-rule, in: group:model-deploy, at: [2, 2]}
+    - {tf: aws_s3_bucket, name: cfn-templates, in: group:model-deploy, at: [3, 1]}
+    - {tf: aws_cloudformation_stack, name: endpoint-stack, in: group:model-deploy, at: [3, 2]}
+    - {tf: aws_codebuild_project, name: seed-code-project, in: group:seeding, at: [1, 1]}
+    - {tf: aws_lambda_function, name: seed-code-checkin-fn, in: group:seeding, at: [2, 1]}
+    - {tf: aws_sagemaker_pipeline, name: abalone-pipeline, in: group:sagemaker pipelines, at: [1, 1]}
+    - {tf: aws_sagemaker_training_job, name: abalone-training-job, in: group:sagemaker pipelines, at: [1, 2]}
+    - {tf: aws_sagemaker_model_package_group, name: abalone-models, in: group:model registry, at: [1, 1]}
+    - {tf: aws_sagemaker_endpoint, name: staging-endpoint, in: group:hosting, at: [1, 1]}
+    - {tf: aws_sagemaker_endpoint, name: prod-endpoint, in: group:hosting, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: mlops-artifacts, in: region, at: [3, 2]}
+  actors:
+    - {type: saas, name: GitHub model build repo, at: [1, 1]}
+    - {type: user, name: Data Scientist, at: [2, 1]}
+    - {type: saas, name: GitHub model deploy repo, at: [1, 4]}
   flows:
-    - {from: user, to: saas, label: push modelbuild repo, step: 1}
-    - {from: saas, to: github-connection, label: webhook}
-    - {from: github-connection, to: model-build-pipeline, label: source stage, step: 2}
-    - {from: model-build-pipeline, to: build-pipeline-project, label: build stage, step: 3}
-    - {from: build-pipeline-project, to: abalone-pipeline, label: upsert and start execution, step: 4}
-    - {from: abalone-pipeline, to: mlops-artifacts, label: training artifacts}
-    - {from: abalone-pipeline, to: abalone-models, label: RegisterModel PendingManualApproval, step: 5}
+    - {from: seed-code-project, to: seed-code-checkin-fn, label: initial seeding on project create}
+    - {from: seed-code-checkin-fn, to: GitHub model build repo, label: seed model build code}
+    - {from: seed-code-checkin-fn, to: GitHub model deploy repo, label: seed model deploy code}
+    - {from: Data Scientist, to: GitHub model build repo, label: commits pipeline code, step: 1}
+    - {from: GitHub model build repo, to: github-connection, label: Studio Git clone}
+    - {from: github-connection, to: model-build-pipeline, label: 'Checkout source: build trigger polling every minute', step: 2}
+    - {from: model-build-pipeline, to: abalone-pipeline, label: 'Install AWS CLI, update and run SageMaker pipeline', step: 3}
+    - {from: abalone-pipeline, to: abalone-training-job, label: 'processing, training and evaluate steps', step: 4}
+    - {from: abalone-training-job, to: mlops-artifacts, label: model artifact}
+    - {from: abalone-pipeline, to: abalone-models, label: Register model, step: 5}
+    - {from: Data Scientist, to: abalone-models, label: Approve deployment}
     - {from: abalone-models, to: model-approved-rule, label: ModelPackage state change Approved, step: 6}
-    - {from: model-approved-rule, to: model-deploy-pipeline, link: aws_cloudwatch_event_target}
-    - {from: model-deploy-pipeline, to: deploy-build-project, label: build CloudFormation templates, step: 7}
-    - {from: deploy-build-project, to: staging-endpoint, label: DeployStaging stack, step: 8}
-    - {from: deploy-build-project, to: prod-endpoint, label: DeployProd after manual approval, step: 9}
-
+    - {from: model-approved-rule, to: model-deploy-trigger-fn, link: aws_cloudwatch_event_target}
+    - {from: model-deploy-trigger-fn, to: model-deploy-pipeline, label: 'Deploy trigger: approved model', step: 7}
+    - {from: GitHub model deploy repo, to: model-deploy-pipeline, label: Checkout source model deploy code}
+    - {from: model-deploy-pipeline, to: cfn-templates, label: Build CloudFormation templates, step: 8}
+    - {from: cfn-templates, to: endpoint-stack, label: templates}
+    - {from: endpoint-stack, to: staging-endpoint, label: Staging deploy and test staging, step: 9}
+    - {from: endpoint-stack, to: prod-endpoint, label: Prod deploy after manual approval, step: 10}
 - slug: step-functions-sagemaker-train-batch-transform
   title: Step Functions orchestrating SageMaker training and batch transform
   category: ml
@@ -344,104 +388,143 @@
   category: ml
   tags: [feature store, kinesis, managed flink, streaming aggregates, real-time inference]
   source: https://aws.amazon.com/blogs/machine-learning/using-streaming-ingestion-with-amazon-sagemaker-feature-store-to-make-ml-backed-decisions-in-near-real-time/
-  description: Credit card transactions arrive on a Kinesis data stream; a Managed Service for Apache Flink application computes sliding-window aggregates and a Lambda function writes them to an online Feature Store group, which replicates to the offline S3 store. A second Lambda consumes the same stream, reads the latest aggregates with GetRecord and calls a SageMaker endpoint to score each transaction.
+  description: Historical transactions and fraud labels in an S3 data lake feed a nightly PySpark job that builds the training data for a SageMaker training job and materialises one-week aggregates into a batch online-only feature group. Live credit card transactions arrive on a Kinesis data stream; a Kinesis Data Analytics SQL application computes sliding ten-minute aggregates and a Lambda pushes them into a second online-only feature group, while a second Lambda consumes the same stream, reads the latest aggregates with GetRecord, calls the fraud detection endpoint and writes results that trigger alerts and feed a dashboard.
   containers:
     - region: us-east-1
   elements:
-    - {tf: aws_kinesis_stream, name: cc-transactions, in: region}
-    - {tf: aws_kinesisanalyticsv2_application, name: window-aggregates, in: region}
-    - {tf: aws_lambda_function, name: ingest-features-fn, in: region}
-    - {tf: aws_sagemaker_feature_group, name: cc-agg-features, in: region}
-    - {tf: aws_sagemaker_feature_group, name: cc-agg-batch-features, in: region}
-    - {tf: aws_s3_bucket, name: offline-feature-store, in: region}
-    - {tf: aws_lambda_function, name: predict-fn, in: region}
-    - {tf: aws_sagemaker_endpoint, name: fraud-endpoint, in: region}
+    - {tf: aws_s3_bucket, name: raw-data-lake, in: region, at: [1, 1]}
+    - {tf: aws_glue_job, name: nightly-aggregates-job, in: region, at: [1, 2]}
+    - {tf: aws_sagemaker_training_job, name: fraud-model-training, in: region, at: [1, 3]}
+    - {tf: aws_sagemaker_feature_group, name: cc-agg-batch-features, in: region, at: [1, 4]}
+    - {tf: aws_kinesis_stream, name: cc-transactions, in: region, at: [2, 1, 2, 1]}
+    - {tf: aws_kinesisanalyticsv2_application, name: window-aggregates, in: region, at: [2, 2]}
+    - {tf: aws_lambda_function, name: ingest-features-fn, in: region, at: [2, 3]}
+    - {tf: aws_sagemaker_feature_group, name: cc-agg-features, in: region, at: [2, 4]}
+    - {tf: aws_lambda_function, name: predict-fn, in: region, at: [3, 2]}
+    - {tf: aws_sagemaker_endpoint, name: fraud-endpoint, in: region, at: [3, 3]}
+    - {tf: aws_s3_bucket, name: results-store, in: region, at: [4, 2]}
   actors: [device]
   flows:
-    - {from: device, to: cc-transactions, label: PutRecord transaction, step: 1}
-    - {from: cc-transactions, to: window-aggregates, label: Flink source, step: 2}
-    - {from: window-aggregates, to: ingest-features-fn, label: aggregated rows, step: 3}
-    - {from: ingest-features-fn, to: cc-agg-features, label: PutRecord online store, step: 4}
-    - {from: cc-agg-features, to: offline-feature-store, label: async replication}
-    - {from: cc-agg-batch-features, to: offline-feature-store, label: historical features}
-    - {from: cc-transactions, to: predict-fn, link: aws_lambda_event_source_mapping}
-    - {from: predict-fn, to: cc-agg-features, label: GetRecord latest aggregates, step: 5}
-    - {from: predict-fn, to: fraud-endpoint, label: InvokeEndpoint, step: 6}
-
+    - {from: raw-data-lake, to: nightly-aggregates-job, label: 'Nightly batch: fraud labels and transactions', step: 2}
+    - {from: nightly-aggregates-job, to: fraud-model-training, label: training data, step: 3}
+    - {from: fraud-model-training, to: fraud-endpoint, label: model deployment}
+    - {from: nightly-aggregates-job, to: cc-agg-batch-features, label: nightly update last 1 week aggregations}
+    - {from: device, to: cc-transactions, label: PutRecord transaction}
+    - {from: cc-transactions, to: window-aggregates, label: Streaming aggregation, step: 4}
+    - {from: window-aggregates, to: ingest-features-fn, label: push aggregate features}
+    - {from: ingest-features-fn, to: cc-agg-features, label: sliding last 10 mins aggregations}
+    - {from: cc-transactions, to: predict-fn, label: Streaming predictions, step: 5, link: aws_lambda_event_source_mapping}
+    - {from: cc-agg-features, to: predict-fn, label: GetRecord latest aggregates}
+    - {from: predict-fn, to: fraud-endpoint, label: InvokeEndpoint}
+    - {from: predict-fn, to: results-store, label: results, trigger alerts, feed dashboard}
 - slug: idp-textract-bedrock-comprehend
   title: Intelligent document processing with Textract, Comprehend and Bedrock
   category: ml
   tags: [intelligent document processing, textract, comprehend, bedrock, step functions, sqs]
   source: https://aws.amazon.com/blogs/machine-learning/intelligent-document-processing-with-amazon-textract-amazon-bedrock-and-langchain/
-  description: Documents uploaded to S3 start a Step Functions workflow that submits asynchronous Textract analysis jobs; completion notifications reach SQS through SNS and a Lambda collects the extracted text. A classification step routes each document through a Comprehend custom classifier or a Bedrock model, and a Bedrock extraction step returns structured fields that are stored in DynamoDB and S3.
+  description: Documents captured in S3 are OCR'd with Textract and categorised and tagged by a Comprehend custom classifier or a Bedrock Anthropic Claude model. The categorised documents then go through extraction and enrichment, Textract queries, forms and tables, Comprehend entity and PII redaction and Claude summarisation, normalisation and Q&A over a vector store, before a verification stage routes low-confidence predictions to a human-in-the-loop review and high-confidence ones, plus Claude spell corrections, to a post-processing Lambda that integrates the results into downstream databases and applications.
   containers:
     - region: us-east-1
+      groups:
+        - {label: classification, at: [1, 2, 2, 1]}
+        - {label: extraction and enrichment, at: [1, 4, 2, 1]}
+        - {label: verification and human review, at: [1, 5, 2, 1]}
   elements:
-    - {tf: aws_s3_bucket, name: inbound-documents, in: region}
-    - {tf: aws_sfn_state_machine, name: idp-workflow, in: region}
-    - {tf: aws_lambda_function, name: start-textract-fn, in: region}
-    - {tf: aws_sns_topic, name: textract-job-status, in: region}
-    - {tf: aws_sqs_queue, name: textract-results, in: region}
-    - {tf: aws_lambda_function, name: collect-text-fn, in: region}
-    - {tf: aws_comprehend_document_classifier, name: doc-type-classifier, in: region}
-    - {tf: aws_lambda_function, name: classify-fn, in: region}
-    - {tf: aws_lambda_function, name: extract-fields-fn, in: region}
-    - {tf: aws_dynamodb_table, name: extracted-fields, in: region}
-    - {tf: aws_s3_bucket, name: processed-documents, in: region}
-  actors: [users]
+    - {tf: aws_s3_bucket, name: inbound-documents, in: region, at: [1, 1]}
+    - {tf: aws_lambda_function, name: textract-ocr-fn, in: group:classification, at: [1, 1]}
+    - {tf: aws_comprehend_document_classifier, name: doc-type-classifier, in: group:classification, at: [2, 1]}
+    - {tf: aws_bedrock_inference_profile, name: claude-classifier, in: group:classification, at: [3, 1]}
+    - {tf: aws_dynamodb_table, name: categorized-documents, in: region, at: [1, 3]}
+    - {tf: aws_opensearchserverless_collection, name: vector-db, in: region, at: [2, 3]}
+    - {tf: aws_lambda_function, name: textract-analyze-fn, in: group:extraction and enrichment, at: [1, 1]}
+    - {tf: aws_comprehend_entity_recognizer, name: pii-entity-recognizer, in: group:extraction and enrichment, at: [2, 1]}
+    - {tf: aws_bedrock_inference_profile, name: claude-extraction, in: group:extraction and enrichment, at: [3, 1]}
+    - {tf: aws_sagemaker_flow_definition, name: human-review-loop, in: group:verification and human review, at: [1, 1]}
+    - {tf: aws_lambda_function, name: post-processing-fn, in: group:verification and human review, at: [2, 2]}
+    - {tf: aws_bedrock_inference_profile, name: claude-spell-check, in: group:verification and human review, at: [3, 1]}
+  actors: [users, {type: database, name: downstream applications, at: [1, 3]}]
   flows:
-    - {from: users, to: inbound-documents, label: upload PDF, step: 1}
-    - {from: inbound-documents, to: idp-workflow, label: S3 event via EventBridge, step: 2}
-    - {from: idp-workflow, to: start-textract-fn, step: 3}
-    - {from: start-textract-fn, to: textract-job-status, label: StartDocumentAnalysis with NotificationChannel, step: 4}
-    - {from: textract-job-status, to: textract-results, link: aws_sns_topic_subscription}
-    - {from: textract-results, to: collect-text-fn, link: aws_lambda_event_source_mapping}
-    - {from: collect-text-fn, to: idp-workflow, label: SendTaskSuccess with text, step: 5}
-    - {from: idp-workflow, to: classify-fn, step: 6}
-    - {from: classify-fn, to: doc-type-classifier, label: ClassifyDocument}
-    - {from: idp-workflow, to: extract-fields-fn, label: Bedrock extraction prompt, step: 7}
-    - {from: extract-fields-fn, to: extracted-fields, label: structured JSON, step: 8}
-    - {from: extract-fields-fn, to: processed-documents, label: outputs}
-
+    - {from: users, to: inbound-documents, label: Document capture, step: 1}
+    - {from: inbound-documents, to: textract-ocr-fn, label: Textract OCR, step: 2}
+    - {from: textract-ocr-fn, to: doc-type-classifier, label: Comprehend classification}
+    - {from: textract-ocr-fn, to: claude-classifier, label: or Bedrock Claude classification}
+    - {from: doc-type-classifier, to: categorized-documents, label: Categorized documents, step: 3}
+    - {from: claude-classifier, to: categorized-documents, label: Categorized documents}
+    - {from: categorized-documents, to: textract-analyze-fn, label: 'Textract: query, forms, tables and more', step: 4}
+    - {from: categorized-documents, to: pii-entity-recognizer, label: 'Comprehend: entities, PII redaction'}
+    - {from: categorized-documents, to: vector-db, label: Vector DB}
+    - {from: vector-db, to: claude-extraction, label: 'Claude: summary, normalization, Q&A', step: 5}
+    - {from: textract-analyze-fn, to: human-review-loop, label: Route low confidence predictions, step: 6}
+    - {from: textract-analyze-fn, to: post-processing-fn, label: Route high confidence predictions, step: 7}
+    - {from: claude-extraction, to: claude-spell-check, label: 'Claude: spell check, corrections'}
+    - {from: human-review-loop, to: post-processing-fn, label: reviewed predictions}
+    - {from: claude-spell-check, to: post-processing-fn, label: corrected text}
+    - {from: post-processing-fn, to: downstream applications, label: Integrate into downstream databases / applications, step: 8}
 - slug: media2cloud-rekognition-analysis
   title: Media2Cloud media ingestion and AI analysis with Rekognition
   category: media
   tags: [rekognition, media analysis, video, step functions, mediaconvert, opensearch]
   source: https://docs.aws.amazon.com/solutions/latest/media2cloud-on-aws/architecture-overview.html
-  description: Uploads to an ingest bucket start a main Step Functions state machine whose ingestion sub-workflow creates proxies with MediaConvert and whose analysis sub-workflow runs Rekognition, Transcribe, Comprehend and Textract jobs. Rekognition publishes video job status to SNS, results and state are kept in DynamoDB and indexed into OpenSearch for search from a CloudFront-hosted web app authenticated by Cognito.
+  description: Users sign in with Cognito and call an API Gateway that starts the main Step Functions state machine, whose ingest sub-workflow creates proxies with MediaConvert and whose analysis sub-workflow runs Rekognition, Transcribe, Comprehend and Textract jobs; the web app is served by CloudFront from the web bucket. Results and state are kept in DynamoDB and indexed into OpenSearch, media lives in the proxy, ingest and logs buckets, job status reaches the web app over IoT Core MQTT and SNS, and CloudWatch and EventBridge events allow an optional downstream integration.
   containers:
     - region: us-east-1
-      groups: [{label: web}, {label: workflows}, {label: storage}]
+      groups:
+        - {label: main state machine, at: [1, 2, 2, 1]}
+        - {label: media services, at: [1, 3, 1, 2]}
+        - {label: ai-ml services, at: [2, 3, 1, 2]}
+        - {label: datastore services, at: [3, 2]}
+        - {label: notification services, at: [3, 3]}
+        - {label: events services, at: [3, 4]}
+        - {label: storage services, at: [4, 2, 1, 3]}
   elements:
-    - {tf: aws_cognito_user_pool, name: m2c-users, in: group:web}
-    - {tf: aws_cloudfront_distribution, name: web-app, in: group:web}
-    - {tf: aws_api_gateway_rest_api, name: m2c-api, in: group:web}
-    - {tf: aws_sfn_state_machine, name: main-workflow, in: group:workflows}
-    - {tf: aws_sfn_state_machine, name: ingest-workflow, in: group:workflows}
-    - {tf: aws_sfn_state_machine, name: analysis-workflow, in: group:workflows}
-    - {tf: aws_media_convert_queue, name: proxy-queue, in: group:workflows}
-    - {tf: aws_rekognition_collection, name: face-collection, in: group:workflows}
-    - {tf: aws_sns_topic, name: rekognition-job-status, in: group:workflows}
-    - {tf: aws_s3_bucket, name: ingest-bucket, in: group:storage}
-    - {tf: aws_s3_bucket, name: proxy-bucket, in: group:storage}
-    - {tf: aws_dynamodb_table, name: ingest-state, in: group:storage}
-    - {tf: aws_opensearch_domain, name: media-index, in: group:storage}
-  actors: [users]
+    - {tf: aws_cognito_user_pool, name: m2c-users, in: region, at: [1, 1]}
+    - {tf: aws_api_gateway_rest_api, name: m2c-api, in: region, at: [2, 1]}
+    - {tf: aws_cloudfront_distribution, name: web-app, in: region, at: [3, 1]}
+    - {tf: aws_sfn_state_machine, name: main-workflow, in: group:main state machine, at: [1, 1]}
+    - {tf: aws_sfn_state_machine, name: ingest-workflow, in: group:main state machine, at: [2, 1]}
+    - {tf: aws_sfn_state_machine, name: analysis-workflow, in: group:main state machine, at: [3, 1]}
+    - {tf: aws_media_convert_queue, name: proxy-queue, in: group:media services, at: [1, 1]}
+    - {tf: aws_rekognition_collection, name: face-collection, in: group:ai-ml services, at: [1, 1]}
+    - {tf: aws_transcribe_vocabulary, name: transcribe-vocabulary, in: group:ai-ml services, at: [1, 2]}
+    - {tf: aws_comprehend_entity_recognizer, name: comprehend-entities, in: group:ai-ml services, at: [1, 3]}
+    - {tf: aws_dynamodb_table, name: ingest-state, in: group:datastore services, at: [1, 1]}
+    - {tf: aws_opensearch_domain, name: media-index, in: group:datastore services, at: [1, 2]}
+    - {tf: aws_iot_topic_rule, name: iot-status-topic, in: group:notification services, at: [1, 1]}
+    - {tf: aws_sns_topic, name: rekognition-job-status, in: group:notification services, at: [1, 2]}
+    - {tf: aws_cloudwatch_log_group, name: workflow-logs, in: group:events services, at: [1, 1]}
+    - {tf: aws_cloudwatch_event_bus, name: workflow-events, in: group:events services, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: web-bucket, in: group:storage services, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: proxy-bucket, in: group:storage services, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: ingest-bucket, in: group:storage services, at: [1, 3]}
+    - {tf: aws_s3_bucket, name: logs-bucket, in: group:storage services, at: [1, 4]}
+  actors:
+    - {type: users, at: [1, 1]}
+    - {type: device, name: IoT MQTT protocol, at: [2, 1]}
+    - {type: server, name: optional downstream process, at: [1, 3]}
   flows:
-    - {from: users, to: web-app, label: HTTPS, step: 1}
-    - {from: web-app, to: m2c-api, label: IAM-signed calls with Cognito credentials, step: 2}
-    - {from: users, to: ingest-bucket, label: multipart upload, step: 3}
+    - {from: users, to: m2c-users, label: sign in, step: 1}
+    - {from: m2c-users, to: m2c-api, label: IAM-signed calls with Cognito credentials, step: 2}
+    - {from: m2c-users, to: web-app, label: web app, step: 3}
+    - {from: web-app, to: web-bucket, label: static web assets}
+    - {from: users, to: ingest-bucket, label: multipart upload}
     - {from: m2c-api, to: main-workflow, label: StartExecution, step: 4}
-    - {from: main-workflow, to: ingest-workflow, step: 5}
+    - {from: main-workflow, to: ingest-workflow, label: ingest workflow, step: 5}
     - {from: ingest-workflow, to: proxy-queue, label: MediaConvert proxy job}
     - {from: proxy-queue, to: proxy-bucket, label: proxies}
-    - {from: main-workflow, to: analysis-workflow, step: 6}
-    - {from: analysis-workflow, to: face-collection, label: Rekognition video jobs}
+    - {from: main-workflow, to: analysis-workflow, label: analysis workflow, step: 6}
+    - {from: analysis-workflow, to: face-collection, label: Rekognition jobs}
+    - {from: analysis-workflow, to: transcribe-vocabulary, label: Transcribe jobs}
+    - {from: analysis-workflow, to: comprehend-entities, label: Comprehend jobs}
     - {from: face-collection, to: rekognition-job-status, label: job completion}
-    - {from: rekognition-job-status, to: analysis-workflow, label: resume}
-    - {from: analysis-workflow, to: ingest-state, label: status and pointers}
-    - {from: analysis-workflow, to: media-index, label: index metadata, step: 7}
-
+    - {from: rekognition-job-status, to: analysis-workflow, label: resume, step: 13}
+    - {from: analysis-workflow, to: ingest-state, label: status and pointers, step: 7}
+    - {from: analysis-workflow, to: media-index, label: index metadata, step: 8}
+    - {from: main-workflow, to: logs-bucket, label: logs, step: 9}
+    - {from: main-workflow, to: workflow-logs, label: CloudWatch, step: 10}
+    - {from: main-workflow, to: workflow-events, label: EventBridge, step: 11}
+    - {from: workflow-events, to: optional downstream process, label: integration}
+    - {from: main-workflow, to: iot-status-topic, label: IoT Core status, step: 12}
+    - {from: iot-status-topic, to: IoT MQTT protocol, label: MQTT to web app}
 - slug: video-subtitles-transcribe-translate-polly
   title: Video subtitle and dubbing pipeline with Transcribe, Translate and Polly
   category: media
@@ -476,64 +559,63 @@
   category: ml
   tags: [personalize, recommendations, event tracker, kinesis, api gateway]
   source: https://docs.aws.amazon.com/personalize/latest/dg/how-it-works.html
-  description: Historical interactions, items and users are exported to S3 and imported into a Personalize dataset group where a solution version is trained and deployed as a campaign. Clickstream events flow through Kinesis to a Lambda that calls PutEvents on the event tracker, and an API Gateway backed Lambda calls GetRecommendations and enriches results with item metadata from DynamoDB.
+  description: Historical interactions, items and users are exported to S3 and bulk-imported into a Personalize dataset group, where a solution version is trained and deployed as a campaign (drawn as a Step Functions workflow because Personalize has no Terraform resource types); incremental records and clickstream events flow through Kinesis to a Lambda that calls PutEvents on the event tracker. An API Gateway backed Lambda calls GetRecommendations on the real-time recommendation API for the application, and a batch inference job reads its input from and writes its recommendations to an S3 bucket.
   containers:
     - region: us-east-1
+      account_at: [1, 1, 2, 1]
+      groups: [{label: amazon-personalize, at: [1, 3, 2, 1]}]
   elements:
-    - {tf: aws_s3_bucket, name: interactions-export, in: region}
-    - {tf: aws_sfn_state_machine, name: personalize-training, in: region}
-    - {tf: aws_cloudwatch_event_rule, name: weekly-retrain, in: region}
-    - {tf: aws_kinesis_stream, name: clickstream, in: region}
-    - {tf: aws_lambda_function, name: put-events-fn, in: region}
-    - {tf: aws_api_gateway_rest_api, name: recommendations-api, in: region}
-    - {tf: aws_lambda_function, name: get-recommendations-fn, in: region}
-    - {tf: aws_dynamodb_table, name: item-catalog, in: region}
-  actors: [users, mobile]
+    - {tf: aws_s3_bucket, name: interactions-export, in: region, at: [1, 1]}
+    - {tf: aws_kinesis_stream, name: clickstream, in: region, at: [2, 1]}
+    - {tf: aws_lambda_function, name: put-events-fn, in: region, at: [2, 2]}
+    - {tf: aws_sfn_state_machine, name: personalize-training, in: group:amazon-personalize, at: [1, 1]}
+    - {tf: aws_lambda_function, name: get-recommendations-fn, in: region, at: [1, 4]}
+    - {tf: aws_api_gateway_rest_api, name: recommendations-api, in: region, at: [1, 5]}
+    - {tf: aws_s3_bucket, name: batch-recommendations, in: region, at: [2, 5]}
+  actors: [{type: client, name: Your application, at: [1, 2]}, {type: mobile, at: [2, 2]}]
   flows:
-    - {from: weekly-retrain, to: personalize-training, link: aws_cloudwatch_event_target}
-    - {from: interactions-export, to: personalize-training, label: CreateDatasetImportJob from S3, step: 1}
-    - {from: personalize-training, to: personalize-training, label: CreateSolutionVersion then UpdateCampaign, step: 2}
-    - {from: mobile, to: clickstream, label: view and purchase events, step: 3}
+    - {from: interactions-export, to: personalize-training, label: import bulk historical data, step: 1}
+    - {from: mobile, to: clickstream, label: stream interaction events in real time, step: 2}
     - {from: clickstream, to: put-events-fn, link: aws_lambda_event_source_mapping}
-    - {from: put-events-fn, to: personalize-training, label: PutEvents to event tracker, step: 4}
-    - {from: users, to: recommendations-api, label: GET /recommendations, step: 5}
+    - {from: put-events-fn, to: personalize-training, label: PutEvents and incremental PutItems and PutUsers, step: 3}
+    - {from: personalize-training, to: personalize-training, label: store data, train and host models, deploy campaign, filter recommendations, step: 4}
+    - {from: Your application, to: recommendations-api, label: get real-time recommendations, step: 5}
     - {from: recommendations-api, to: get-recommendations-fn, step: 6}
-    - {from: get-recommendations-fn, to: personalize-training, label: GetRecommendations from campaign, step: 7}
-    - {from: get-recommendations-fn, to: item-catalog, label: BatchGetItem metadata, step: 8}
+    - {from: get-recommendations-fn, to: personalize-training, label: GetRecommendations from real-time recommendation API, step: 7}
+    - {from: personalize-training, to: batch-recommendations, label: batch inference job input and output, step: 8}
 
 - slug: fraud-detection-sagemaker-rcf-xgboost
   title: Real-time fraud detection with SageMaker Random Cut Forest and XGBoost
   category: ml
   tags: [fraud detection, sagemaker, random cut forest, xgboost, kinesis firehose, api gateway]
   source: https://aws.amazon.com/blogs/machine-learning/detect-fraudulent-transactions-using-machine-learning-with-amazon-sagemaker/
-  description: A SageMaker notebook trains an unsupervised Random Cut Forest anomaly detector and a supervised XGBoost classifier on labelled card transactions from S3 and deploys both to real-time endpoints. A REST API invokes a Lambda that scores each transaction against both endpoints and streams the enriched result through Kinesis Data Firehose into S3 for reporting.
+  description: An S3 bucket holding the labelled card transactions and the trained model artifacts backs two SageMaker real-time endpoints, an unsupervised Random Cut Forest anomaly detector and a supervised XGBoost fraud classifier. A REST API invokes a Lambda that scores each transaction against both endpoints and streams the enriched result through Kinesis Data Firehose into a results bucket, which an optional QuickSight dashboard reports on.
   containers:
     - region: us-east-1
+      groups:
+        - {label: anomaly detection, at: [1, 3]}
+        - {label: fraud detection, at: [2, 3]}
+        - {label: optional, at: [3, 4]}
   elements:
-    - {tf: aws_s3_bucket, name: transactions-dataset, in: region}
-    - {tf: aws_sagemaker_notebook_instance, name: fraud-notebook, in: region}
-    - {tf: aws_sagemaker_model, name: rcf-model, in: region}
-    - {tf: aws_sagemaker_model, name: xgboost-model, in: region}
-    - {tf: aws_sagemaker_endpoint, name: rcf-endpoint, in: region}
-    - {tf: aws_sagemaker_endpoint, name: xgboost-endpoint, in: region}
-    - {tf: aws_api_gateway_rest_api, name: fraud-api, in: region}
-    - {tf: aws_lambda_function, name: score-transaction-fn, in: region}
-    - {tf: aws_kinesis_firehose_delivery_stream, name: scored-results-stream, in: region}
-    - {tf: aws_s3_bucket, name: scored-results, in: region}
+    - {tf: aws_api_gateway_rest_api, name: fraud-api, in: region, at: [1, 1, 2, 1]}
+    - {tf: aws_lambda_function, name: score-transaction-fn, in: region, at: [1, 2, 2, 1]}
+    - {tf: aws_sagemaker_endpoint, name: rcf-endpoint, in: group:anomaly detection, at: [1, 1]}
+    - {tf: aws_sagemaker_endpoint, name: xgboost-endpoint, in: group:fraud detection, at: [1, 1]}
+    - {tf: aws_s3_bucket, name: model-and-data, in: region, at: [1, 4, 2, 1]}
+    - {tf: aws_kinesis_firehose_delivery_stream, name: scored-results-stream, in: region, at: [3, 2]}
+    - {tf: aws_s3_bucket, name: scored-results, in: region, at: [3, 3]}
+    - {tf: aws_quicksight_dashboard, name: fraud-reports, in: group:optional, at: [1, 1]}
   actors: [client]
   flows:
-    - {from: transactions-dataset, to: fraud-notebook, label: training data}
-    - {from: fraud-notebook, to: rcf-model, label: RCF training job}
-    - {from: fraud-notebook, to: xgboost-model, label: XGBoost training job}
-    - {from: rcf-model, to: rcf-endpoint, label: deploy}
-    - {from: xgboost-model, to: xgboost-endpoint, label: deploy}
+    - {from: model-and-data, to: rcf-endpoint, label: model and data}
+    - {from: model-and-data, to: xgboost-endpoint, label: model and data}
     - {from: client, to: fraud-api, label: POST transaction, step: 1}
     - {from: fraud-api, to: score-transaction-fn, step: 2}
     - {from: score-transaction-fn, to: rcf-endpoint, label: anomaly score, step: 3}
     - {from: score-transaction-fn, to: xgboost-endpoint, label: fraud probability, step: 4}
     - {from: score-transaction-fn, to: scored-results-stream, label: PutRecord, step: 5}
     - {from: scored-results-stream, to: scored-results, label: buffered delivery, step: 6}
-
+    - {from: scored-results, to: fraud-reports, label: optional reporting}
 - slug: llm-fine-tuning-sagemaker-jumpstart
   title: LLM fine-tuning and hosting with SageMaker JumpStart
   category: ml
@@ -571,37 +653,73 @@
   category: ml
   tags: [multi-tenant, saas, generative ai gateway, bedrock, cost allocation, cognito]
   source: https://aws.amazon.com/blogs/machine-learning/build-a-multi-tenant-generative-ai-environment-for-your-enterprise-on-aws/
-  description: A central API Gateway and Lambda gateway authenticates tenants with Cognito, looks up tenant configuration in DynamoDB and routes requests to Bedrock models with a guardrail and tenant-scoped knowledge base. Invocation logs and usage records land in S3 and are queried with Athena to allocate cost and enforce quotas per tenant.
+  description: A shared generative AI environment exposes one HTTPS endpoint in front of an orchestrator and a playground UI; the orchestrator combines Bedrock and SageMaker models, application components (agent, prompt catalog, prompt-chaining flow, hybrid-search knowledge base) and responsible AI components (guardrail, model monitoring, human review, model evaluation). Core services provide logging, metering and auditing, a model registry for onboarding, tenant onboarding in DynamoDB and authentication and authorization, while each tenant keeps its own API layer, business logic, cache, vector store, data sources and data pipelines and calls the endpoint with a tenant JWT.
   containers:
     - region: us-east-1
-      groups: [{label: gateway}, {label: tenant-data}, {label: observability}]
+      account_at: [1, 1, 2, 1]
+      groups:
+        - {label: model-components, at: [1, 1]}
+        - {label: application-components, at: [1, 2]}
+        - {label: responsible-ai, at: [1, 3]}
+        - {label: core-services, at: [2, 1, 1, 3]}
+        - {label: tenant, at: [1, 6, 2, 1]}
   elements:
-    - {tf: aws_cognito_user_pool, name: tenant-users, in: group:gateway}
-    - {tf: aws_api_gateway_rest_api, name: genai-gateway-api, in: group:gateway}
-    - {tf: aws_lambda_function, name: tenant-router-fn, in: group:gateway}
-    - {tf: aws_dynamodb_table, name: tenant-config, in: group:gateway}
-    - {tf: aws_bedrock_guardrail, name: tenant-guardrail, in: group:gateway}
-    - {tf: aws_bedrockagent_knowledge_base, name: tenant-a-kb, in: group:tenant-data}
-    - {tf: aws_opensearchserverless_collection, name: tenant-vectors, in: group:tenant-data}
-    - {tf: aws_s3_bucket, name: tenant-documents, in: group:tenant-data}
-    - {tf: aws_dynamodb_table, name: usage-metering, in: group:observability}
-    - {tf: aws_cloudwatch_log_group, name: model-invocation-logs, in: group:observability}
-    - {tf: aws_s3_bucket, name: invocation-log-archive, in: group:observability}
-    - {tf: aws_athena_workgroup, name: cost-allocation, in: group:observability}
-  actors: [users]
+    - {tf: aws_bedrock_custom_model, name: custom-models, in: group:model-components, at: [1, 1]}
+    - {tf: aws_sagemaker_endpoint, name: sagemaker-models, in: group:model-components, at: [1, 2]}
+    - {tf: aws_bedrockagent_agent, name: agent, in: group:application-components, at: [1, 1]}
+    - {tf: aws_bedrockagent_prompt, name: prompt-catalog, in: group:application-components, at: [1, 2]}
+    - {tf: aws_bedrockagent_flow, name: prompt-chaining, in: group:application-components, at: [2, 1]}
+    - {tf: aws_bedrockagent_knowledge_base, name: tenant-a-kb, in: group:application-components, at: [2, 2]}
+    - {tf: aws_bedrock_guardrail, name: tenant-guardrail, in: group:responsible-ai, at: [1, 1]}
+    - {tf: aws_sagemaker_monitoring_schedule, name: model-monitoring, in: group:responsible-ai, at: [1, 2]}
+    - {tf: aws_sagemaker_flow_definition, name: human-in-the-loop, in: group:responsible-ai, at: [2, 1]}
+    - {tf: aws_bedrock_evaluation_job, name: model-evaluation, in: group:responsible-ai, at: [2, 2]}
+    - {tf: aws_cloudwatch_log_group, name: model-invocation-logs, in: group:core-services, at: [1, 1]}
+    - {tf: aws_dynamodb_table, name: usage-metering, in: group:core-services, at: [1, 2]}
+    - {tf: aws_s3_bucket, name: invocation-log-archive, in: group:core-services, at: [1, 3]}
+    - {tf: aws_athena_workgroup, name: cost-allocation, in: group:core-services, at: [1, 4]}
+    - {tf: aws_sagemaker_model_package_group, name: model-registry, in: group:core-services, at: [2, 1]}
+    - {tf: aws_dynamodb_table, name: tenant-config, in: group:core-services, at: [2, 2]}
+    - {tf: aws_cognito_user_pool, name: tenant-users, in: group:core-services, at: [2, 3]}
+    - {tf: aws_verifiedpermissions_policy_store, name: authorization, in: group:core-services, at: [2, 4]}
+    - {tf: aws_lambda_function, name: orchestrator, in: region, at: [1, 4]}
+    - {tf: aws_amplify_app, name: playground-ui, in: region, at: [2, 4]}
+    - {tf: aws_api_gateway_rest_api, name: genai-gateway-api, in: region, at: [1, 5, 2, 1]}
+    - {tf: aws_api_gateway_rest_api, name: tenant-api-layer, in: group:tenant, at: [1, 1, 1, 2]}
+    - {tf: aws_lambda_function, name: tenant-business-logic, in: group:tenant, at: [2, 1]}
+    - {tf: aws_elasticache_serverless_cache, name: application-cache, in: group:tenant, at: [2, 2]}
+    - {tf: aws_opensearchserverless_collection, name: tenant-vectors, in: group:tenant, at: [3, 1]}
+    - {tf: aws_s3_bucket, name: tenant-documents, in: group:tenant, at: [3, 2]}
+    - {tf: aws_glue_job, name: data-pipelines, in: group:tenant, at: [4, 1]}
+  actors: [{type: user, name: Admin, at: [1, 2]}]
   flows:
-    - {from: users, to: genai-gateway-api, label: HTTPS with tenant JWT, step: 1}
-    - {from: genai-gateway-api, to: tenant-users, label: authorizer}
-    - {from: genai-gateway-api, to: tenant-router-fn, step: 2}
-    - {from: tenant-router-fn, to: tenant-config, label: model, quota and KB per tenant, step: 3}
-    - {from: tenant-router-fn, to: tenant-guardrail, label: InvokeModel with guardrail, step: 4}
-    - {from: tenant-router-fn, to: tenant-a-kb, label: Retrieve with tenant metadata filter, step: 5}
-    - {from: tenant-a-kb, to: tenant-vectors, label: vector index}
-    - {from: tenant-documents, to: tenant-a-kb, link: aws_bedrockagent_data_source}
-    - {from: tenant-router-fn, to: usage-metering, label: tokens per tenant, step: 6}
-    - {from: tenant-guardrail, to: model-invocation-logs, label: invocation logging}
+    - {from: Admin, to: genai-gateway-api, label: HTTPS, step: 1}
+    - {from: genai-gateway-api, to: orchestrator, step: 2}
+    - {from: genai-gateway-api, to: playground-ui}
+    - {from: genai-gateway-api, to: tenant-users, label: authentication}
+    - {from: genai-gateway-api, to: authorization, label: authorization}
+    - {from: orchestrator, to: tenant-config, label: model, quota and KB per tenant, step: 3}
+    - {from: orchestrator, to: prompt-catalog, label: prompt lookup, step: 4}
+    - {from: orchestrator, to: agent}
+    - {from: orchestrator, to: prompt-chaining}
+    - {from: orchestrator, to: tenant-a-kb, label: hybrid search with tenant metadata filter, step: 5}
+    - {from: orchestrator, to: tenant-guardrail, label: apply guardrail, step: 6}
+    - {from: orchestrator, to: custom-models, label: InvokeModel, step: 7}
+    - {from: orchestrator, to: sagemaker-models, label: InvokeEndpoint}
+    - {from: model-registry, to: sagemaker-models, label: model onboarding}
+    - {from: model-monitoring, to: sagemaker-models, label: monitor}
+    - {from: model-evaluation, to: custom-models, label: evaluate}
+    - {from: human-in-the-loop, to: orchestrator, label: human review of flagged responses}
+    - {from: orchestrator, to: usage-metering, label: tokens per tenant, step: 8}
+    - {from: custom-models, to: model-invocation-logs, label: invocation logging}
     - {from: model-invocation-logs, to: invocation-log-archive, label: S3 delivery}
     - {from: cost-allocation, to: invocation-log-archive, label: SQL over logs}
+    - {from: tenant-api-layer, to: tenant-business-logic}
+    - {from: tenant-business-logic, to: application-cache, label: application caching}
+    - {from: tenant-business-logic, to: genai-gateway-api, label: HTTPS with tenant JWT}
+    - {from: tenant-a-kb, to: tenant-vectors, label: vector index}
+    - {from: tenant-documents, to: tenant-a-kb, link: aws_bedrockagent_data_source}
+    - {from: data-pipelines, to: tenant-documents, label: prepare tenant data}
 
 - slug: step-functions-bedrock-prompt-chaining
   title: Agentic prompt chaining with Step Functions and Amazon Bedrock
@@ -669,23 +787,26 @@
   category: ml
   tags: [voice assistant, transcribe streaming, bedrock, polly, amplify, cognito]
   source: https://aws.amazon.com/blogs/machine-learning/build-a-serverless-voice-based-contextual-chatbot-for-people-with-disabilities-using-amazon-bedrock/
-  description: An Amplify-hosted web application obtains temporary credentials from a Cognito identity pool and streams microphone audio directly to Amazon Transcribe streaming. The transcript is sent to a Bedrock model with conversation context and the reply is synthesized by Amazon Polly and played back; conversation history can be persisted in DynamoDB.
+  description: A client browser loads the Amplify-hosted web application, signs in with a Cognito user pool and exchanges the token at a Cognito identity pool for temporary credentials of an IAM role, then streams microphone audio directly to Amazon Transcribe streaming. The transcript is sent to a Bedrock model with conversation context and the reply is synthesized by Amazon Polly and played back in the browser.
   containers:
     - region: us-east-1
+      account_at: [1, 3, 2, 1]
+      groups: [{label: authentication, at: [1, 1]}]
   elements:
-    - {tf: aws_amplify_app, name: voice-assistant-web, in: region}
-    - {tf: aws_cognito_user_pool, name: assistant-users, in: region}
-    - {tf: aws_cognito_identity_pool, name: assistant-identity, in: region}
-    - {tf: aws_transcribe_vocabulary, name: domain-vocabulary, in: region}
-    - {tf: aws_bedrock_guardrail, name: assistant-guardrail, in: region}
-    - {tf: aws_dynamodb_table, name: conversation-history, in: region}
-    - {tf: aws_s3_bucket, name: synthesized-audio, in: region}
-  actors: [users]
+    - {tf: aws_amplify_app, name: voice-assistant-web, in: group:authentication, at: [1, 1]}
+    - {tf: aws_cognito_user_pool, name: assistant-users, in: group:authentication, at: [1, 2]}
+    - {tf: aws_cognito_identity_pool, name: assistant-identity, in: group:authentication, at: [1, 3]}
+    - {tf: aws_iam_role, name: assistant-role, in: group:authentication, at: [1, 4]}
+    - {tf: aws_bedrock_inference_profile, name: assistant-model, in: region, at: [2, 1]}
+    - {tf: aws_s3_bucket, name: synthesized-audio, in: region, at: [3, 1]}
+    - {tf: aws_transcribe_vocabulary, name: domain-vocabulary, in: region, at: [4, 1]}
+  actors: [{type: user, at: [2, 1]}, {type: client, at: [2, 2]}]
   flows:
-    - {from: users, to: voice-assistant-web, label: speak into browser, step: 1}
-    - {from: voice-assistant-web, to: assistant-users, label: sign in, step: 2}
+    - {from: user, to: client, label: speak into browser, step: 1}
+    - {from: client, to: voice-assistant-web, label: load web app}
+    - {from: client, to: assistant-users, label: sign in, step: 2}
     - {from: assistant-users, to: assistant-identity, label: identity token exchange, step: 3}
-    - {from: voice-assistant-web, to: domain-vocabulary, label: StartStreamTranscription over WebSocket, step: 4}
-    - {from: voice-assistant-web, to: assistant-guardrail, label: InvokeModel with transcript and history, step: 5}
-    - {from: voice-assistant-web, to: synthesized-audio, label: Polly SynthesizeSpeech output, step: 6}
-    - {from: voice-assistant-web, to: conversation-history, label: persist turns}
+    - {from: assistant-identity, to: assistant-role, label: temporary credentials}
+    - {from: client, to: domain-vocabulary, label: StartStreamTranscription over WebSocket, step: 4}
+    - {from: client, to: assistant-model, label: InvokeModel with transcript and history, step: 5}
+    - {from: client, to: synthesized-audio, label: Polly SynthesizeSpeech output, step: 6}

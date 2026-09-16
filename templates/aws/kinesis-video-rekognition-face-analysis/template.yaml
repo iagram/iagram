@@ -9,35 +9,28 @@ tags:
 - sns
 image: https://d2908q01vomqb2.cloudfront.net/f1f836cb4ea6efb2a0b1b99f41ad8b103eff4b59/2018/04/21/FacialRekognition1.png
 source: https://aws.amazon.com/blogs/machine-learning/easily-perform-facial-analysis-on-live-feeds-by-creating-a-serverless-video-analytics-environment-with-amazon-rekognition-video-and-amazon-kinesis-video-streams/
-description: A camera streams live video into a Kinesis video stream, where a Rekognition Video stream processor compares detected faces against a face collection. Match results are written to a Kinesis
-  data stream, a Lambda consumer formats them, and Amazon SNS delivers email notifications.
+description: A webcam streams live video into a Kinesis video stream, where a Rekognition Video stream processor compares detected faces against a face collection. Match results are written to a Kinesis
+  data stream, a Lambda consumer formats them, and Amazon SNS delivers a text notification to the end user's phone.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-video-ingestion, type: common.group, name: video ingestion, parent: reg-us-east-1, at: [1, 1]}
-- {id: grp-analysis, type: common.group, name: analysis, parent: reg-us-east-1, at: [1, 2]}
-- {id: grp-notification, type: common.group, name: notification, parent: reg-us-east-1, at: [2, 1, 1, 2]}
-- {id: device, type: common.device, name: device, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [2, 1]}
-- {id: camera-feed, type: aws.res.aws_kinesis_video_stream, name: camera-feed, parent: grp-video-ingestion, props: {name: changeme}, at: [1, 1]}
-- {id: known-faces, type: aws.res.aws_rekognition_collection, name: known-faces, parent: grp-analysis, props: {collection_id: changeme}, at: [1, 2]}
-- {id: face-search-processor, type: aws.res.aws_rekognition_stream_processor, name: face-search-processor, parent: grp-analysis, props: {name: changeme, role_arn: changeme}, at: [1, 1]}
-- {id: face-matches, type: aws.res.aws_kinesis_stream, name: face-matches, parent: grp-analysis, props: {name: changeme}, at: [2, 1]}
-- {id: match-handler, type: aws.lambda_function, name: match-handler, parent: grp-notification, at: [1, 2]}
-- {id: match-alerts, type: aws.res.aws_sns_topic, name: match-alerts, parent: grp-notification, at: [1, 1]}
+- {id: webcam, type: common.device, name: webcam, at: [1, 1]}
+- {id: text-notification, type: common.mobile, name: text notification, at: [2, 1]}
+- {id: camera-feed, type: aws.res.aws_kinesis_video_stream, name: camera-feed, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
+- {id: face-search-processor, type: aws.res.aws_rekognition_stream_processor, name: face-search-processor, parent: reg-us-east-1, props: {name: changeme, role_arn: changeme}, at: [1, 3]}
+- {id: known-faces, type: aws.res.aws_rekognition_collection, name: known-faces, parent: reg-us-east-1, props: {collection_id: changeme}, at: [1, 4]}
+- {id: face-matches, type: aws.res.aws_kinesis_stream, name: face-matches, parent: reg-us-east-1, props: {name: changeme}, at: [2, 3]}
+- {id: match-handler, type: aws.lambda_function, name: match-handler, parent: reg-us-east-1, at: [2, 2]}
+- {id: match-alerts, type: aws.res.aws_sns_topic, name: match-alerts, parent: reg-us-east-1, at: [2, 1]}
 edges:
-- {from: device, to: camera-feed, label: KVS producer SDK, step: '1'}
+- {from: webcam, to: camera-feed, label: camera-captured video, step: '1'}
 - {from: camera-feed, to: face-search-processor, label: video fragments, step: '2'}
-- {from: known-faces, to: face-search-processor, label: face collection, step: '3'}
-- {from: face-search-processor, to: face-matches, label: match records, step: '4'}
-- {from: face-matches, to: match-handler, step: '5', link: aws_lambda_event_source_mapping}
-- {from: match-handler, to: match-alerts, label: Publish, step: '6'}
-- {from: match-alerts, to: users, label: email, step: '7'}
+- {from: known-faces, to: face-search-processor, label: face collection}
+- {from: face-search-processor, to: face-matches, label: match records}
+- {from: face-matches, to: match-handler, link: aws_lambda_event_source_mapping}
+- {from: match-handler, to: match-alerts, label: Publish}
+- {from: match-alerts, to: text-notification, label: face match notification, step: '3'}
 steps:
-- {n: '1', text: 'device → camera-feed: KVS producer SDK'}
+- {n: '1', text: 'webcam → camera-feed: camera-captured video'}
 - {n: '2', text: 'camera-feed → face-search-processor: video fragments'}
-- {n: '3', text: 'known-faces → face-search-processor: face collection'}
-- {n: '4', text: 'face-search-processor → face-matches: match records'}
-- {n: '5', text: face-matches → match-handler}
-- {n: '6', text: 'match-handler → match-alerts: Publish'}
-- {n: '7', text: 'match-alerts → users: email'}
+- {n: '3', text: 'match-alerts → text notification: face match notification'}

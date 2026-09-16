@@ -11,59 +11,108 @@ tags:
 - eventbridge
 image: https://docs.aws.amazon.com/images/solutions/unified-commerce-on-aws/images/unified-commerce-on-aws-1.png
 source: https://docs.aws.amazon.com/solutions/unified-commerce-on-aws/
-description: Guidance for Unified Commerce on AWS applies MACH principles so web, mobile and store frontends call one AWS AppSync aggregation API that fronts differentiating microservices on DynamoDB and
-  Neptune, SaaS commerce applications and COTS applications on EC2 and RDS. Every microservice publishes events to EventBridge custom buses; decoupled consumers stream them to an S3 data platform queried
-  with Athena and feed SageMaker forecasts and real-time personalization back to the engagement channels.
+description: Guidance for Unified Commerce on AWS applies MACH principles so web, mobile, store and in-game channels reach frontend experience apps (CloudFront, S3, Cognito, WAF), serverless web and POS
+  apps on Lambda and DynamoDB, and one AWS AppSync aggregation API that fronts product, pricing and customer microservices on DynamoDB and Neptune, Internet SaaS applications, COTS order management on EC2
+  and RDS in a VPC, and enterprise WMS/ERP systems. Every service publishes events to an EventBridge custom bus; consumers stream them to an S3 data platform catalogued as a data lake and queried with Redshift
+  and Athena, drive Pinpoint customer engagement, and feed SageMaker Canvas and SageMaker forecasts back to the channels.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 3]}
-- {id: acct-prod, type: aws.account, name: prod, at: [2, 1, 1, 2]}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [3, 4]}
+- {id: acct-prod, type: aws.account, name: prod, at: [2, 1, 1, 3]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-experience-api, type: common.group, name: experience-api, parent: reg-us-east-1, at: [1, 2]}
-- {id: grp-microservices, type: common.group, name: microservices, parent: reg-us-east-1, at: [2, 2]}
-- {id: grp-cots-applications, type: common.group, name: cots-applications, parent: reg-us-east-1, at: [2, 1]}
-- {id: grp-data-platform, type: common.group, name: data-platform, parent: reg-us-east-1, at: [4, 1, 1, 2]}
+- {id: grp-frontend-experience-apps, type: common.group, name: frontend-experience-apps, parent: reg-us-east-1, at: [1, 1]}
+- {id: grp-web-app, type: common.group, name: web-app, parent: reg-us-east-1, at: [1, 2]}
+- {id: grp-pos-app, type: common.group, name: pos-app, parent: reg-us-east-1, at: [1, 3]}
+- {id: grp-aggregation-api, type: common.group, name: aggregation-api, parent: reg-us-east-1, at: [2, 2]}
+- {id: grp-microservices, type: common.group, name: microservices, parent: reg-us-east-1, at: [3, 2, 1, 2]}
+- {id: grp-personalization-marketing, type: common.group, name: personalization-marketing, parent: reg-us-east-1, at: [4, 3]}
+- {id: grp-data-platform, type: common.group, name: data-platform, parent: reg-us-east-1, at: [5, 1, 1, 2]}
+- {id: grp-ai-ml, type: common.group, name: ai-ml, parent: reg-us-east-1, at: [5, 3]}
+- {id: vpc-cots-applications, type: aws.vpc, name: cots-applications, parent: reg-us-east-1, props: {cidr: 10.10.0.0/16}, at: [3, 1]}
+- {id: az-cots-applications-a, type: aws.availability_zone, name: a, parent: vpc-cots-applications, props: {zone: a}, at: [1, 1]}
+- {id: sub-cots-private-a, type: aws.subnet, name: cots-private-a, parent: az-cots-applications-a, props: {cidr: 10.10.1.0/24, az: a, public: false}, at: [1, 1]}
 - {id: users, type: common.users, name: users, at: [1, 1]}
 - {id: mobile, type: common.mobile, name: mobile, at: [1, 2]}
-- {id: saas, type: common.saas, name: saas, at: [1, 3]}
-- {id: storefront-cdn, type: aws.cloudfront_distribution, name: storefront-cdn, parent: reg-us-east-1, at: [1, 1]}
-- {id: shopper-identity, type: aws.res.aws_cognito_user_pool, name: shopper-identity, parent: grp-experience-api, props: {name: changeme}, at: [1, 1]}
-- {id: commerce-aggregation-api, type: aws.res.aws_appsync_graphql_api, name: commerce-aggregation-api, parent: grp-experience-api, props: {authentication_type: changeme, name: changeme}, at: [1, 2]}
-- {id: cart-service, type: aws.lambda_function, name: cart-service, parent: grp-microservices, at: [1, 1]}
-- {id: cart-and-orders, type: aws.dynamodb_table, name: cart-and-orders, parent: grp-microservices, at: [1, 2]}
-- {id: product-graph, type: aws.res.aws_neptune_cluster, name: product-graph, parent: grp-microservices, at: [1, 3]}
-- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}, at: [3, 1]}
-- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}, at: [2, 1]}
-- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: oms-cots-app, type: aws.ec2_instance, name: oms-cots-app, parent: sub-reg-us-east-1-a, at: [1, 1]}
-- {id: oms-database, type: aws.rds_instance, name: oms-database, parent: sub-reg-us-east-1-a, at: [1, 2]}
-- {id: commerce-events, type: aws.res.aws_cloudwatch_event_bus, name: commerce-events, parent: reg-us-east-1, props: {name: changeme}, at: [3, 2]}
+- {id: store-pos, type: common.client, name: store-pos, at: [1, 3]}
+- {id: saas, type: common.saas, name: saas, at: [2, 4]}
+- {id: storefront-cdn, type: aws.cloudfront_distribution, name: storefront-cdn, parent: grp-frontend-experience-apps, at: [1, 1]}
+- {id: storefront-assets, type: aws.s3_bucket, name: storefront-assets, parent: grp-frontend-experience-apps, at: [1, 2]}
+- {id: shopper-identity, type: aws.res.aws_cognito_user_pool, name: shopper-identity, parent: grp-frontend-experience-apps, props: {name: changeme}, at: [1, 3]}
+- id: storefront-waf
+  type: aws.res.aws_wafv2_web_acl
+  name: storefront-waf
+  parent: grp-frontend-experience-apps
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+  at:
+  - 1
+  - 4
+- {id: web-app-function, type: aws.lambda_function, name: web-app-function, parent: grp-web-app, at: [1, 1]}
+- {id: web-app-table, type: aws.dynamodb_table, name: web-app-table, parent: grp-web-app, at: [1, 2]}
+- {id: pos-app-function, type: aws.lambda_function, name: pos-app-function, parent: grp-pos-app, at: [1, 1]}
+- {id: pos-app-table, type: aws.dynamodb_table, name: pos-app-table, parent: grp-pos-app, at: [1, 2]}
+- {id: commerce-aggregation-api, type: aws.res.aws_appsync_graphql_api, name: commerce-aggregation-api, parent: grp-aggregation-api, props: {authentication_type: changeme, name: changeme}, at: [1, 1]}
+- {id: product-service, type: aws.res.aws_ecs_task_definition, name: product-service, parent: grp-microservices, props: {container_definitions: changeme, family: changeme}, at: [1, 1]}
+- {id: product-table, type: aws.dynamodb_table, name: product-table, parent: grp-microservices, at: [1, 2]}
+- {id: pricing-service, type: aws.res.aws_ecs_task_definition, name: pricing-service, parent: grp-microservices, props: {container_definitions: changeme, family: changeme}, at: [1, 3]}
+- {id: pricing-table, type: aws.dynamodb_table, name: pricing-table, parent: grp-microservices, at: [1, 4]}
+- {id: customer-service, type: aws.res.aws_ecs_task_definition, name: customer-service, parent: grp-microservices, props: {container_definitions: changeme, family: changeme}, at: [1, 5]}
+- {id: customer-graph, type: aws.res.aws_neptune_cluster, name: customer-graph, parent: grp-microservices, at: [1, 6]}
+- {id: oms-cots-app, type: aws.ec2_instance, name: oms-cots-app, parent: sub-cots-private-a, at: [1, 1]}
+- {id: oms-database, type: aws.rds_instance, name: oms-database, parent: sub-cots-private-a, at: [1, 2]}
+- {id: commerce-events, type: aws.res.aws_cloudwatch_event_bus, name: commerce-events, parent: reg-us-east-1, props: {name: changeme}, at: [4, 2]}
 - {id: commerce-data-lake, type: aws.s3_bucket, name: commerce-data-lake, parent: grp-data-platform, at: [1, 1]}
-- {id: commerce-analytics, type: aws.res.aws_athena_workgroup, name: commerce-analytics, parent: grp-data-platform, props: {name: changeme}, at: [1, 2]}
-- {id: demand-forecast-endpoint, type: aws.res.aws_sagemaker_endpoint, name: demand-forecast-endpoint, parent: grp-data-platform, props: {endpoint_config_name: changeme}, at: [1, 3]}
+- {id: data-lake-catalog, type: aws.res.aws_glue_catalog_database, name: data-lake-catalog, parent: grp-data-platform, props: {name: changeme}, at: [1, 2]}
+- {id: commerce-warehouse, type: aws.res.aws_redshift_cluster, name: commerce-warehouse, parent: grp-data-platform, props: {cluster_identifier: changeme, node_type: changeme}, at: [1, 3]}
+- {id: commerce-analytics, type: aws.res.aws_athena_workgroup, name: commerce-analytics, parent: grp-data-platform, props: {name: changeme}, at: [1, 4]}
+- {id: customer-engagement, type: aws.res.aws_pinpoint_app, name: customer-engagement, parent: grp-personalization-marketing, at: [1, 1]}
+- id: sagemaker-canvas
+  type: aws.res.aws_sagemaker_domain
+  name: sagemaker-canvas
+  parent: grp-ai-ml
+  props: {auth_mode: changeme, default_user_settings: {}, domain_name: changeme, subnet_ids: [], vpc_id: changeme}
+  at:
+  - 1
+  - 1
+- {id: demand-forecast-endpoint, type: aws.res.aws_sagemaker_endpoint, name: demand-forecast-endpoint, parent: grp-ai-ml, props: {endpoint_config_name: changeme}, at: [1, 2]}
+- {id: az-vpc-cots-applications-b, type: aws.availability_zone, name: b, parent: vpc-cots-applications, props: {zone: b}, at: [2, 1]}
+- {id: sub-vpc-cots-applications-b, type: aws.subnet, name: private-b, parent: az-vpc-cots-applications-b, props: {cidr: 10.10.251.0/24, az: b, public: false}}
 edges:
-- {from: users, to: storefront-cdn, label: HTTPS storefront, step: '1'}
-- {from: storefront-cdn, to: commerce-aggregation-api, label: GraphQL, step: '2'}
-- {from: mobile, to: commerce-aggregation-api, label: GraphQL}
+- {from: users, to: storefront-cdn, label: web storefront, step: '1'}
+- {from: mobile, to: storefront-cdn, label: mobile app, step: '1'}
+- {from: store-pos, to: pos-app-function, label: in-store and in-game sales, step: '1'}
+- {from: storefront-waf, to: storefront-cdn, label: wafv2 web acl association}
+- {from: storefront-cdn, to: storefront-assets, label: static assets}
+- {from: storefront-cdn, to: web-app-function, label: web app}
+- {from: web-app-function, to: web-app-table, label: session and cart state}
+- {from: pos-app-function, to: pos-app-table, label: store transactions}
+- {from: web-app-function, to: commerce-aggregation-api, label: GraphQL, step: '1'}
+- {from: pos-app-function, to: commerce-aggregation-api, label: GraphQL, step: '1'}
 - {from: commerce-aggregation-api, to: shopper-identity, label: JWT validation}
-- {from: commerce-aggregation-api, to: cart-service, label: resolver, step: '3'}
-- {from: cart-service, to: cart-and-orders, label: PutItem}
-- {from: commerce-aggregation-api, to: product-graph, label: product relationships}
-- {from: commerce-aggregation-api, to: saas, label: SaaS commerce APIs, step: '4'}
-- {from: commerce-aggregation-api, to: oms-cots-app, label: order management, step: '5'}
+- {from: commerce-aggregation-api, to: product-service, label: resolver, step: '2'}
+- {from: commerce-aggregation-api, to: pricing-service, label: resolver, step: '2'}
+- {from: commerce-aggregation-api, to: customer-service, label: resolver, step: '2'}
+- {from: product-service, to: product-table, label: product catalog}
+- {from: pricing-service, to: pricing-table, label: prices and promotions}
+- {from: customer-service, to: customer-graph, label: customer relationships}
+- {from: commerce-aggregation-api, to: saas, label: service desk and content management APIs, step: '3'}
+- {from: commerce-aggregation-api, to: oms-cots-app, label: order management, step: '4'}
 - {from: oms-cots-app, to: oms-database, label: SQL}
-- {from: commerce-aggregation-api, to: dc-on-premises, label: ERP and WMS integration}
-- {from: cart-service, to: commerce-events, label: OrderPlaced event, step: '6'}
+- {from: commerce-aggregation-api, to: dc-on-premises, label: warehouse management and ERP integration, step: '5'}
+- {from: product-service, to: commerce-events, label: domain events, step: '6'}
+- {from: oms-cots-app, to: commerce-events, label: OrderPlaced event, step: '6'}
 - {from: commerce-events, to: commerce-data-lake, label: event archive, step: '7'}
+- {from: commerce-data-lake, to: data-lake-catalog, label: metadata}
+- {from: commerce-data-lake, to: commerce-warehouse, label: COPY}
 - {from: commerce-data-lake, to: commerce-analytics, label: SQL over S3}
-- {from: commerce-data-lake, to: demand-forecast-endpoint, label: training data, step: '8'}
+- {from: commerce-events, to: customer-engagement, label: engagement events, step: '8'}
+- {from: commerce-data-lake, to: sagemaker-canvas, label: training data, step: '9'}
+- {from: sagemaker-canvas, to: demand-forecast-endpoint, label: deploy forecast model}
 steps:
-- {n: '1', text: 'users → storefront-cdn: HTTPS storefront'}
-- {n: '2', text: 'storefront-cdn → commerce-aggregation-api: GraphQL'}
-- {n: '3', text: 'commerce-aggregation-api → cart-service: resolver'}
-- {n: '4', text: 'commerce-aggregation-api → saas: SaaS commerce APIs'}
-- {n: '5', text: 'commerce-aggregation-api → oms-cots-app: order management'}
-- {n: '6', text: 'cart-service → commerce-events: OrderPlaced event'}
+- {n: '1', text: 'users → storefront-cdn: web storefront'}
+- {n: '2', text: 'commerce-aggregation-api → product-service: resolver'}
+- {n: '3', text: 'commerce-aggregation-api → saas: service desk and content management APIs'}
+- {n: '4', text: 'commerce-aggregation-api → oms-cots-app: order management'}
+- {n: '5', text: 'commerce-aggregation-api → datacenter: warehouse management and ERP integration'}
+- {n: '6', text: 'product-service → commerce-events: domain events'}
 - {n: '7', text: 'commerce-events → commerce-data-lake: event archive'}
-- {n: '8', text: 'commerce-data-lake → demand-forecast-endpoint: training data'}
+- {n: '8', text: 'commerce-events → customer-engagement: engagement events'}
+- {n: '9', text: 'commerce-data-lake → sagemaker-canvas: training data'}

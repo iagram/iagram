@@ -10,55 +10,112 @@ tags:
 - routing policies
 image: https://learn.microsoft.com/en-us/azure/virtual-wan/media/routing-policies/two-secured-hubs-diagram.png
 source: https://learn.microsoft.com/en-us/azure/virtual-wan/how-to-routing-policies
-description: Azure Firewall is deployed inside a Virtual WAN hub and routing intent applies an internet traffic routing policy and a private traffic routing policy, so all VNet-to-VNet, branch-to-VNet,
-  branch-to-branch and internet-bound flows are steered through the firewall without user-defined routes in the spokes. Branches connect over site-to-site VPN and ExpressRoute, and Azure Firewall Manager
-  governs the firewall policy.
+description: Azure Firewall is deployed inside two Virtual WAN hubs and routing intent applies an internet traffic routing policy and a private traffic routing policy on each, so all VNet-to-VNet, branch-to-VNet,
+  branch-to-branch, inter-hub and internet-bound flows are steered through the firewalls without user-defined routes in the spokes. Each secured hub serves two spoke virtual networks, a VPN/SD-WAN site,
+  point-to-site users and an ExpressRoute circuit, the hubs are interconnected over the Microsoft global network, and Azure Firewall Manager governs the shared firewall policy.
 nodes:
-- {id: dc-branch, type: common.datacenter, name: branch, at: [3, 1]}
-- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1]}
+- {id: dc-vpn-sdwan-site-1, type: common.datacenter, name: vpn-sdwan-site-1, at: [3, 1]}
+- {id: dc-vpn-sdwan-site-2, type: common.datacenter, name: vpn-sdwan-site-2, at: [3, 3]}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1, 1, 4]}
 - {id: rg-rg-vwan-secured, type: azure.resource_group, name: rg-vwan-secured, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
-- {id: sub-landing-zone-prod, type: azure.subscription, name: landing-zone-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1]}
+- {id: sub-landing-zone-prod, type: azure.subscription, name: landing-zone-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1, 1, 4]}
 - {id: rg-rg-spoke-a, type: azure.resource_group, name: rg-spoke-a, parent: sub-landing-zone-prod, props: {location: westeurope}, at: [1, 1]}
 - {id: vpc-spoke-a, type: azure.vnet, name: spoke-a, parent: rg-rg-spoke-a, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
 - {id: sub-snet-a, type: azure.subnet, name: snet-a, parent: vpc-spoke-a, props: {cidr: 10.1.0.0/24}, at: [1, 1]}
 - {id: rg-rg-spoke-b, type: azure.resource_group, name: rg-spoke-b, parent: sub-landing-zone-prod, props: {location: westeurope}, at: [1, 2]}
 - {id: vpc-spoke-b, type: azure.vnet, name: spoke-b, parent: rg-rg-spoke-b, props: {cidr: 10.2.0.0/16}, at: [1, 1]}
 - {id: sub-snet-b, type: azure.subnet, name: snet-b, parent: vpc-spoke-b, props: {cidr: 10.2.0.0/24}, at: [1, 1]}
-- {id: internet, type: common.internet, name: internet, at: [2, 2]}
-- {id: vwan-secured, type: azure.res.azurerm_virtual_wan, name: vwan-secured, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1, 1, 4]}
-- {id: vhub-secured, type: azure.res.azurerm_virtual_hub, name: vhub-secured, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1, 1, 2]}
-- {id: fw-vhub, type: azure.res.azurerm_firewall, name: fw-vhub, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [2, 3]}
-- {id: fwpol-global, type: azure.res.azurerm_firewall_policy, name: fwpol-global, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 4]}
-- {id: s2s-gw, type: azure.res.azurerm_vpn_gateway, name: s2s-gw, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_hub_id: changeme}, at: [3, 1]}
-- {id: vpn-site-branch, type: azure.res.azurerm_vpn_site, name: vpn-site-branch, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_wan_id: changeme}, at: [4, 1]}
-- {id: er-gw, type: azure.res.azurerm_express_route_gateway, name: er-gw, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, scale_units: 1, virtual_hub_id: changeme}, at: [3, 2]}
-- id: er-circuit-branch
-  type: azure.res.azurerm_express_route_circuit
-  name: er-circuit-branch
+- {id: rg-rg-spoke-c, type: azure.resource_group, name: rg-spoke-c, parent: sub-landing-zone-prod, props: {location: eastus}, at: [1, 3]}
+- {id: vpc-spoke-c, type: azure.vnet, name: spoke-c, parent: rg-rg-spoke-c, props: {cidr: 10.3.0.0/16}, at: [1, 1]}
+- {id: sub-snet-c, type: azure.subnet, name: snet-c, parent: vpc-spoke-c, props: {cidr: 10.3.0.0/24}, at: [1, 1]}
+- {id: rg-rg-spoke-d, type: azure.resource_group, name: rg-spoke-d, parent: sub-landing-zone-prod, props: {location: eastus}, at: [1, 4]}
+- {id: vpc-spoke-d, type: azure.vnet, name: spoke-d, parent: rg-rg-spoke-d, props: {cidr: 10.4.0.0/16}, at: [1, 1]}
+- {id: sub-snet-d, type: azure.subnet, name: snet-d, parent: vpc-spoke-d, props: {cidr: 10.4.0.0/24}, at: [1, 1]}
+- {id: p2s-user-1, type: common.users, name: p2s-user-1, at: [3, 2]}
+- {id: p2s-user-2, type: common.users, name: p2s-user-2, at: [3, 4]}
+- {id: internet, type: common.internet, name: internet, at: [2, 5]}
+- {id: vwan-secured, type: azure.res.azurerm_virtual_wan, name: vwan-secured, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1, 1, 8]}
+- {id: vhub-secured, type: azure.res.azurerm_virtual_hub, name: vhub-secured, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1, 1, 3]}
+- {id: fw-vhub, type: azure.res.azurerm_firewall, name: fw-vhub, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme},
+  at: [2, 4]}
+- {id: vhub-secured-2, type: azure.res.azurerm_virtual_hub, name: vhub-secured-2, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 5, 1,
+    3]}
+- {id: fw-vhub-2, type: azure.res.azurerm_firewall, name: fw-vhub-2, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme},
+  at: [2, 8]}
+- {id: s2s-gw, type: azure.res.azurerm_vpn_gateway, name: s2s-gw, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_hub_id: changeme}, at: [
+    3, 1]}
+- id: p2s-gw
+  type: azure.res.azurerm_point_to_site_vpn_gateway
+  name: p2s-gw
   parent: rg-rg-vwan-secured
-  at: [4, 2]
+  props: {connection_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, scale_unit: 1, virtual_hub_id: changeme, vpn_server_configuration_id: changeme}
+  at:
+  - 3
+  - 2
+- {id: er-gw, type: azure.res.azurerm_express_route_gateway, name: er-gw, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, scale_units: 1, virtual_hub_id: changeme},
+  at: [3, 3]}
+- {id: fwpol-global, type: azure.res.azurerm_firewall_policy, name: fwpol-global, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 4, 1,
+    5]}
+- {id: s2s-gw-2, type: azure.res.azurerm_vpn_gateway, name: s2s-gw-2, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, virtual_hub_id: changeme},
+  at: [3, 5]}
+- id: p2s-gw-2
+  type: azure.res.azurerm_point_to_site_vpn_gateway
+  name: p2s-gw-2
+  parent: rg-rg-vwan-secured
+  props: {connection_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme, scale_unit: 1, virtual_hub_id: changeme, vpn_server_configuration_id: changeme}
+  at:
+  - 3
+  - 6
+- {id: er-gw-2, type: azure.res.azurerm_express_route_gateway, name: er-gw-2, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme, scale_units: 1, virtual_hub_id: changeme},
+  at: [3, 7]}
+- id: er-circuit-1
+  type: azure.res.azurerm_express_route_circuit
+  name: er-circuit-1
+  parent: rg-rg-vwan-secured
   props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 4
+  - 3
+- id: er-circuit-2
+  type: azure.res.azurerm_express_route_circuit
+  name: er-circuit-2
+  parent: rg-rg-vwan-secured
+  props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
+  at:
+  - 4
+  - 7
 - {id: vm-a, type: azure.virtual_machine, name: vm-a, parent: sub-snet-a, at: [1, 1]}
 - {id: vm-b, type: azure.virtual_machine, name: vm-b, parent: sub-snet-b, at: [1, 1]}
-- {id: law-fw, type: azure.res.azurerm_log_analytics_workspace, name: law-fw, parent: rg-rg-vwan-secured, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 3]}
+- {id: vm-c, type: azure.virtual_machine, name: vm-c, parent: sub-snet-c, at: [1, 1]}
+- {id: vm-d, type: azure.virtual_machine, name: vm-d, parent: sub-snet-d, at: [1, 1]}
 edges:
 - {from: vwan-secured, to: vhub-secured, label: hub in WAN}
+- {from: vwan-secured, to: vhub-secured-2, label: hub in WAN}
 - {from: vhub-secured, to: vpc-spoke-a, label: VNet connection, link: azurerm_virtual_hub_connection}
 - {from: vhub-secured, to: vpc-spoke-b, label: VNet connection, link: azurerm_virtual_hub_connection}
-- {from: dc-branch, to: vpn-site-branch, label: IPsec}
-- {from: vpn-site-branch, to: s2s-gw, label: site-to-site VPN}
-- {from: dc-branch, to: er-circuit-branch, label: ExpressRoute private peering}
-- {from: er-circuit-branch, to: er-gw, label: ExpressRoute connection}
+- {from: vhub-secured-2, to: vpc-spoke-c, label: VNet connection, link: azurerm_virtual_hub_connection}
+- {from: vhub-secured-2, to: vpc-spoke-d, label: VNet connection, link: azurerm_virtual_hub_connection}
+- {from: vhub-secured, to: vhub-secured-2, label: hub-to-hub (Microsoft global network)}
+- {from: dc-vpn-sdwan-site-1, to: s2s-gw, label: site-to-site VPN / SD-WAN}
+- {from: dc-vpn-sdwan-site-1, to: er-circuit-1, label: ExpressRoute private peering}
+- {from: er-circuit-1, to: er-gw, label: ExpressRoute connection}
+- {from: p2s-user-1, to: p2s-gw, label: User VPN (point-to-site)}
+- {from: dc-vpn-sdwan-site-2, to: s2s-gw-2, label: site-to-site VPN / SD-WAN}
+- {from: dc-vpn-sdwan-site-2, to: er-circuit-2, label: ExpressRoute private peering}
+- {from: er-circuit-2, to: er-gw-2, label: ExpressRoute connection}
+- {from: p2s-user-2, to: p2s-gw-2, label: User VPN (point-to-site)}
 - {from: vm-a, to: fw-vhub, label: private traffic routing policy, step: '1'}
 - {from: fw-vhub, to: vm-b, label: inspected VNet-to-VNet, step: '2'}
 - {from: s2s-gw, to: fw-vhub, label: branch-to-VNet via firewall, step: '3'}
 - {from: vm-b, to: fw-vhub, label: internet traffic routing policy 0.0.0.0/0, step: '4'}
 - {from: fw-vhub, to: internet, label: SNAT egress, step: '5'}
+- {from: vm-a, to: vm-c, label: inter-hub VNet-to-VNet inspected by both hub firewalls, step: '6'}
 - {from: fwpol-global, to: fw-vhub, label: policy (Firewall Manager)}
-- {from: fw-vhub, to: law-fw, label: firewall logs}
+- {from: fwpol-global, to: fw-vhub-2, label: policy (Firewall Manager)}
 steps:
 - {n: '1', text: 'vm-a → fw-vhub: private traffic routing policy'}
 - {n: '2', text: 'fw-vhub → vm-b: inspected VNet-to-VNet'}
 - {n: '3', text: 's2s-gw → fw-vhub: branch-to-VNet via firewall'}
 - {n: '4', text: 'vm-b → fw-vhub: internet traffic routing policy 0.0.0.0/0'}
 - {n: '5', text: 'fw-vhub → internet: SNAT egress'}
+- {n: '6', text: 'vm-a → vm-c: inter-hub VNet-to-VNet inspected by both hub firewalls'}

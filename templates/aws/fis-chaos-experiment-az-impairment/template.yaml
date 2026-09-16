@@ -10,52 +10,52 @@ tags:
 - cloudwatch alarm
 image: https://docs.aws.amazon.com/images/fis/latest/userguide/images/experiment-components.png
 source: https://docs.aws.amazon.com/fis/latest/userguide/what-is.html
-description: An FIS experiment template defines actions (for example stopping instances or disrupting network connectivity in one Availability Zone), targets selected by tag, and stop conditions tied to
-  CloudWatch alarms on the application's error rate. Running the experiment against the multi-AZ stack validates that the load balancer, Auto Scaling group and Multi-AZ database recover as designed, with
-  automatic rollback if the guardrail alarm fires.
+description: Two FIS experiment templates each define targets, actions and stop conditions. Template A targets specific EC2 instances with two actions (stop instances, disrupt network connectivity in one
+  Availability Zone) and stops on a single CloudWatch alarm; template B targets EC2 instances selected by tag with three actions and stops when either of two CloudWatch alarms fires, rolling the experiment
+  back automatically.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod, at: [1,2]}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1,1]}
-- {id: vpc-fis-target, type: aws.vpc, name: fis-target, parent: reg-eu-west-1, props: {cidr: 10.110.0.0/16}, at: [1,1,1,2]}
-- {id: az-fis-target-a, type: aws.availability_zone, name: a, parent: vpc-fis-target, props: {zone: a}, at: [1,2]}
-- {id: sub-fis-public-a, type: aws.subnet, name: fis-public-a, parent: az-fis-target-a, props: {cidr: 10.110.0.0/24, az: a, public: true}, at: [1,1]}
-- {id: az-fis-target-b, type: aws.availability_zone, name: b, parent: vpc-fis-target, props: {zone: b}, at: [2,2]}
-- {id: sub-fis-public-b, type: aws.subnet, name: fis-public-b, parent: az-fis-target-b, props: {cidr: 10.110.1.0/24, az: b, public: true}, at: [1,1]}
-- {id: sub-fis-app-a, type: aws.subnet, name: fis-app-a, parent: az-fis-target-a, props: {cidr: 10.110.10.0/24, az: a, public: false}, at: [1,2]}
-- {id: sub-fis-app-b, type: aws.subnet, name: fis-app-b, parent: az-fis-target-b, props: {cidr: 10.110.11.0/24, az: b, public: false}, at: [1,2]}
-- {id: sub-fis-db-a, type: aws.subnet, name: fis-db-a, parent: az-fis-target-a, props: {cidr: 10.110.20.0/24, az: a, public: false}, at: [1,3]}
-- {id: users, type: common.users, name: users, at: [1,1]}
-- id: az-a-impairment
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 1]}
+- {id: vpc-fis-target, type: aws.vpc, name: fis-target, parent: reg-eu-west-1, props: {cidr: 10.110.0.0/16}, at: [1, 1, 1, 3]}
+- {id: az-fis-target-a, type: aws.availability_zone, name: a, parent: vpc-fis-target, props: {zone: a}, at: [1, 2]}
+- {id: sub-fis-app-a, type: aws.subnet, name: fis-app-a, parent: az-fis-target-a, props: {cidr: 10.110.10.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-fis-target-b, type: aws.availability_zone, name: b, parent: vpc-fis-target, props: {zone: b}, at: [2, 2]}
+- {id: sub-fis-app-b, type: aws.subnet, name: fis-app-b, parent: az-fis-target-b, props: {cidr: 10.110.11.0/24, az: b, public: false}, at: [1, 1]}
+- {id: target-az-a-1, type: aws.ec2_instance, name: target-az-a-1, parent: sub-fis-app-a, at: [1, 1]}
+- {id: target-az-a-2, type: aws.ec2_instance, name: target-az-a-2, parent: sub-fis-app-a, at: [1, 2]}
+- {id: tagged-target-az-b, type: aws.ec2_instance, name: tagged-target-az-b, parent: sub-fis-app-b, at: [1, 1]}
+- id: experiment-template-a
   type: aws.res.aws_fis_experiment_template
-  name: az-a-impairment
+  name: experiment-template-a
   parent: reg-eu-west-1
-  at: [2,1,1,2]
-  props:
-    action: []
-    description: changeme
-    role_arn: changeme
-    stop_condition: []
-- {id: error-rate-guardrail, type: aws.res.aws_cloudwatch_metric_alarm, name: error-rate-guardrail, parent: reg-eu-west-1, props: {alarm_name: changeme}, at: [3,1]}
-- {id: experiment-notifications, type: aws.res.aws_sns_topic, name: experiment-notifications, parent: reg-eu-west-1, at: [3,2]}
-- {id: target-alb, type: aws.alb, name: target-alb, parent: vpc-fis-target, at: [1,1,2,1]}
-- {id: target-asg, type: aws.res.aws_autoscaling_group, name: target-asg, parent: vpc-fis-target, props: {max_size: 1, min_size: 1}, at: [1,3,2,1]}
-- {id: target-az-a, type: aws.ec2_instance, name: target-az-a, parent: sub-fis-app-a, at: [1,1]}
-- {id: target-az-b, type: aws.ec2_instance, name: target-az-b, parent: sub-fis-app-b, at: [1,1]}
-- {id: target-db-multi-az, type: aws.rds_instance, name: target-db-multi-az, parent: sub-fis-db-a, at: [1,1]}
+  props: {action: [], description: changeme, role_arn: changeme, stop_condition: []}
+  at:
+  - 2
+  - 1
+- id: experiment-template-b
+  type: aws.res.aws_fis_experiment_template
+  name: experiment-template-b
+  parent: reg-eu-west-1
+  props: {action: [], description: changeme, role_arn: changeme, stop_condition: []}
+  at:
+  - 2
+  - 2
+  - 1
+  - 2
+- {id: template-a-stop-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: template-a-stop-alarm, parent: reg-eu-west-1, props: {alarm_name: changeme}, at: [3, 1]}
+- {id: template-b-error-rate-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: template-b-error-rate-alarm, parent: reg-eu-west-1, props: {alarm_name: changeme}, at: [3, 2]}
+- {id: template-b-latency-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: template-b-latency-alarm, parent: reg-eu-west-1, props: {alarm_name: changeme}, at: [3, 3]}
 edges:
-- {from: az-a-impairment, to: target-az-a, label: 'action aws:ec2:stop-instances on tag az=a', step: '1'}
-- {from: az-a-impairment, to: target-asg, label: 'action aws:network:disrupt-connectivity (AZ a)'}
-- {from: error-rate-guardrail, to: az-a-impairment, label: stop condition, step: '2'}
-- {from: az-a-impairment, to: experiment-notifications, label: experiment state changes}
-- {from: users, to: target-alb, label: synthetic load during experiment, step: '3'}
-- {from: target-alb, to: target-az-b, label: traffic shifts to healthy AZ, step: '4'}
-- {from: target-alb, to: target-az-a, label: unhealthy targets removed}
-- {from: target-asg, to: target-az-a, label: replaces stopped instances, step: '5'}
-- {from: target-az-b, to: target-db-multi-az, label: Multi-AZ failover observed}
-- {from: target-alb, to: error-rate-guardrail, label: 5xx metric}
+- {from: experiment-template-a, to: target-az-a-1, label: 'action 1: aws:ec2:stop-instances (specific instances)', step: '1'}
+- {from: experiment-template-a, to: target-az-a-2, label: 'action 2: aws:network:disrupt-connectivity (AZ a)'}
+- {from: template-a-stop-alarm, to: experiment-template-a, label: stop condition, step: '2'}
+- {from: experiment-template-b, to: tagged-target-az-b, label: 'action 1: aws:ec2:stop-instances (by tag)', step: '3'}
+- {from: experiment-template-b, to: tagged-target-az-b, label: 'action 2: aws:ssm:send-command (CPU stress)'}
+- {from: experiment-template-b, to: vpc-fis-target, label: 'action 3: aws:network:disrupt-connectivity (AZ b)'}
+- {from: template-b-error-rate-alarm, to: experiment-template-b, label: stop condition, step: '4'}
+- {from: template-b-latency-alarm, to: experiment-template-b, label: stop condition}
 steps:
-- {n: '1', text: 'az-a-impairment → target-az-a: action aws:ec2:stop-instances on tag az=a'}
-- {n: '2', text: 'error-rate-guardrail → az-a-impairment: stop condition'}
-- {n: '3', text: 'users → target-alb: synthetic load during experiment'}
-- {n: '4', text: 'target-alb → target-az-b: traffic shifts to healthy AZ'}
-- {n: '5', text: 'target-asg → target-az-a: replaces stopped instances'}
+- {n: '1', text: 'experiment-template-a → target-az-a-1: action 1: aws:ec2:stop-instances (specific instances)'}
+- {n: '2', text: 'template-a-stop-alarm → experiment-template-a: stop condition'}
+- {n: '3', text: 'experiment-template-b → tagged-target-az-b: action 1: aws:ec2:stop-instances (by tag)'}
+- {n: '4', text: 'template-b-error-rate-alarm → experiment-template-b: stop condition'}

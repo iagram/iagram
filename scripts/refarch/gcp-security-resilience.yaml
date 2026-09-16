@@ -156,37 +156,53 @@
   category: security
   tags: [vpc service controls, service perimeter, restricted googleapis, access level, data exfiltration]
   source: https://docs.cloud.google.com/vpc-service-controls/docs/overview
-  description: A service perimeter encloses the projects holding BigQuery datasets and Cloud Storage buckets so those APIs can only be called from inside the perimeter, blocking copies to outside projects even with stolen credentials. Workloads reach the APIs privately through the restricted.googleapis.com VIP via a Cloud DNS private zone and static route, while ingress rules with an access level admit on-premises analysts from corporate IP ranges.
+  description: A service perimeter encloses the authorized project and its VPC project holding a Cloud Storage bucket with sensitive data and a BigQuery dataset, so those APIs can only be called from inside the perimeter and copies to outside projects are blocked even with stolen credentials. An unauthorized client on the internet, a VM in an unauthorized VPC project using Private Google Access, a VM inside the perimeter calling a service in an unauthorized project and a service-to-service copy into that project are all denied, while the VM inside the perimeter reads and writes the bucket freely.
   containers:
-    - datacenter: corp-dc
     - project: prj-p-data-restricted
       region: us-central1
+      account_at: [1, 2]
       vpcs:
         - name: restricted-vpc
+          at: [2, 1]
           subnets:
-            - {name: restricted-sub, cidr: 10.40.0.0/24, region: us-central1}
+            - {name: restricted-sub, cidr: 10.40.0.0/24, region: us-central1, at: [1, 1]}
     - project: prj-p-analytics-restricted
       region: us-central1
+      account_at: [2, 2]
+    - project: prj-unauthorized-vpc
+      region: us-central1
+      account_at: [2, 1]
+      vpcs:
+        - name: unauthorized-vpc
+          at: [1, 1]
+          subnets:
+            - {name: unauthorized-sub, cidr: 10.50.0.0/24, region: us-central1, at: [1, 1]}
+    - project: prj-unauthorized
+      region: us-central1
+      account_at: [1, 3, 2, 1]
+      vpcs:
+        - name: unauthorized-project-vpc
+          at: [1, 1]
+          subnets:
+            - {name: unauthorized-project-sub, cidr: 10.60.0.0/24, region: us-central1, at: [1, 1]}
   elements:
-    - {tf: google_access_context_manager_access_policy, name: org-access-policy, in: project:prj-p-data-restricted}
-    - {tf: google_access_context_manager_service_perimeter, name: data-perimeter, in: project:prj-p-data-restricted}
-    - {tf: google_access_context_manager_access_level, name: corp-ip-access-level, in: project:prj-p-data-restricted}
-    - {tf: google_dns_managed_zone, name: restricted-googleapis-zone, in: vpc:restricted-vpc}
-    - {tf: google_compute_route, name: restricted-vip-route, in: vpc:restricted-vpc}
-    - {tf: google_compute_instance, name: etl-worker, in: subnet:restricted-sub}
-    - {tf: google_storage_bucket, name: raw-data-bucket, in: project:prj-p-data-restricted}
-    - {tf: google_bigquery_dataset, name: analytics-dataset, in: project:prj-p-analytics-restricted}
-    - {tf: google_compute_ha_vpn_gateway, name: corp-vpn-gw, in: vpc:restricted-vpc}
-  actors: [datacenter, users, internet]
+    - {tf: google_access_context_manager_service_perimeter, name: data-perimeter, in: project:prj-p-data-restricted, at: [1, 1]}
+    - {tf: google_compute_instance, name: etl-worker, in: subnet:restricted-sub, at: [1, 1]}
+    - {tf: google_storage_bucket, name: raw-data-bucket, in: project:prj-p-data-restricted, at: [3, 1]}
+    - {tf: google_bigquery_dataset, name: analytics-dataset, in: project:prj-p-analytics-restricted, at: [1, 1]}
+    - {tf: google_compute_instance, name: unauthorized-vpc-vm, in: subnet:unauthorized-sub, at: [1, 1]}
+    - {tf: google_compute_instance, name: unauthorized-vm, in: subnet:unauthorized-project-sub, at: [1, 1]}
+    - {tf: google_storage_bucket, name: unauthorized-bucket, in: project:prj-unauthorized, at: [2, 1]}
+  actors: [{type: client, name: Unauthorized Client, at: [1, 1]}]
   flows:
-    - {from: etl-worker, to: restricted-googleapis-zone, label: "resolve *.googleapis.com", step: 1}
-    - {from: restricted-vip-route, to: raw-data-bucket, label: 199.36.153.4/30 private path, step: 2}
-    - {from: etl-worker, to: analytics-dataset, label: load inside perimeter, step: 3}
-    - {from: data-perimeter, to: project:prj-p-analytics-restricted, label: perimeter member, step: 4}
-    - {from: datacenter, to: corp-vpn-gw, label: HA VPN, step: 5}
-    - {from: corp-ip-access-level, to: data-perimeter, label: ingress rule, step: 6}
-    - {from: users, to: analytics-dataset, label: query from corp IP only, step: 7}
-    - {from: internet, to: data-perimeter, label: denied, step: 8}
+    - {from: Unauthorized Client, to: raw-data-bucket, label: "access from internet: denied", step: 1}
+    - {from: unauthorized-vpc-vm, to: raw-data-bucket, label: "private access: denied", step: 2}
+    - {from: etl-worker, to: unauthorized-bucket, label: "VM -> GCP service outside perimeter: denied", step: 3}
+    - {from: raw-data-bucket, to: unauthorized-bucket, label: "GCP service <-> GCP service copy: denied", step: 4}
+    - {from: etl-worker, to: raw-data-bucket, label: inside perimeter, step: 5}
+    - {from: etl-worker, to: analytics-dataset, label: load inside perimeter, step: 6}
+    - {from: data-perimeter, to: project:prj-p-analytics-restricted, label: perimeter member, step: 7}
+    - {from: unauthorized-vm, to: analytics-dataset, label: "query from outside: denied", step: 8}
 
 - slug: cmek-cloud-kms-hsm-key-project
   title: Customer-managed encryption keys with Cloud KMS and Cloud HSM
@@ -301,37 +317,44 @@
   category: security
   tags: [cloud armor, waf, owasp, ddos, rate limiting, adaptive protection, global load balancer]
   source: https://docs.cloud.google.com/armor/docs/cloud-armor-overview
-  description: A Cloud Armor security policy attached to the backend service of a global external Application Load Balancer evaluates preconfigured OWASP Core Rule Set WAF rules, rate-limiting and geo-based rules at Google's edge before traffic enters the VPC. Always-on Layer 3/4 DDoS mitigation protects the anycast frontend, Adaptive Protection suggests Layer 7 mitigation rules, and Cloud CDN serves cacheable content while regional managed instance groups run the application.
+  description: Users reach the anycast frontend of a global external Application Load Balancer through their ISP, and the request terminates at the nearest Google Edge point of presence where a Cloud Armor security policy enforces IP allow/deny lists, preconfigured OWASP Core Rule Set WAF rules, rate limiting and geo-based rules before any traffic crosses into Google's network. Always-on Layer 3/4 DDoS mitigation absorbs volumetric attacks at the edge, Adaptive Protection suggests Layer 7 mitigation rules, and only allowed requests travel over the Google backbone to the backend service, which spreads them across regional managed instance groups in Google data centers.
   containers:
     - project: prj-p-web
       region: us-central1
+      groups: [{label: Cloud Edge, at: [2, 1]}]
       vpcs:
         - name: web-vpc
+          at: [2, 3]
           subnets:
-            - {name: web-sub-usc1, cidr: 10.80.0.0/24, region: us-central1}
-            - {name: web-sub-euw1, cidr: 10.80.1.0/24, region: europe-west1}
+            - {name: web-sub-usc1, cidr: 10.80.0.0/24, region: us-central1, at: [1, 1]}
+            - {name: web-sub-euw1, cidr: 10.80.1.0/24, region: europe-west1, at: [2, 1]}
+            - {name: web-sub-apse1, cidr: 10.80.2.0/24, region: asia-southeast1, at: [3, 1]}
   elements:
-    - {tf: google_compute_global_forwarding_rule, name: web-https-rule, in: project:prj-p-web}
-    - {tf: google_compute_security_policy, name: web-waf-policy, in: project:prj-p-web}
-    - {tf: google_compute_backend_service, name: web-backend, in: vpc:web-vpc}
-    - {tf: google_compute_backend_bucket, name: static-assets-backend, in: project:prj-p-web}
-    - {tf: google_storage_bucket, name: static-assets-bucket, in: project:prj-p-web}
-    - {tf: google_compute_region_instance_group_manager, name: web-mig-usc1, in: subnet:web-sub-usc1}
-    - {tf: google_compute_region_instance_group_manager, name: web-mig-euw1, in: subnet:web-sub-euw1}
-    - {tf: google_compute_health_check, name: web-health-check, in: project:prj-p-web}
-    - {tf: google_logging_project_sink, name: armor-logs-sink, in: project:prj-p-web}
-  actors: [users, internet]
+    - {tf: google_compute_security_policy, name: web-waf-policy, in: project:prj-p-web, at: [1, 1, 1, 3]}
+    - {tf: google_compute_target_https_proxy, name: edge-pop-1, in: group:Cloud Edge, at: [1, 1]}
+    - {tf: google_compute_target_https_proxy, name: edge-pop-2, in: group:Cloud Edge, at: [2, 1]}
+    - {tf: google_compute_target_https_proxy, name: edge-pop-3, in: group:Cloud Edge, at: [3, 1]}
+    - {tf: google_compute_target_https_proxy, name: edge-pop-4, in: group:Cloud Edge, at: [4, 1]}
+    - {tf: google_compute_global_forwarding_rule, name: web-https-rule, in: group:Cloud Edge, at: [1, 2, 4, 1]}
+    - {tf: google_compute_backend_service, name: web-backend, in: project:prj-p-web, at: [2, 2]}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-usc1, in: subnet:web-sub-usc1, at: [1, 1]}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-euw1, in: subnet:web-sub-euw1, at: [1, 1]}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-apse1, in: subnet:web-sub-apse1, at: [1, 1]}
+  actors: [{type: user, name: User, at: [1, 1]}, {type: internet, name: ISP network, at: [2, 1]}]
   flows:
-    - {from: users, to: web-https-rule, label: HTTPS anycast, step: 1}
-    - {from: internet, to: web-https-rule, label: volumetric DDoS absorbed at edge, step: 1}
-    - {from: web-https-rule, to: web-waf-policy, label: WAF and rate-limit evaluation, step: 2}
-    - {from: web-waf-policy, to: web-backend, label: allowed requests, step: 3}
-    - {from: web-backend, to: web-mig-usc1, label: nearest healthy region, step: 4}
-    - {from: web-backend, to: web-mig-euw1, label: failover / proximity, step: 4}
-    - {from: web-health-check, to: web-mig-usc1, label: health probes, step: 5}
-    - {from: web-https-rule, to: static-assets-backend, label: Cloud CDN cache, step: 6}
-    - {from: static-assets-backend, to: static-assets-bucket, label: origin fill, step: 7}
-    - {from: web-waf-policy, to: armor-logs-sink, label: request logs with rule outcome, step: 8}
+    - {from: User, to: ISP network, label: HTTPS, step: 1}
+    - {from: ISP network, to: edge-pop-2, label: anycast IP terminates at nearest Google Edge PoP, step: 2}
+    - {from: web-waf-policy, to: web-https-rule, label: IP allowlist / denylist and WAF enforced at the edge, step: 3}
+    - {from: edge-pop-1, to: web-https-rule, label: load balancing at the edge, step: 4}
+    - {from: edge-pop-2, to: web-https-rule, label: load balancing at the edge, step: 4}
+    - {from: edge-pop-3, to: web-https-rule, label: load balancing at the edge, step: 4}
+    - {from: edge-pop-4, to: web-https-rule, label: load balancing at the edge, step: 4}
+    - {from: web-https-rule, to: web-backend, label: Google backbone, step: 5}
+    - {from: web-backend, to: web-mig-usc1, label: Google data center, step: 6}
+    - {from: web-backend, to: web-mig-euw1, label: Google data center, step: 6}
+    - {from: web-backend, to: web-mig-apse1, label: Google data center, step: 6}
+    - {from: web-mig-usc1, to: web-mig-euw1, label: inter-region backbone}
+    - {from: web-mig-euw1, to: web-mig-apse1, label: inter-region backbone}
 
 - slug: google-secops-siem-log-ingestion
   title: SIEM export of Google Cloud logs and findings to Google Security Operations
@@ -451,73 +474,70 @@
   category: resilience
   tags: [active-active, multi-region, spanner, global load balancer, managed instance groups, 99.999]
   source: https://docs.cloud.google.com/architecture/multiregional-vms
-  description: A global external Application Load Balancer sends users to the closest healthy region, where regional managed instance groups spread across three zones run the web and application tiers in isolated stacks. A Spanner multi-region instance in the nam3 configuration keeps read-write replicas in us-east4 and us-east1 with a witness in us-central1, giving both regions strongly consistent access to one database and a 99.999% availability SLA.
+  description: A global external Application Load Balancer sends application users to the closest healthy region, where a regional managed instance group spread across three zones runs the web tier, a regional internal load balancer hands requests to a second regional managed instance group running the application tier, and both regions share one VPC. In place of the reference's replicated PostgreSQL VMs, a Spanner multi-region instance in the nam3 configuration keeps read-write replicas in us-east4 and us-east1 with a witness in us-central1, giving both regions strongly consistent access to one database and a 99.999% availability SLA, while dual-region Cloud Storage buckets hold shared assets.
   containers:
     - project: prj-p-global-app
       region: us-east4
       vpcs:
         - name: global-app-vpc
+          at: [2, 1, 1, 2]
           subnets:
-            - {name: app-sub-use4, cidr: 10.120.0.0/22, region: us-east4}
-            - {name: app-sub-use1, cidr: 10.120.4.0/22, region: us-east1}
+            - {name: app-sub-use4, cidr: 10.120.0.0/22, region: us-east4, at: [2, 1]}
+            - {name: app-sub-use1, cidr: 10.120.4.0/22, region: us-east1, at: [2, 2]}
   elements:
-    - {tf: google_compute_global_forwarding_rule, name: global-https-rule, in: project:prj-p-global-app}
-    - {tf: google_compute_backend_service, name: app-global-backend, in: vpc:global-app-vpc}
-    - {tf: google_compute_security_policy, name: app-armor-policy, in: project:prj-p-global-app}
-    - {tf: google_compute_region_instance_group_manager, name: web-mig-use4, in: subnet:app-sub-use4}
-    - {tf: google_compute_region_instance_group_manager, name: web-mig-use1, in: subnet:app-sub-use1}
-    - {tf: google_compute_health_check, name: app-health-check, in: project:prj-p-global-app}
-    - {tf: google_spanner_instance, name: orders-spanner-nam3, in: project:prj-p-global-app}
-    - {tf: google_spanner_database, name: orders-db, in: project:prj-p-global-app}
-    - {tf: google_storage_bucket, name: assets-dual-region, in: project:prj-p-global-app}
-  actors: [users]
+    - {tf: google_compute_global_forwarding_rule, name: global-https-rule, in: project:prj-p-global-app, at: [1, 1, 1, 2]}
+    - {tf: google_compute_backend_service, name: app-global-backend, in: vpc:global-app-vpc, at: [1, 1, 1, 2]}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-use4, in: subnet:app-sub-use4, at: [1, 1]}
+    - {tf: google_compute_forwarding_rule, name: app-ilb-use4, in: subnet:app-sub-use4, at: [2, 1]}
+    - {tf: google_compute_region_instance_group_manager, name: app-mig-use4, in: subnet:app-sub-use4, at: [3, 1]}
+    - {tf: google_compute_region_instance_group_manager, name: web-mig-use1, in: subnet:app-sub-use1, at: [1, 1]}
+    - {tf: google_compute_forwarding_rule, name: app-ilb-use1, in: subnet:app-sub-use1, at: [2, 1]}
+    - {tf: google_compute_region_instance_group_manager, name: app-mig-use1, in: subnet:app-sub-use1, at: [3, 1]}
+    - {tf: google_spanner_instance, name: orders-spanner-nam3, in: project:prj-p-global-app, at: [3, 1]}
+    - {tf: google_spanner_database, name: orders-db, in: project:prj-p-global-app, at: [3, 2]}
+    - {tf: google_storage_bucket, name: assets-dual-region, in: project:prj-p-global-app, at: [4, 1, 1, 2]}
+  actors: [{type: users, name: Application Users, at: [1, 1]}]
   flows:
-    - {from: users, to: global-https-rule, label: HTTPS anycast, step: 1}
-    - {from: global-https-rule, to: app-armor-policy, label: WAF, step: 2}
-    - {from: app-armor-policy, to: app-global-backend, label: allowed, step: 3}
-    - {from: app-global-backend, to: web-mig-use4, label: nearest region, step: 4}
-    - {from: app-global-backend, to: web-mig-use1, label: nearest region / failover, step: 4}
-    - {from: app-health-check, to: web-mig-use4, label: health, step: 5}
-    - {from: web-mig-use4, to: orders-db, label: strongly consistent reads and writes, step: 6}
-    - {from: web-mig-use1, to: orders-db, label: strongly consistent reads and writes, step: 6}
+    - {from: Application Users, to: global-https-rule, label: HTTPS anycast, step: 1}
+    - {from: global-https-rule, to: app-global-backend, label: closest healthy region, step: 2}
+    - {from: app-global-backend, to: web-mig-use4, label: web tier region AA, step: 3}
+    - {from: app-global-backend, to: web-mig-use1, label: web tier region BB, step: 3}
+    - {from: web-mig-use4, to: app-ilb-use4, label: regional internal load balancer, step: 4}
+    - {from: web-mig-use1, to: app-ilb-use1, label: regional internal load balancer, step: 4}
+    - {from: app-ilb-use4, to: app-mig-use4, label: application tier, step: 5}
+    - {from: app-ilb-use1, to: app-mig-use1, label: application tier, step: 5}
+    - {from: app-mig-use4, to: orders-db, label: strongly consistent reads and writes, step: 6}
+    - {from: app-mig-use1, to: orders-db, label: strongly consistent reads and writes, step: 6}
     - {from: orders-spanner-nam3, to: orders-db, label: nam3 read-write replicas plus witness, step: 7}
-    - {from: web-mig-use1, to: assets-dual-region, label: static assets, step: 8}
+    - {from: app-mig-use4, to: assets-dual-region, label: dual-region buckets, step: 8}
+    - {from: app-mig-use1, to: assets-dual-region, label: dual-region buckets, step: 8}
 
 - slug: cloud-sql-ha-cross-region-replica-dr
   title: Cloud SQL regional HA with cross-region replica for DR
   category: database
   tags: [cloud sql, high availability, standby, cross-region replica, promotion, rpo, rto]
   source: https://docs.cloud.google.com/sql/docs/postgres/intro-to-cloud-sql-disaster-recovery
-  description: The primary Cloud SQL instance runs as a regional HA pair with a synchronous standby in a second zone of us-central1, and a cross-region read replica in us-east1 receives asynchronous replication. On a regional outage the replica is promoted to a standalone primary, the application tier in the secondary region is scaled up and a Cloud DNS record is repointed, accepting a small RPO from replication lag; after recovery a new standby and replica are rebuilt to restore the topology.
+  description: The application writes through a global Cloud DNS name (myWriteEndpoint) that resolves to the primary Cloud SQL instance, which runs as a regional HA pair with a synchronous standby in a second zone of region R1 (us-central1), while a cross-region read replica in zone C of region R2 (us-east1) receives asynchronous replication. On a regional outage the replica is promoted to a standalone primary and the DNS record is repointed to it, accepting a small RPO from replication lag; after recovery a new standby and replica are rebuilt to restore the topology.
   containers:
     - project: prj-p-orders
       region: us-central1
       vpcs:
         - name: orders-vpc
-          subnets:
-            - {name: app-sub-usc1, cidr: 10.130.0.0/24, region: us-central1}
-            - {name: app-sub-use1, cidr: 10.130.1.0/24, region: us-east1}
+          at: [1, 2, 2, 1]
   elements:
-    - {tf: google_sql_database_instance, name: orders-pg-primary-ha, in: vpc:orders-vpc}
-    - {tf: google_sql_database_instance, name: orders-pg-replica-use1, in: vpc:orders-vpc}
-    - {tf: google_compute_region_instance_group_manager, name: app-mig-usc1, in: subnet:app-sub-usc1}
-    - {tf: google_compute_region_instance_group_manager, name: app-mig-use1, in: subnet:app-sub-use1}
-    - {tf: google_compute_global_forwarding_rule, name: orders-https-rule, in: project:prj-p-orders}
-    - {tf: google_dns_managed_zone, name: orders-private-zone, in: vpc:orders-vpc}
-    - {tf: google_dns_record_set, name: db-cname-record, in: vpc:orders-vpc}
-    - {tf: google_storage_bucket, name: pg-backups-bucket, in: project:prj-p-orders}
-    - {tf: google_monitoring_alert_policy, name: replica-lag-alert, in: project:prj-p-orders}
-  actors: [users]
+    - {tf: google_dns_managed_zone, name: orders-private-zone, in: project:prj-p-orders, at: [1, 1]}
+    - {tf: google_dns_record_set, name: db-cname-record, in: project:prj-p-orders, at: [2, 1]}
+    - {tf: google_sql_database_instance, name: orders-pg-primary-ha, in: vpc:orders-vpc, at: [1, 1]}
+    - {tf: google_sql_database_instance, name: orders-pg-standby, in: vpc:orders-vpc, at: [1, 2]}
+    - {tf: google_sql_database_instance, name: orders-pg-replica-use1, in: vpc:orders-vpc, at: [2, 1]}
+  actors: [{type: client, name: Application, at: [1, 1]}]
   flows:
-    - {from: users, to: orders-https-rule, label: HTTPS, step: 1}
-    - {from: orders-https-rule, to: app-mig-usc1, label: primary region, step: 2}
-    - {from: app-mig-usc1, to: db-cname-record, label: resolve db endpoint, step: 3}
-    - {from: db-cname-record, to: orders-pg-primary-ha, label: primary with zonal standby, step: 4}
-    - {from: orders-pg-primary-ha, to: orders-pg-replica-use1, label: async cross-region replication, step: 5}
-    - {from: orders-pg-primary-ha, to: pg-backups-bucket, label: automated backups export, step: 6}
-    - {from: replica-lag-alert, to: orders-pg-replica-use1, label: monitor lag, step: 7}
-    - {from: orders-https-rule, to: app-mig-use1, label: failover traffic, step: 8}
-    - {from: app-mig-use1, to: orders-pg-replica-use1, label: after promotion to primary, step: 9}
+    - {from: Application, to: db-cname-record, label: myWriteEndpoint global DNS name, step: 1}
+    - {from: orders-private-zone, to: db-cname-record, label: hosts record}
+    - {from: db-cname-record, to: orders-pg-primary-ha, label: resolves to primary, step: 2}
+    - {from: orders-pg-primary-ha, to: orders-pg-standby, label: synchronous replication to zone B standby, step: 3}
+    - {from: orders-pg-primary-ha, to: orders-pg-replica-use1, label: asynchronous replication, step: 4}
+    - {from: db-cname-record, to: orders-pg-replica-use1, label: repointed after promotion, step: 5}
 
 - slug: backup-dr-service-vault
   title: Centralized backups with Backup and DR Service and immutable vaults
@@ -638,37 +658,33 @@
   category: containers
   tags: [gke, multi-cluster gateway, fleet, config cluster, serviceexport, global load balancer, failover]
   source: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploying-multi-cluster-gateways
-  description: Two GKE clusters in different regions are registered to one fleet with multi-cluster Services and Gateway enabled, and the config cluster hosts a Gateway of class gke-l7-global-external-managed-mc plus HTTPRoutes. ServiceExport resources in each cluster become fleet-wide ServiceImports, and the resulting global external Application Load Balancer routes each request to the healthy cluster closest to the client, failing over automatically when a cluster or region becomes unhealthy.
+  description: Two GKE clusters in us-west1 and us-east1 are registered to one fleet with multi-cluster Services and Gateway enabled, and the config cluster gke-west-1 hosts the external-http Gateway of class gke-l7-global-external-managed-mc plus HTTPRoutes for store.example.com. Each cluster runs the store pods in a store namespace exported as a fleet-wide ServiceImport, and the resulting global external Application Load Balancer routes store.example.com/west and /east to the matching cluster and every other path to the healthy cluster closest to the client, failing over automatically when a cluster or region becomes unhealthy.
   containers:
     - project: prj-p-fleet
       region: us-west1
+      groups: [{label: external-http Gateway, at: [1, 1]}]
       vpcs:
         - name: fleet-vpc
+          at: [2, 1]
           subnets:
-            - {name: gke-sub-usw1, cidr: 10.170.0.0/20, region: us-west1}
-            - {name: gke-sub-use1, cidr: 10.170.16.0/20, region: us-east1}
+            - {name: gke-sub-usw1, cidr: 10.170.0.0/20, region: us-west1, at: [1, 1]}
+            - {name: gke-sub-use1, cidr: 10.170.16.0/20, region: us-east1, at: [1, 2]}
   elements:
-    - {tf: google_container_cluster, name: gke-west-1, in: subnet:gke-sub-usw1}
-    - {tf: google_container_cluster, name: gke-east-1, in: subnet:gke-sub-use1}
-    - {tf: google_gke_hub_membership, name: gke-west-1-membership, in: project:prj-p-fleet}
-    - {tf: google_gke_hub_membership, name: gke-east-1-membership, in: project:prj-p-fleet}
-    - {tf: google_gke_hub_feature, name: multiclusterservicediscovery, in: project:prj-p-fleet}
-    - {tf: google_gke_hub_feature, name: multiclusteringress-config-cluster, in: project:prj-p-fleet}
-    - {tf: google_compute_global_forwarding_rule, name: store-external-gateway, in: project:prj-p-fleet}
-    - {tf: google_compute_health_check, name: store-health-check, in: project:prj-p-fleet}
-    - {tf: google_artifact_registry_repository, name: store-images, in: project:prj-p-fleet}
-  actors: [users]
+    - {tf: google_compute_global_forwarding_rule, name: store-external-gateway, in: group:external-http Gateway, at: [1, 1]}
+    - {tf: google_container_cluster, name: gke-west-1, in: subnet:gke-sub-usw1, at: [1, 1]}
+    - {tf: google_compute_network_endpoint_group, name: store-pods-west, in: subnet:gke-sub-usw1, at: [2, 1]}
+    - {tf: google_container_cluster, name: gke-east-1, in: subnet:gke-sub-use1, at: [1, 1]}
+    - {tf: google_compute_network_endpoint_group, name: store-pods-east, in: subnet:gke-sub-use1, at: [2, 1]}
+    - {tf: google_gke_hub_feature, name: multiclusteringress-config-cluster, in: project:prj-p-fleet, at: [3, 1]}
+  actors: [{type: client, name: Internet Client, at: [1, 1]}]
   flows:
-    - {from: gke-west-1-membership, to: gke-west-1, label: fleet registration, step: 1}
-    - {from: gke-east-1-membership, to: gke-east-1, label: fleet registration, step: 1}
-    - {from: multiclusteringress-config-cluster, to: gke-west-1, label: config cluster hosts Gateway, step: 2}
-    - {from: multiclusterservicediscovery, to: gke-east-1, label: ServiceExport to ServiceImport, step: 3}
+    - {from: Internet Client, to: store-external-gateway, label: "store.example.com/* /west /east", step: 1}
+    - {from: store-external-gateway, to: store-pods-west, label: "/west and nearest healthy", step: 2}
+    - {from: store-external-gateway, to: store-pods-east, label: "/east and failover", step: 2}
+    - {from: gke-west-1, to: store-pods-west, label: store namespace}
+    - {from: gke-east-1, to: store-pods-east, label: store namespace}
+    - {from: multiclusteringress-config-cluster, to: gke-west-1, label: config cluster hosts Gateway, step: 3}
     - {from: gke-west-1, to: store-external-gateway, label: Gateway reconciles global external ALB, step: 4}
-    - {from: users, to: store-external-gateway, label: HTTPS anycast, step: 5}
-    - {from: store-external-gateway, to: gke-west-1, label: "/west and nearest healthy", step: 6}
-    - {from: store-external-gateway, to: gke-east-1, label: "/east and failover", step: 6}
-    - {from: store-health-check, to: gke-east-1, label: NEG health, step: 7}
-    - {from: gke-west-1, to: store-images, label: pull images, step: 8}
 
 - slug: cloud-dns-failover-routing-policy
   title: DNS-based failover with Cloud DNS routing policies and health checks

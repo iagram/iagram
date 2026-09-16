@@ -11,91 +11,126 @@ tags:
 - neptune
 image: https://docs.aws.amazon.com/images/reference-architecture-diagrams/latest/supply-chain-data-lake/images/supply-chain-data-lake.png
 source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/supply-chain-data-lake/supply-chain-data-lake.html
-description: Planning, execution and shipment-status data from ERP and CRM systems, edge devices and streams is ingested with DMS, DataSync, Kinesis and AppFlow into an S3 data lake built with Lake Formation
-  and transformed by Glue. Athena and QuickSight give planners cross-category scorecards, Redshift and EMR handle warehouse and big data processing, SageMaker trains models and Neptune answers network queries.
+description: Supply chain data from on-premises SQL/NoSQL databases and file shares, logs, devices, social and media streams and SaaS ERP/CRM applications is ingested with DMS, DataSync, Kinesis Data Streams,
+  MSK, IoT Core, AppFlow and Data Exchange into an S3 data lake governed by Lake Formation that holds demand plans, production plans, transfer orders, shipment status, external events, pick orders, carriers,
+  weather, product inventory, product returns, fleet data and tenders. Glue crawlers and ETL jobs maintain the Data Catalog, while Athena and QuickSight give planners scorecards, Redshift and EMR handle
+  warehouse and big data processing, SageMaker trains models and Neptune answers network queries.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1]}
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 3, 1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 7, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1, at: [1, 1]}
-- {id: grp-data-lake, type: common.group, name: data lake, parent: reg-us-east-1, at: [1, 2]}
-- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1, at: [1, 4]}
-- {id: vpc-supply-chain, type: aws.vpc, name: supply-chain, parent: reg-us-east-1, props: {cidr: 10.30.0.0/16}, at: [2, 1, 1, 4]}
-- {id: az-supply-chain-a, type: aws.availability_zone, name: a, parent: vpc-supply-chain, props: {zone: a}, at: [1, 1]}
-- {id: sub-sc-private-a, type: aws.subnet, name: sc-private-a, parent: az-supply-chain-a, props: {cidr: 10.30.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: saas, type: common.saas, name: saas, at: [3, 1]}
-- {id: device, type: common.device, name: device, at: [2, 1]}
-- {id: users, type: common.users, name: users, at: [1, 3, 3, 1]}
-- {id: erp-dms, type: aws.res.aws_dms_replication_instance, name: erp-dms, parent: sub-sc-private-a, props: {replication_instance_class: changeme, replication_instance_id: changeme}, at: [1, 1]}
-- {id: plan-files-sync, type: aws.res.aws_datasync_task, name: plan-files-sync, parent: grp-ingestion, props: {destination_location_arn: changeme, source_location_arn: changeme}, at: [1, 1]}
-- {id: shipment-events, type: aws.res.aws_kinesis_stream, name: shipment-events, parent: grp-ingestion, props: {name: changeme}, at: [2, 1]}
+- {id: grp-data-ingestion, type: common.group, name: data ingestion, parent: reg-us-east-1, at: [1, 1]}
+- {id: grp-scalable-supply-chain-data-lake, type: common.group, name: scalable supply chain data lake, parent: reg-us-east-1, at: [1, 2]}
+- {id: grp-seamless-data-movement, type: common.group, name: seamless data movement, parent: reg-us-east-1, at: [1, 3]}
+- {id: grp-purpose-built-analytics-and-insights, type: common.group, name: purpose-built analytics and insights, parent: reg-us-east-1, at: [1, 4]}
+- {id: sql-nosql-dbs, type: common.database, name: SQL/NoSQL DBs, at: [1, 1]}
+- {id: file-shares, type: common.server, name: File shares, at: [2, 1]}
+- {id: logs, type: common.server, name: Logs, at: [3, 1]}
+- {id: devices, type: common.device, name: Devices, at: [4, 1]}
+- {id: social, type: common.users, name: Social, at: [5, 1]}
+- {id: media, type: common.internet, name: Media, at: [6, 1]}
+- {id: saas-applications, type: common.saas, name: SaaS Applications, at: [7, 1]}
+- {id: erp-dms, type: aws.res.aws_dms_replication_instance, name: erp-dms, parent: grp-data-ingestion, props: {replication_instance_class: changeme, replication_instance_id: changeme}, at: [1, 1]}
+- {id: plan-files-sync, type: aws.res.aws_datasync_task, name: plan-files-sync, parent: grp-data-ingestion, props: {destination_location_arn: changeme, source_location_arn: changeme}, at: [2, 1]}
+- {id: shipment-events, type: aws.res.aws_kinesis_stream, name: shipment-events, parent: grp-data-ingestion, props: {name: changeme}, at: [3, 1]}
+- id: supply-chain-msk
+  type: aws.res.aws_msk_cluster
+  name: supply-chain-msk
+  parent: grp-data-ingestion
+  props: {broker_node_group_info: {}, cluster_name: changeme, kafka_version: changeme, number_of_broker_nodes: 1}
+  at:
+  - 4
+  - 1
+- {id: device-telemetry, type: aws.res.aws_iot_topic_rule, name: device-telemetry, parent: grp-data-ingestion, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}, at: [5, 1]}
 - id: crm-appflow
   type: aws.res.aws_appflow_flow
   name: crm-appflow
-  parent: grp-ingestion
-  at: [3, 1]
-  props:
-    destination_flow_config: []
-    name: changeme
-    source_flow_config: {}
-    task: []
-    trigger_config: {}
-- {id: supply-chain-lake, type: aws.s3_bucket, name: supply-chain-lake, parent: grp-data-lake, at: [1, 1]}
-- {id: lake-location, type: aws.res.aws_lakeformation_resource, name: lake-location, parent: grp-data-lake, props: {arn: changeme}, at: [2, 1]}
+  parent: grp-data-ingestion
+  props: {destination_flow_config: [], name: changeme, source_flow_config: {}, task: [], trigger_config: {}}
+  at:
+  - 6
+  - 1
+- {id: third-party-data, type: aws.res.aws_dataexchange_data_set, name: third-party-data, parent: grp-data-ingestion, props: {asset_type: changeme, description: changeme, name: changeme}, at: [7, 1]}
+- {id: supply-chain-lake, type: aws.s3_bucket, name: supply-chain-lake, parent: grp-scalable-supply-chain-data-lake, at: [1, 1, 1, 3]}
+- {id: lake-location, type: aws.res.aws_lakeformation_resource, name: lake-location, parent: grp-scalable-supply-chain-data-lake, props: {arn: changeme}, at: [2, 1, 1, 3]}
+- {id: demand-plans, type: aws.s3_bucket, name: demand-plans, parent: grp-scalable-supply-chain-data-lake, at: [3, 1]}
+- {id: production-plans, type: aws.s3_bucket, name: production-plans, parent: grp-scalable-supply-chain-data-lake, at: [3, 2]}
+- {id: transfer-orders, type: aws.s3_bucket, name: transfer-orders, parent: grp-scalable-supply-chain-data-lake, at: [3, 3]}
+- {id: shipment-status, type: aws.s3_bucket, name: shipment-status, parent: grp-scalable-supply-chain-data-lake, at: [4, 1]}
+- {id: external-events, type: aws.s3_bucket, name: external-events, parent: grp-scalable-supply-chain-data-lake, at: [4, 2]}
+- {id: pick-orders, type: aws.s3_bucket, name: pick-orders, parent: grp-scalable-supply-chain-data-lake, at: [4, 3]}
+- {id: carriers, type: aws.s3_bucket, name: carriers, parent: grp-scalable-supply-chain-data-lake, at: [5, 1]}
+- {id: weather, type: aws.s3_bucket, name: weather, parent: grp-scalable-supply-chain-data-lake, at: [5, 2]}
+- {id: product-inventory, type: aws.s3_bucket, name: product-inventory, parent: grp-scalable-supply-chain-data-lake, at: [5, 3]}
+- {id: product-returns, type: aws.s3_bucket, name: product-returns, parent: grp-scalable-supply-chain-data-lake, at: [6, 1]}
+- {id: fleet-data, type: aws.s3_bucket, name: fleet-data, parent: grp-scalable-supply-chain-data-lake, at: [6, 2]}
+- {id: tenders-bids, type: aws.s3_bucket, name: tenders-bids, parent: grp-scalable-supply-chain-data-lake, at: [6, 3]}
+- {id: supply-chain-catalog, type: aws.res.aws_glue_catalog_database, name: supply-chain-catalog, parent: grp-seamless-data-movement, props: {name: changeme}, at: [1, 1]}
 - id: glue-etl
   type: aws.res.aws_glue_job
   name: glue-etl
-  parent: grp-data-lake
-  at: [2, 2]
+  parent: grp-seamless-data-movement
   props: {command: {}, name: changeme, role_arn: changeme}
-- {id: supply-chain-catalog, type: aws.res.aws_glue_catalog_database, name: supply-chain-catalog, parent: grp-data-lake, props: {name: changeme}, at: [1, 2]}
-- {id: planner-athena, type: aws.res.aws_athena_workgroup, name: planner-athena, parent: grp-analytics, props: {name: changeme}, at: [1, 1]}
+  at:
+  - 2
+  - 1
+- {id: lake-crawler, type: aws.res.aws_glue_crawler, name: lake-crawler, parent: grp-seamless-data-movement, props: {database_name: changeme, name: changeme, role: changeme}, at: [3, 1]}
+- {id: planner-athena, type: aws.res.aws_athena_workgroup, name: planner-athena, parent: grp-purpose-built-analytics-and-insights, props: {name: changeme}, at: [1, 1]}
 - id: scorecards
   type: aws.res.aws_quicksight_data_source
   name: scorecards
-  parent: grp-analytics
-  at: [2, 1]
+  parent: grp-purpose-built-analytics-and-insights
   props: {data_source_id: changeme, name: changeme, parameters: {}, type: changeme}
-- {id: supply-chain-dw, type: aws.res.aws_redshift_cluster, name: supply-chain-dw, parent: sub-sc-private-a, props: {cluster_identifier: changeme, node_type: changeme}, at: [1, 2]}
-- {id: emr-processing, type: aws.res.aws_emr_cluster, name: emr-processing, parent: sub-sc-private-a, props: {name: changeme, release_label: changeme, service_role: changeme}, at: [1, 3]}
+  at:
+  - 2
+  - 1
+- {id: supply-chain-dw, type: aws.res.aws_redshift_cluster, name: supply-chain-dw, parent: grp-purpose-built-analytics-and-insights, props: {cluster_identifier: changeme, node_type: changeme}, at: [3, 1]}
+- {id: emr-processing, type: aws.res.aws_emr_cluster, name: emr-processing, parent: grp-purpose-built-analytics-and-insights, props: {name: changeme, release_label: changeme, service_role: changeme}, at: [
+    4, 1]}
 - id: demand-ml
   type: aws.res.aws_sagemaker_domain
   name: demand-ml
-  parent: grp-analytics
-  at: [3, 1]
-  props:
-    auth_mode: changeme
-    default_user_settings: {}
-    domain_name: changeme
-    subnet_ids: []
-    vpc_id: changeme
-- {id: network-graph, type: aws.res.aws_neptune_cluster, name: network-graph, parent: sub-sc-private-a, at: [1, 4]}
-- {id: az-vpc-supply-chain-b, type: aws.availability_zone, name: b, parent: vpc-supply-chain, props: {zone: b}, at: [1, 2]}
-- {id: sub-vpc-supply-chain-b, type: aws.subnet, name: private-b, parent: az-vpc-supply-chain-b, props: {cidr: 10.30.251.0/24, az: b, public: false}, at: [1, 1]}
+  parent: grp-purpose-built-analytics-and-insights
+  props: {auth_mode: changeme, default_user_settings: {}, domain_name: changeme, subnet_ids: [], vpc_id: changeme}
+  at:
+  - 5
+  - 1
+- {id: network-graph, type: aws.res.aws_neptune_cluster, name: network-graph, parent: grp-purpose-built-analytics-and-insights, at: [6, 1]}
 edges:
-- {from: dc-on-premises, to: erp-dms, label: ERP tables, step: '1'}
-- {from: dc-on-premises, to: plan-files-sync, label: planning files, step: '1'}
-- {from: device, to: shipment-events, label: shipment status, step: '1'}
-- {from: saas, to: crm-appflow, label: CRM objects, step: '1'}
+- {from: sql-nosql-dbs, to: erp-dms, label: on-prem, step: '1'}
+- {from: file-shares, to: plan-files-sync, label: files, step: '1'}
+- {from: logs, to: shipment-events, label: streaming, step: '1'}
+- {from: devices, to: device-telemetry, label: streaming, step: '1'}
+- {from: social, to: supply-chain-msk, label: streaming, step: '1'}
+- {from: media, to: shipment-events, label: streaming, step: '1'}
+- {from: saas-applications, to: crm-appflow, label: 'ERP, CRM', step: '1'}
 - {from: erp-dms, to: supply-chain-lake, step: '2'}
 - {from: plan-files-sync, to: supply-chain-lake, step: '2'}
 - {from: shipment-events, to: supply-chain-lake, step: '2'}
+- {from: supply-chain-msk, to: supply-chain-lake, step: '2'}
+- {from: device-telemetry, to: shipment-events, step: '2'}
 - {from: crm-appflow, to: supply-chain-lake, step: '2'}
-- {from: lake-location, to: supply-chain-lake, label: Lake Formation registration, step: '3'}
-- {from: glue-etl, to: supply-chain-lake, label: transform, step: '4'}
-- {from: glue-etl, to: supply-chain-catalog, label: catalog, step: '4'}
-- {from: planner-athena, to: supply-chain-catalog, label: SQL, step: '5'}
-- {from: scorecards, to: planner-athena, step: '6'}
-- {from: users, to: scorecards, label: planners drill down, step: '7'}
-- {from: supply-chain-dw, to: supply-chain-lake, label: warehouse loads}
-- {from: emr-processing, to: supply-chain-lake, label: open-source processing}
-- {from: demand-ml, to: supply-chain-lake, label: train models}
-- {from: network-graph, to: glue-etl, label: graph loads}
+- {from: third-party-data, to: supply-chain-lake, label: subscribed data sets, step: '3'}
+- {from: lake-location, to: supply-chain-lake, label: Lake Formation registration, step: '4'}
+- {from: supply-chain-lake, to: demand-plans, label: 'CSV, JSON, XML', step: '5'}
+- {from: lake-crawler, to: supply-chain-lake, label: crawl, step: '6'}
+- {from: lake-crawler, to: supply-chain-catalog, label: catalog, step: '6'}
+- {from: glue-etl, to: supply-chain-lake, label: transform, step: '6'}
+- {from: planner-athena, to: supply-chain-catalog, label: SQL, step: '7'}
+- {from: scorecards, to: planner-athena, label: scorecards, step: '8'}
+- {from: supply-chain-dw, to: supply-chain-lake, label: warehouse loads, step: '9'}
+- {from: emr-processing, to: supply-chain-lake, label: open-source processing, step: '10'}
+- {from: demand-ml, to: supply-chain-lake, label: train models, step: '11'}
+- {from: network-graph, to: glue-etl, label: graph loads, step: '12'}
 steps:
-- {n: '1', text: 'datacenter → erp-dms: ERP tables'}
+- {n: '1', text: 'SQL/NoSQL DBs → erp-dms: on-prem'}
 - {n: '2', text: erp-dms → supply-chain-lake}
-- {n: '3', text: 'lake-location → supply-chain-lake: Lake Formation registration'}
-- {n: '4', text: 'glue-etl → supply-chain-lake: transform'}
-- {n: '5', text: 'planner-athena → supply-chain-catalog: SQL'}
-- {n: '6', text: scorecards → planner-athena}
-- {n: '7', text: 'users → scorecards: planners drill down'}
+- {n: '3', text: 'third-party-data → supply-chain-lake: subscribed data sets'}
+- {n: '4', text: 'lake-location → supply-chain-lake: Lake Formation registration'}
+- {n: '5', text: 'supply-chain-lake → demand-plans: CSV, JSON, XML'}
+- {n: '6', text: 'lake-crawler → supply-chain-lake: crawl'}
+- {n: '7', text: 'planner-athena → supply-chain-catalog: SQL'}
+- {n: '8', text: 'scorecards → planner-athena: scorecards'}
+- {n: '9', text: 'supply-chain-dw → supply-chain-lake: warehouse loads'}
+- {n: '10', text: 'emr-processing → supply-chain-lake: open-source processing'}
+- {n: '11', text: 'demand-ml → supply-chain-lake: train models'}
+- {n: '12', text: 'network-graph → glue-etl: graph loads'}

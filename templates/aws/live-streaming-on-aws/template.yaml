@@ -10,39 +10,47 @@ tags:
 - live streaming
 image: https://docs.aws.amazon.com/images/solutions/latest/live-streaming-on-aws/images/live-streaming-on-aws-architecture.png
 source: https://docs.aws.amazon.com/solutions/latest/live-streaming-on-aws/architecture-overview.html
-description: MediaLive ingests two redundant contribution feeds and transcodes them into adaptive bitrate HLS; MediaPackage packages the output into HLS, DASH and CMAF endpoints and acts as the origin.
-  CloudFront delivers the stream to viewers, authenticating to MediaPackage with a CDN identifier header stored in Secrets Manager, and a demo player is hosted from an S3 bucket.
+description: MediaLive ingests two redundant contribution feeds (primary and backup inputs) from the live channel source and transcodes them into adaptive bitrate HLS; MediaPackage packages the output just
+  in time into HLS, DASH, MSS and CMAF endpoints and acts as the origin (MediaPackage channels are configuration in Terraform, so the packaging hop is drawn as the MediaLive to CloudFront edge). CloudFront
+  delivers the stream to OTT playback devices, authenticating to MediaPackage with a CDN identifier header stored in Secrets Manager, and a demo preview player is hosted from an S3 bucket behind a second
+  CloudFront distribution.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 2, 2, 1]}
 - {id: grp-ingest-and-transcode, type: common.group, name: ingest and transcode, parent: reg-us-east-1, at: [1, 1]}
 - {id: grp-package-and-deliver, type: common.group, name: package and deliver, parent: reg-us-east-1, at: [1, 2]}
-- {id: server, type: common.server, name: server, at: [1, 1]}
-- {id: users, type: common.users, name: users, at: [1, 3]}
+- {id: live-channel-source, type: common.server, name: live channel source, at: [1, 1]}
+- {id: ott-devices, type: common.mobile, name: OTT devices, at: [1, 3]}
+- {id: users, type: common.users, name: users, at: [2, 3]}
 - {id: primary-input, type: aws.res.aws_medialive_input, name: primary-input, parent: grp-ingest-and-transcode, props: {name: changeme, type: changeme}, at: [1, 1]}
+- {id: backup-input, type: aws.res.aws_medialive_input, name: backup-input, parent: grp-ingest-and-transcode, props: {name: changeme, type: changeme}, at: [2, 1]}
 - id: live-channel
   type: aws.res.aws_medialive_channel
   name: live-channel
   parent: grp-ingest-and-transcode
-  at: [1, 2]
-  props:
-    channel_class: changeme
-    destinations: []
-    encoder_settings: {}
-    input_attachments: []
-    input_specification: {}
-    name: changeme
+  props: {channel_class: changeme, destinations: [], encoder_settings: {}, input_attachments: [], input_specification: {}, name: changeme}
+  at:
+  - 1
+  - 2
+  - 2
+  - 1
 - {id: cdn-identifier, type: aws.res.aws_secretsmanager_secret, name: cdn-identifier, parent: grp-package-and-deliver, at: [2, 1]}
-- {id: live-cdn, type: aws.cloudfront_distribution, name: live-cdn, parent: grp-package-and-deliver, at: [1, 1]}
+- {id: live-cdn, type: aws.cloudfront_distribution, name: live-cdn, parent: grp-package-and-deliver, at: [1, 1, 1, 2]}
 - {id: demo-player-site, type: aws.s3_bucket, name: demo-player-site, parent: grp-package-and-deliver, at: [2, 2]}
-- {id: stack-custom-resources, type: aws.lambda_function, name: stack-custom-resources, parent: grp-package-and-deliver, at: [1, 2]}
+- {id: demo-player-cdn, type: aws.cloudfront_distribution, name: demo-player-cdn, parent: grp-package-and-deliver, at: [2, 3]}
 edges:
-- {from: server, to: primary-input, label: RTMP/RTP/HLS primary and backup feeds, step: '1'}
-- {from: primary-input, to: live-channel, label: attached input, step: '1'}
-- {from: live-cdn, to: cdn-identifier, label: CDN authorization header}
-- {from: live-cdn, to: demo-player-site, label: static player origin, step: '5'}
-- {from: users, to: live-cdn, label: playback, step: '4'}
+- {from: live-channel-source, to: primary-input, label: primary contribution feed, step: '1'}
+- {from: live-channel-source, to: backup-input, label: backup feed (dual ingest), step: '1'}
+- {from: primary-input, to: live-channel, label: attached input}
+- {from: backup-input, to: live-channel, label: attached input}
+- {from: live-channel, to: live-cdn, label: 'ABR HLS output packaged by MediaPackage into HLS, DASH, MSS and CMAF origin endpoints', step: '2'}
+- {from: live-cdn, to: cdn-identifier, label: CDN identifier header verification, step: '3'}
+- {from: live-cdn, to: ott-devices, label: live stream playback on multiple devices, step: '4'}
+- {from: demo-player-cdn, to: demo-player-site, label: demo preview player origin, step: '5'}
+- {from: users, to: demo-player-cdn, label: open demo player}
 steps:
-- {n: '1', text: 'server → primary-input: RTMP/RTP/HLS primary and backup feeds'}
-- {n: '4', text: 'users → live-cdn: playback'}
-- {n: '5', text: 'live-cdn → demo-player-site: static player origin'}
+- {n: '1', text: 'live channel source → primary-input: primary contribution feed'}
+- {n: '2', text: 'live-channel → live-cdn: ABR HLS output packaged by MediaPackage into HLS, DASH, MSS and CMAF origin endpoints'}
+- {n: '3', text: 'live-cdn → cdn-identifier: CDN identifier header verification'}
+- {n: '4', text: 'live-cdn → OTT devices: live stream playback on multiple devices'}
+- {n: '5', text: 'demo-player-cdn → demo-player-site: demo preview player origin'}

@@ -10,8 +10,10 @@ tags:
 - cloudfront
 image: https://docs.aws.amazon.com/images/solutions/latest/generative-ai-application-builder-on-aws/images/deployment-dashboard-diagram.png
 source: https://docs.aws.amazon.com/solutions/latest/generative-ai-application-builder-on-aws/architecture-overview.html
-description: CloudFront serves a React web UI from S3 and Cognito authenticates users of both the deployment dashboard and the chat use case. A REST API drives use-case management Lambdas that record configurations
-  in DynamoDB, while a WebSocket API queues chat messages in SQS for a chat Lambda that calls Bedrock, optionally grounded by a Bedrock knowledge base or Kendra index.
+description: Admin users open the deployment dashboard, a React web app served by CloudFront from S3 with its runtime settings in Parameter Store; REST calls pass AWS WAF and API Gateway, where a Lambda
+  custom authorizer checks the Cognito token against a DynamoDB policy store before backing Lambdas record use cases in DynamoDB, launch a CloudFormation stack per use case from nested templates in the
+  solutions artifact bucket and store the LLM configuration, all watched by a CloudWatch custom dashboard. In the deployed text use case a WebSocket API queues chat messages in SQS for a chat Lambda that
+  calls Bedrock, optionally grounded by a Bedrock knowledge base or Kendra index.
 nodes:
 - {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
@@ -19,12 +21,27 @@ nodes:
 - {id: grp-text-use-case, type: common.group, name: text-use-case, parent: reg-us-east-1, at: [2, 1]}
 - {id: users, type: common.users, name: users, at: [2, 1]}
 - {id: user, type: common.user, name: user, at: [1, 1]}
-- {id: web-ui-cdn, type: aws.cloudfront_distribution, name: web-ui-cdn, parent: grp-deployment-dashboard, at: [2, 1]}
-- {id: web-ui-bucket, type: aws.s3_bucket, name: web-ui-bucket, parent: grp-deployment-dashboard, at: [3, 1]}
-- {id: solution-users, type: aws.res.aws_cognito_user_pool, name: solution-users, parent: grp-deployment-dashboard, props: {name: changeme}, at: [2, 2]}
-- {id: deployment-api, type: aws.res.aws_api_gateway_rest_api, name: deployment-api, parent: grp-deployment-dashboard, props: {name: changeme}, at: [1, 2]}
-- {id: use-case-mgmt-fn, type: aws.lambda_function, name: use-case-mgmt-fn, parent: grp-deployment-dashboard, at: [1, 3]}
-- {id: use-case-configs, type: aws.dynamodb_table, name: use-case-configs, parent: grp-deployment-dashboard, at: [2, 3]}
+- {id: solutions-artifacts, type: aws.s3_bucket, name: solutions-artifacts, parent: grp-deployment-dashboard, at: [1, 5]}
+- {id: ops-dashboard, type: aws.res.aws_cloudwatch_dashboard, name: ops-dashboard, parent: grp-deployment-dashboard, props: {dashboard_body: changeme, dashboard_name: changeme}, at: [1, 6]}
+- id: web-acl
+  type: aws.res.aws_wafv2_web_acl
+  name: web-acl
+  parent: grp-deployment-dashboard
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+  at:
+  - 2
+  - 1
+- {id: deployment-api, type: aws.res.aws_api_gateway_rest_api, name: deployment-api, parent: grp-deployment-dashboard, props: {name: changeme}, at: [2, 2]}
+- {id: authorizer-fn, type: aws.lambda_function, name: authorizer-fn, parent: grp-deployment-dashboard, at: [2, 3]}
+- {id: use-case-mgmt-fn, type: aws.lambda_function, name: use-case-mgmt-fn, parent: grp-deployment-dashboard, at: [2, 4]}
+- {id: use-case-stacks, type: aws.res.aws_cloudformation_stack, name: use-case-stacks, parent: grp-deployment-dashboard, props: {name: changeme}, at: [2, 5]}
+- {id: web-ui-cdn, type: aws.cloudfront_distribution, name: web-ui-cdn, parent: grp-deployment-dashboard, at: [3, 1]}
+- {id: solution-users, type: aws.res.aws_cognito_user_pool, name: solution-users, parent: grp-deployment-dashboard, props: {name: changeme}, at: [3, 2]}
+- {id: policy-store, type: aws.dynamodb_table, name: policy-store, parent: grp-deployment-dashboard, at: [3, 3]}
+- {id: use-case-configs, type: aws.dynamodb_table, name: use-case-configs, parent: grp-deployment-dashboard, at: [3, 4]}
+- {id: llm-config-store, type: aws.dynamodb_table, name: llm-config-store, parent: grp-deployment-dashboard, at: [3, 5]}
+- {id: web-ui-bucket, type: aws.s3_bucket, name: web-ui-bucket, parent: grp-deployment-dashboard, at: [4, 1]}
+- {id: web-ui-parameters, type: aws.res.aws_ssm_parameter, name: web-ui-parameters, parent: grp-deployment-dashboard, props: {name: changeme, type: changeme}, at: [4, 2]}
 - {id: chat-websocket-api, type: aws.res.aws_apigatewayv2_api, name: chat-websocket-api, parent: grp-text-use-case, props: {name: changeme, protocol_type: changeme}, at: [1, 1]}
 - {id: chat-request-queue, type: aws.sqs_queue, name: chat-request-queue, parent: grp-text-use-case, at: [1, 2]}
 - {id: chat-fn, type: aws.lambda_function, name: chat-fn, parent: grp-text-use-case, at: [1, 3]}
@@ -32,23 +49,39 @@ nodes:
 - {id: use-case-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: use-case-kb, parent: grp-text-use-case, props: {name: changeme, role_arn: changeme}, at: [1, 4]}
 - {id: use-case-kendra, type: aws.res.aws_kendra_index, name: use-case-kendra, parent: grp-text-use-case, props: {name: changeme, role_arn: changeme}, at: [2, 4]}
 edges:
-- {from: user, to: web-ui-cdn, label: admin deploys use case, step: '1'}
-- {from: web-ui-cdn, to: web-ui-bucket, label: static assets}
-- {from: web-ui-cdn, to: deployment-api, label: REST with Cognito token, step: '2'}
-- {from: deployment-api, to: use-case-mgmt-fn, step: '3'}
-- {from: use-case-mgmt-fn, to: use-case-configs, label: CloudFormation stack per use case}
-- {from: users, to: chat-websocket-api, label: WSS chat, step: '4'}
-- {from: chat-websocket-api, to: chat-request-queue, step: '5'}
+- {from: user, to: web-ui-cdn, label: admin opens dashboard, step: '1'}
+- {from: web-ui-cdn, to: web-ui-bucket, label: Web app (UI), step: '2'}
+- {from: web-ui-parameters, to: web-ui-bucket, label: runtime configuration}
+- {from: user, to: web-acl, label: REST API calls, step: '3'}
+- {from: web-acl, to: deployment-api, step: '4'}
+- {from: deployment-api, to: authorizer-fn, label: custom authorizer, step: '5'}
+- {from: authorizer-fn, to: solution-users, label: validate token}
+- {from: authorizer-fn, to: policy-store, label: policies for authenticated users}
+- {from: deployment-api, to: use-case-mgmt-fn, label: backing functions, step: '6'}
+- {from: use-case-mgmt-fn, to: use-case-configs, label: use cases store, step: '7'}
+- {from: use-case-mgmt-fn, to: use-case-stacks, label: Stack ID, step: '8'}
+- {from: solutions-artifacts, to: use-case-stacks, label: use case and nested templates}
+- {from: use-case-mgmt-fn, to: llm-config-store, label: 'Store LLM configuration: prompt, temperature, model parameters', step: '9'}
+- {from: use-case-stacks, to: ops-dashboard, label: custom dashboard, step: '10'}
+- {from: users, to: chat-websocket-api, label: WSS chat, step: '11'}
+- {from: chat-websocket-api, to: chat-request-queue, step: '12'}
 - {from: chat-request-queue, to: chat-fn, link: aws_lambda_event_source_mapping}
-- {from: chat-fn, to: use-case-kb, label: Retrieve, step: '6'}
+- {from: chat-fn, to: use-case-kb, label: Retrieve, step: '13'}
 - {from: chat-fn, to: use-case-kendra, label: alternative retriever}
 - {from: chat-fn, to: conversation-history, label: memory}
-- {from: chat-fn, to: chat-websocket-api, label: streamed tokens, step: '7'}
+- {from: chat-fn, to: chat-websocket-api, label: streamed tokens, step: '14'}
 steps:
-- {n: '1', text: 'user → web-ui-cdn: admin deploys use case'}
-- {n: '2', text: 'web-ui-cdn → deployment-api: REST with Cognito token'}
-- {n: '3', text: deployment-api → use-case-mgmt-fn}
-- {n: '4', text: 'users → chat-websocket-api: WSS chat'}
-- {n: '5', text: chat-websocket-api → chat-request-queue}
-- {n: '6', text: 'chat-fn → use-case-kb: Retrieve'}
-- {n: '7', text: 'chat-fn → chat-websocket-api: streamed tokens'}
+- {n: '1', text: 'user → web-ui-cdn: admin opens dashboard'}
+- {n: '2', text: 'web-ui-cdn → web-ui-bucket: Web app (UI)'}
+- {n: '3', text: 'user → web-acl: REST API calls'}
+- {n: '4', text: web-acl → deployment-api}
+- {n: '5', text: 'deployment-api → authorizer-fn: custom authorizer'}
+- {n: '6', text: 'deployment-api → use-case-mgmt-fn: backing functions'}
+- {n: '7', text: 'use-case-mgmt-fn → use-case-configs: use cases store'}
+- {n: '8', text: 'use-case-mgmt-fn → use-case-stacks: Stack ID'}
+- {n: '9', text: 'use-case-mgmt-fn → llm-config-store: Store LLM configuration: prompt, temperature, model parameters'}
+- {n: '10', text: 'use-case-stacks → ops-dashboard: custom dashboard'}
+- {n: '11', text: 'users → chat-websocket-api: WSS chat'}
+- {n: '12', text: chat-websocket-api → chat-request-queue}
+- {n: '13', text: 'chat-fn → use-case-kb: Retrieve'}
+- {n: '14', text: 'chat-fn → chat-websocket-api: streamed tokens'}

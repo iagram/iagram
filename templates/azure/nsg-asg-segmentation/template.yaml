@@ -10,9 +10,9 @@ tags:
 - zero trust
 image: https://learn.microsoft.com/en-us/azure/virtual-network/media/security-groups/application-security-groups.png
 source: https://learn.microsoft.com/en-us/azure/virtual-network/application-security-groups
-description: Virtual machine NICs are grouped into AsgWeb, AsgLogic and AsgDb application security groups, and a single network security group on both subnets allows HTTP from the internet only to AsgWeb,
-  allows SQL from AsgLogic to AsgDb, and denies all other traffic to AsgDb ahead of the default AllowVNetInBound rule. Security policy follows the application structure without maintaining explicit IP addresses,
-  and flow logs feed traffic analytics.
+description: The network interfaces of VM1 and VM2 join the AsgWeb application security group, NIC3 joins AsgLogic and NIC4 joins AsgDb, and a single network security group NSG1 on Subnet1 and Subnet2 allows
+  HTTP on TCP port 80 from the internet only to AsgWeb, allows SQL on TCP port 1433 from AsgLogic to AsgDb, and denies all other traffic to AsgDb ahead of the default AllowVNetInBound rule. Security policy
+  follows the application structure without maintaining explicit IP addresses.
 nodes:
 - {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1]}
 - {id: rg-rg-segmentation, type: azure.resource_group, name: rg-segmentation, parent: sub-workload, props: {location: westeurope}, at: [1, 1]}
@@ -20,30 +20,66 @@ nodes:
 - {id: sub-subnet-web, type: azure.subnet, name: subnet-web, parent: vpc-vnet1, props: {cidr: 10.0.1.0/24}, at: [1, 1]}
 - {id: sub-subnet-data, type: azure.subnet, name: subnet-data, parent: vpc-vnet1, props: {cidr: 10.0.2.0/24}, at: [2, 1]}
 - {id: internet, type: common.internet, name: internet, at: [1, 1]}
-- {id: vpc-rg-rg-segmentation, type: azure.vnet, name: main, parent: rg-rg-segmentation, props: {cidr: 10.200.0.0/16}, at: [1, 4, 2, 1]}
-- {id: nsg1, type: azure.network_security_group, name: nsg1, parent: vpc-rg-rg-segmentation, at: [1, 1]}
+- {id: nsg1, type: azure.network_security_group, name: nsg1, parent: vpc-vnet1, at: [1, 2, 2, 1]}
 - {id: asg-web, type: azure.res.azurerm_application_security_group, name: asg-web, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
 - {id: asg-logic, type: azure.res.azurerm_application_security_group, name: asg-logic, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2]}
 - {id: asg-db, type: azure.res.azurerm_application_security_group, name: asg-db, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 3]}
-- {id: vm-web-1, type: azure.virtual_machine, name: vm-web-1, parent: sub-subnet-web, at: [1, 1]}
-- {id: vm-web-2, type: azure.virtual_machine, name: vm-web-2, parent: sub-subnet-web, at: [1, 2]}
-- {id: vm-logic, type: azure.virtual_machine, name: vm-logic, parent: sub-subnet-web, at: [1, 3]}
-- {id: vm-db, type: azure.virtual_machine, name: vm-db, parent: sub-subnet-data, at: [1, 1]}
-- {id: nw-flow-logs, type: azure.res.azurerm_network_watcher, name: nw-flow-logs, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 1]}
-- {id: law-traffic, type: azure.res.azurerm_log_analytics_workspace, name: law-traffic, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 2]}
+- id: nic1
+  type: azure.res.azurerm_network_interface
+  name: nic1
+  parent: sub-subnet-web
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme}
+  at:
+  - 1
+  - 1
+- id: nic2
+  type: azure.res.azurerm_network_interface
+  name: nic2
+  parent: sub-subnet-web
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme}
+  at:
+  - 1
+  - 2
+- id: nic3
+  type: azure.res.azurerm_network_interface
+  name: nic3
+  parent: sub-subnet-web
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme}
+  at:
+  - 1
+  - 3
+- {id: vm-web-1, type: azure.virtual_machine, name: vm-web-1, parent: sub-subnet-web, at: [2, 1]}
+- {id: vm-web-2, type: azure.virtual_machine, name: vm-web-2, parent: sub-subnet-web, at: [2, 2]}
+- {id: vm-logic, type: azure.virtual_machine, name: vm-logic, parent: sub-subnet-web, at: [2, 3]}
+- id: nic4
+  type: azure.res.azurerm_network_interface
+  name: nic4
+  parent: sub-subnet-data
+  props: {ip_configuration: [], location: westeurope, name: changeme, resource_group_name: changeme}
+  at:
+  - 1
+  - 1
+- {id: vm-db, type: azure.virtual_machine, name: vm-db, parent: sub-subnet-data, at: [2, 1]}
 edges:
-- {from: nsg1, to: sub-subnet-web, label: subnet network security group association}
-- {from: nsg1, to: sub-subnet-data, label: subnet network security group association}
-- {from: asg-web, to: vm-web-1, label: NIC member}
-- {from: asg-web, to: vm-web-2, label: NIC member}
-- {from: asg-logic, to: vm-logic, label: NIC member}
-- {from: asg-db, to: vm-db, label: NIC member}
-- {from: internet, to: vm-web-1, label: Allow-HTTP-Inbound-Internet to AsgWeb 80, step: '1'}
+- {from: nsg1, to: sub-subnet-web, label: NSG1 on Subnet1}
+- {from: nsg1, to: sub-subnet-data, label: NSG1 on Subnet2}
+- {from: asg-web, to: nic1, label: AsgWeb}
+- {from: asg-web, to: nic2, label: AsgWeb}
+- {from: asg-logic, to: nic3, label: AsgLogic}
+- {from: asg-db, to: nic4, label: AsgDb}
+- {from: nic1, to: vm-web-1, label: NIC1}
+- {from: nic2, to: vm-web-2, label: NIC2}
+- {from: nic3, to: vm-logic, label: NIC3}
+- {from: nic4, to: vm-db, label: NIC4}
+- {from: internet, to: nic1, label: HTTP TCP port 80 allowed (Allow-HTTP-Inbound-Internet to AsgWeb), step: '1'}
+- {from: internet, to: nic2, label: HTTP TCP port 80 allowed}
+- {from: internet, to: nic3, label: HTTP TCP port 80 denied}
+- {from: internet, to: nic4, label: HTTP TCP port 80 denied}
 - {from: vm-web-1, to: vm-logic, label: AllowVNetInBound default, step: '2'}
-- {from: vm-logic, to: vm-db, label: Allow-Database-BusinessLogic AsgLogic to AsgDb 1433, step: '3'}
-- {from: vm-web-2, to: vm-db, label: Deny-Database-All 1433 (denied)}
-- {from: nw-flow-logs, to: law-traffic, label: VNet flow logs / traffic analytics}
+- {from: nic3, to: nic4, label: TCP port 1433 allowed (Allow-Database-BusinessLogic AsgLogic to AsgDb), step: '3'}
+- {from: vm-web-1, to: nic4, label: TCP port 1433 denied (Deny-Database-All)}
+- {from: vm-web-2, to: nic4, label: TCP port 1433 denied (Deny-Database-All)}
 steps:
-- {n: '1', text: 'internet → vm-web-1: Allow-HTTP-Inbound-Internet to AsgWeb 80'}
+- {n: '1', text: 'internet → nic1: HTTP TCP port 80 allowed (Allow-HTTP-Inbound-Internet to AsgWeb)'}
 - {n: '2', text: 'vm-web-1 → vm-logic: AllowVNetInBound default'}
-- {n: '3', text: 'vm-logic → vm-db: Allow-Database-BusinessLogic AsgLogic to AsgDb 1433'}
+- {n: '3', text: 'nic3 → nic4: TCP port 1433 allowed (Allow-Database-BusinessLogic AsgLogic to AsgDb)'}

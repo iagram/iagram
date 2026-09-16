@@ -11,71 +11,47 @@ tags:
 - multi-account
 image: https://docs.aws.amazon.com/images/prescriptive-guidance/latest/patterns/images/pattern-img/01e700cd-be8c-4a5d-bc89-b901a260d045/images/d69d4cad-5e2c-4481-9370-2708e8a4f8c1.png
 source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/set-up-dns-resolution-for-hybrid-networks-in-a-multi-account-aws-environment.html
-description: A shared-services VPC connected to on-premises through a Transit Gateway hosts one inbound and one outbound Route 53 Resolver endpoint spanning two Availability Zones. On-premises DNS servers
-  forward AWS domains to the inbound endpoint, while Resolver forwarding rules for the corporate domain target the on-premises servers via the outbound endpoint and are shared to workload accounts with
-  AWS RAM and associated with their VPCs, together with the private hosted zone.
+description: A shared-services VPC hosts an outbound Route 53 Resolver endpoint that reaches the corporate data center over AWS Direct Connect or Site-to-Site VPN. A Resolver forwarding rule for onprem.example.com
+  targets the on-premises DNS server through the outbound endpoint; the rule is shared to the production account with AWS RAM and associated with the production VPC, so queries from EC2 instances to the
+  VPC's Route 53 Resolver are forwarded to the on-premises private DNS zone.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 3]}
-- {id: acct-shared-services, type: aws.account, name: shared-services, at: [1, 2]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-shared-services, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-shared-services, type: aws.vpc, name: shared-services, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: dc-corporate-data-center, type: common.datacenter, name: corporate-data-center, at: [1, 3]}
+- {id: acct-production, type: aws.account, name: production, at: [1, 1, 2, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-production, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-production, type: aws.vpc, name: production, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-production-a, type: aws.availability_zone, name: a, parent: vpc-production, props: {zone: a}, at: [1, 1]}
+- {id: sub-production-private-a, type: aws.subnet, name: production-private-a, parent: az-production-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: acct-shared-services, type: aws.account, name: shared-services, at: [1, 2, 2, 1]}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-shared-services, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-shared-services, type: aws.vpc, name: shared-services, parent: reg-us-east-1-2, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
 - {id: az-shared-services-a, type: aws.availability_zone, name: a, parent: vpc-shared-services, props: {zone: a}, at: [1, 1]}
 - {id: sub-dns-private-a, type: aws.subnet, name: dns-private-a, parent: az-shared-services-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-shared-services-b, type: aws.availability_zone, name: b, parent: vpc-shared-services, props: {zone: b}, at: [2, 1]}
-- {id: sub-dns-private-b, type: aws.subnet, name: dns-private-b, parent: az-shared-services-b, props: {cidr: 10.0.2.0/24, az: b, public: false}, at: [1, 1]}
-- {id: acct-workload, type: aws.account, name: workload, at: [1, 1]}
-- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}, at: [1, 1]}
-- {id: vpc-workload, type: aws.vpc, name: workload, parent: reg-us-east-1-2, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
-- {id: az-workload-a, type: aws.availability_zone, name: a, parent: vpc-workload, props: {zone: a}, at: [1, 1]}
-- {id: sub-workload-private-a, type: aws.subnet, name: workload-private-a, parent: az-workload-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}, at: [1, 3, 2, 1]}
-- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}, at: [2, 1]}
-- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: onprem-dns, type: aws.ec2_instance, name: onprem-dns, parent: sub-reg-us-east-1-a, at: [1, 1]}
-- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1, at: [1, 2, 2, 1]}
-- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-us-east-1-a, props: {type: changeme}, at: [1, 2]}
-- id: inbound-resolver
+- {id: on-prem-dns-server, type: common.server, name: on-prem-dns-server, at: [2, 3]}
+- {id: ec2-instance-1, type: aws.ec2_instance, name: ec2-instance-1, parent: sub-production-private-a, at: [1, 1]}
+- {id: ec2-instance-2, type: aws.ec2_instance, name: ec2-instance-2, parent: sub-production-private-a, at: [1, 2]}
+- {id: production-vpc-resolver, type: aws.res.aws_route53_resolver_config, name: production-vpc-resolver, parent: vpc-production, props: {autodefined_reverse_flag: changeme, resource_id: changeme}, at: [
+    1, 2]}
+- {id: production-forward-rule, type: aws.res.aws_route53_resolver_rule, name: production-forward-rule, parent: acct-production, props: {domain_name: changeme, rule_type: changeme}, at: [2, 1]}
+- id: outbound-resolver-endpoint
   type: aws.res.aws_route53_resolver_endpoint
-  name: inbound-resolver
+  name: outbound-resolver-endpoint
   parent: sub-dns-private-a
-  at: [1, 1]
-  props:
-    direction: changeme
-    ip_address: []
-    security_group_ids: []
-- id: outbound-resolver
-  type: aws.res.aws_route53_resolver_endpoint
-  name: outbound-resolver
-  parent: sub-dns-private-b
-  at: [1, 1]
-  props:
-    direction: changeme
-    ip_address: []
-    security_group_ids: []
-- {id: forward-corp-example-com, type: aws.res.aws_route53_resolver_rule, name: forward-corp-example-com, parent: vpc-shared-services, props: {domain_name: changeme, rule_type: changeme}, at: [3, 1]}
-- {id: aws-corp-private-zone, type: aws.route53_zone, name: aws-corp-private-zone, parent: reg-us-east-1, props: {domain: example.com}, at: [2, 1]}
-- {id: dns-rules-share, type: aws.res.aws_ram_resource_share, name: dns-rules-share, parent: acct-shared-services, props: {name: changeme}, at: [2, 1]}
-- {id: workload-server, type: aws.ec2_instance, name: workload-server, parent: sub-workload-private-a, at: [1, 1]}
-- {id: az-vpc-workload-b, type: aws.availability_zone, name: b, parent: vpc-workload, props: {zone: b}, at: [2, 1]}
-- {id: sub-vpc-workload-b, type: aws.subnet, name: private-b, parent: az-vpc-workload-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+  props: {direction: changeme, ip_address: [], security_group_ids: []}
+  at:
+  - 1
+  - 1
+- {id: onprem-forward-rule, type: aws.res.aws_route53_resolver_rule, name: onprem-forward-rule, parent: acct-shared-services, props: {domain_name: changeme, rule_type: changeme}, at: [2, 1]}
 edges:
-- {from: dc-on-premises, to: dc-cgw}
-- {from: hub-tgw, to: vpc-shared-services, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: hub-tgw, to: vpc-workload, link: aws_ec2_transit_gateway_vpc_attachment}
-- {from: onprem-dns, to: inbound-resolver, label: forward aws.corp.example.com (UDP/TCP 53), step: '1'}
-- {from: inbound-resolver, to: aws-corp-private-zone, label: resolve in private hosted zone, step: '2'}
-- {from: workload-server, to: forward-corp-example-com, label: query corp.example.com, step: '3'}
-- {from: forward-corp-example-com, to: outbound-resolver, step: '4'}
-- {from: outbound-resolver, to: onprem-dns, label: forward to on-prem DNS via TGW, step: '5'}
-- {from: dns-rules-share, to: acct-workload, label: RAM share of rules}
-- {from: forward-corp-example-com, to: vpc-workload, link: aws_route53_resolver_rule_association}
-- {from: aws-corp-private-zone, to: vpc-workload, link: aws_route53_zone_association}
-- {from: dc-cgw, to: hub-tgw, label: IPsec, link: aws_vpn_connection}
+- {from: ec2-instance-1, to: production-vpc-resolver, label: 'Q: db.onprem.example.com', step: '1'}
+- {from: production-vpc-resolver, to: production-forward-rule, label: matching forward rule, step: '2'}
+- {from: onprem-forward-rule, to: production-forward-rule, label: cross-account sharing (RAM) and association}
+- {from: production-forward-rule, to: vpc-production, link: aws_route53_resolver_rule_association}
+- {from: onprem-forward-rule, to: outbound-resolver-endpoint, label: 'rule type forward, domain onprem.example.com'}
+- {from: outbound-resolver-endpoint, to: on-prem-dns-server, label: forward over Direct Connect or Site-to-Site VPN, step: '3'}
+- {from: on-prem-dns-server, to: outbound-resolver-endpoint, label: 'A: db.onprem.example.com 1.2.3.4', step: '4'}
+- {from: dc-corporate-data-center, to: on-prem-dns-server, label: onprem.example.com private DNS zone}
 steps:
-- {n: '1', text: 'onprem-dns → inbound-resolver: forward aws.corp.example.com (UDP/TCP 53)'}
-- {n: '2', text: 'inbound-resolver → aws-corp-private-zone: resolve in private hosted zone'}
-- {n: '3', text: 'workload-server → forward-corp-example-com: query corp.example.com'}
-- {n: '4', text: forward-corp-example-com → outbound-resolver}
-- {n: '5', text: 'outbound-resolver → onprem-dns: forward to on-prem DNS via TGW'}
+- {n: '1', text: 'ec2-instance-1 → production-vpc-resolver: Q: db.onprem.example.com'}
+- {n: '2', text: 'production-vpc-resolver → production-forward-rule: matching forward rule'}
+- {n: '3', text: 'outbound-resolver-endpoint → on-prem-dns-server: forward over Direct Connect or Site-to-Site VPN'}
+- {n: '4', text: 'on-prem-dns-server → outbound-resolver-endpoint: A: db.onprem.example.com 1.2.3.4'}

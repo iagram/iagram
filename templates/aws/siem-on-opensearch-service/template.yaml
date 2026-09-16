@@ -10,50 +10,58 @@ tags:
 - elastic common schema
 image: https://d2908q01vomqb2.cloudfront.net/22d200f8670dbdb3e253a90eee5098477c95c23d/2022/03/17/image1-1-1024x469.png
 source: https://aws.amazon.com/blogs/security/how-to-use-aws-security-hub-and-amazon-opensearch-service-for-siem/
-description: Security Hub findings, CloudTrail, VPC flow logs, GuardDuty and WAF logs from many accounts land in a central S3 bucket, where a Lambda ETL function normalizes each log type to Elastic Common
-  Schema and indexes it into an OpenSearch domain. Analysts correlate events across sources in OpenSearch Dashboards and configure alerts, keeping findings searchable beyond the Security Hub retention window.
+description: Security Hub findings aggregated by the administrator account, WAF logs through a Kinesis Data Firehose delivery stream, GuardDuty exports and CloudTrail logs replicated from member-account
+  log buckets all land in a centralized S3 bucket in the log account. Each new object triggers the es-loader Lambda function, which normalizes the log to Elastic Common Schema, enriches it with a GeoIP
+  database kept in S3 by a download function and indexes it into an OpenSearch domain; analysts work in OpenSearch Dashboards and receive alerts by email through SNS.
 nodes:
-- {id: acct-security-tooling, type: aws.account, name: security-tooling, at: [1, 2, 2, 1]}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}, at: [2, 1, 1, 4]}
-- {id: vpc-siem, type: aws.vpc, name: siem, parent: reg-us-east-1, props: {cidr: 10.90.0.0/16}, at: [1, 4]}
-- {id: az-siem-a, type: aws.availability_zone, name: a, parent: vpc-siem, props: {zone: a}, at: [1, 1]}
-- {id: sub-siem-private-a, type: aws.subnet, name: siem-private-a, parent: az-siem-a, props: {cidr: 10.90.1.0/24, az: a, public: false}, at: [1, 1]}
-- {id: acct-log-archive, type: aws.account, name: log-archive, at: [2, 1]}
+- {id: acct-security-tooling, type: aws.account, name: security-tooling, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-security-tooling, props: {region: us-east-1}, at: [1, 1]}
+- {id: acct-log-archive, type: aws.account, name: log-archive, at: [1, 3, 2, 1]}
 - {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-log-archive, props: {region: us-east-1}, at: [1, 1]}
-- {id: acct-workload, type: aws.account, name: workload, at: [1, 1]}
-- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-workload, props: {region: us-east-1}, at: [1, 2, 2, 1]}
-- {id: users, type: common.users, name: users, at: [1, 3, 2, 1]}
-- {id: security-hub, type: aws.res.aws_securityhub_account, name: security-hub, parent: acct-security-tooling, at: [1, 1]}
-- {id: findings-export-rule, type: aws.res.aws_cloudwatch_event_rule, name: findings-export-rule, parent: acct-security-tooling, at: [1, 2]}
-- {id: findings-firehose, type: aws.res.aws_kinesis_firehose_delivery_stream, name: findings-firehose, parent: acct-security-tooling, props: {destination: changeme, name: changeme}, at: [1, 3]}
-- {id: siem-log-bucket, type: aws.s3_bucket, name: siem-log-bucket, parent: reg-us-east-1, at: [1, 1]}
-- {id: log-object-queue, type: aws.sqs_queue, name: log-object-queue, parent: reg-us-east-1, at: [1, 2]}
-- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}, at: [1, 3]}
-- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}, at: [1, 1]}
-- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
-- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}, at: [2, 1]}
-- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
-- {id: es-loader, type: aws.lambda_function, name: es-loader, parent: sub-reg-us-east-1-a, at: [1, 1]}
-- {id: siem-domain, type: aws.res.aws_opensearch_domain, name: siem-domain, parent: sub-siem-private-a, props: {domain_name: changeme}, at: [1, 1]}
-- {id: siem-cmk, type: aws.res.aws_kms_key, name: siem-cmk, parent: acct-security-tooling, at: [1, 4]}
-- {id: workload-trail, type: aws.res.aws_cloudtrail, name: workload-trail, parent: acct-workload, props: {name: changeme, s3_bucket_name: changeme}, at: [2, 1]}
-- {id: guardduty-member, type: aws.res.aws_guardduty_detector, name: guardduty-member, parent: acct-workload, at: [1, 1]}
-- {id: az-vpc-siem-b, type: aws.availability_zone, name: b, parent: vpc-siem, props: {zone: b}, at: [2, 1]}
-- {id: sub-vpc-siem-b, type: aws.subnet, name: private-b, parent: az-vpc-siem-b, props: {cidr: 10.90.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: grp-siem-on-amazon-opensearch-service, type: common.group, name: SIEM on Amazon OpenSearch Service, parent: reg-us-east-1-2, at: [1, 1]}
+- {id: acct-member, type: aws.account, name: member, at: [1, 1, 2, 1]}
+- {id: reg-us-east-1-3, type: aws.region, name: us-east-1, parent: acct-member, props: {region: us-east-1}, at: [1, 1]}
+- {id: users, type: common.users, name: users, at: [1, 4]}
+- {id: securityhub-administrator, type: aws.res.aws_securityhub_organization_admin_account, name: securityhub-administrator, parent: reg-us-east-1, props: {admin_account_id: changeme}, at: [1, 1]}
+- {id: geoip-bucket, type: aws.s3_bucket, name: geoip-bucket, parent: grp-siem-on-amazon-opensearch-service, at: [1, 2]}
+- {id: geoip-downloader, type: aws.lambda_function, name: geoip-downloader, parent: grp-siem-on-amazon-opensearch-service, at: [1, 3]}
+- {id: siem-log-bucket, type: aws.s3_bucket, name: siem-log-bucket, parent: grp-siem-on-amazon-opensearch-service, at: [2, 1]}
+- {id: es-loader, type: aws.lambda_function, name: es-loader, parent: grp-siem-on-amazon-opensearch-service, at: [2, 2]}
+- {id: siem-domain, type: aws.res.aws_opensearch_domain, name: siem-domain, parent: grp-siem-on-amazon-opensearch-service, props: {domain_name: changeme}, at: [2, 3]}
+- {id: siem-alerts, type: aws.res.aws_sns_topic, name: siem-alerts, parent: grp-siem-on-amazon-opensearch-service, at: [3, 3]}
+- {id: securityhub-member, type: aws.res.aws_securityhub_account, name: securityhub-member, parent: reg-us-east-1-3, at: [1, 1]}
+- id: waf-web-acl
+  type: aws.res.aws_wafv2_web_acl
+  name: waf-web-acl
+  parent: reg-us-east-1-3
+  props: {default_action: {}, scope: changeme, visibility_config: {}}
+  at:
+  - 2
+  - 1
+- {id: log-firehose, type: aws.res.aws_kinesis_firehose_delivery_stream, name: log-firehose, parent: reg-us-east-1-3, props: {destination: changeme, name: changeme}, at: [2, 2]}
+- {id: guardduty-member, type: aws.res.aws_guardduty_detector, name: guardduty-member, parent: reg-us-east-1-3, at: [3, 1]}
+- {id: workload-trail, type: aws.res.aws_cloudtrail, name: workload-trail, parent: reg-us-east-1-3, props: {name: changeme, s3_bucket_name: changeme}, at: [4, 1]}
+- {id: member-log-bucket, type: aws.s3_bucket, name: member-log-bucket, parent: reg-us-east-1-3, at: [4, 2]}
 edges:
-- {from: workload-trail, to: siem-log-bucket, label: CloudTrail logs, step: '1'}
-- {from: guardduty-member, to: security-hub, label: findings, step: '2'}
-- {from: findings-export-rule, to: findings-firehose, link: aws_cloudwatch_event_target}
-- {from: findings-firehose, to: siem-log-bucket, label: findings as JSON, step: '3'}
-- {from: siem-log-bucket, to: log-object-queue, label: object created event, step: '4'}
-- {from: log-object-queue, to: es-loader, link: aws_lambda_event_source_mapping}
+- {from: securityhub-member, to: securityhub-administrator, label: aggregate findings, step: '1'}
+- {from: securityhub-administrator, to: siem-log-bucket, label: S3 export, step: '2'}
+- {from: waf-web-acl, to: log-firehose, label: delivery stream, step: '3'}
+- {from: log-firehose, to: siem-log-bucket, label: S3 destination}
+- {from: guardduty-member, to: siem-log-bucket, label: S3 export}
+- {from: workload-trail, to: member-log-bucket, label: S3 export}
+- {from: member-log-bucket, to: siem-log-bucket, label: replication}
+- {from: siem-log-bucket, to: es-loader, label: trigger, step: '4'}
+- {from: geoip-downloader, to: geoip-bucket, label: PUT GeoIP}
+- {from: geoip-bucket, to: es-loader, label: GeoIP enrichment}
 - {from: es-loader, to: siem-domain, label: index ECS documents, step: '5'}
-- {from: siem-cmk, to: siem-domain, label: encryption at rest}
-- {from: users, to: siem-domain, label: OpenSearch Dashboards, step: '6'}
+- {from: siem-domain, to: siem-alerts, label: alerting, step: '6'}
+- {from: siem-alerts, to: users, label: alert email}
+- {from: users, to: siem-domain, label: OpenSearch Dashboards (Kibana), step: '7'}
 steps:
-- {n: '1', text: 'workload-trail → siem-log-bucket: CloudTrail logs'}
-- {n: '2', text: 'guardduty-member → security-hub: findings'}
-- {n: '3', text: 'findings-firehose → siem-log-bucket: findings as JSON'}
-- {n: '4', text: 'siem-log-bucket → log-object-queue: object created event'}
+- {n: '1', text: 'securityhub-member → securityhub-administrator: aggregate findings'}
+- {n: '2', text: 'securityhub-administrator → siem-log-bucket: S3 export'}
+- {n: '3', text: 'waf-web-acl → log-firehose: delivery stream'}
+- {n: '4', text: 'siem-log-bucket → es-loader: trigger'}
 - {n: '5', text: 'es-loader → siem-domain: index ECS documents'}
-- {n: '6', text: 'users → siem-domain: OpenSearch Dashboards'}
+- {n: '6', text: 'siem-domain → siem-alerts: alerting'}
+- {n: '7', text: 'users → siem-domain: OpenSearch Dashboards (Kibana)'}

@@ -10,42 +10,34 @@ tags:
 image: https://d2908q01vomqb2.cloudfront.net/da4b9237bacccdf19c0760cab7aec4a8359010b0/2021/04/01/cloudfront-functions-where-1024x532.png
 source: https://aws.amazon.com/blogs/aws/introducing-cloudfront-functions-run-your-code-at-the-edge-with-low-latency-at-any-scale/
 description: CloudFront Functions run sub-millisecond JavaScript at every edge location on viewer-request and viewer-response events for cache-key normalization, URL rewrites and redirects, header manipulation,
-  and cookie-based A/B routing. Heavier logic such as network calls or origin selection stays in Lambda@Edge, while the origin content comes from S3 and an Application Load Balancer.
+  and cookie-based A/B routing, so each client is served by the edge location closest to it. Heavier logic such as network calls or origin selection runs in Lambda@Edge at the regional edge location, which
+  fetches from the origin on a cache miss.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 3, 1]}
 - {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
-- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-us-east-1, at: [1, 1, 2, 1]}
-- {id: vpc-origin, type: aws.vpc, name: origin, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [2, 2]}
-- {id: az-origin-a, type: aws.availability_zone, name: a, parent: vpc-origin, props: {zone: a}, at: [2, 1]}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-origin-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
-- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-origin-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [2, 1]}
-- {id: users, type: common.users, name: users, at: [1, 1]}
-- {id: site-cdn, type: aws.cloudfront_distribution, name: site-cdn, parent: grp-global-edge, at: [1, 1, 2, 1]}
-- {id: viewer-request-rewrite, type: aws.res.aws_cloudfront_function, name: viewer-request-rewrite, parent: grp-global-edge, props: {code: changeme, name: changeme, runtime: changeme}, at: [1, 2]}
-- {id: viewer-response-headers, type: aws.res.aws_cloudfront_function, name: viewer-response-headers, parent: grp-global-edge, props: {code: changeme, name: changeme, runtime: changeme}, at: [2, 2]}
-- {id: origin-request-edge, type: aws.lambda_function, name: origin-request-edge, parent: grp-global-edge, at: [1, 3, 2, 1]}
-- {id: static-origin, type: aws.s3_bucket, name: static-origin, parent: reg-us-east-1, at: [1, 2]}
-- {id: origin-igw, type: aws.res.aws_internet_gateway, name: origin-igw, parent: vpc-origin, at: [1, 1]}
-- {id: app-alb, type: aws.alb, name: app-alb, parent: vpc-origin, at: [1, 2]}
-- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-app-a, at: [1, 1]}
-- {id: az-vpc-origin-b, type: aws.availability_zone, name: b, parent: vpc-origin, props: {zone: b}, at: [2, 2]}
-- {id: sub-vpc-origin-b, type: aws.subnet, name: private-b, parent: az-vpc-origin-b, props: {cidr: 10.0.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: grp-edge-location-a, type: common.group, name: edge-location-a, parent: reg-us-east-1, at: [1, 1]}
+- {id: grp-edge-location-b, type: common.group, name: edge-location-b, parent: reg-us-east-1, at: [2, 1]}
+- {id: grp-edge-location-c, type: common.group, name: edge-location-c, parent: reg-us-east-1, at: [3, 1]}
+- {id: grp-regional-edge-location, type: common.group, name: regional-edge-location, parent: reg-us-east-1, at: [2, 2]}
+- {id: client-a, type: common.client, name: client-a, at: [1, 1]}
+- {id: client-b, type: common.client, name: client-b, at: [2, 1]}
+- {id: client-c, type: common.client, name: client-c, at: [3, 1]}
+- {id: origin, type: common.server, name: origin, at: [2, 3]}
+- {id: viewer-function-a, type: aws.res.aws_cloudfront_function, name: viewer-function-a, parent: grp-edge-location-a, props: {code: changeme, name: changeme, runtime: changeme}, at: [1, 1]}
+- {id: viewer-function-b, type: aws.res.aws_cloudfront_function, name: viewer-function-b, parent: grp-edge-location-b, props: {code: changeme, name: changeme, runtime: changeme}, at: [1, 1]}
+- {id: viewer-function-c, type: aws.res.aws_cloudfront_function, name: viewer-function-c, parent: grp-edge-location-c, props: {code: changeme, name: changeme, runtime: changeme}, at: [1, 1]}
+- {id: origin-request-edge, type: aws.lambda_function, name: origin-request-edge, parent: grp-regional-edge-location, at: [1, 1]}
+- {id: site-cdn, type: aws.cloudfront_distribution, name: site-cdn, parent: reg-us-east-1, at: [1, 2]}
 edges:
-- {from: users, to: site-cdn, label: HTTPS, step: '1'}
-- {from: site-cdn, to: viewer-request-rewrite, label: viewer request, step: '2'}
-- {from: viewer-request-rewrite, to: site-cdn, label: 'normalized URI, A/B cookie, redirect', step: '3'}
-- {from: site-cdn, to: origin-request-edge, label: origin request (Lambda@Edge) on miss, step: '4'}
-- {from: site-cdn, to: static-origin, label: static origin, step: '5'}
-- {from: site-cdn, to: app-alb, label: dynamic origin, step: '5'}
-- {from: app-alb, to: app-server}
-- {from: origin-igw, to: app-alb}
-- {from: site-cdn, to: viewer-response-headers, label: viewer response adds security headers, step: '6'}
-- {from: site-cdn, to: users, label: response, step: '7'}
+- {from: client-a, to: viewer-function-a, label: viewer request, step: '1'}
+- {from: client-b, to: viewer-function-b, label: viewer request, step: '1'}
+- {from: client-c, to: viewer-function-c, label: viewer request, step: '1'}
+- {from: viewer-function-a, to: origin-request-edge, label: cache miss to regional edge cache, step: '2'}
+- {from: viewer-function-b, to: origin-request-edge, label: cache miss to regional edge cache, step: '2'}
+- {from: viewer-function-c, to: origin-request-edge, label: cache miss to regional edge cache, step: '2'}
+- {from: origin-request-edge, to: origin, label: origin request (Lambda@Edge), step: '3'}
+- {from: site-cdn, to: origin-request-edge, label: distribution behaviours associate the functions}
 steps:
-- {n: '1', text: 'users → site-cdn: HTTPS'}
-- {n: '2', text: 'site-cdn → viewer-request-rewrite: viewer request'}
-- {n: '3', text: 'viewer-request-rewrite → site-cdn: normalized URI, A/B cookie, redirect'}
-- {n: '4', text: 'site-cdn → origin-request-edge: origin request (Lambda@Edge) on miss'}
-- {n: '5', text: 'site-cdn → static-origin: static origin'}
-- {n: '6', text: 'site-cdn → viewer-response-headers: viewer response adds security headers'}
-- {n: '7', text: 'site-cdn → users: response'}
+- {n: '1', text: 'client-a → viewer-function-a: viewer request'}
+- {n: '2', text: 'viewer-function-a → origin-request-edge: cache miss to regional edge cache'}
+- {n: '3', text: 'origin-request-edge → origin: origin request (Lambda@Edge)'}
