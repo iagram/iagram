@@ -78,7 +78,10 @@ export function makeNode(rules: Rules, n: DocNode): RFNode {
 }
 
 export function makeEdge(e: DocEdge, ruleLabel: string, ruleStyle?: EdgeStyle): RFEdge {
-  const data: EdgeData = { kind: e.kind, label: e.label || ruleLabel, userLabel: e.label, ruleLabel, step: e.step, style: e.style, ruleStyle, attr: e.attr, output: e.output, type: e.type, name: e.name, props: e.props }
+  // Reference diagrams never write "references" or "protects" on a line:
+  // those kinds stay silent unless the author typed a label.
+  const quiet = e.kind === 'references' || e.kind === 'protects'
+  const data: EdgeData = { kind: e.kind, label: e.label || ruleLabel, userLabel: e.label, ruleLabel, step: e.step, style: e.style, ruleStyle, attr: e.attr, output: e.output, type: e.type, name: e.name, props: e.props, showLabel: !!e.label || !quiet }
   return withMarkers({ id: e.id, source: e.source, target: e.target, sourceHandle: e.from_port || 'r', targetHandle: e.to_port || 'l', type: 'iagram', data })
 }
 
@@ -112,7 +115,10 @@ export function fromDocument(rules: Rules, doc: Document): { nodes: RFNode[]; ed
   const types = new Map(doc.nodes.map((n) => [n.id, n.type]))
   const edges = doc.edges.map((e) => {
     const rule = e.kind === 'link' ? rules.linkRule(types.get(e.source) ?? '', types.get(e.target) ?? '', e.type) ?? rules.connection(types.get(e.source) ?? '', types.get(e.target) ?? '') : rules.connection(types.get(e.source) ?? '', types.get(e.target) ?? '')
-    const label = e.kind === 'references' && e.attr ? e.attr : rule?.label ?? (e.kind === 'flow' ? '' : e.kind)
+    // A rule's label only applies when it is the rule this edge follows: the
+    // fallback "references" rule must not caption an arrow of another kind.
+    const ruleLabel = rule && rule.kind === e.kind ? rule.label : undefined
+    const label = e.kind === 'references' && e.attr ? e.attr : ruleLabel ?? (e.kind === 'flow' ? '' : e.kind)
     return makeEdge(e, label, rule?.style)
   })
   return { nodes, edges }

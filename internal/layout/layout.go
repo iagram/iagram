@@ -96,6 +96,10 @@ func Arrange(c *catalog.Catalog, d *document.Document, o Options) {
 		if e, ok := c.Get(n.Type); ok && e.Attachment {
 			continue // configured inside their owner, not drawn
 		}
+		if len(l.coveredBy(n)) > 0 {
+			l.bands = append(l.bands, n) // drawn over the containers it covers, after they are placed
+			continue
+		}
 		if n.Parent != "" {
 			if _, ok := l.byID[n.Parent]; ok {
 				l.children[n.Parent] = append(l.children[n.Parent], n)
@@ -109,6 +113,7 @@ func Arrange(c *catalog.Catalog, d *document.Document, o Options) {
 		ox, oy = math.Min(ox, r.Layout.X), math.Min(oy, r.Layout.Y)
 	}
 	l.place(roots, "")
+	l.placeBands()
 	if o.PreserveOrigin && len(roots) > 0 && !math.IsInf(ox, 0) {
 		nx, ny := math.Inf(1), math.Inf(1)
 		for _, r := range roots {
@@ -127,6 +132,92 @@ type layouter struct {
 	o        Options
 	byID     map[string]*document.Node
 	children map[string][]*document.Node
+	bands    []*document.Node // spanning groups (Auto Scaling groups) laid over their containers
+}
+
+// coveredBy returns the containers a spanning band stretches over: the
+// targets of its reference edges, or the containers holding what it points
+// at (an Auto Scaling group "scales" instances that live in subnets).
+func (l *layouter) coveredBy(band *document.Node) []*document.Node {
+	e := l.entry(band)
+	if e == nil || e.Span == nil {
+		return nil
+	}
+	allowed := map[string]bool{}
+	for _, t := range e.Span.Elements {
+		allowed[t] = true
+	}
+	seen := map[string]bool{}
+	var out []*document.Node
+	add := func(n *document.Node) {
+		if n != nil && allowed[n.Type] && !seen[n.ID] {
+			seen[n.ID] = true
+			out = append(out, n)
+		}
+	}
+	for _, ed := range l.d.Edges {
+		if ed.Source != band.ID {
+			continue
+		}
+		t := l.byID[ed.Target]
+		if t == nil {
+			continue
+		}
+		if ed.Kind == "references" {
+			add(t)
+			continue
+		}
+		for cur := t; cur != nil; cur = l.byID[cur.Parent] {
+			if allowed[cur.Type] {
+				add(cur)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// absPos returns a node's position on the canvas (parents' offsets summed).
+func (l *layouter) absPos(n *document.Node) (float64, float64) {
+	x, y := 0.0, 0.0
+	for cur := n; cur != nil; cur = l.byID[cur.Parent] {
+		x += cur.Layout.X
+		y += cur.Layout.Y
+	}
+	return x, y
+}
+
+// Band insets: inside the covered containers' borders, below their headers,
+// around the elements they hold, like the dashed Auto Scaling box in the
+// AWS diagrams.
+const (
+	bandInsetX   = 22
+	bandInsetTop = 44
+	bandInsetBot = 18
+)
+
+// placeBands stretches every spanning band over the containers it covers.
+func (l *layouter) placeBands() {
+	for _, b := range l.bands {
+		minX, minY := math.Inf(1), math.Inf(1)
+		maxX, maxY := math.Inf(-1), math.Inf(-1)
+		for _, cn := range l.coveredBy(b) {
+			x, y := l.absPos(cn)
+			minX, minY = math.Min(minX, x), math.Min(minY, y)
+			maxX, maxY = math.Max(maxX, x+cn.Layout.W), math.Max(maxY, y+cn.Layout.H)
+		}
+		if math.IsInf(minX, 0) {
+			continue
+		}
+		px, py := 0.0, 0.0
+		if p := l.byID[b.Parent]; p != nil {
+			px, py = l.absPos(p)
+		}
+		b.Layout.X = minX - px + bandInsetX
+		b.Layout.Y = minY - py + bandInsetTop
+		b.Layout.W = math.Max(compactW, maxX-minX-2*bandInsetX)
+		b.Layout.H = math.Max(compactH, maxY-minY-bandInsetTop-bandInsetBot)
+	}
 }
 
 func (l *layouter) entry(n *document.Node) *catalog.Entry {

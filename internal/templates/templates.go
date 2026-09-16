@@ -293,6 +293,7 @@ func Render(c *catalog.Catalog, slug string, spec *Spec) (*document.Document, er
 		return 1 // cloud roots
 	}
 	sort.SliceStable(d.Nodes, func(i, j int) bool { return rank(d.Nodes[i]) < rank(d.Nodes[j]) })
+	spanReferences(c, d)
 	layout.Auto(c, d)
 	return d, nil
 }
@@ -394,4 +395,59 @@ func slugify(s string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+// spanReferences turns a spanning band's arrows at leaf elements into the
+// reference edges the generator and the layout work from (the subnets an Auto
+// Scaling group covers), the way the client does when a band is dragged over
+// containers. Undocumented "scales" arrows are dropped: the band drawn around
+// the instances says it.
+func spanReferences(c *catalog.Catalog, d *document.Document) {
+	byID := d.Index()
+	have := map[string]bool{}
+	for _, e := range d.Edges {
+		if e.Kind == "references" {
+			have[e.Source+"\x00"+e.Target] = true
+		}
+	}
+	var keep, add []document.Edge
+	for _, e := range d.Edges {
+		var sp *catalog.Span
+		if src := byID[e.Source]; src != nil {
+			if ent, ok := c.Get(src.Type); ok {
+				sp = ent.Span
+			}
+		}
+		if sp == nil || e.Kind == "references" {
+			keep = append(keep, e)
+			continue
+		}
+		allowed := map[string]bool{}
+		for _, t := range sp.Elements {
+			allowed[t] = true
+		}
+		var cont *document.Node
+		for cur := byID[e.Target]; cur != nil; cur = byID[cur.Parent] {
+			if allowed[cur.Type] {
+				cont = cur
+				break
+			}
+		}
+		if cont == nil {
+			keep = append(keep, e)
+			continue
+		}
+		if key := e.Source + "\x00" + cont.ID; !have[key] {
+			have[key] = true
+			out := sp.Outputs[cont.Type]
+			if out == "" {
+				out = "id"
+			}
+			add = append(add, document.Edge{ID: "span-" + e.Source + "-" + cont.ID, Kind: "references", Source: e.Source, Target: cont.ID, Attr: sp.Attr, Output: out})
+		}
+		if e.Step != "" || (e.Label != "" && e.Label != "scales") {
+			keep = append(keep, e)
+		}
+	}
+	d.Edges = append(keep, add...)
 }

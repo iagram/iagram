@@ -150,17 +150,11 @@ export function Gallery() {
 /** The original vendor diagram when available and enabled, else the generated miniature. */
 function CardImage({ t }: { t: TemplateItem }) {
   const [failed, setFailed] = useState(false)
+  // Credit goes through the card's "Official reference" link (and templates/NOTICE.md).
   if (t.image && !failed) {
-    let host = ''
-    try {
-      host = new URL(t.image_source ?? t.source).hostname
-    } catch {
-      /* keep empty */
-    }
     return (
       <div className="preview ref">
         <img src={t.image} alt={`Reference diagram: ${t.title}`} loading="lazy" onError={() => setFailed(true)} />
-        {host && <span className="credit">Diagram from {host}</span>}
       </div>
     )
   }

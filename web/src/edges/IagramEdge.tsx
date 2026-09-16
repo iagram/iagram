@@ -34,7 +34,7 @@ function IagramEdgeImpl({ id, sourceX, sourceY, targetX, targetY, sourcePosition
       />
       {(step || (showLabel && label)) && (
         <EdgeLabelRenderer>
-          <div className={`edge-label ${style?.inactive ? 'inactive' : ''}`} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, ...(stroke ? { borderColor: stroke } : {}) }}>
+          <div className={`edge-label ${style?.inactive ? 'inactive' : ''} ${step && showLabel && label ? 'has-step' : ''} ${selected ? 'selected' : ''}`} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, ...(stroke ? { borderColor: stroke } : {}) }}>
             {step && <span className="step">{step}</span>}
             {showLabel && label && <span className="text">{label}</span>}
           </div>
