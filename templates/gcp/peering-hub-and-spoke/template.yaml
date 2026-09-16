@@ -11,26 +11,26 @@ source: https://docs.cloud.google.com/vpc/docs/vpc-peering
 description: Each spoke VPC is peered with a central hub VPC that hosts shared services and the hybrid connectivity to on-premises; the hub exports custom dynamic routes so spokes learn on-premises prefixes.
   Peering is non-transitive, so spokes cannot talk to each other through the hub unless a network virtual appliance or NCC is added.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-central1}}
-- {id: vpc-hub-vpc, type: gcp.vpc, name: hub-vpc, parent: prj-net-hub, props: {cidr: 10.10.0.0/16}}
-- {id: sub-hub-shared-svc, type: gcp.subnetwork, name: hub-shared-svc, parent: vpc-hub-vpc, props: {cidr: 10.10.0.0/24, region: us-central1}}
-- {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: us-central1}}
-- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-workload-a, props: {cidr: 10.11.0.0/16}}
-- {id: sub-spoke-a-usc1, type: gcp.subnetwork, name: spoke-a-usc1, parent: vpc-spoke-a, props: {cidr: 10.11.0.0/24, region: us-central1}}
-- {id: prj-workload-b, type: gcp.project, name: workload-b, props: {project_id: workload-b-123456, project: changeme, region: us-central1}}
-- {id: vpc-spoke-b, type: gcp.vpc, name: spoke-b, parent: prj-workload-b, props: {cidr: 10.12.0.0/16}}
-- {id: sub-spoke-b-usc1, type: gcp.subnetwork, name: spoke-b-usc1, parent: vpc-spoke-b, props: {cidr: 10.12.0.0/24, region: us-central1}}
-- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}}
-- {id: hub-vlan-attachment, type: gcp.res.google_compute_interconnect_attachment, name: hub-vlan-attachment, parent: vpc-hub-vpc, props: {name: changeme, router: changeme}}
-- {id: shared-services-vm, type: gcp.compute_instance, name: shared-services-vm, parent: sub-hub-shared-svc}
-- {id: hub-private-zone, type: gcp.cloud_dns_zone, name: hub-private-zone, parent: prj-net-hub, props: {domain: example.com}}
-- {id: allow-spoke-ingress, type: gcp.firewall_rule, name: allow-spoke-ingress, parent: vpc-hub-vpc}
-- {id: app-a, type: gcp.compute_instance, name: app-a, parent: sub-spoke-a-usc1}
-- {id: app-b, type: gcp.compute_instance, name: app-b, parent: sub-spoke-b-usc1}
-- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub}
-- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
-- {id: onprem-router, type: gcp.res.google_compute_router, name: onprem-router, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 4]}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: us-central1}, at: [1, 2]}
+- {id: vpc-hub-vpc, type: gcp.vpc, name: hub-vpc, parent: prj-net-hub, props: {cidr: 10.10.0.0/16}, at: [1, 1]}
+- {id: sub-hub-shared-svc, type: gcp.subnetwork, name: hub-shared-svc, parent: vpc-hub-vpc, props: {cidr: 10.10.0.0/24, region: us-central1}, at: [1, 1]}
+- {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: us-central1}, at: [1, 1]}
+- {id: vpc-spoke-a, type: gcp.vpc, name: spoke-a, parent: prj-workload-a, props: {cidr: 10.11.0.0/16}, at: [1, 1]}
+- {id: sub-spoke-a-usc1, type: gcp.subnetwork, name: spoke-a-usc1, parent: vpc-spoke-a, props: {cidr: 10.11.0.0/24, region: us-central1}, at: [1, 1]}
+- {id: prj-workload-b, type: gcp.project, name: workload-b, props: {project_id: workload-b-123456, project: changeme, region: us-central1}, at: [1, 3]}
+- {id: vpc-spoke-b, type: gcp.vpc, name: spoke-b, parent: prj-workload-b, props: {cidr: 10.12.0.0/16}, at: [1, 1]}
+- {id: sub-spoke-b-usc1, type: gcp.subnetwork, name: spoke-b-usc1, parent: vpc-spoke-b, props: {cidr: 10.12.0.0/24, region: us-central1}, at: [1, 1]}
+- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-vpc, props: {name: changeme, network: changeme}, at: [3, 1]}
+- {id: hub-vlan-attachment, type: gcp.res.google_compute_interconnect_attachment, name: hub-vlan-attachment, parent: vpc-hub-vpc, props: {name: changeme, router: changeme}, at: [2, 1]}
+- {id: shared-services-vm, type: gcp.compute_instance, name: shared-services-vm, parent: sub-hub-shared-svc, at: [1, 1]}
+- {id: hub-private-zone, type: gcp.cloud_dns_zone, name: hub-private-zone, parent: prj-net-hub, props: {domain: example.com}, at: [3, 1]}
+- {id: allow-spoke-ingress, type: gcp.firewall_rule, name: allow-spoke-ingress, parent: vpc-hub-vpc, at: [1, 2, 3, 1]}
+- {id: app-a, type: gcp.compute_instance, name: app-a, parent: sub-spoke-a-usc1, at: [1, 1]}
+- {id: app-b, type: gcp.compute_instance, name: app-b, parent: sub-spoke-b-usc1, at: [1, 1]}
+- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub, at: [2, 1]}
+- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}, at: [1, 1]}
+- {id: onprem-router, type: gcp.res.google_compute_router, name: onprem-router, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}, at: [1, 1]}
 edges:
 - {from: vpc-hub-vpc, to: vpc-spoke-a, link: google_compute_network_peering}
 - {from: vpc-hub-vpc, to: vpc-spoke-b, link: google_compute_network_peering}

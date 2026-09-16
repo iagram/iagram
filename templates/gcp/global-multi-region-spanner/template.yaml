@@ -12,19 +12,20 @@ source: https://docs.cloud.google.com/architecture/global-deployment-compute-eng
 description: A global external Application Load Balancer sends users to the nearest healthy region, where regional managed instance groups spanning three zones run the web tier and a cross-region internal
   load balancer forwards to application-tier MIGs. All regions read and write a synchronously replicated multi-region Spanner instance, so a full regional outage fails over without data loss.
 nodes:
-- {id: prj-global-app-prj, type: gcp.project, name: global-app-prj, props: {project_id: global-app-prj-123456, project: changeme, region: europe-west1}}
-- {id: vpc-global-vpc, type: gcp.vpc, name: global-vpc, parent: prj-global-app-prj}
-- {id: sub-web-sub-ew1, type: gcp.subnetwork, name: web-sub-ew1, parent: vpc-global-vpc, props: {cidr: 10.80.1.0/24, region: europe-west1}}
-- {id: sub-app-sub-ew1, type: gcp.subnetwork, name: app-sub-ew1, parent: vpc-global-vpc, props: {cidr: 10.80.2.0/24, region: europe-west1}}
-- {id: sub-web-sub-ew4, type: gcp.subnetwork, name: web-sub-ew4, parent: vpc-global-vpc, props: {cidr: 10.81.1.0/24, region: europe-west4}}
-- {id: sub-app-sub-ew4, type: gcp.subnetwork, name: app-sub-ew4, parent: vpc-global-vpc, props: {cidr: 10.81.2.0/24, region: europe-west4}}
-- {id: users, type: common.users, name: users}
-- {id: internet, type: common.internet, name: internet}
-- {id: global-https-lb, type: gcp.res.google_compute_global_forwarding_rule, name: global-https-lb, parent: prj-global-app-prj, props: {name: changeme, target: changeme}}
+- {id: prj-global-app-prj, type: gcp.project, name: global-app-prj, props: {project_id: global-app-prj-123456, project: changeme, region: europe-west1}, at: [2, 1, 1, 2]}
+- {id: vpc-global-vpc, type: gcp.vpc, name: global-vpc, parent: prj-global-app-prj, at: [2, 1]}
+- {id: sub-web-sub-ew1, type: gcp.subnetwork, name: web-sub-ew1, parent: vpc-global-vpc, props: {cidr: 10.80.1.0/24, region: europe-west1}, at: [1, 1]}
+- {id: sub-app-sub-ew1, type: gcp.subnetwork, name: app-sub-ew1, parent: vpc-global-vpc, props: {cidr: 10.80.2.0/24, region: europe-west1}, at: [3, 1]}
+- {id: sub-web-sub-ew4, type: gcp.subnetwork, name: web-sub-ew4, parent: vpc-global-vpc, props: {cidr: 10.81.1.0/24, region: europe-west4}, at: [1, 2]}
+- {id: sub-app-sub-ew4, type: gcp.subnetwork, name: app-sub-ew4, parent: vpc-global-vpc, props: {cidr: 10.81.2.0/24, region: europe-west4}, at: [3, 2]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [1, 2]}
+- {id: global-https-lb, type: gcp.res.google_compute_global_forwarding_rule, name: global-https-lb, parent: prj-global-app-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
 - id: web-mig-ew1
   type: gcp.res.google_compute_region_instance_group_manager
   name: web-mig-ew1
   parent: sub-web-sub-ew1
+  at: [1, 1]
   props:
     base_instance_name: changeme
     name: changeme
@@ -33,15 +34,17 @@ nodes:
   type: gcp.res.google_compute_region_instance_group_manager
   name: web-mig-ew4
   parent: sub-web-sub-ew4
+  at: [1, 1]
   props:
     base_instance_name: changeme
     name: changeme
     version: []
-- {id: app-internal-lb, type: gcp.res.google_compute_forwarding_rule, name: app-internal-lb, parent: vpc-global-vpc, props: {name: changeme}}
+- {id: app-internal-lb, type: gcp.res.google_compute_forwarding_rule, name: app-internal-lb, parent: vpc-global-vpc, props: {name: changeme}, at: [2, 1, 1, 2]}
 - id: app-mig-ew1
   type: gcp.res.google_compute_region_instance_group_manager
   name: app-mig-ew1
   parent: sub-app-sub-ew1
+  at: [1, 1]
   props:
     base_instance_name: changeme
     name: changeme
@@ -50,12 +53,13 @@ nodes:
   type: gcp.res.google_compute_region_instance_group_manager
   name: app-mig-ew4
   parent: sub-app-sub-ew4
+  at: [1, 1]
   props:
     base_instance_name: changeme
     name: changeme
     version: []
-- {id: global-spanner, type: gcp.res.google_spanner_instance, name: global-spanner, parent: prj-global-app-prj, props: {config: changeme, display_name: changeme}}
-- {id: nat-ew1, type: gcp.res.google_compute_router_nat, name: nat-ew1, parent: vpc-global-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+- {id: global-spanner, type: gcp.res.google_spanner_instance, name: global-spanner, parent: prj-global-app-prj, props: {config: changeme, display_name: changeme}, at: [3, 1]}
+- {id: nat-ew1, type: gcp.res.google_compute_router_nat, name: nat-ew1, parent: vpc-global-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [4, 1]}
 edges:
 - {from: users, to: global-https-lb, label: anycast HTTPS, step: '1'}
 - {from: global-https-lb, to: web-mig-ew1, label: nearest region, step: '2'}

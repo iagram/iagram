@@ -13,22 +13,23 @@ source: https://docs.cloud.google.com/datastream/docs/implementing-datastream-da
 description: Datastream captures MySQL change events and writes them as Avro files to a Cloud Storage bucket whose object notifications publish to Pub/Sub. The Datastream to BigQuery Dataflow template consumes
   those notifications, loads change events into staging tables and merges them into replica tables, allowing custom transformations in the pipeline.
 nodes:
-- {id: prj-cdc-dataflow, type: gcp.project, name: cdc-dataflow, props: {project_id: cdc-dataflow-123456, project: changeme, region: us-central1}}
-- {id: vpc-mysql-vpc, type: gcp.vpc, name: mysql-vpc, parent: prj-cdc-dataflow, props: {cidr: 10.50.0.0/16}}
-- {id: sub-mysql-subnet, type: gcp.subnetwork, name: mysql-subnet, parent: vpc-mysql-vpc, props: {cidr: 10.50.1.0/24, region: us-central1}}
-- {id: client, type: common.client, name: client}
-- {id: source-mysql, type: gcp.cloud_sql_instance, name: source-mysql, parent: vpc-mysql-vpc}
-- {id: mysql-source-profile, type: gcp.res.google_datastream_connection_profile, name: mysql-source-profile, parent: prj-cdc-dataflow, props: {connection_profile_id: changeme, display_name: changeme, location: westeurope}}
+- {id: prj-cdc-dataflow, type: gcp.project, name: cdc-dataflow, props: {project_id: cdc-dataflow-123456, project: changeme, region: us-central1}, at: [1, 2]}
+- {id: vpc-mysql-vpc, type: gcp.vpc, name: mysql-vpc, parent: prj-cdc-dataflow, props: {cidr: 10.50.0.0/16}, at: [1, 1, 2, 1]}
+- {id: sub-mysql-subnet, type: gcp.subnetwork, name: mysql-subnet, parent: vpc-mysql-vpc, props: {cidr: 10.50.1.0/24, region: us-central1}, at: [1, 2]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: source-mysql, type: gcp.cloud_sql_instance, name: source-mysql, parent: vpc-mysql-vpc, at: [1, 1]}
+- {id: mysql-source-profile, type: gcp.res.google_datastream_connection_profile, name: mysql-source-profile, parent: prj-cdc-dataflow, props: {connection_profile_id: changeme, display_name: changeme, location: westeurope}, at: [1, 2]}
 - id: mysql-to-gcs-stream
   type: gcp.res.google_datastream_stream
   name: mysql-to-gcs-stream
   parent: prj-cdc-dataflow
+  at: [1, 3]
   props: {destination_config: {}, display_name: changeme, location: westeurope, source_config: {}, stream_id: changeme}
-- {id: cdc-avro-bucket, type: gcp.storage_bucket, name: cdc-avro-bucket, parent: prj-cdc-dataflow}
-- {id: cdc-files-topic, type: gcp.pubsub_topic, name: cdc-files-topic, parent: prj-cdc-dataflow}
-- {id: cdc-files-sub, type: gcp.res.google_pubsub_subscription, name: cdc-files-sub, parent: prj-cdc-dataflow, props: {name: changeme, topic: changeme}}
-- {id: cdc-staging-dataset, type: gcp.bigquery_dataset, name: cdc-staging-dataset, parent: prj-cdc-dataflow}
-- {id: cdc-replica-dataset, type: gcp.bigquery_dataset, name: cdc-replica-dataset, parent: prj-cdc-dataflow}
+- {id: cdc-avro-bucket, type: gcp.storage_bucket, name: cdc-avro-bucket, parent: prj-cdc-dataflow, at: [2, 3]}
+- {id: cdc-files-topic, type: gcp.pubsub_topic, name: cdc-files-topic, parent: prj-cdc-dataflow, at: [1, 4]}
+- {id: cdc-files-sub, type: gcp.res.google_pubsub_subscription, name: cdc-files-sub, parent: prj-cdc-dataflow, props: {name: changeme, topic: changeme}, at: [2, 4]}
+- {id: cdc-staging-dataset, type: gcp.bigquery_dataset, name: cdc-staging-dataset, parent: prj-cdc-dataflow, at: [1, 5]}
+- {id: cdc-replica-dataset, type: gcp.bigquery_dataset, name: cdc-replica-dataset, parent: prj-cdc-dataflow, at: [2, 5]}
 edges:
 - {from: client, to: source-mysql, label: transactions, step: '1'}
 - {from: mysql-to-gcs-stream, to: mysql-source-profile, label: binlog read, step: '2'}

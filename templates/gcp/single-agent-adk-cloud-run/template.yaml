@@ -13,19 +13,20 @@ source: https://docs.cloud.google.com/architecture/single-agent-ai-system-adk-cl
 description: A frontend Cloud Run service forwards user prompts to an Agent Development Kit agent hosted on a second Cloud Run service, which reasons with a Gemini model on Vertex AI and decides which tools
   to call. Tool calls go through Model Context Protocol servers to enterprise data such as Firestore and BigQuery, session state is persisted, and logs and traces flow to Cloud Observability.
 nodes:
-- {id: prj-agent-prj, type: gcp.project, name: agent-prj, props: {project_id: agent-prj-123456, project: changeme, region: europe-west1}}
-- {id: users, type: common.users, name: users}
-- {id: chat-frontend, type: gcp.cloud_run_service, name: chat-frontend, parent: prj-agent-prj}
-- {id: adk-agent, type: gcp.cloud_run_service, name: adk-agent, parent: prj-agent-prj}
-- {id: mcp-tools-server, type: gcp.cloud_run_service, name: mcp-tools-server, parent: prj-agent-prj}
-- {id: session-store, type: gcp.res.google_firestore_database, name: session-store, parent: prj-agent-prj, props: {location_id: changeme, name: changeme, type: changeme}}
-- {id: enterprise-data, type: gcp.bigquery_dataset, name: enterprise-data, parent: prj-agent-prj}
+- {id: prj-agent-prj, type: gcp.project, name: agent-prj, props: {project_id: agent-prj-123456, project: changeme, region: europe-west1}, at: [2, 1]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: chat-frontend, type: gcp.cloud_run_service, name: chat-frontend, parent: prj-agent-prj, at: [1, 2]}
+- {id: adk-agent, type: gcp.cloud_run_service, name: adk-agent, parent: prj-agent-prj, at: [2, 2]}
+- {id: mcp-tools-server, type: gcp.cloud_run_service, name: mcp-tools-server, parent: prj-agent-prj, at: [2, 3]}
+- {id: session-store, type: gcp.res.google_firestore_database, name: session-store, parent: prj-agent-prj, props: {location_id: changeme, name: changeme, type: changeme}, at: [3, 2]}
+- {id: enterprise-data, type: gcp.bigquery_dataset, name: enterprise-data, parent: prj-agent-prj, at: [3, 3]}
 - id: tool-api-keys
   type: gcp.res.google_secret_manager_secret
   name: tool-api-keys
   parent: prj-agent-prj
+  at: [2, 4]
   props: {replication: {}, secret_id: changeme}
-- {id: agent-images, type: gcp.res.google_artifact_registry_repository, name: agent-images, parent: prj-agent-prj, props: {format: changeme, repository_id: changeme}}
+- {id: agent-images, type: gcp.res.google_artifact_registry_repository, name: agent-images, parent: prj-agent-prj, props: {format: changeme, repository_id: changeme}, at: [2, 1]}
 edges:
 - {from: users, to: chat-frontend, label: HTTPS prompt, step: '1'}
 - {from: chat-frontend, to: adk-agent, label: forward request, step: '2'}

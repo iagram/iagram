@@ -12,17 +12,17 @@ source: https://docs.cloud.google.com/dns/docs/zones/zones-overview
 description: Private managed zones are authorized to one or more VPC networks and serve internal names such as internal.example.com to instances in those networks, alongside managed reverse lookup zones
   for PTR records and Service Directory zones for service discovery. A response policy or private zone can override public names, for example to point googleapis.com at private endpoints.
 nodes:
-- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: us-central1}}
-- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-workload, props: {cidr: 10.170.0.0/16}}
-- {id: sub-app-usc1, type: gcp.subnetwork, name: app-usc1, parent: vpc-app-vpc, props: {cidr: 10.170.0.0/24, region: us-central1}}
-- {id: sub-db-usc1, type: gcp.subnetwork, name: db-usc1, parent: vpc-app-vpc, props: {cidr: 10.170.1.0/24, region: us-central1}}
-- {id: internal-private-zone, type: gcp.cloud_dns_zone, name: internal-private-zone, parent: prj-workload, props: {domain: example.com}}
-- {id: reverse-lookup-zone, type: gcp.cloud_dns_zone, name: reverse-lookup-zone, parent: prj-workload, props: {domain: example.com}}
-- {id: service-directory-zone, type: gcp.cloud_dns_zone, name: service-directory-zone, parent: prj-workload, props: {domain: example.com}}
-- {id: logging-dns-policy, type: gcp.res.google_dns_policy, name: logging-dns-policy, parent: vpc-app-vpc, props: {name: changeme}}
-- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-app-usc1}
-- {id: db-internal-ip, type: gcp.res.google_compute_address, name: db-internal-ip, parent: sub-db-usc1, props: {name: changeme}}
-- {id: db-vm, type: gcp.compute_instance, name: db-vm, parent: sub-db-usc1}
+- {id: prj-workload, type: gcp.project, name: workload, props: {project_id: workload-123456, project: changeme, region: us-central1}, at: [1, 1]}
+- {id: vpc-app-vpc, type: gcp.vpc, name: app-vpc, parent: prj-workload, props: {cidr: 10.170.0.0/16}, at: [1, 1, 3, 1]}
+- {id: sub-app-usc1, type: gcp.subnetwork, name: app-usc1, parent: vpc-app-vpc, props: {cidr: 10.170.0.0/24, region: us-central1}, at: [1, 1]}
+- {id: sub-db-usc1, type: gcp.subnetwork, name: db-usc1, parent: vpc-app-vpc, props: {cidr: 10.170.1.0/24, region: us-central1}, at: [2, 1]}
+- {id: internal-private-zone, type: gcp.cloud_dns_zone, name: internal-private-zone, parent: prj-workload, props: {domain: example.com}, at: [1, 2]}
+- {id: reverse-lookup-zone, type: gcp.cloud_dns_zone, name: reverse-lookup-zone, parent: prj-workload, props: {domain: example.com}, at: [2, 2]}
+- {id: service-directory-zone, type: gcp.cloud_dns_zone, name: service-directory-zone, parent: prj-workload, props: {domain: example.com}, at: [3, 2]}
+- {id: logging-dns-policy, type: gcp.res.google_dns_policy, name: logging-dns-policy, parent: vpc-app-vpc, props: {name: changeme}, at: [1, 2, 2, 1]}
+- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-app-usc1, at: [1, 1]}
+- {id: db-internal-ip, type: gcp.res.google_compute_address, name: db-internal-ip, parent: sub-db-usc1, props: {name: changeme}, at: [1, 2]}
+- {id: db-vm, type: gcp.compute_instance, name: db-vm, parent: sub-db-usc1, at: [1, 1]}
 edges:
 - {from: app-vm, to: internal-private-zone, label: resolve db.internal.example.com, step: '1'}
 - {from: internal-private-zone, to: db-internal-ip, label: A record to reserved internal IP, step: '2'}

@@ -14,21 +14,21 @@ description: Cloud Build runs CI on the pipeline source, builds component images
   validation, transformation with Dataflow, training and evaluation steps. Validated models are registered in Vertex AI Model Registry and deployed to an online endpoint, while Cloud Scheduler and Pub/Sub
   trigger continuous training runs on new data in BigQuery.
 nodes:
-- {id: prj-mlops-prj, type: gcp.project, name: mlops-prj, props: {project_id: mlops-prj-123456, project: changeme, region: us-central1}}
-- {id: grp-ci-cd, type: common.group, name: ci-cd, parent: prj-mlops-prj}
-- {id: grp-training, type: common.group, name: training, parent: prj-mlops-prj}
-- {id: grp-serving, type: common.group, name: serving, parent: prj-mlops-prj}
-- {id: user, type: common.user, name: user}
-- {id: client, type: common.client, name: client}
-- {id: pipeline-source, type: gcp.res.google_sourcerepo_repository, name: pipeline-source, parent: grp-ci-cd, props: {name: changeme}}
-- {id: pipeline-ci, type: gcp.res.google_cloudbuild_trigger, name: pipeline-ci, parent: grp-ci-cd}
-- {id: component-images, type: gcp.res.google_artifact_registry_repository, name: component-images, parent: grp-ci-cd, props: {format: changeme, repository_id: changeme}}
-- {id: pipeline-root, type: gcp.storage_bucket, name: pipeline-root, parent: grp-training}
-- {id: training-data, type: gcp.bigquery_dataset, name: training-data, parent: grp-training}
-- {id: retrain-schedule, type: gcp.res.google_cloud_scheduler_job, name: retrain-schedule, parent: grp-training, props: {name: changeme}}
-- {id: pipeline-trigger, type: gcp.pubsub_topic, name: pipeline-trigger, parent: grp-training}
-- {id: submit-pipeline-fn, type: gcp.res.google_cloudfunctions2_function, name: submit-pipeline-fn, parent: grp-training, props: {location: westeurope, name: changeme}}
-- {id: prod-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: prod-endpoint, parent: grp-serving, props: {display_name: changeme, location: westeurope, name: changeme}}
+- {id: prj-mlops-prj, type: gcp.project, name: mlops-prj, props: {project_id: mlops-prj-123456, project: changeme, region: us-central1}, at: [1, 2]}
+- {id: grp-ci-cd, type: common.group, name: ci-cd, parent: prj-mlops-prj, at: [1, 1, 1, 2]}
+- {id: grp-training, type: common.group, name: training, parent: prj-mlops-prj, at: [2, 1]}
+- {id: grp-serving, type: common.group, name: serving, parent: prj-mlops-prj, at: [2, 2]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [1, 3]}
+- {id: pipeline-source, type: gcp.res.google_sourcerepo_repository, name: pipeline-source, parent: grp-ci-cd, props: {name: changeme}, at: [1, 1]}
+- {id: pipeline-ci, type: gcp.res.google_cloudbuild_trigger, name: pipeline-ci, parent: grp-ci-cd, at: [1, 2]}
+- {id: component-images, type: gcp.res.google_artifact_registry_repository, name: component-images, parent: grp-ci-cd, props: {format: changeme, repository_id: changeme}, at: [1, 3]}
+- {id: pipeline-root, type: gcp.storage_bucket, name: pipeline-root, parent: grp-training, at: [2, 1]}
+- {id: training-data, type: gcp.bigquery_dataset, name: training-data, parent: grp-training, at: [2, 2]}
+- {id: retrain-schedule, type: gcp.res.google_cloud_scheduler_job, name: retrain-schedule, parent: grp-training, props: {name: changeme}, at: [1, 1]}
+- {id: pipeline-trigger, type: gcp.pubsub_topic, name: pipeline-trigger, parent: grp-training, at: [1, 2]}
+- {id: submit-pipeline-fn, type: gcp.res.google_cloudfunctions2_function, name: submit-pipeline-fn, parent: grp-training, props: {location: westeurope, name: changeme}, at: [1, 3]}
+- {id: prod-endpoint, type: gcp.res.google_vertex_ai_endpoint, name: prod-endpoint, parent: grp-serving, props: {display_name: changeme, location: westeurope, name: changeme}, at: [1, 1]}
 edges:
 - {from: user, to: pipeline-source, label: push pipeline code, step: '1'}
 - {from: pipeline-source, to: pipeline-ci, label: trigger build, step: '2'}

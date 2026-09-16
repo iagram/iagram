@@ -12,19 +12,19 @@ source: https://docs.cloud.google.com/network-connectivity/docs/interconnect/con
 description: On-premises connects to Google Cloud through a supported service provider; two Partner Interconnect VLAN attachments in separate edge availability domains terminate on a Cloud Router in the
   VPC. For Layer 3 partners the provider's routers peer with the Cloud Router; for Layer 2 partners the customer's on-premises router runs BGP directly to Google.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west3}}
-- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-net-hub, props: {cidr: 10.50.0.0/16}}
-- {id: sub-hybrid-ew3, type: gcp.subnetwork, name: hybrid-ew3, parent: vpc-hybrid-vpc, props: {cidr: 10.50.0.0/24, region: europe-west3}}
-- {id: saas, type: common.saas, name: saas}
-- {id: partner-router, type: gcp.res.google_compute_router, name: partner-router, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}}
-- {id: partner-vlan-ead1, type: gcp.res.google_compute_interconnect_attachment, name: partner-vlan-ead1, parent: vpc-hybrid-vpc, props: {name: changeme, router: changeme}}
-- {id: partner-vlan-ead2, type: gcp.res.google_compute_interconnect_attachment, name: partner-vlan-ead2, parent: vpc-hybrid-vpc, props: {name: changeme, router: changeme}}
-- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-hybrid-ew3}
-- {id: allow-onprem-ingress, type: gcp.firewall_rule, name: allow-onprem-ingress, parent: vpc-hybrid-vpc}
-- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub}
-- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
-- {id: onprem-router, type: gcp.res.google_compute_router, name: onprem-router, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 3]}
+- {id: prj-net-hub, type: gcp.project, name: net-hub, props: {project_id: net-hub-123456, project: changeme, region: europe-west3}, at: [1, 1]}
+- {id: vpc-hybrid-vpc, type: gcp.vpc, name: hybrid-vpc, parent: prj-net-hub, props: {cidr: 10.50.0.0/16}, at: [1, 1]}
+- {id: sub-hybrid-ew3, type: gcp.subnetwork, name: hybrid-ew3, parent: vpc-hybrid-vpc, props: {cidr: 10.50.0.0/24, region: europe-west3}, at: [1, 1, 1, 2]}
+- {id: saas, type: common.saas, name: saas, at: [1, 2]}
+- {id: partner-router, type: gcp.res.google_compute_router, name: partner-router, parent: vpc-hybrid-vpc, props: {name: changeme, network: changeme}, at: [2, 1]}
+- {id: partner-vlan-ead1, type: gcp.res.google_compute_interconnect_attachment, name: partner-vlan-ead1, parent: vpc-hybrid-vpc, props: {name: changeme, router: changeme}, at: [2, 2]}
+- {id: partner-vlan-ead2, type: gcp.res.google_compute_interconnect_attachment, name: partner-vlan-ead2, parent: vpc-hybrid-vpc, props: {name: changeme, router: changeme}, at: [2, 3]}
+- {id: app-vm, type: gcp.compute_instance, name: app-vm, parent: sub-hybrid-ew3, at: [1, 1]}
+- {id: allow-onprem-ingress, type: gcp.firewall_rule, name: allow-onprem-ingress, parent: vpc-hybrid-vpc, at: [1, 3]}
+- {id: vpc-prj-net-hub, type: gcp.vpc, name: main, parent: prj-net-hub, at: [1, 2]}
+- {id: sub-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}, at: [1, 1]}
+- {id: onprem-router, type: gcp.res.google_compute_router, name: onprem-router, parent: sub-prj-net-hub, props: {name: changeme, network: changeme}, at: [1, 1]}
 edges:
 - {from: onprem-router, to: saas, label: circuit to service provider, step: '1'}
 - {from: saas, to: partner-vlan-ead1, label: partner VLAN attachment primary, step: '2'}

@@ -12,24 +12,25 @@ source: https://docs.cloud.google.com/architecture/exporting-stackdriver-logging
 description: An aggregated log sink routes audit, network and platform logs from all projects into a partitioned BigQuery dataset in a dedicated analytics project, while a Cloud Storage sink keeps a long-term
   archive. Scheduled queries and Community Security Analytics SQL detect anomalies over the log tables, and Looker Studio dashboards visualize the results.
 nodes:
-- {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: us-central1}}
-- {id: prj-workload-b, type: gcp.project, name: workload-b, props: {project_id: workload-b-123456, project: changeme, region: us-central1}}
-- {id: prj-log-analytics, type: gcp.project, name: log-analytics, props: {project_id: log-analytics-123456, project: changeme, region: us-central1}}
-- {id: users, type: common.users, name: users}
-- {id: api-service, type: gcp.cloud_run_service, name: api-service, parent: prj-workload-a}
-- {id: vpc-prj-workload-b, type: gcp.vpc, name: main, parent: prj-workload-b}
-- {id: app-database, type: gcp.cloud_sql_instance, name: app-database, parent: vpc-prj-workload-b}
-- {id: audit-logs-bq-sink, type: gcp.res.google_logging_project_sink, name: audit-logs-bq-sink, parent: prj-log-analytics, props: {destination: changeme, name: changeme}}
-- {id: archive-gcs-sink, type: gcp.res.google_logging_project_sink, name: archive-gcs-sink, parent: prj-log-analytics, props: {destination: changeme, name: changeme}}
-- {id: security-logs-dataset, type: gcp.bigquery_dataset, name: security-logs-dataset, parent: prj-log-analytics}
-- {id: cloudaudit-activity-table, type: gcp.res.google_bigquery_table, name: cloudaudit-activity-table, parent: prj-log-analytics, props: {dataset_id: changeme, table_id: changeme}}
-- {id: logs-archive-bucket, type: gcp.storage_bucket, name: logs-archive-bucket, parent: prj-log-analytics}
+- {id: prj-workload-a, type: gcp.project, name: workload-a, props: {project_id: workload-a-123456, project: changeme, region: us-central1}, at: [1, 1]}
+- {id: prj-workload-b, type: gcp.project, name: workload-b, props: {project_id: workload-b-123456, project: changeme, region: us-central1}, at: [2, 1]}
+- {id: prj-log-analytics, type: gcp.project, name: log-analytics, props: {project_id: log-analytics-123456, project: changeme, region: us-central1}, at: [1, 2, 2, 1]}
+- {id: users, type: common.users, name: users, at: [1, 3, 2, 1]}
+- {id: api-service, type: gcp.cloud_run_service, name: api-service, parent: prj-workload-a, at: [1, 1]}
+- {id: vpc-prj-workload-b, type: gcp.vpc, name: main, parent: prj-workload-b, at: [1, 1]}
+- {id: app-database, type: gcp.cloud_sql_instance, name: app-database, parent: vpc-prj-workload-b, at: [1, 1]}
+- {id: audit-logs-bq-sink, type: gcp.res.google_logging_project_sink, name: audit-logs-bq-sink, parent: prj-log-analytics, props: {destination: changeme, name: changeme}, at: [1, 1]}
+- {id: archive-gcs-sink, type: gcp.res.google_logging_project_sink, name: archive-gcs-sink, parent: prj-log-analytics, props: {destination: changeme, name: changeme}, at: [2, 1]}
+- {id: security-logs-dataset, type: gcp.bigquery_dataset, name: security-logs-dataset, parent: prj-log-analytics, at: [1, 2]}
+- {id: cloudaudit-activity-table, type: gcp.res.google_bigquery_table, name: cloudaudit-activity-table, parent: prj-log-analytics, props: {dataset_id: changeme, table_id: changeme}, at: [1, 3]}
+- {id: logs-archive-bucket, type: gcp.storage_bucket, name: logs-archive-bucket, parent: prj-log-analytics, at: [2, 2]}
 - id: threat-detection-scheduled-query
   type: gcp.res.google_bigquery_data_transfer_config
   name: threat-detection-scheduled-query
   parent: prj-log-analytics
+  at: [1, 4]
   props: {data_source_id: changeme, display_name: changeme, params: {}}
-- {id: findings-table, type: gcp.res.google_bigquery_table, name: findings-table, parent: prj-log-analytics, props: {dataset_id: changeme, table_id: changeme}}
+- {id: findings-table, type: gcp.res.google_bigquery_table, name: findings-table, parent: prj-log-analytics, props: {dataset_id: changeme, table_id: changeme}, at: [2, 4]}
 edges:
 - {from: api-service, to: audit-logs-bq-sink, label: Cloud Audit Logs, step: '1'}
 - {from: app-database, to: audit-logs-bq-sink, label: data access logs, step: '2'}

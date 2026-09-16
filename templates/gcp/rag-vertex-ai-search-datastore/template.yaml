@@ -13,20 +13,21 @@ description: Raw documents uploaded to Cloud Storage trigger Cloud Run functions
   the content without a self-managed vector database. A Cloud Run frontend and backend forward user questions to the Gemini Enterprise API, which searches the data store, augments the prompt and returns
   a grounded answer.
 nodes:
-- {id: prj-search-rag-prj, type: gcp.project, name: search-rag-prj, props: {project_id: search-rag-prj-123456, project: changeme, region: europe-west1}}
-- {id: grp-ingestion, type: common.group, name: ingestion, parent: prj-search-rag-prj}
-- {id: grp-serving, type: common.group, name: serving, parent: prj-search-rag-prj}
-- {id: users, type: common.users, name: users}
-- {id: docs-bucket, type: gcp.storage_bucket, name: docs-bucket, parent: grp-ingestion}
-- {id: docs-topic, type: gcp.pubsub_topic, name: docs-topic, parent: grp-ingestion}
-- {id: metadata-fn, type: gcp.res.google_cloudfunctions2_function, name: metadata-fn, parent: grp-ingestion, props: {location: westeurope, name: changeme}}
-- {id: metadata-bucket, type: gcp.storage_bucket, name: metadata-bucket, parent: grp-ingestion}
+- {id: prj-search-rag-prj, type: gcp.project, name: search-rag-prj, props: {project_id: search-rag-prj-123456, project: changeme, region: europe-west1}, at: [2, 1, 1, 2]}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: prj-search-rag-prj, at: [1, 1]}
+- {id: grp-serving, type: common.group, name: serving, parent: prj-search-rag-prj, at: [1, 2]}
+- {id: users, type: common.users, name: users, at: [1, 2]}
+- {id: docs-bucket, type: gcp.storage_bucket, name: docs-bucket, parent: grp-ingestion, at: [1, 1]}
+- {id: docs-topic, type: gcp.pubsub_topic, name: docs-topic, parent: grp-ingestion, at: [1, 2]}
+- {id: metadata-fn, type: gcp.res.google_cloudfunctions2_function, name: metadata-fn, parent: grp-ingestion, props: {location: westeurope, name: changeme}, at: [2, 1]}
+- {id: metadata-bucket, type: gcp.storage_bucket, name: metadata-bucket, parent: grp-ingestion, at: [2, 2]}
 - {id: enterprise-datastore, type: gcp.res.google_discovery_engine_data_store, name: enterprise-datastore, parent: grp-serving, props: {content_config: changeme, data_store_id: changeme, display_name: changeme,
-    industry_vertical: changeme, location: westeurope}}
+    industry_vertical: changeme, location: westeurope}, at: [1, 1]}
 - id: enterprise-search-app
   type: gcp.res.google_discovery_engine_search_engine
   name: enterprise-search-app
   parent: grp-serving
+  at: [2, 1]
   props:
     collection_id: changeme
     data_store_ids: []
@@ -34,8 +35,8 @@ nodes:
     engine_id: changeme
     location: westeurope
     search_engine_config: {}
-- {id: web-frontend, type: gcp.cloud_run_service, name: web-frontend, parent: grp-serving}
-- {id: api-backend, type: gcp.cloud_run_service, name: api-backend, parent: grp-serving}
+- {id: web-frontend, type: gcp.cloud_run_service, name: web-frontend, parent: grp-serving, at: [1, 2]}
+- {id: api-backend, type: gcp.cloud_run_service, name: api-backend, parent: grp-serving, at: [2, 2]}
 edges:
 - {from: docs-bucket, to: docs-topic, label: upload event, step: '1'}
 - {from: docs-topic, to: metadata-fn, label: trigger, step: '2'}

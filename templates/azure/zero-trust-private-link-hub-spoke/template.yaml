@@ -15,23 +15,24 @@ description: PaaS services are reached only through private endpoints; shared en
   endpoints sit in the spoke, and public endpoints are disabled. Centralized private DNS zones linked to every virtual network resolve the privatelink FQDNs, and a DNS Private Resolver inbound endpoint
   lets on-premises resolvers answer the same names over ExpressRoute.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-hub, type: azure.resource_group, name: rg-hub, parent: sub-connectivity, props: {location: westeurope}}
-- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.0.0.0/16}}
-- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-hub, props: {cidr: 10.0.0.0/27}}
-- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub, props: {cidr: 10.0.1.0/26}}
-- {id: sub-snet-hub-private-endpoints, type: azure.subnet, name: snet-hub-private-endpoints, parent: vpc-hub, props: {cidr: 10.0.2.0/24}}
-- {id: sub-snet-dns-resolver-inbound, type: azure.subnet, name: snet-dns-resolver-inbound, parent: vpc-hub, props: {cidr: 10.0.3.0/28}}
-- {id: sub-landing-zone-app, type: azure.subscription, name: landing-zone-app, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-spoke, type: azure.resource_group, name: rg-spoke, parent: sub-landing-zone-app, props: {location: westeurope}}
-- {id: vpc-spoke, type: azure.vnet, name: spoke, parent: rg-rg-spoke, props: {cidr: 10.1.0.0/16}}
-- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-spoke, props: {cidr: 10.1.1.0/24}}
-- {id: sub-snet-spoke-private-endpoints, type: azure.subnet, name: snet-spoke-private-endpoints, parent: vpc-spoke, props: {cidr: 10.1.2.0/24}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1, 2, 1]}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: rg-rg-hub, type: azure.resource_group, name: rg-hub, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.0.0.0/16}, at: [2, 1, 1, 2]}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-hub, props: {cidr: 10.0.0.0/27}, at: [1, 1]}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub, props: {cidr: 10.0.1.0/26}, at: [1, 2]}
+- {id: sub-snet-hub-private-endpoints, type: azure.subnet, name: snet-hub-private-endpoints, parent: vpc-hub, props: {cidr: 10.0.2.0/24}, at: [2, 2]}
+- {id: sub-snet-dns-resolver-inbound, type: azure.subnet, name: snet-dns-resolver-inbound, parent: vpc-hub, props: {cidr: 10.0.3.0/28}, at: [2, 1]}
+- {id: sub-landing-zone-app, type: azure.subscription, name: landing-zone-app, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 2]}
+- {id: rg-rg-spoke, type: azure.resource_group, name: rg-spoke, parent: sub-landing-zone-app, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-spoke, type: azure.vnet, name: spoke, parent: rg-rg-spoke, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-spoke, props: {cidr: 10.1.1.0/24}, at: [1, 1]}
+- {id: sub-snet-spoke-private-endpoints, type: azure.subnet, name: snet-spoke-private-endpoints, parent: vpc-spoke, props: {cidr: 10.1.2.0/24}, at: [1, 2]}
 - id: ergw-hub
   type: azure.res.azurerm_virtual_network_gateway
   name: ergw-hub
   parent: sub-gatewaysubnet
+  at: [1, 1]
   props:
     ip_configuration: []
     location: westeurope
@@ -39,26 +40,28 @@ nodes:
     resource_group_name: changeme
     sku: changeme
     type: changeme
-- {id: hub-fw, type: azure.res.azurerm_firewall, name: hub-fw, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
+- {id: hub-fw, type: azure.res.azurerm_firewall, name: hub-fw, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [1, 1]}
 - {id: dns-resolver-hub, type: azure.res.azurerm_private_dns_resolver, name: dns-resolver-hub, parent: sub-snet-dns-resolver-inbound, props: {location: westeurope, name: changeme, resource_group_name: changeme,
-    virtual_network_id: changeme}}
-- {id: pdz-blob, type: azure.res.azurerm_private_dns_zone, name: pdz-blob, parent: rg-rg-hub, props: {name: changeme, resource_group_name: changeme}}
-- {id: pdz-sql, type: azure.res.azurerm_private_dns_zone, name: pdz-sql, parent: rg-rg-hub, props: {name: changeme, resource_group_name: changeme}}
-- {id: vpc-rg-rg-hub, type: azure.vnet, name: main, parent: rg-rg-hub, props: {cidr: 10.200.0.0/16}}
-- {id: nsg-hub-pe, type: azure.network_security_group, name: nsg-hub-pe, parent: vpc-rg-rg-hub}
+    virtual_network_id: changeme}, at: [1, 1]}
+- {id: pdz-blob, type: azure.res.azurerm_private_dns_zone, name: pdz-blob, parent: rg-rg-hub, props: {name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: pdz-sql, type: azure.res.azurerm_private_dns_zone, name: pdz-sql, parent: rg-rg-hub, props: {name: changeme, resource_group_name: changeme}, at: [1, 2]}
+- {id: vpc-rg-rg-hub, type: azure.vnet, name: main, parent: rg-rg-hub, props: {cidr: 10.200.0.0/16}, at: [2, 3]}
+- {id: nsg-hub-pe, type: azure.network_security_group, name: nsg-hub-pe, parent: vpc-rg-rg-hub, at: [1, 1]}
 - id: pe-shared-storage
   type: azure.res.azurerm_private_endpoint
   name: pe-shared-storage
   parent: sub-snet-hub-private-endpoints
+  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: st-shared, type: azure.storage_account, name: st-shared, parent: rg-rg-hub}
-- {id: vm-app, type: azure.virtual_machine, name: vm-app, parent: sub-snet-app}
+- {id: st-shared, type: azure.storage_account, name: st-shared, parent: rg-rg-hub, at: [1, 3]}
+- {id: vm-app, type: azure.virtual_machine, name: vm-app, parent: sub-snet-app, at: [1, 1]}
 - id: pe-sql-app
   type: azure.res.azurerm_private_endpoint
   name: pe-sql-app
   parent: sub-snet-spoke-private-endpoints
+  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: sql-app, type: azure.res.azurerm_mssql_server, name: sql-app, parent: rg-rg-spoke, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: sql-app, type: azure.res.azurerm_mssql_server, name: sql-app, parent: rg-rg-spoke, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}, at: [1, 2]}
 edges:
 - {from: dc-on-premises, to: ergw-hub, label: ExpressRoute private peering, step: '1'}
 - {from: vpc-hub, to: vpc-spoke, label: hub-spoke peering, link: azurerm_virtual_network_peering}

@@ -14,17 +14,17 @@ source: https://docs.cloud.google.com/kubernetes-engine/docs/concepts/tpus
 description: A GKE cluster provides accelerator node pools, either multi-host TPU slices or NVIDIA GPU nodes, on which JobSet and Kueue schedule distributed training jobs built from images in Artifact Registry.
   Training data and checkpoints live in Cloud Storage mounted through Cloud Storage FUSE, and the finished model artifacts are uploaded to Vertex AI Model Registry for serving.
 nodes:
-- {id: prj-training-prj, type: gcp.project, name: training-prj, props: {project_id: training-prj-123456, project: changeme, region: us-central2}}
-- {id: vpc-train-vpc, type: gcp.vpc, name: train-vpc, parent: prj-training-prj, props: {cidr: 10.50.0.0/16}}
-- {id: sub-accel-sub, type: gcp.subnetwork, name: accel-sub, parent: vpc-train-vpc, props: {cidr: 10.50.0.0/20, region: us-central2}}
-- {id: user, type: common.user, name: user}
-- {id: train-cluster, type: gcp.gke_cluster, name: train-cluster, parent: sub-accel-sub}
-- {id: tpu-slice-pool, type: gcp.res.google_container_node_pool, name: tpu-slice-pool, parent: train-cluster, props: {cluster: changeme}}
-- {id: gpu-pool, type: gcp.res.google_container_node_pool, name: gpu-pool, parent: train-cluster, props: {cluster: changeme}}
-- {id: datasets-bucket, type: gcp.storage_bucket, name: datasets-bucket, parent: prj-training-prj}
-- {id: checkpoints-bucket, type: gcp.storage_bucket, name: checkpoints-bucket, parent: prj-training-prj}
-- {id: training-images, type: gcp.res.google_artifact_registry_repository, name: training-images, parent: prj-training-prj, props: {format: changeme, repository_id: changeme}}
-- {id: managed-dataset, type: gcp.res.google_vertex_ai_dataset, name: managed-dataset, parent: prj-training-prj, props: {display_name: changeme, metadata_schema_uri: changeme}}
+- {id: prj-training-prj, type: gcp.project, name: training-prj, props: {project_id: training-prj-123456, project: changeme, region: us-central2}, at: [1, 2]}
+- {id: vpc-train-vpc, type: gcp.vpc, name: train-vpc, parent: prj-training-prj, props: {cidr: 10.50.0.0/16}, at: [1, 1, 1, 4]}
+- {id: sub-accel-sub, type: gcp.subnetwork, name: accel-sub, parent: vpc-train-vpc, props: {cidr: 10.50.0.0/20, region: us-central2}, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: train-cluster, type: gcp.gke_cluster, name: train-cluster, parent: sub-accel-sub, at: [1, 1]}
+- {id: tpu-slice-pool, type: gcp.res.google_container_node_pool, name: tpu-slice-pool, parent: train-cluster, props: {cluster: changeme}, at: [1, 1]}
+- {id: gpu-pool, type: gcp.res.google_container_node_pool, name: gpu-pool, parent: train-cluster, props: {cluster: changeme}, at: [1, 2]}
+- {id: datasets-bucket, type: gcp.storage_bucket, name: datasets-bucket, parent: prj-training-prj, at: [2, 2]}
+- {id: checkpoints-bucket, type: gcp.storage_bucket, name: checkpoints-bucket, parent: prj-training-prj, at: [2, 3]}
+- {id: training-images, type: gcp.res.google_artifact_registry_repository, name: training-images, parent: prj-training-prj, props: {format: changeme, repository_id: changeme}, at: [2, 1]}
+- {id: managed-dataset, type: gcp.res.google_vertex_ai_dataset, name: managed-dataset, parent: prj-training-prj, props: {display_name: changeme, metadata_schema_uri: changeme}, at: [2, 4]}
 edges:
 - {from: user, to: training-images, label: push training image, step: '1'}
 - {from: user, to: train-cluster, label: submit JobSet via Kueue, step: '2'}

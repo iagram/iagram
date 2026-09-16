@@ -15,22 +15,22 @@ description: Two private GKE application clusters in separate regions run Cloud 
   cluster's nodes use Cloud NAT for egress and authorized networks for control-plane access. A third small cluster is the Multi Cluster Ingress config cluster that programs a global external Application
   Load Balancer in front of the mesh ingress gateways in both application clusters.
 nodes:
-- {id: prj-mesh-prj, type: gcp.project, name: mesh-prj, props: {project_id: mesh-prj-123456, project: changeme, region: europe-west1}}
-- {id: vpc-mesh-vpc, type: gcp.vpc, name: mesh-vpc, parent: prj-mesh-prj, props: {cidr: 10.80.0.0/16}}
-- {id: sub-app1-sub, type: gcp.subnetwork, name: app1-sub, parent: vpc-mesh-vpc, props: {cidr: 10.80.0.0/20, region: europe-west1}}
-- {id: sub-app2-sub, type: gcp.subnetwork, name: app2-sub, parent: vpc-mesh-vpc, props: {cidr: 10.80.16.0/20, region: europe-west4}}
-- {id: sub-ingress-config-sub, type: gcp.subnetwork, name: ingress-config-sub, parent: vpc-mesh-vpc, props: {cidr: 10.80.32.0/22, region: europe-west3}}
-- {id: users, type: common.users, name: users}
-- {id: internet, type: common.internet, name: internet}
-- {id: gke-central-priv, type: gcp.gke_cluster, name: gke-central-priv, parent: sub-app1-sub}
-- {id: gke-west-priv, type: gcp.gke_cluster, name: gke-west-priv, parent: sub-app2-sub}
-- {id: ingress-config, type: gcp.gke_cluster, name: ingress-config, parent: sub-ingress-config-sub}
-- {id: servicemesh, type: gcp.res.google_gke_hub_feature, name: servicemesh, parent: prj-mesh-prj, props: {location: westeurope}}
-- {id: multiclusteringress, type: gcp.res.google_gke_hub_feature, name: multiclusteringress, parent: prj-mesh-prj, props: {location: westeurope}}
-- {id: mesh-router, type: gcp.res.google_compute_router, name: mesh-router, parent: vpc-mesh-vpc, props: {name: changeme, network: changeme}}
-- {id: mesh-nat, type: gcp.res.google_compute_router_nat, name: mesh-nat, parent: vpc-mesh-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
-- {id: mci-frontend, type: gcp.res.google_compute_global_forwarding_rule, name: mci-frontend, parent: prj-mesh-prj, props: {name: changeme, target: changeme}}
-- {id: mci-ingress-backend, type: gcp.res.google_compute_backend_service, name: mci-ingress-backend, parent: prj-mesh-prj, props: {name: changeme}}
+- {id: prj-mesh-prj, type: gcp.project, name: mesh-prj, props: {project_id: mesh-prj-123456, project: changeme, region: europe-west1}, at: [2, 1, 1, 2]}
+- {id: vpc-mesh-vpc, type: gcp.vpc, name: mesh-vpc, parent: prj-mesh-prj, props: {cidr: 10.80.0.0/16}, at: [2, 1, 1, 4]}
+- {id: sub-app1-sub, type: gcp.subnetwork, name: app1-sub, parent: vpc-mesh-vpc, props: {cidr: 10.80.0.0/20, region: europe-west1}, at: [2, 1]}
+- {id: sub-app2-sub, type: gcp.subnetwork, name: app2-sub, parent: vpc-mesh-vpc, props: {cidr: 10.80.16.0/20, region: europe-west4}, at: [2, 2]}
+- {id: sub-ingress-config-sub, type: gcp.subnetwork, name: ingress-config-sub, parent: vpc-mesh-vpc, props: {cidr: 10.80.32.0/22, region: europe-west3}, at: [1, 1, 1, 2]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [1, 2]}
+- {id: gke-central-priv, type: gcp.gke_cluster, name: gke-central-priv, parent: sub-app1-sub, at: [1, 1]}
+- {id: gke-west-priv, type: gcp.gke_cluster, name: gke-west-priv, parent: sub-app2-sub, at: [1, 1]}
+- {id: ingress-config, type: gcp.gke_cluster, name: ingress-config, parent: sub-ingress-config-sub, at: [1, 1]}
+- {id: servicemesh, type: gcp.res.google_gke_hub_feature, name: servicemesh, parent: prj-mesh-prj, props: {location: westeurope}, at: [1, 4]}
+- {id: multiclusteringress, type: gcp.res.google_gke_hub_feature, name: multiclusteringress, parent: prj-mesh-prj, props: {location: westeurope}, at: [1, 3]}
+- {id: mesh-router, type: gcp.res.google_compute_router, name: mesh-router, parent: vpc-mesh-vpc, props: {name: changeme, network: changeme}, at: [3, 1]}
+- {id: mesh-nat, type: gcp.res.google_compute_router_nat, name: mesh-nat, parent: vpc-mesh-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [3, 2]}
+- {id: mci-frontend, type: gcp.res.google_compute_global_forwarding_rule, name: mci-frontend, parent: prj-mesh-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
+- {id: mci-ingress-backend, type: gcp.res.google_compute_backend_service, name: mci-ingress-backend, parent: prj-mesh-prj, props: {name: changeme}, at: [1, 2]}
 edges:
 - {from: servicemesh, to: gke-central-priv, label: gke hub membership}
 - {from: servicemesh, to: gke-west-priv, label: gke hub membership}
