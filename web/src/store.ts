@@ -27,6 +27,8 @@ interface State {
   cardStyle: boolean
   showPalette: boolean
   showInspector: boolean
+  /** Pinned: the settings panel stays open when the empty canvas is clicked. */
+  inspectorPinned: boolean
   /** hand: drag the background to pan; otherwise drag selects */
   handMode: boolean
   /** The reference-architecture gallery (front page). */
@@ -95,6 +97,7 @@ interface State {
   setCardStyle: (v: boolean) => void
   setShowPalette: (v: boolean) => void
   setShowInspector: (v: boolean) => void
+  setInspectorPinned: (v: boolean) => void
   setHandMode: (v: boolean) => void
   setShowGallery: (v: boolean, opts?: { silent?: boolean }) => void
   loadTemplates: () => Promise<void>
@@ -241,6 +244,7 @@ export const useStore = create<State>((set, get) => ({
   cardStyle: stored('iagram.cards', false),
   showPalette: stored('iagram.palette', true),
   showInspector: stored('iagram.inspector', true),
+  inspectorPinned: stored('iagram.inspector.pin', false),
   handMode: stored('iagram.hand', true),
   showGallery: false,
   arrangeDialog: null,
@@ -470,7 +474,7 @@ export const useStore = create<State>((set, get) => ({
   select(id) {
     // selectedId mirrors React Flow's selection; the flags on nodes are owned
     // by React Flow's change pipeline (see requestSelect for programmatic use).
-    if (id !== get().selectedId) set({ selectedId: id })
+    if (id !== get().selectedId) set({ selectedId: id, ...(id ? { showInspector: true } : {}) })
   },
 
   requestSelect(id) {
@@ -971,6 +975,10 @@ export const useStore = create<State>((set, get) => ({
     persist('iagram.inspector', v)
     set({ showInspector: v })
   },
+  setInspectorPinned(v) {
+    persist('iagram.inspector.pin', v)
+    set({ inspectorPinned: v })
+  },
   setHandMode(v) {
     persist('iagram.hand', v)
     set({ handMode: v })
@@ -1004,7 +1012,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   selectEdge(id) {
-    set({ selectedEdgeId: id, ...(id ? { selectedId: null } : {}) })
+    set({ selectedEdgeId: id, ...(id ? { selectedId: null, showInspector: true } : {}) })
   },
 
   hoverEdge(id) {

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useStore } from '../store'
 import { MenuBar } from './MenuBar'
 
@@ -25,28 +24,23 @@ export function Toolbar() {
   const running = job?.status === 'running'
   const canApply = !!plan && !planStale && plan.changes && !running && !dirty
 
-  const [showMenu, setShowMenu] = useState(false)
-
   const errors = problems.filter((p) => p.level === 'error').length
   const warnings = problems.length - errors
 
   return (
     <header className="toolbar">
-      <div className="group left">
+      <div className="side left">
         <button className="brand" title="Home: reference architectures" onClick={() => setShowGallery(true)}>
           iagram
         </button>
-        <button className={`hamburger ${showMenu ? 'on' : ''}`} onClick={() => setShowMenu((v) => !v)} title={showMenu ? 'Hide the menu bar' : 'Show the menu bar'} aria-label="Menu" aria-expanded={showMenu}>
-          ☰
-        </button>
-        {showMenu && <MenuBar />}
+        <MenuBar />
         <span className="doc">
           {docName || 'iagram.iad'}
           {dirty && <i title="unsaved changes"> ●</i>}
         </span>
       </div>
       <span className="spacer" />
-      <div className="group right">
+      <div className="side right">
       <label className="mirror-toggle" title={mirror ? 'Mirror on: other clouds show the live equivalence of the tab you draw on; Plan and Apply run the source.' : 'Mirror off: independent canvases in one file; Plan and Apply cover all of them.'}>
         <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} /> mirror clouds
       </label>

@@ -60,6 +60,9 @@ const (
 	padX, padTop = 30, 56
 	padBottom    = 24
 	minW, minH   = 240, 150
+	// a component box with nothing inside (an empty cluster) is drawn as a
+	// header-only card, the way the reference diagrams show a bare service
+	compactW, compactH = 220, 64
 )
 
 // Auto lays out every node in d in place, reference style, left to right.
@@ -156,6 +159,10 @@ func (l *layouter) size(n *document.Node) (float64, float64) {
 		if !l.o.ResizeContainers && n.Layout.W > 0 {
 			return n.Layout.W, n.Layout.H
 		}
+		if !l.isZone(n) && !strings.HasPrefix(n.Type, "common.") {
+			n.Layout.W, n.Layout.H = compactW, compactH
+			return compactW, compactH
+		}
 		n.Layout.W, n.Layout.H = minW, minH
 		return minW, minH
 	}
@@ -193,11 +200,12 @@ type graph struct {
 	sz    map[string][2]float64
 	out   map[string]map[string]bool // arrows between kids (through descendants)
 	in    map[string]int
-	order []*document.Node // reading order: actors, data centers, then names
+	guard map[string]string // "protects" lines: guard -> protected kid; adjacency, not flow
+	order []*document.Node  // reading order: actors, data centers, then names
 }
 
 func (l *layouter) graphOf(kids []*document.Node, parent string) *graph {
-	g := &graph{kids: kids, sz: map[string][2]float64{}, out: map[string]map[string]bool{}, in: map[string]int{}}
+	g := &graph{kids: kids, sz: map[string][2]float64{}, out: map[string]map[string]bool{}, in: map[string]int{}, guard: map[string]string{}}
 	idx := map[string]bool{}
 	for _, k := range kids {
 		w, h := l.size(k)
@@ -208,6 +216,18 @@ func (l *layouter) graphOf(kids []*document.Node, parent string) *graph {
 	for _, e := range l.d.Edges {
 		a, b := l.ancestorUnder(e.Source, parent), l.ancestorUnder(e.Target, parent)
 		if a == "" || b == "" || a == b || !idx[a] || !idx[b] {
+			continue
+		}
+		switch e.Kind {
+		case "references":
+			// hidden span bookkeeping, never drawn as an arrow
+			continue
+		case "protects":
+			// a security group / firewall rule / NSG is drawn next to what it
+			// protects, the way the reference diagrams do; it does not rank it
+			if _, dup := g.guard[a]; !dup {
+				g.guard[a] = b
+			}
 			continue
 		}
 		if g.out[a] == nil {
@@ -229,13 +249,76 @@ func (l *layouter) graphOf(kids []*document.Node, parent string) *graph {
 		if di != dj {
 			return di
 		}
-		return g.order[i].Name < g.order[j].Name
+		return sourceBefore(g.order[i], g.order[j])
 	})
 	return g
 }
 
+// sourceBefore keeps the author's reading order (rows, then columns) when the
+// nodes carry positions, so a mirror or a re-arrangement does not shuffle
+// siblings; unplaced nodes fall back to their names.
+func sourceBefore(a, b *document.Node) bool {
+	placed := func(n *document.Node) bool { return n.Layout.X != 0 || n.Layout.Y != 0 }
+	if placed(a) && placed(b) {
+		ra, rb := math.Floor(a.Layout.Y/60), math.Floor(b.Layout.Y/60)
+		if ra != rb {
+			return ra < rb
+		}
+		if a.Layout.X != b.Layout.X {
+			return a.Layout.X < b.Layout.X
+		}
+	} else if placed(a) != placed(b) {
+		return placed(a)
+	}
+	return a.Name < b.Name
+}
+
 func (g *graph) connected(id string) bool {
-	return len(g.out[id]) > 0 || g.in[id] > 0
+	if len(g.out[id]) > 0 || g.in[id] > 0 {
+		return true
+	}
+	if _, ok := g.guard[id]; ok {
+		return true
+	}
+	for _, t := range g.guard {
+		if t == id {
+			return true
+		}
+	}
+	return false
+}
+
+// pullGuards moves every guard right before the kid it protects when both
+// sit in the same column.
+func (g *graph) pullGuards(col []*document.Node) []*document.Node {
+	if len(g.guard) == 0 {
+		return col
+	}
+	pos := map[string]int{}
+	for i, k := range col {
+		pos[k.ID] = i
+	}
+	out := make([]*document.Node, 0, len(col))
+	placed := map[string]bool{}
+	for _, k := range col {
+		if placed[k.ID] {
+			continue
+		}
+		if t, ok := g.guard[k.ID]; ok {
+			if _, same := pos[t]; same {
+				continue // emitted right before its target
+			}
+		}
+		for _, other := range col {
+			if g.guard[other.ID] == k.ID && !placed[other.ID] {
+				out = append(out, other)
+				placed[other.ID] = true
+			}
+		}
+		out = append(out, k)
+		placed[k.ID] = true
+	}
+	return out
 }
 
 // place arranges kids inside parent ("" = canvas) and returns the bounding box.
@@ -276,7 +359,7 @@ func (l *layouter) stackZone(g *graph) (float64, float64) {
 		if pi != pj {
 			return pi
 		}
-		return kids[i].Name < kids[j].Name
+		return sourceBefore(kids[i], kids[j])
 	})
 	y := float64(padTop)
 	w := 0.0
@@ -349,8 +432,19 @@ func (l *layouter) flow(g *graph) (float64, float64) {
 			others = append(others, k)
 		}
 	}
-	sort.SliceStable(zones, func(i, j int) bool { return zoneKey(zones[i]) < zoneKey(zones[j]) })
+	sort.SliceStable(zones, func(i, j int) bool {
+		// AZ columns in order; inside one AZ (or without AZs) keep the author's order
+		if ki, kj := zoneKey(zones[i]), zoneKey(zones[j]); ki != kj {
+			return ki < kj
+		}
+		return sourceBefore(zones[i], zones[j])
+	})
 	rank := l.ranks(g, others)
+	for a, b := range g.guard {
+		if r, ok := rank[b]; ok {
+			rank[a] = r
+		}
+	}
 	// The zone row is one block in the flow: feeders left of it, consumers right.
 	zoneRank := 0
 	if len(zones) > 0 {
@@ -426,6 +520,8 @@ func (l *layouter) flow(g *graph) (float64, float64) {
 			}
 			sort.SliceStable(col, func(i, j int) bool { return bary[col[i].ID] < bary[col[j].ID] })
 		}
+		col = g.pullGuards(col)
+		cols[r] = col
 		for i, k := range col {
 			position[k.ID] = float64(i)
 		}
@@ -903,5 +999,5 @@ func zoneKey(n *document.Node) string {
 			return v
 		}
 	}
-	return n.Name
+	return ""
 }

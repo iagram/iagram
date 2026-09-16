@@ -66,6 +66,7 @@ export function PropertyPanel() {
     ]
     return (
       <aside className="panel">
+        <PanelControls />
         <h2>Connection</h2>
         <p>
           <b>{src?.data.name}</b> <span className="muted">→</span> <b>{dst?.data.name}</b>
@@ -129,6 +130,7 @@ export function PropertyPanel() {
   if (selectedCount > 1 && rules) {
     return (
       <aside className="panel">
+        <PanelControls />
         <h2>{selectedCount} elements selected</h2>
         <p className="muted">⌘C copy · ⌘V paste · ⌘D duplicate · ⌫ delete. Drag to move them together; drop into another container to re-parent.</p>
         <button className="danger" onClick={() => removeNodes(selIds)}>
@@ -140,6 +142,7 @@ export function PropertyPanel() {
   if (!node || !rules || !selectedId) {
     return (
       <aside className="panel">
+        <PanelControls />
         <h2>{docName || 'Diagram'}</h2>
         <p className="muted">
           {nodeCount} elements, {edgeCount} connections.
@@ -187,6 +190,7 @@ export function PropertyPanel() {
 
   return (
     <aside className="panel">
+        <PanelControls />
       <h2>
         {entry?.icon && <img src={`/icons/${entry.icon}`} alt="" />}
         {entry?.label ?? node.data.type}
@@ -886,5 +890,29 @@ function EdgeStyleControls({ style, onChange }: { style: EdgeStyle; onChange: (p
         </div>
       </div>
     </>
+  )
+}
+
+/** Pin (stay open on canvas clicks) and collapse controls, top right of the panel. */
+function PanelControls() {
+  const pinned = useStore((s) => s.inspectorPinned)
+  const setPinned = useStore((s) => s.setInspectorPinned)
+  const setShow = useStore((s) => s.setShowInspector)
+  return (
+    <div className="panel-controls">
+      <button className={pinned ? 'on' : ''} onClick={() => setPinned(!pinned)} title={pinned ? 'Unpin: clicking the canvas hides the panel' : 'Pin: keep the panel open when clicking the canvas'} aria-pressed={pinned}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z" />
+          <path d="M12 15v6" />
+        </svg>
+      </button>
+      <button onClick={() => setShow(false)} title="Collapse the panel (reopen from the rail or by selecting an element)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 12h12" />
+          <path d="M12 7l5 5-5 5" />
+          <path d="M20 5v14" />
+        </svg>
+      </button>
+    </div>
   )
 }

@@ -34,10 +34,12 @@ export function MenuBar() {
       if (!bar.current?.contains(e.target as Node)) setOpen(null)
     }
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(null)
-    document.addEventListener('mousedown', onDoc)
+    // Capture phase: the canvas pan handler stops mousedown propagation, so
+    // a bubbling listener would never see clicks on the canvas.
+    document.addEventListener('mousedown', onDoc, true)
     document.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('mousedown', onDoc, true)
       document.removeEventListener('keydown', onKey)
     }
   }, [open])

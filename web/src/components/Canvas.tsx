@@ -315,6 +315,8 @@ export function Canvas() {
           select(null)
           selectEdge(null)
           setContextMenu(null)
+          // clicking the empty canvas puts the settings panel away; selecting brings it back
+          if (!useStore.getState().inspectorPinned) useStore.setState({ showInspector: false })
         }}
         onNodeContextMenu={(ev, n) => {
           if (!n.selected) rfStore.getState().addSelectedNodes([n.id])
