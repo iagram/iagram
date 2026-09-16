@@ -15,36 +15,37 @@ description: Guidance for Building a Real Time Bidder for Advertising on AWS rec
   running Graviton instances. The bidder reads audience, campaign and budget tables in DynamoDB through VPC endpoints, updates budgets on wins, and sends compressed transaction micro-batches to Kinesis
   Data Streams and Firehose for delivery to S3, with KMS encryption and ECR-hosted container images.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-rtb, type: aws.vpc, name: rtb, parent: reg-us-east-1, props: {cidr: 10.60.0.0/16}}
-- {id: az-rtb-a, type: aws.availability_zone, name: a, parent: vpc-rtb, props: {zone: a}}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-rtb-a, props: {cidr: 10.60.0.0/24, az: a, public: true}}
-- {id: az-rtb-b, type: aws.availability_zone, name: b, parent: vpc-rtb, props: {zone: b}}
-- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-rtb-b, props: {cidr: 10.60.1.0/24, az: b, public: true}}
-- {id: sub-bidder-a, type: aws.subnet, name: bidder-a, parent: az-rtb-a, props: {cidr: 10.60.10.0/24, az: a, public: false}}
-- {id: sub-bidder-b, type: aws.subnet, name: bidder-b, parent: az-rtb-b, props: {cidr: 10.60.11.0/24, az: b, public: false}}
-- {id: saas, type: common.saas, name: saas}
-- {id: bid-request-nlb, type: aws.alb, name: bid-request-nlb, parent: az-rtb-a}
-- {id: bidder-cluster, type: aws.eks_cluster, name: bidder-cluster, parent: vpc-rtb}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-rtb, type: aws.vpc, name: rtb, parent: reg-us-east-1, props: {cidr: 10.60.0.0/16}, at: [1, 1, 3, 1]}
+- {id: az-rtb-a, type: aws.availability_zone, name: a, parent: vpc-rtb, props: {zone: a}, at: [1, 1]}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-rtb-a, props: {cidr: 10.60.0.0/24, az: a, public: true}, at: [1, 2]}
+- {id: az-rtb-b, type: aws.availability_zone, name: b, parent: vpc-rtb, props: {zone: b}, at: [2, 1]}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-rtb-b, props: {cidr: 10.60.1.0/24, az: b, public: true}, at: [1, 1]}
+- {id: sub-bidder-a, type: aws.subnet, name: bidder-a, parent: az-rtb-a, props: {cidr: 10.60.10.0/24, az: a, public: false}, at: [1, 3]}
+- {id: sub-bidder-b, type: aws.subnet, name: bidder-b, parent: az-rtb-b, props: {cidr: 10.60.11.0/24, az: b, public: false}, at: [1, 2]}
+- {id: saas, type: common.saas, name: saas, at: [1, 1]}
+- {id: bid-request-nlb, type: aws.alb, name: bid-request-nlb, parent: az-rtb-a, at: [1, 1]}
+- {id: bidder-cluster, type: aws.eks_cluster, name: bidder-cluster, parent: vpc-rtb, at: [1, 2, 2, 1]}
 - id: graviton-bidder-nodes
   type: aws.res.aws_eks_node_group
   name: graviton-bidder-nodes
   parent: bidder-cluster
+  at: [1, 1]
   props:
     cluster_name: changeme
     node_role_arn: changeme
     scaling_config: {}
     subnet_ids: []
-- {id: bidder-images, type: aws.res.aws_ecr_repository, name: bidder-images, parent: reg-us-east-1, props: {name: changeme}}
-- {id: audiences, type: aws.dynamodb_table, name: audiences, parent: reg-us-east-1}
-- {id: campaigns, type: aws.dynamodb_table, name: campaigns, parent: reg-us-east-1}
-- {id: budgets, type: aws.dynamodb_table, name: budgets, parent: reg-us-east-1}
-- {id: dynamodb-endpoint, type: aws.res.aws_vpc_endpoint, name: dynamodb-endpoint, parent: vpc-rtb, props: {vpc_id: changeme}}
-- {id: bid-transactions, type: aws.res.aws_kinesis_stream, name: bid-transactions, parent: reg-us-east-1, props: {name: changeme}}
-- {id: transactions-to-s3, type: aws.res.aws_kinesis_firehose_delivery_stream, name: transactions-to-s3, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
-- {id: bid-analytics, type: aws.s3_bucket, name: bid-analytics, parent: reg-us-east-1}
-- {id: rtb-cmk, type: aws.res.aws_kms_key, name: rtb-cmk, parent: reg-us-east-1}
+- {id: bidder-images, type: aws.res.aws_ecr_repository, name: bidder-images, parent: reg-us-east-1, props: {name: changeme}, at: [3, 2]}
+- {id: audiences, type: aws.dynamodb_table, name: audiences, parent: reg-us-east-1, at: [1, 2]}
+- {id: campaigns, type: aws.dynamodb_table, name: campaigns, parent: reg-us-east-1, at: [1, 3]}
+- {id: budgets, type: aws.dynamodb_table, name: budgets, parent: reg-us-east-1, at: [1, 4]}
+- {id: dynamodb-endpoint, type: aws.res.aws_vpc_endpoint, name: dynamodb-endpoint, parent: vpc-rtb, props: {vpc_id: changeme}, at: [1, 3, 2, 1]}
+- {id: bid-transactions, type: aws.res.aws_kinesis_stream, name: bid-transactions, parent: reg-us-east-1, props: {name: changeme}, at: [2, 2]}
+- {id: transactions-to-s3, type: aws.res.aws_kinesis_firehose_delivery_stream, name: transactions-to-s3, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [2, 3]}
+- {id: bid-analytics, type: aws.s3_bucket, name: bid-analytics, parent: reg-us-east-1, at: [2, 4]}
+- {id: rtb-cmk, type: aws.res.aws_kms_key, name: rtb-cmk, parent: reg-us-east-1, at: [3, 3]}
 edges:
 - {from: saas, to: bid-request-nlb, label: OpenRTB bid request from SSP, step: '1'}
 - {from: bid-request-nlb, to: graviton-bidder-nodes, label: bidder pods, step: '2'}

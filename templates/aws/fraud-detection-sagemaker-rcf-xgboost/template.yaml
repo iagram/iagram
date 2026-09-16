@@ -13,19 +13,19 @@ source: https://aws.amazon.com/blogs/machine-learning/detect-fraudulent-transact
 description: A SageMaker notebook trains an unsupervised Random Cut Forest anomaly detector and a supervised XGBoost classifier on labelled card transactions from S3 and deploys both to real-time endpoints.
   A REST API invokes a Lambda that scores each transaction against both endpoints and streams the enriched result through Kinesis Data Firehose into S3 for reporting.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: client, type: common.client, name: client}
-- {id: transactions-dataset, type: aws.s3_bucket, name: transactions-dataset, parent: reg-us-east-1}
-- {id: fraud-notebook, type: aws.res.aws_sagemaker_notebook_instance, name: fraud-notebook, parent: reg-us-east-1, props: {instance_type: changeme, name: changeme, role_arn: changeme}}
-- {id: rcf-model, type: aws.res.aws_sagemaker_model, name: rcf-model, parent: reg-us-east-1, props: {execution_role_arn: changeme}}
-- {id: xgboost-model, type: aws.res.aws_sagemaker_model, name: xgboost-model, parent: reg-us-east-1, props: {execution_role_arn: changeme}}
-- {id: rcf-endpoint, type: aws.res.aws_sagemaker_endpoint, name: rcf-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}}
-- {id: xgboost-endpoint, type: aws.res.aws_sagemaker_endpoint, name: xgboost-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}}
-- {id: fraud-api, type: aws.res.aws_api_gateway_rest_api, name: fraud-api, parent: reg-us-east-1, props: {name: changeme}}
-- {id: score-transaction-fn, type: aws.lambda_function, name: score-transaction-fn, parent: reg-us-east-1}
-- {id: scored-results-stream, type: aws.res.aws_kinesis_firehose_delivery_stream, name: scored-results-stream, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
-- {id: scored-results, type: aws.s3_bucket, name: scored-results, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1,2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1,1]}
+- {id: client, type: common.client, name: client, at: [1,1]}
+- {id: transactions-dataset, type: aws.s3_bucket, name: transactions-dataset, parent: reg-us-east-1, at: [1,6,2,1]}
+- {id: fraud-notebook, type: aws.res.aws_sagemaker_notebook_instance, name: fraud-notebook, parent: reg-us-east-1, props: {instance_type: changeme, name: changeme, role_arn: changeme}, at: [1,5,2,1]}
+- {id: rcf-model, type: aws.res.aws_sagemaker_model, name: rcf-model, parent: reg-us-east-1, props: {execution_role_arn: changeme}, at: [1,4]}
+- {id: xgboost-model, type: aws.res.aws_sagemaker_model, name: xgboost-model, parent: reg-us-east-1, props: {execution_role_arn: changeme}, at: [2,4]}
+- {id: rcf-endpoint, type: aws.res.aws_sagemaker_endpoint, name: rcf-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}, at: [1,3]}
+- {id: xgboost-endpoint, type: aws.res.aws_sagemaker_endpoint, name: xgboost-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}, at: [2,3]}
+- {id: fraud-api, type: aws.res.aws_api_gateway_rest_api, name: fraud-api, parent: reg-us-east-1, props: {name: changeme}, at: [1,1,2,1]}
+- {id: score-transaction-fn, type: aws.lambda_function, name: score-transaction-fn, parent: reg-us-east-1, at: [1,2,2,1]}
+- {id: scored-results-stream, type: aws.res.aws_kinesis_firehose_delivery_stream, name: scored-results-stream, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [3,2]}
+- {id: scored-results, type: aws.s3_bucket, name: scored-results, parent: reg-us-east-1, at: [3,3]}
 edges:
 - {from: transactions-dataset, to: fraud-notebook, label: training data}
 - {from: fraud-notebook, to: rcf-model, label: RCF training job}

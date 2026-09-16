@@ -12,16 +12,17 @@ source: https://aws.amazon.com/blogs/machine-learning/using-streaming-ingestion-
 description: Credit card transactions arrive on a Kinesis data stream; a Managed Service for Apache Flink application computes sliding-window aggregates and a Lambda function writes them to an online Feature
   Store group, which replicates to the offline S3 store. A second Lambda consumes the same stream, reads the latest aggregates with GetRecord and calls a SageMaker endpoint to score each transaction.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: device, type: common.device, name: device}
-- {id: cc-transactions, type: aws.res.aws_kinesis_stream, name: cc-transactions, parent: reg-us-east-1, props: {name: changeme}}
-- {id: window-aggregates, type: aws.res.aws_kinesisanalyticsv2_application, name: window-aggregates, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
-- {id: ingest-features-fn, type: aws.lambda_function, name: ingest-features-fn, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1,2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1,1]}
+- {id: device, type: common.device, name: device, at: [1,1]}
+- {id: cc-transactions, type: aws.res.aws_kinesis_stream, name: cc-transactions, parent: reg-us-east-1, props: {name: changeme}, at: [1,1,2,1]}
+- {id: window-aggregates, type: aws.res.aws_kinesisanalyticsv2_application, name: window-aggregates, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}, at: [1,2]}
+- {id: ingest-features-fn, type: aws.lambda_function, name: ingest-features-fn, parent: reg-us-east-1, at: [1,3]}
 - id: cc-agg-features
   type: aws.res.aws_sagemaker_feature_group
   name: cc-agg-features
   parent: reg-us-east-1
+  at: [1,4]
   props:
     event_time_feature_name: changeme
     feature_definition: []
@@ -32,15 +33,16 @@ nodes:
   type: aws.res.aws_sagemaker_feature_group
   name: cc-agg-batch-features
   parent: reg-us-east-1
+  at: [2,4]
   props:
     event_time_feature_name: changeme
     feature_definition: []
     feature_group_name: changeme
     record_identifier_feature_name: changeme
     role_arn: changeme
-- {id: offline-feature-store, type: aws.s3_bucket, name: offline-feature-store, parent: reg-us-east-1}
-- {id: predict-fn, type: aws.lambda_function, name: predict-fn, parent: reg-us-east-1}
-- {id: fraud-endpoint, type: aws.res.aws_sagemaker_endpoint, name: fraud-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}}
+- {id: offline-feature-store, type: aws.s3_bucket, name: offline-feature-store, parent: reg-us-east-1, at: [1,5,2,1]}
+- {id: predict-fn, type: aws.lambda_function, name: predict-fn, parent: reg-us-east-1, at: [2,2]}
+- {id: fraud-endpoint, type: aws.res.aws_sagemaker_endpoint, name: fraud-endpoint, parent: reg-us-east-1, props: {endpoint_config_name: changeme}, at: [2,3]}
 edges:
 - {from: device, to: cc-transactions, label: PutRecord transaction, step: '1'}
 - {from: cc-transactions, to: window-aggregates, label: Flink source, step: '2'}

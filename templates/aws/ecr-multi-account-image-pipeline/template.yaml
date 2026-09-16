@@ -15,37 +15,38 @@ description: A platform account caches upstream public images through an ECR pul
   and promoting clean images while quarantining ones with critical CVEs. ECR replication copies promoted images to the production account and to a second Region for disaster recovery, and workload clusters
   pull from their local registry through VPC endpoints rather than across accounts.
 nodes:
-- {id: org, type: aws.organization, name: organization, props: {root_id: r-abcd}}
-- {id: acct-tooling, type: aws.account, name: tooling, parent: org}
-- {id: ou-organization, type: aws.organizational_unit, name: organization, parent: org}
-- {id: acct-platform, type: aws.account, name: platform, parent: ou-organization}
-- {id: acct-production, type: aws.account, name: production, parent: ou-organization}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-tooling, props: {region: eu-west-1}}
-- {id: vpc-workloads, type: aws.vpc, name: workloads, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-workloads-a, type: aws.availability_zone, name: a, parent: vpc-workloads, props: {zone: a}}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-workloads-a, props: {cidr: 10.0.16.0/20, az: a, public: false}}
-- {id: sub-endpoints-a, type: aws.subnet, name: endpoints-a, parent: az-workloads-a, props: {cidr: 10.0.32.0/24, az: a, public: false}}
-- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-production, props: {region: eu-central-1}, caption: dr}
-- {id: user, type: common.user, name: user}
-- {id: public-cache-rule, type: aws.res.aws_ecr_pull_through_cache_rule, name: public-cache-rule, parent: acct-platform, props: {ecr_repository_prefix: changeme, upstream_registry_url: changeme}}
-- {id: cached-base-images, type: aws.res.aws_ecr_repository, name: cached-base-images, parent: acct-platform, props: {name: changeme}}
-- {id: app-source, type: aws.res.aws_codecommit_repository, name: app-source, parent: reg-eu-west-1, props: {repository_name: changeme}}
+- {id: org, type: aws.organization, name: organization, props: {root_id: r-abcd}, at: [1, 2]}
+- {id: acct-tooling, type: aws.account, name: tooling, parent: org, at: [1, 1]}
+- {id: ou-organization, type: aws.organizational_unit, name: organization, parent: org, at: [1, 2]}
+- {id: acct-platform, type: aws.account, name: platform, parent: ou-organization, at: [1, 1]}
+- {id: acct-production, type: aws.account, name: production, parent: ou-organization, at: [1, 2]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-tooling, props: {region: eu-west-1}, at: [1, 1]}
+- {id: vpc-workloads, type: aws.vpc, name: workloads, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}, at: [3, 1, 1, 4]}
+- {id: az-workloads-a, type: aws.availability_zone, name: a, parent: vpc-workloads, props: {zone: a}, at: [1, 1]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-workloads-a, props: {cidr: 10.0.16.0/20, az: a, public: false}, at: [1, 1]}
+- {id: sub-endpoints-a, type: aws.subnet, name: endpoints-a, parent: az-workloads-a, props: {cidr: 10.0.32.0/24, az: a, public: false}, at: [1, 2]}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-production, props: {region: eu-central-1}, caption: dr, at: [1, 2]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: public-cache-rule, type: aws.res.aws_ecr_pull_through_cache_rule, name: public-cache-rule, parent: acct-platform, props: {ecr_repository_prefix: changeme, upstream_registry_url: changeme}, at: [1, 1]}
+- {id: cached-base-images, type: aws.res.aws_ecr_repository, name: cached-base-images, parent: acct-platform, props: {name: changeme}, at: [1, 2]}
+- {id: app-source, type: aws.res.aws_codecommit_repository, name: app-source, parent: reg-eu-west-1, props: {repository_name: changeme}, at: [2, 1]}
 - id: image-build
   type: aws.res.aws_codebuild_project
   name: image-build
   parent: reg-eu-west-1
+  at: [2, 2]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: app-build-repo, type: aws.res.aws_ecr_repository, name: app-build-repo, parent: reg-eu-west-1, props: {name: changeme}}
-- {id: app-quarantine-repo, type: aws.res.aws_ecr_repository, name: app-quarantine-repo, parent: reg-eu-west-1, props: {name: changeme}}
-- {id: scan-complete-rule, type: aws.res.aws_cloudwatch_event_rule, name: scan-complete-rule, parent: reg-eu-west-1}
-- {id: promote-or-quarantine-fn, type: aws.lambda_function, name: promote-or-quarantine-fn, parent: reg-eu-west-1}
-- {id: replicate-to-prod, type: aws.res.aws_ecr_replication_configuration, name: replicate-to-prod, parent: reg-eu-west-1}
-- {id: prod-app-repo, type: aws.res.aws_ecr_repository, name: prod-app-repo, parent: acct-production, props: {name: changeme}}
-- {id: prod-dr-app-repo, type: aws.res.aws_ecr_repository, name: prod-dr-app-repo, parent: reg-eu-central-1, props: {name: changeme}}
-- {id: ecr-dkr-endpoint, type: aws.res.aws_vpc_endpoint, name: ecr-dkr-endpoint, parent: sub-endpoints-a, props: {vpc_id: changeme}}
-- {id: prod-cluster, type: aws.eks_cluster, name: prod-cluster, parent: vpc-workloads}
-- {id: az-vpc-workloads-b, type: aws.availability_zone, name: b, parent: vpc-workloads, props: {zone: b}}
-- {id: sub-vpc-workloads-b, type: aws.subnet, name: private-b, parent: az-vpc-workloads-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
+- {id: app-build-repo, type: aws.res.aws_ecr_repository, name: app-build-repo, parent: reg-eu-west-1, props: {name: changeme}, at: [1, 1]}
+- {id: app-quarantine-repo, type: aws.res.aws_ecr_repository, name: app-quarantine-repo, parent: reg-eu-west-1, props: {name: changeme}, at: [1, 2]}
+- {id: scan-complete-rule, type: aws.res.aws_cloudwatch_event_rule, name: scan-complete-rule, parent: reg-eu-west-1, at: [1, 3]}
+- {id: promote-or-quarantine-fn, type: aws.lambda_function, name: promote-or-quarantine-fn, parent: reg-eu-west-1, at: [1, 4]}
+- {id: replicate-to-prod, type: aws.res.aws_ecr_replication_configuration, name: replicate-to-prod, parent: reg-eu-west-1, at: [2, 3]}
+- {id: prod-app-repo, type: aws.res.aws_ecr_repository, name: prod-app-repo, parent: acct-production, props: {name: changeme}, at: [1, 1]}
+- {id: prod-dr-app-repo, type: aws.res.aws_ecr_repository, name: prod-dr-app-repo, parent: reg-eu-central-1, props: {name: changeme}, at: [1, 1]}
+- {id: ecr-dkr-endpoint, type: aws.res.aws_vpc_endpoint, name: ecr-dkr-endpoint, parent: sub-endpoints-a, props: {vpc_id: changeme}, at: [1, 1]}
+- {id: prod-cluster, type: aws.eks_cluster, name: prod-cluster, parent: vpc-workloads, at: [2, 1, 1, 2]}
+- {id: az-vpc-workloads-b, type: aws.availability_zone, name: b, parent: vpc-workloads, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-workloads-b, type: aws.subnet, name: private-b, parent: az-vpc-workloads-b, props: {cidr: 10.0.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: public-cache-rule, to: cached-base-images, label: pull-through cache from ECR Public / Quay, step: '1'}
 - {from: cached-base-images, to: image-build, label: vetted base image (cross-account pull), step: '2'}

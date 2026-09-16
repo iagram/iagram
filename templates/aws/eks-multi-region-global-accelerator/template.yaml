@@ -14,50 +14,52 @@ description: Identical stateless deployments run on EKS clusters in two Regions,
   IPs, sends 100 percent of traffic to the primary endpoint group and 0 percent to the secondary, and health-checks both ALBs so failover happens at the accelerator without waiting for DNS propagation;
   Route 53 maps the application domain to the accelerator.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: primary}
-- {id: vpc-primary-vpc, type: aws.vpc, name: primary-vpc, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}}
-- {id: az-primary-vpc-a, type: aws.availability_zone, name: a, parent: vpc-primary-vpc, props: {zone: a}}
-- {id: sub-p-public-a, type: aws.subnet, name: p-public-a, parent: az-primary-vpc-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
-- {id: az-primary-vpc-b, type: aws.availability_zone, name: b, parent: vpc-primary-vpc, props: {zone: b}}
-- {id: sub-p-public-b, type: aws.subnet, name: p-public-b, parent: az-primary-vpc-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
-- {id: sub-p-private-a, type: aws.subnet, name: p-private-a, parent: az-primary-vpc-a, props: {cidr: 10.0.16.0/20, az: a, public: false}}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: secondary}
-- {id: vpc-secondary-vpc, type: aws.vpc, name: secondary-vpc, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
-- {id: az-secondary-vpc-a, type: aws.availability_zone, name: a, parent: vpc-secondary-vpc, props: {zone: a}}
-- {id: sub-s-public-a, type: aws.subnet, name: s-public-a, parent: az-secondary-vpc-a, props: {cidr: 10.1.0.0/24, az: a, public: true}}
-- {id: az-secondary-vpc-b, type: aws.availability_zone, name: b, parent: vpc-secondary-vpc, props: {zone: b}}
-- {id: sub-s-public-b, type: aws.subnet, name: s-public-b, parent: az-secondary-vpc-b, props: {cidr: 10.1.1.0/24, az: b, public: true}}
-- {id: sub-s-private-a, type: aws.subnet, name: s-private-a, parent: az-secondary-vpc-a, props: {cidr: 10.1.16.0/20, az: a, public: false}}
-- {id: users, type: common.users, name: users}
-- {id: example-zone, type: aws.route53_zone, name: example-zone, parent: reg-us-west-2, props: {domain: example.com}}
-- {id: app-accelerator, type: aws.res.aws_globalaccelerator_accelerator, name: app-accelerator, parent: reg-us-west-2, props: {name: changeme}}
-- {id: primary-igw, type: aws.res.aws_internet_gateway, name: primary-igw, parent: vpc-primary-vpc}
-- {id: primary-alb, type: aws.alb, name: primary-alb, parent: vpc-primary-vpc}
-- {id: primary-cluster, type: aws.eks_cluster, name: primary-cluster, parent: vpc-primary-vpc}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: primary, at: [1, 1]}
+- {id: vpc-primary-vpc, type: aws.vpc, name: primary-vpc, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}, at: [1, 1, 2, 1]}
+- {id: az-primary-vpc-a, type: aws.availability_zone, name: a, parent: vpc-primary-vpc, props: {zone: a}, at: [1, 2]}
+- {id: sub-p-public-a, type: aws.subnet, name: p-public-a, parent: az-primary-vpc-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 2]}
+- {id: az-primary-vpc-b, type: aws.availability_zone, name: b, parent: vpc-primary-vpc, props: {zone: b}, at: [2, 2]}
+- {id: sub-p-public-b, type: aws.subnet, name: p-public-b, parent: az-primary-vpc-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
+- {id: sub-p-private-a, type: aws.subnet, name: p-private-a, parent: az-primary-vpc-a, props: {cidr: 10.0.16.0/20, az: a, public: false}, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: secondary, at: [2, 1]}
+- {id: vpc-secondary-vpc, type: aws.vpc, name: secondary-vpc, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-secondary-vpc-a, type: aws.availability_zone, name: a, parent: vpc-secondary-vpc, props: {zone: a}, at: [1, 2]}
+- {id: sub-s-public-a, type: aws.subnet, name: s-public-a, parent: az-secondary-vpc-a, props: {cidr: 10.1.0.0/24, az: a, public: true}, at: [1, 2]}
+- {id: az-secondary-vpc-b, type: aws.availability_zone, name: b, parent: vpc-secondary-vpc, props: {zone: b}, at: [2, 2]}
+- {id: sub-s-public-b, type: aws.subnet, name: s-public-b, parent: az-secondary-vpc-b, props: {cidr: 10.1.1.0/24, az: b, public: true}, at: [1, 1]}
+- {id: sub-s-private-a, type: aws.subnet, name: s-private-a, parent: az-secondary-vpc-a, props: {cidr: 10.1.16.0/20, az: a, public: false}, at: [1, 1]}
+- {id: users, type: common.users, name: users, at: [1, 2]}
+- {id: example-zone, type: aws.route53_zone, name: example-zone, parent: reg-us-west-2, props: {domain: example.com}, at: [1, 3]}
+- {id: app-accelerator, type: aws.res.aws_globalaccelerator_accelerator, name: app-accelerator, parent: reg-us-west-2, props: {name: changeme}, at: [1, 2]}
+- {id: primary-igw, type: aws.res.aws_internet_gateway, name: primary-igw, parent: vpc-primary-vpc, at: [1, 4, 2, 1]}
+- {id: primary-alb, type: aws.alb, name: primary-alb, parent: vpc-primary-vpc, at: [1, 3, 2, 1]}
+- {id: primary-cluster, type: aws.eks_cluster, name: primary-cluster, parent: vpc-primary-vpc, at: [1, 1, 2, 1]}
 - id: primary-nodes
   type: aws.res.aws_eks_node_group
   name: primary-nodes
   parent: primary-cluster
+  at: [1, 1]
   props:
     cluster_name: changeme
     node_role_arn: changeme
     scaling_config: {}
     subnet_ids: []
-- {id: app-image, type: aws.res.aws_ecr_repository, name: app-image, parent: reg-us-west-2, props: {name: changeme}}
-- {id: secondary-igw, type: aws.res.aws_internet_gateway, name: secondary-igw, parent: vpc-secondary-vpc}
-- {id: secondary-alb, type: aws.alb, name: secondary-alb, parent: vpc-secondary-vpc}
-- {id: secondary-cluster, type: aws.eks_cluster, name: secondary-cluster, parent: vpc-secondary-vpc}
+- {id: app-image, type: aws.res.aws_ecr_repository, name: app-image, parent: reg-us-west-2, props: {name: changeme}, at: [2, 2]}
+- {id: secondary-igw, type: aws.res.aws_internet_gateway, name: secondary-igw, parent: vpc-secondary-vpc, at: [1, 4, 2, 1]}
+- {id: secondary-alb, type: aws.alb, name: secondary-alb, parent: vpc-secondary-vpc, at: [1, 3, 2, 1]}
+- {id: secondary-cluster, type: aws.eks_cluster, name: secondary-cluster, parent: vpc-secondary-vpc, at: [1, 1, 2, 1]}
 - id: secondary-nodes
   type: aws.res.aws_eks_node_group
   name: secondary-nodes
   parent: primary-cluster
+  at: [2, 1]
   props:
     cluster_name: changeme
     node_role_arn: changeme
     scaling_config: {}
     subnet_ids: []
-- {id: app-image-replica, type: aws.res.aws_ecr_repository, name: app-image-replica, parent: reg-us-east-1, props: {name: changeme}}
+- {id: app-image-replica, type: aws.res.aws_ecr_repository, name: app-image-replica, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
 edges:
 - {from: users, to: example-zone, label: DNS, step: '1'}
 - {from: example-zone, to: app-accelerator, label: alias to accelerator DNS name, step: '2'}

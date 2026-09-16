@@ -15,21 +15,22 @@ description: A commit to the application repository in CodeCommit starts a CodeP
   in the EKS cluster watches a separate Kubernetes manifest repository and the ECR registry; when a new tag appears it updates the manifest and reconciles the cluster so the desired state always lives in
   Git.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-eks-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.0.16.0/20, az: a, public: false}}
-- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}}
-- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.0.32.0/20, az: b, public: false}}
-- {id: user, type: common.user, name: user}
-- {id: app-repo, type: aws.res.aws_codecommit_repository, name: app-repo, parent: reg-eu-west-1, props: {repository_name: changeme}}
-- {id: k8s-manifests-repo, type: aws.res.aws_codecommit_repository, name: k8s-manifests-repo, parent: reg-eu-west-1, props: {repository_name: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 1]}
+- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}, at: [2, 3, 2, 2]}
+- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}, at: [1, 1]}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-eks-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.0.16.0/20, az: a, public: false}, at: [1, 2]}
+- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}, at: [2, 1]}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.0.32.0/20, az: b, public: false}, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: app-repo, type: aws.res.aws_codecommit_repository, name: app-repo, parent: reg-eu-west-1, props: {repository_name: changeme}, at: [1, 1]}
+- {id: k8s-manifests-repo, type: aws.res.aws_codecommit_repository, name: k8s-manifests-repo, parent: reg-eu-west-1, props: {repository_name: changeme}, at: [2, 1]}
 - id: build-pipeline
   type: aws.res.aws_codepipeline
   name: build-pipeline
   parent: reg-eu-west-1
+  at: [1, 2]
   props:
     artifact_store: []
     name: changeme
@@ -39,22 +40,24 @@ nodes:
   type: aws.res.aws_codebuild_project
   name: image-build
   parent: reg-eu-west-1
+  at: [1, 3]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: app-image, type: aws.res.aws_ecr_repository, name: app-image, parent: reg-eu-west-1, props: {name: changeme}}
-- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: reg-eu-west-1}
-- {id: gitops-cluster, type: aws.eks_cluster, name: gitops-cluster, parent: vpc-eks}
+- {id: app-image, type: aws.res.aws_ecr_repository, name: app-image, parent: reg-eu-west-1, props: {name: changeme}, at: [1, 4]}
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: reg-eu-west-1, at: [2, 2]}
+- {id: gitops-cluster, type: aws.eks_cluster, name: gitops-cluster, parent: vpc-eks, at: [1, 2, 2, 1]}
 - id: app-nodes
   type: aws.res.aws_eks_node_group
   name: app-nodes
   parent: gitops-cluster
+  at: [1, 1]
   props:
     cluster_name: changeme
     node_role_arn: changeme
     scaling_config: {}
     subnet_ids: []
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
-- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-eks}
-- {id: flux-irsa-role, type: aws.res.aws_iam_role, name: flux-irsa-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
+- {id: igw, type: aws.res.aws_internet_gateway, name: igw, parent: vpc-eks, at: [3, 1, 1, 2]}
+- {id: flux-irsa-role, type: aws.res.aws_iam_role, name: flux-irsa-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}, at: [3, 1]}
 edges:
 - {from: user, to: app-repo, label: git push, step: '1'}
 - {from: app-repo, to: build-pipeline, label: CodeCommit source trigger, step: '2'}

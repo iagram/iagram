@@ -14,26 +14,26 @@ description: An accelerated Site-to-Site VPN attaches to a Transit Gateway and u
   instead of at the Region. The customer gateway's traffic enters the AWS global network close to the site and rides the backbone to the Regional Transit Gateway, reducing jitter and path variability compared
   with traversing the public internet all the way to the Region.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-ap-southeast-2, type: aws.region, name: ap-southeast-2, parent: acct-prod, props: {region: ap-southeast-2}}
-- {id: grp-aws-edge-location, type: common.group, name: aws-edge-location, parent: reg-ap-southeast-2}
-- {id: vpc-workload, type: aws.vpc, name: workload, parent: reg-ap-southeast-2, props: {cidr: 10.1.0.0/16}}
-- {id: az-workload-a, type: aws.availability_zone, name: a, parent: vpc-workload, props: {zone: a}}
-- {id: sub-workload-private-a, type: aws.subnet, name: workload-private-a, parent: az-workload-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: az-workload-b, type: aws.availability_zone, name: b, parent: vpc-workload, props: {zone: b}}
-- {id: sub-workload-private-b, type: aws.subnet, name: workload-private-b, parent: az-workload-b, props: {cidr: 10.1.2.0/24, az: b, public: false}}
-- {id: internet, type: common.internet, name: internet}
-- {id: vpc-reg-ap-southeast-2, type: aws.vpc, name: main, parent: reg-ap-southeast-2, props: {cidr: 10.200.0.0/16}}
-- {id: az-reg-ap-southeast-2-a, type: aws.availability_zone, name: a, parent: vpc-reg-ap-southeast-2, props: {zone: a}}
-- {id: sub-reg-ap-southeast-2-a, type: aws.subnet, name: private-a, parent: az-reg-ap-southeast-2-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
-- {id: az-reg-ap-southeast-2-b, type: aws.availability_zone, name: b, parent: vpc-reg-ap-southeast-2, props: {zone: b}}
-- {id: sub-reg-ap-southeast-2-b, type: aws.subnet, name: private-b, parent: az-reg-ap-southeast-2-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
-- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-ap-southeast-2-a, props: {type: changeme}}
-- {id: vpn-accelerator, type: aws.res.aws_globalaccelerator_accelerator, name: vpn-accelerator, parent: grp-aws-edge-location, props: {name: changeme}}
-- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-ap-southeast-2}
-- {id: workload-a, type: aws.ec2_instance, name: workload-a, parent: sub-workload-private-a}
-- {id: workload-b, type: aws.ec2_instance, name: workload-b, parent: sub-workload-private-b}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 3]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: reg-ap-southeast-2, type: aws.region, name: ap-southeast-2, parent: acct-prod, props: {region: ap-southeast-2}, at: [1, 1]}
+- {id: grp-aws-edge-location, type: common.group, name: aws-edge-location, parent: reg-ap-southeast-2, at: [1, 3, 2, 1]}
+- {id: vpc-workload, type: aws.vpc, name: workload, parent: reg-ap-southeast-2, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-workload-a, type: aws.availability_zone, name: a, parent: vpc-workload, props: {zone: a}, at: [1, 1]}
+- {id: sub-workload-private-a, type: aws.subnet, name: workload-private-a, parent: az-workload-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-workload-b, type: aws.availability_zone, name: b, parent: vpc-workload, props: {zone: b}, at: [2, 1]}
+- {id: sub-workload-private-b, type: aws.subnet, name: workload-private-b, parent: az-workload-b, props: {cidr: 10.1.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [1, 2]}
+- {id: vpc-reg-ap-southeast-2, type: aws.vpc, name: main, parent: reg-ap-southeast-2, props: {cidr: 10.200.0.0/16}, at: [2, 1]}
+- {id: az-reg-ap-southeast-2-a, type: aws.availability_zone, name: a, parent: vpc-reg-ap-southeast-2, props: {zone: a}, at: [1, 1]}
+- {id: sub-reg-ap-southeast-2-a, type: aws.subnet, name: private-a, parent: az-reg-ap-southeast-2-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-reg-ap-southeast-2-b, type: aws.availability_zone, name: b, parent: vpc-reg-ap-southeast-2, props: {zone: b}, at: [2, 1]}
+- {id: sub-reg-ap-southeast-2-b, type: aws.subnet, name: private-b, parent: az-reg-ap-southeast-2-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
+- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-ap-southeast-2-a, props: {type: changeme}, at: [1, 1]}
+- {id: vpn-accelerator, type: aws.res.aws_globalaccelerator_accelerator, name: vpn-accelerator, parent: grp-aws-edge-location, props: {name: changeme}, at: [1, 1]}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-ap-southeast-2, at: [1, 2, 2, 1]}
+- {id: workload-a, type: aws.ec2_instance, name: workload-a, parent: sub-workload-private-a, at: [1, 1]}
+- {id: workload-b, type: aws.ec2_instance, name: workload-b, parent: sub-workload-private-b, at: [1, 1]}
 edges:
 - {from: dc-on-premises, to: dc-cgw, step: '1'}
 - {from: dc-cgw, to: internet, label: IPsec to anycast tunnel endpoints, step: '2'}

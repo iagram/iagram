@@ -13,41 +13,42 @@ source: https://aws.amazon.com/blogs/architecture/disaster-recovery-dr-architect
 description: AWS Backup takes point-in-time recovery points of EBS, RDS, EFS and DynamoDB in the primary Region and copies them to a vault in the recovery Region. An EventBridge rule on CloudWatch alarms
   and AWS Health events triggers a Lambda function that redeploys the stack from CloudFormation and golden AMIs, then restores data from the copied recovery points.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: primary}
-- {id: vpc-prod-primary, type: aws.vpc, name: prod-primary, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-prod-primary-a, type: aws.availability_zone, name: a, parent: vpc-prod-primary, props: {zone: a}}
-- {id: sub-bp-app-a, type: aws.subnet, name: bp-app-a, parent: az-prod-primary-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
-- {id: sub-bp-db-a, type: aws.subnet, name: bp-db-a, parent: az-prod-primary-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
-- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: secondary}
-- {id: vpc-prod-recovery, type: aws.vpc, name: prod-recovery, parent: reg-us-west-2, props: {cidr: 10.1.0.0/16}}
-- {id: az-prod-recovery-a, type: aws.availability_zone, name: a, parent: vpc-prod-recovery, props: {zone: a}}
-- {id: sub-bp-rec-app-a, type: aws.subnet, name: bp-rec-app-a, parent: az-prod-recovery-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: sub-bp-rec-db-a, type: aws.subnet, name: bp-rec-db-a, parent: az-prod-recovery-a, props: {cidr: 10.1.10.0/24, az: a, public: false}}
-- {id: users, type: common.users, name: users}
-- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-bp-app-a}
-- {id: app-db, type: aws.rds_instance, name: app-db, parent: sub-bp-db-a}
-- {id: app-files, type: aws.res.aws_efs_file_system, name: app-files, parent: vpc-prod-primary}
-- {id: sessions, type: aws.dynamodb_table, name: sessions, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, caption: primary, at: [1, 1]}
+- {id: vpc-prod-primary, type: aws.vpc, name: prod-primary, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [2, 1]}
+- {id: az-prod-primary-a, type: aws.availability_zone, name: a, parent: vpc-prod-primary, props: {zone: a}, at: [1, 1]}
+- {id: sub-bp-app-a, type: aws.subnet, name: bp-app-a, parent: az-prod-primary-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: sub-bp-db-a, type: aws.subnet, name: bp-db-a, parent: az-prod-primary-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 2]}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, caption: secondary, at: [1, 2]}
+- {id: vpc-prod-recovery, type: aws.vpc, name: prod-recovery, parent: reg-us-west-2, props: {cidr: 10.1.0.0/16}, at: [1, 2]}
+- {id: az-prod-recovery-a, type: aws.availability_zone, name: a, parent: vpc-prod-recovery, props: {zone: a}, at: [1, 1]}
+- {id: sub-bp-rec-app-a, type: aws.subnet, name: bp-rec-app-a, parent: az-prod-recovery-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: sub-bp-rec-db-a, type: aws.subnet, name: bp-rec-db-a, parent: az-prod-recovery-a, props: {cidr: 10.1.10.0/24, az: a, public: false}, at: [1, 2]}
+- {id: users, type: common.users, name: users, at: [1, 2]}
+- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-bp-app-a, at: [1, 1]}
+- {id: app-db, type: aws.rds_instance, name: app-db, parent: sub-bp-db-a, at: [1, 1]}
+- {id: app-files, type: aws.res.aws_efs_file_system, name: app-files, parent: vpc-prod-primary, at: [1, 2, 2, 1]}
+- {id: sessions, type: aws.dynamodb_table, name: sessions, parent: reg-us-east-1, at: [2, 2]}
 - id: daily-plan
   type: aws.res.aws_backup_plan
   name: daily-plan
   parent: reg-us-east-1
+  at: [1, 1]
   props:
     name: changeme
     rule: []
-- {id: primary-vault, type: aws.res.aws_backup_vault, name: primary-vault, parent: reg-us-east-1, props: {name: changeme}}
-- {id: recovery-vault, type: aws.res.aws_backup_vault, name: recovery-vault, parent: reg-us-west-2, props: {name: changeme}}
-- {id: disaster-detected, type: aws.res.aws_cloudwatch_event_rule, name: disaster-detected, parent: reg-us-west-2}
-- {id: recovery-orchestrator, type: aws.lambda_function, name: recovery-orchestrator, parent: reg-us-west-2}
-- {id: workload-stack, type: aws.res.aws_cloudformation_stack, name: workload-stack, parent: reg-us-west-2, props: {name: changeme}}
-- {id: golden-ami, type: aws.res.aws_ami, name: golden-ami, parent: reg-us-west-2, props: {name: changeme}}
-- {id: restored-app-server, type: aws.ec2_instance, name: restored-app-server, parent: sub-bp-rec-app-a}
-- {id: restored-db, type: aws.rds_instance, name: restored-db, parent: sub-bp-rec-db-a}
-- {id: az-vpc-prod-primary-b, type: aws.availability_zone, name: b, parent: vpc-prod-primary, props: {zone: b}}
-- {id: sub-vpc-prod-primary-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-primary-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
-- {id: az-vpc-prod-recovery-b, type: aws.availability_zone, name: b, parent: vpc-prod-recovery, props: {zone: b}}
-- {id: sub-vpc-prod-recovery-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-recovery-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: primary-vault, type: aws.res.aws_backup_vault, name: primary-vault, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
+- {id: recovery-vault, type: aws.res.aws_backup_vault, name: recovery-vault, parent: reg-us-west-2, props: {name: changeme}, at: [1, 1]}
+- {id: disaster-detected, type: aws.res.aws_cloudwatch_event_rule, name: disaster-detected, parent: reg-us-west-2, at: [2, 1]}
+- {id: recovery-orchestrator, type: aws.lambda_function, name: recovery-orchestrator, parent: reg-us-west-2, at: [2, 2]}
+- {id: workload-stack, type: aws.res.aws_cloudformation_stack, name: workload-stack, parent: reg-us-west-2, props: {name: changeme}, at: [1, 3]}
+- {id: golden-ami, type: aws.res.aws_ami, name: golden-ami, parent: reg-us-west-2, props: {name: changeme}, at: [1, 4]}
+- {id: restored-app-server, type: aws.ec2_instance, name: restored-app-server, parent: sub-bp-rec-app-a, at: [1, 1]}
+- {id: restored-db, type: aws.rds_instance, name: restored-db, parent: sub-bp-rec-db-a, at: [1, 1]}
+- {id: az-vpc-prod-primary-b, type: aws.availability_zone, name: b, parent: vpc-prod-primary, props: {zone: b}, at: [2, 1]}
+- {id: sub-vpc-prod-primary-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-primary-b, props: {cidr: 10.0.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-prod-recovery-b, type: aws.availability_zone, name: b, parent: vpc-prod-recovery, props: {zone: b}, at: [2, 1]}
+- {id: sub-vpc-prod-recovery-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-recovery-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: daily-plan, to: app-server, label: EBS snapshot, step: '1'}
 - {from: daily-plan, to: app-db, label: RDS snapshot}

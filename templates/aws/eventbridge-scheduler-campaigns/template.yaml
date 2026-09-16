@@ -12,20 +12,21 @@ source: https://aws.amazon.com/blogs/compute/scheduling-email-campaigns-at-scale
 description: An API creates one-time or recurring EventBridge Scheduler schedules inside a schedule group, one per campaign; when a schedule fires it invokes a Lambda function that personalizes and sends
   email through SES. Failed invocations go to a dead-letter queue and completed one-time schedules are deleted automatically.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: user, type: common.user, name: user}
-- {id: campaign-api, type: aws.res.aws_api_gateway_rest_api, name: campaign-api, parent: reg-us-east-1, props: {name: changeme}}
-- {id: create-schedule, type: aws.lambda_function, name: create-schedule, parent: reg-us-east-1}
-- {id: campaigns, type: aws.dynamodb_table, name: campaigns, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1,2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1,1]}
+- {id: user, type: common.user, name: user, at: [1,1]}
+- {id: campaign-api, type: aws.res.aws_api_gateway_rest_api, name: campaign-api, parent: reg-us-east-1, props: {name: changeme}, at: [1,1]}
+- {id: create-schedule, type: aws.lambda_function, name: create-schedule, parent: reg-us-east-1, at: [1,2]}
+- {id: campaigns, type: aws.dynamodb_table, name: campaigns, parent: reg-us-east-1, at: [2,2]}
 - id: send-campaign
   type: aws.res.aws_scheduler_schedule
   name: send-campaign
   parent: reg-us-east-1
+  at: [1,3]
   props: {flexible_time_window: {}, schedule_expression: changeme, target: {}}
-- {id: send-personalized-email, type: aws.lambda_function, name: send-personalized-email, parent: reg-us-east-1}
-- {id: marketing-sender, type: aws.res.aws_ses_email_identity, name: marketing-sender, parent: reg-us-east-1, props: {email: changeme}}
-- {id: scheduler-dlq, type: aws.sqs_queue, name: scheduler-dlq, parent: reg-us-east-1}
+- {id: send-personalized-email, type: aws.lambda_function, name: send-personalized-email, parent: reg-us-east-1, at: [1,4]}
+- {id: marketing-sender, type: aws.res.aws_ses_email_identity, name: marketing-sender, parent: reg-us-east-1, props: {email: changeme}, at: [1,5]}
+- {id: scheduler-dlq, type: aws.sqs_queue, name: scheduler-dlq, parent: reg-us-east-1, at: [2,3]}
 edges:
 - {from: user, to: campaign-api, label: POST /campaigns, step: '1'}
 - {from: campaign-api, to: create-schedule, step: '2'}

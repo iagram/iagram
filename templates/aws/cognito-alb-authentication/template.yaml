@@ -12,27 +12,27 @@ source: https://docs.aws.amazon.com/elasticloadbalancing/latest/application/list
 description: An HTTPS listener on the Application Load Balancer redirects unauthenticated users to the Cognito hosted UI, exchanges the returned authorization code for tokens, and sets an encrypted session
   cookie. Subsequent requests are validated by the load balancer and forwarded to backend instances with the user claims in headers, so the application code carries no login logic.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
-- {id: grp-identity, type: common.group, name: identity, parent: reg-eu-central-1}
-- {id: vpc-app, type: aws.vpc, name: app, parent: reg-eu-central-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-app-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
-- {id: az-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
-- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-app-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
-- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-app-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
-- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-app-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
-- {id: users, type: common.users, name: users}
-- {id: idp, type: common.idp, name: idp}
-- {id: app-zone, type: aws.route53_zone, name: app-zone, parent: reg-eu-central-1, props: {domain: example.com}}
-- {id: alb-cert, type: aws.res.aws_acm_certificate, name: alb-cert, parent: reg-eu-central-1}
-- {id: employee-pool, type: aws.res.aws_cognito_user_pool, name: employee-pool, parent: grp-identity, props: {name: changeme}}
-- {id: app-igw, type: aws.res.aws_internet_gateway, name: app-igw, parent: vpc-app}
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
-- {id: app-alb, type: aws.alb, name: app-alb, parent: vpc-app}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}, at: [1, 1]}
+- {id: grp-identity, type: common.group, name: identity, parent: reg-eu-central-1, at: [3, 1, 1, 2]}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-eu-central-1, props: {cidr: 10.0.0.0/16}, at: [1, 2, 2, 1]}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}, at: [1, 2]}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-app-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: az-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}, at: [2, 2]}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-app-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
+- {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-app-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 2]}
+- {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-app-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [1, 2]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: idp, type: common.idp, name: idp, at: [2, 1, 1, 2]}
+- {id: app-zone, type: aws.route53_zone, name: app-zone, parent: reg-eu-central-1, props: {domain: example.com}, at: [1, 1]}
+- {id: alb-cert, type: aws.res.aws_acm_certificate, name: alb-cert, parent: reg-eu-central-1, at: [2, 1]}
+- {id: employee-pool, type: aws.res.aws_cognito_user_pool, name: employee-pool, parent: grp-identity, props: {name: changeme}, at: [1, 1]}
+- {id: app-igw, type: aws.res.aws_internet_gateway, name: app-igw, parent: vpc-app, at: [1, 1]}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
+- {id: app-alb, type: aws.alb, name: app-alb, parent: vpc-app, at: [2, 1]}
 - {id: app-asg, type: aws.res.aws_autoscaling_group, name: app-asg, parent: vpc-app, props: {max_size: 1, min_size: 1}}
-- {id: app-a, type: aws.ec2_instance, name: app-a, parent: sub-app-a}
-- {id: app-b, type: aws.ec2_instance, name: app-b, parent: sub-app-b}
+- {id: app-a, type: aws.ec2_instance, name: app-a, parent: sub-app-a, at: [1, 1]}
+- {id: app-b, type: aws.ec2_instance, name: app-b, parent: sub-app-b, at: [1, 1]}
 edges:
 - {from: users, to: app-zone, label: DNS, step: '1'}
 - {from: users, to: app-alb, label: HTTPS request without session cookie, step: '2'}

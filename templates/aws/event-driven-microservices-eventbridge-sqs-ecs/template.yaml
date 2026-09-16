@@ -15,27 +15,27 @@ description: Producers publish domain events to a custom EventBridge event bus; 
   own queue at its own pace. The settlement service on ECS Fargate scales on queue depth, persists results to DynamoDB and emits a follow-up event back to the bus, while a dead-letter queue captures messages
   that repeatedly fail.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: vpc-main, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
-- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
-- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
-- {id: client, type: common.client, name: client}
-- {id: payments-bus, type: aws.res.aws_cloudwatch_event_bus, name: payments-bus, parent: reg-eu-west-1, props: {name: changeme}}
-- {id: fraud-not-detected-rule, type: aws.res.aws_cloudwatch_event_rule, name: fraud-not-detected-rule, parent: reg-eu-west-1}
-- {id: settlement-finalized-rule, type: aws.res.aws_cloudwatch_event_rule, name: settlement-finalized-rule, parent: reg-eu-west-1}
-- {id: settlement-queue, type: aws.sqs_queue, name: settlement-queue, parent: reg-eu-west-1}
-- {id: settlement-dlq, type: aws.sqs_queue, name: settlement-dlq, parent: reg-eu-west-1}
-- {id: fraud-detection-fn, type: aws.lambda_function, name: fraud-detection-fn, parent: reg-eu-west-1}
-- {id: notification-fn, type: aws.lambda_function, name: notification-fn, parent: reg-eu-west-1}
-- {id: payments-cluster, type: aws.res.aws_ecs_cluster, name: payments-cluster, parent: vpc-main, props: {name: changeme}}
-- {id: settlement-service, type: aws.res.aws_ecs_service, name: settlement-service, parent: payments-cluster, props: {name: changeme}}
-- {id: settlements-table, type: aws.dynamodb_table, name: settlements-table, parent: reg-eu-west-1}
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
-- {id: settlement-image, type: aws.res.aws_ecr_repository, name: settlement-image, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 1]}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}, at: [1, 5, 2, 1]}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}, at: [1, 1]}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 2]}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}, at: [2, 1]}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: payments-bus, type: aws.res.aws_cloudwatch_event_bus, name: payments-bus, parent: reg-eu-west-1, props: {name: changeme}, at: [1, 2, 2, 1]}
+- {id: fraud-not-detected-rule, type: aws.res.aws_cloudwatch_event_rule, name: fraud-not-detected-rule, parent: reg-eu-west-1, at: [1, 3]}
+- {id: settlement-finalized-rule, type: aws.res.aws_cloudwatch_event_rule, name: settlement-finalized-rule, parent: reg-eu-west-1, at: [2, 3]}
+- {id: settlement-queue, type: aws.sqs_queue, name: settlement-queue, parent: reg-eu-west-1, at: [1, 4]}
+- {id: settlement-dlq, type: aws.sqs_queue, name: settlement-dlq, parent: reg-eu-west-1, at: [2, 4]}
+- {id: fraud-detection-fn, type: aws.lambda_function, name: fraud-detection-fn, parent: reg-eu-west-1, at: [1, 1]}
+- {id: notification-fn, type: aws.lambda_function, name: notification-fn, parent: reg-eu-west-1, at: [2, 1]}
+- {id: payments-cluster, type: aws.res.aws_ecs_cluster, name: payments-cluster, parent: vpc-main, props: {name: changeme}, at: [1, 2, 2, 1]}
+- {id: settlement-service, type: aws.res.aws_ecs_service, name: settlement-service, parent: payments-cluster, props: {name: changeme}, at: [1, 1]}
+- {id: settlements-table, type: aws.dynamodb_table, name: settlements-table, parent: reg-eu-west-1, at: [1, 6]}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
+- {id: settlement-image, type: aws.res.aws_ecr_repository, name: settlement-image, parent: reg-eu-west-1, props: {name: changeme}, at: [2, 6]}
 edges:
 - {from: client, to: fraud-detection-fn, label: payment request, step: '1'}
 - {from: fraud-detection-fn, to: payments-bus, label: PutEvents Fraud.Not.Detected, step: '2'}

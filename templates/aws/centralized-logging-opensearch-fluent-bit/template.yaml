@@ -14,29 +14,29 @@ description: Fluent Bit agents installed on EC2 instances and EKS nodes by Syste
   parses the records and bulk-indexes them into an Amazon OpenSearch Service domain, writing failed batches to an S3 backup bucket. A separate service log pipeline loads AWS service logs (ALB, CloudFront,
   CloudTrail, WAF) from S3 through SQS notifications, and the solution console built on CloudFront, AppSync, Cognito and DynamoDB provisions each pipeline on demand with Step Functions.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-solution-console, type: common.group, name: solution console, parent: reg-us-east-1}
-- {id: grp-log-pipelines, type: common.group, name: log pipelines, parent: reg-us-east-1}
-- {id: vpc-logging, type: aws.vpc, name: logging, parent: reg-us-east-1, props: {cidr: 10.70.0.0/16}}
-- {id: az-logging-a, type: aws.availability_zone, name: a, parent: vpc-logging, props: {zone: a}}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-logging-a, props: {cidr: 10.70.1.0/24, az: a, public: false}}
-- {id: az-logging-b, type: aws.availability_zone, name: b, parent: vpc-logging, props: {zone: b}}
-- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-logging-b, props: {cidr: 10.70.2.0/24, az: b, public: false}}
-- {id: user, type: common.user, name: user}
-- {id: console-cdn, type: aws.cloudfront_distribution, name: console-cdn, parent: grp-solution-console}
-- {id: console-api, type: aws.res.aws_appsync_graphql_api, name: console-api, parent: grp-solution-console, props: {authentication_type: changeme, name: changeme}}
-- {id: pipeline-metadata, type: aws.dynamodb_table, name: pipeline-metadata, parent: grp-solution-console}
-- {id: pipeline-provisioner, type: aws.res.aws_sfn_state_machine, name: pipeline-provisioner, parent: grp-solution-console, props: {definition: changeme, role_arn: changeme}}
-- {id: app-server-fluent-bit, type: aws.ec2_instance, name: app-server-fluent-bit, parent: sub-private-a}
-- {id: app-cluster-fluent-bit, type: aws.eks_cluster, name: app-cluster-fluent-bit, parent: az-logging-b}
-- {id: app-log-buffer, type: aws.res.aws_kinesis_stream, name: app-log-buffer, parent: grp-log-pipelines, props: {name: changeme}}
-- {id: log-processor, type: aws.lambda_function, name: log-processor, parent: grp-log-pipelines}
-- {id: service-log-bucket, type: aws.s3_bucket, name: service-log-bucket, parent: grp-log-pipelines}
-- {id: service-log-notifications, type: aws.sqs_queue, name: service-log-notifications, parent: grp-log-pipelines}
-- {id: failed-records-backup, type: aws.s3_bucket, name: failed-records-backup, parent: grp-log-pipelines}
-- {id: central-logs, type: aws.res.aws_opensearch_domain, name: central-logs, parent: vpc-logging, props: {domain_name: changeme}}
-- {id: install-fluent-bit, type: aws.res.aws_ssm_document, name: install-fluent-bit, parent: reg-us-east-1, props: {content: changeme, document_type: changeme, name: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-solution-console, type: common.group, name: solution console, parent: reg-us-east-1, at: [3, 1, 1, 2]}
+- {id: grp-log-pipelines, type: common.group, name: log pipelines, parent: reg-us-east-1, at: [1, 2, 2, 1]}
+- {id: vpc-logging, type: aws.vpc, name: logging, parent: reg-us-east-1, props: {cidr: 10.70.0.0/16}, at: [2, 1]}
+- {id: az-logging-a, type: aws.availability_zone, name: a, parent: vpc-logging, props: {zone: a}, at: [1, 1]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-logging-a, props: {cidr: 10.70.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-logging-b, type: aws.availability_zone, name: b, parent: vpc-logging, props: {zone: b}, at: [1, 2]}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-logging-b, props: {cidr: 10.70.2.0/24, az: b, public: false}, at: [2, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: console-cdn, type: aws.cloudfront_distribution, name: console-cdn, parent: grp-solution-console, at: [1, 1]}
+- {id: console-api, type: aws.res.aws_appsync_graphql_api, name: console-api, parent: grp-solution-console, props: {authentication_type: changeme, name: changeme}, at: [1, 2]}
+- {id: pipeline-metadata, type: aws.dynamodb_table, name: pipeline-metadata, parent: grp-solution-console, at: [2, 2]}
+- {id: pipeline-provisioner, type: aws.res.aws_sfn_state_machine, name: pipeline-provisioner, parent: grp-solution-console, props: {definition: changeme, role_arn: changeme}, at: [1, 3]}
+- {id: app-server-fluent-bit, type: aws.ec2_instance, name: app-server-fluent-bit, parent: sub-private-a, at: [1, 1]}
+- {id: app-cluster-fluent-bit, type: aws.eks_cluster, name: app-cluster-fluent-bit, parent: az-logging-b, at: [1, 1]}
+- {id: app-log-buffer, type: aws.res.aws_kinesis_stream, name: app-log-buffer, parent: grp-log-pipelines, props: {name: changeme}, at: [1, 1]}
+- {id: log-processor, type: aws.lambda_function, name: log-processor, parent: grp-log-pipelines, at: [1, 2]}
+- {id: service-log-bucket, type: aws.s3_bucket, name: service-log-bucket, parent: grp-log-pipelines, at: [2, 1]}
+- {id: service-log-notifications, type: aws.sqs_queue, name: service-log-notifications, parent: grp-log-pipelines, at: [2, 2]}
+- {id: failed-records-backup, type: aws.s3_bucket, name: failed-records-backup, parent: grp-log-pipelines, at: [2, 3]}
+- {id: central-logs, type: aws.res.aws_opensearch_domain, name: central-logs, parent: vpc-logging, props: {domain_name: changeme}, at: [1, 3]}
+- {id: install-fluent-bit, type: aws.res.aws_ssm_document, name: install-fluent-bit, parent: reg-us-east-1, props: {content: changeme, document_type: changeme, name: changeme}, at: [1, 1]}
 edges:
 - {from: user, to: console-cdn, label: create log pipeline, step: '1'}
 - {from: console-cdn, to: console-api, label: GraphQL}

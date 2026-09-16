@@ -16,17 +16,18 @@ description: A CodeCommit push starts a CodePipeline in which CodeBuild projects
   AWS Security Finding Format and imports them into Security Hub, failing the stage when vulnerabilities exceed the threshold. Clean builds are deployed by CodeDeploy to an Elastic Beanstalk staging environment
   where OWASP ZAP runs DAST, and after a manual approval the release is promoted to production while EventBridge, SNS and Parameter Store handle notifications and secrets.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-east-1}
-- {id: grp-security, type: common.group, name: security, parent: reg-us-east-1}
-- {id: grp-environments, type: common.group, name: environments, parent: reg-us-east-1}
-- {id: user, type: common.user, name: user}
-- {id: app-repo, type: aws.res.aws_codecommit_repository, name: app-repo, parent: grp-pipeline, props: {repository_name: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-east-1, at: [2, 1, 1, 2]}
+- {id: grp-security, type: common.group, name: security, parent: reg-us-east-1, at: [3, 1, 1, 3]}
+- {id: grp-environments, type: common.group, name: environments, parent: reg-us-east-1, at: [1, 3, 2, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: app-repo, type: aws.res.aws_codecommit_repository, name: app-repo, parent: grp-pipeline, props: {repository_name: changeme}, at: [2, 1]}
 - id: devsecops-pipeline
   type: aws.res.aws_codepipeline
   name: devsecops-pipeline
   parent: grp-pipeline
+  at: [1, 1, 1, 4]
   props:
     artifact_store: []
     name: changeme
@@ -36,23 +37,26 @@ nodes:
   type: aws.res.aws_codebuild_project
   name: sca-dependency-check
   parent: grp-pipeline
+  at: [2, 2]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
 - id: sast-sonarqube
   type: aws.res.aws_codebuild_project
   name: sast-sonarqube
   parent: grp-pipeline
+  at: [2, 3]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
 - id: dast-owasp-zap
   type: aws.res.aws_codebuild_project
   name: dast-owasp-zap
   parent: grp-pipeline
+  at: [2, 4]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: grp-pipeline}
-- {id: findings-importer, type: aws.lambda_function, name: findings-importer, parent: grp-security}
-- {id: security-hub, type: aws.res.aws_securityhub_account, name: security-hub, parent: grp-security}
-- {id: scanner-credentials, type: aws.res.aws_ssm_parameter, name: scanner-credentials, parent: grp-security, props: {name: changeme, type: changeme}}
-- {id: build-state-rule, type: aws.res.aws_cloudwatch_event_rule, name: build-state-rule, parent: reg-us-east-1}
-- {id: pipeline-notifications, type: aws.res.aws_sns_topic, name: pipeline-notifications, parent: reg-us-east-1}
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: grp-pipeline, at: [3, 1]}
+- {id: findings-importer, type: aws.lambda_function, name: findings-importer, parent: grp-security, at: [1, 2]}
+- {id: security-hub, type: aws.res.aws_securityhub_account, name: security-hub, parent: grp-security, at: [1, 3]}
+- {id: scanner-credentials, type: aws.res.aws_ssm_parameter, name: scanner-credentials, parent: grp-security, props: {name: changeme, type: changeme}, at: [1, 1]}
+- {id: build-state-rule, type: aws.res.aws_cloudwatch_event_rule, name: build-state-rule, parent: reg-us-east-1, at: [1, 2]}
+- {id: pipeline-notifications, type: aws.res.aws_sns_topic, name: pipeline-notifications, parent: reg-us-east-1, at: [1, 1]}
 edges:
 - {from: user, to: app-repo, label: git push, step: '1'}
 - {from: app-repo, to: devsecops-pipeline, label: source stage, step: '2'}

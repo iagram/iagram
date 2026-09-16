@@ -13,19 +13,19 @@ source: https://aws.amazon.com/blogs/big-data/common-streaming-data-enrichment-p
 description: A Managed Service for Apache Flink application enriches each event on the main Kinesis data stream with reference data, either by asynchronous per-record lookups against DynamoDB or by joining
   against a second reference stream fed by change data capture. Enriched events are written to an output stream and delivered to S3 by Firehose.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-streams, type: common.group, name: streams, parent: reg-us-east-1}
-- {id: grp-reference-data, type: common.group, name: reference data, parent: reg-us-east-1}
-- {id: client, type: common.client, name: client}
-- {id: database, type: common.database, name: database}
-- {id: main-events, type: aws.res.aws_kinesis_stream, name: main-events, parent: grp-streams, props: {name: changeme}}
-- {id: reference-updates, type: aws.res.aws_kinesis_stream, name: reference-updates, parent: grp-streams, props: {name: changeme}}
-- {id: reference-table, type: aws.dynamodb_table, name: reference-table, parent: grp-reference-data}
-- {id: enrichment-flink-app, type: aws.res.aws_kinesisanalyticsv2_application, name: enrichment-flink-app, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
-- {id: enriched-events, type: aws.res.aws_kinesis_stream, name: enriched-events, parent: grp-streams, props: {name: changeme}}
-- {id: enriched-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: enriched-delivery, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
-- {id: enriched-bucket, type: aws.s3_bucket, name: enriched-bucket, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1,2,2,1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1,1]}
+- {id: grp-streams, type: common.group, name: streams, parent: reg-us-east-1, at: [2,1]}
+- {id: grp-reference-data, type: common.group, name: reference data, parent: reg-us-east-1, at: [1,1]}
+- {id: client, type: common.client, name: client, at: [1,1]}
+- {id: database, type: common.database, name: database, at: [2,1]}
+- {id: main-events, type: aws.res.aws_kinesis_stream, name: main-events, parent: grp-streams, props: {name: changeme}, at: [1,1]}
+- {id: reference-updates, type: aws.res.aws_kinesis_stream, name: reference-updates, parent: grp-streams, props: {name: changeme}, at: [2,1]}
+- {id: reference-table, type: aws.dynamodb_table, name: reference-table, parent: grp-reference-data, at: [1,1]}
+- {id: enrichment-flink-app, type: aws.res.aws_kinesisanalyticsv2_application, name: enrichment-flink-app, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}, at: [1,2,2,1]}
+- {id: enriched-events, type: aws.res.aws_kinesis_stream, name: enriched-events, parent: grp-streams, props: {name: changeme}, at: [1,2,2,1]}
+- {id: enriched-delivery, type: aws.res.aws_kinesis_firehose_delivery_stream, name: enriched-delivery, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [1,3,2,1]}
+- {id: enriched-bucket, type: aws.s3_bucket, name: enriched-bucket, parent: reg-us-east-1, at: [1,4,2,1]}
 edges:
 - {from: client, to: main-events, label: raw events, step: '1'}
 - {from: database, to: reference-updates, label: CDC of reference data, step: '2'}

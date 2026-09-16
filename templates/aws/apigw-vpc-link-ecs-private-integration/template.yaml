@@ -14,33 +14,34 @@ source: https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-pr
 description: An API Gateway HTTP API terminates client requests and forwards them through a VPC Link into private subnets, either to an internal ALB in front of ECS services or directly to task IPs registered
   in a Cloud Map service. The ECS tasks never receive internet traffic, and API Gateway supplies authorization, throttling and routing while a single VPC link fans out to many backend routes.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-main, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
-- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}}
-- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
-- {id: client, type: common.client, name: client}
-- {id: shop-http-api, type: aws.res.aws_apigatewayv2_api, name: shop-http-api, parent: reg-us-east-1, props: {name: changeme, protocol_type: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-main, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 2, 2, 1]}
+- {id: az-main-a, type: aws.availability_zone, name: a, parent: vpc-main, props: {zone: a}, at: [1, 1]}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-main-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 2]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-main-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-main-b, type: aws.availability_zone, name: b, parent: vpc-main, props: {zone: b}, at: [2, 1]}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-main-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: shop-http-api, type: aws.res.aws_apigatewayv2_api, name: shop-http-api, parent: reg-us-east-1, props: {name: changeme, protocol_type: changeme}, at: [1, 1]}
 - id: private-vpc-link
   type: aws.res.aws_apigatewayv2_vpc_link
   name: private-vpc-link
   parent: sub-private-a
+  at: [1, 1]
   props:
     name: changeme
     security_group_ids: []
     subnet_ids: []
-- {id: internal-alb, type: aws.alb, name: internal-alb, parent: vpc-main}
-- {id: orders-tg, type: aws.res.aws_lb_target_group, name: orders-tg, parent: vpc-main}
-- {id: api-cluster, type: aws.res.aws_ecs_cluster, name: api-cluster, parent: vpc-main, props: {name: changeme}}
-- {id: orders-service, type: aws.res.aws_ecs_service, name: orders-service, parent: api-cluster, props: {name: changeme}}
-- {id: inventory-service, type: aws.res.aws_ecs_service, name: inventory-service, parent: api-cluster, props: {name: changeme}}
-- {id: api-namespace, type: aws.res.aws_service_discovery_private_dns_namespace, name: api-namespace, parent: vpc-main, props: {name: changeme, vpc: changeme}}
-- {id: inventory-discovery, type: aws.res.aws_service_discovery_service, name: inventory-discovery, parent: reg-us-east-1, props: {name: changeme}}
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
-- {id: orders-aurora, type: aws.res.aws_rds_cluster, name: orders-aurora, parent: sub-private-b, props: {engine: changeme}}
+- {id: internal-alb, type: aws.alb, name: internal-alb, parent: vpc-main, at: [1, 2]}
+- {id: orders-tg, type: aws.res.aws_lb_target_group, name: orders-tg, parent: vpc-main, at: [1, 3]}
+- {id: api-cluster, type: aws.res.aws_ecs_cluster, name: api-cluster, parent: vpc-main, props: {name: changeme}, at: [1, 4, 2, 1]}
+- {id: orders-service, type: aws.res.aws_ecs_service, name: orders-service, parent: api-cluster, props: {name: changeme}, at: [1, 1]}
+- {id: inventory-service, type: aws.res.aws_ecs_service, name: inventory-service, parent: api-cluster, props: {name: changeme}, at: [2, 1]}
+- {id: api-namespace, type: aws.res.aws_service_discovery_private_dns_namespace, name: api-namespace, parent: vpc-main, props: {name: changeme, vpc: changeme}, at: [2, 2, 1, 2]}
+- {id: inventory-discovery, type: aws.res.aws_service_discovery_service, name: inventory-discovery, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
+- {id: orders-aurora, type: aws.res.aws_rds_cluster, name: orders-aurora, parent: sub-private-b, props: {engine: changeme}, at: [1, 1]}
 edges:
 - {from: client, to: shop-http-api, label: HTTPS /orders, step: '1'}
 - {from: shop-http-api, to: private-vpc-link, label: private integration, step: '2'}

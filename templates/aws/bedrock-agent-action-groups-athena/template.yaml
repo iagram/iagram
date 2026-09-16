@@ -13,27 +13,27 @@ source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/develo
 description: A Streamlit front end on ECS Fargate behind an Application Load Balancer calls an Invocation Lambda that talks to a Bedrock agent. The agent answers documentation questions from a knowledge
   base on OpenSearch Serverless and delegates database questions to an action-group Lambda that generates SQL and runs it in Athena against a Glue Data Catalog database.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.30.0.0/16}}
-- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-app-a, props: {cidr: 10.30.0.0/24, az: a, public: true}}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.30.10.0/24, az: a, public: false}}
-- {id: users, type: common.users, name: users}
-- {id: streamlit-alb, type: aws.alb, name: streamlit-alb, parent: az-app-a}
-- {id: streamlit-cluster, type: aws.res.aws_ecs_cluster, name: streamlit-cluster, parent: sub-private-a, props: {name: changeme}}
-- {id: streamlit-image, type: aws.res.aws_ecr_repository, name: streamlit-image, parent: reg-us-east-1, props: {name: changeme}}
-- {id: invocation-fn, type: aws.lambda_function, name: invocation-fn, parent: reg-us-east-1}
-- {id: chatbot-agent, type: aws.res.aws_bedrockagent_agent, name: chatbot-agent, parent: reg-us-east-1, props: {agent_name: changeme, agent_resource_role_arn: changeme, foundation_model: changeme}}
-- {id: agent-executor-fn, type: aws.lambda_function, name: agent-executor-fn, parent: reg-us-east-1}
-- {id: docs-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: docs-kb, parent: reg-us-east-1, props: {name: changeme, role_arn: changeme}}
-- {id: kb-vectors, type: aws.res.aws_opensearchserverless_collection, name: kb-vectors, parent: reg-us-east-1, props: {name: changeme}}
-- {id: chatbot-athena, type: aws.res.aws_athena_workgroup, name: chatbot-athena, parent: reg-us-east-1, props: {name: changeme}}
-- {id: tabular-db, type: aws.res.aws_glue_catalog_database, name: tabular-db, parent: reg-us-east-1, props: {name: changeme}}
-- {id: assets-bucket, type: aws.s3_bucket, name: assets-bucket, parent: reg-us-east-1}
-- {id: assets-key, type: aws.res.aws_kms_key, name: assets-key, parent: reg-us-east-1}
-- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
-- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.30.251.0/24, az: b, public: false}}
+- {id: acct-prod, type: aws.account, name: prod, at: [2, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.30.0.0/16}, at: [1, 2]}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}, at: [1, 1]}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-app-a, props: {cidr: 10.30.0.0/24, az: a, public: true}, at: [1, 2]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-app-a, props: {cidr: 10.30.10.0/24, az: a, public: false}, at: [2, 1, 1, 2]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: streamlit-alb, type: aws.alb, name: streamlit-alb, parent: az-app-a, at: [1, 1]}
+- {id: streamlit-cluster, type: aws.res.aws_ecs_cluster, name: streamlit-cluster, parent: sub-private-a, props: {name: changeme}, at: [1, 1]}
+- {id: streamlit-image, type: aws.res.aws_ecr_repository, name: streamlit-image, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1]}
+- {id: invocation-fn, type: aws.lambda_function, name: invocation-fn, parent: reg-us-east-1, at: [2, 2]}
+- {id: chatbot-agent, type: aws.res.aws_bedrockagent_agent, name: chatbot-agent, parent: reg-us-east-1, props: {agent_name: changeme, agent_resource_role_arn: changeme, foundation_model: changeme}, at: [3, 3]}
+- {id: agent-executor-fn, type: aws.lambda_function, name: agent-executor-fn, parent: reg-us-east-1, at: [3, 4]}
+- {id: docs-kb, type: aws.res.aws_bedrockagent_knowledge_base, name: docs-kb, parent: reg-us-east-1, props: {name: changeme, role_arn: changeme}, at: [3, 2]}
+- {id: kb-vectors, type: aws.res.aws_opensearchserverless_collection, name: kb-vectors, parent: reg-us-east-1, props: {name: changeme}, at: [4, 2]}
+- {id: chatbot-athena, type: aws.res.aws_athena_workgroup, name: chatbot-athena, parent: reg-us-east-1, props: {name: changeme}, at: [3, 5]}
+- {id: tabular-db, type: aws.res.aws_glue_catalog_database, name: tabular-db, parent: reg-us-east-1, props: {name: changeme}, at: [3, 6]}
+- {id: assets-bucket, type: aws.s3_bucket, name: assets-bucket, parent: reg-us-east-1, at: [3, 1]}
+- {id: assets-key, type: aws.res.aws_kms_key, name: assets-key, parent: reg-us-east-1, at: [4, 1]}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.30.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: users, to: streamlit-alb, label: HTTP, step: '1'}
 - {from: streamlit-alb, to: streamlit-cluster, step: '2'}

@@ -12,15 +12,15 @@ source: https://serverlessland.com/patterns/apigw-lambda-dynamodb
 description: An API Gateway REST API fronts one Lambda function per route; each function reads or writes items in a single DynamoDB table using the on-demand capacity mode. API Gateway handles throttling,
   request validation and access logging so the functions contain only business logic.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: client, type: common.client, name: client}
-- {id: items-api, type: aws.res.aws_api_gateway_rest_api, name: items-api, parent: reg-us-east-1, props: {name: changeme}}
-- {id: create-item, type: aws.lambda_function, name: create-item, parent: reg-us-east-1}
-- {id: get-item, type: aws.lambda_function, name: get-item, parent: reg-us-east-1}
-- {id: list-items, type: aws.lambda_function, name: list-items, parent: reg-us-east-1}
-- {id: items, type: aws.dynamodb_table, name: items, parent: reg-us-east-1}
-- {id: api-access-logs, type: aws.res.aws_cloudwatch_log_group, name: api-access-logs, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: items-api, type: aws.res.aws_api_gateway_rest_api, name: items-api, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1, 3, 1]}
+- {id: create-item, type: aws.lambda_function, name: create-item, parent: reg-us-east-1, at: [1, 2]}
+- {id: get-item, type: aws.lambda_function, name: get-item, parent: reg-us-east-1, at: [2, 2]}
+- {id: list-items, type: aws.lambda_function, name: list-items, parent: reg-us-east-1, at: [3, 2]}
+- {id: items, type: aws.dynamodb_table, name: items, parent: reg-us-east-1, at: [1, 3, 3, 1]}
+- {id: api-access-logs, type: aws.res.aws_cloudwatch_log_group, name: api-access-logs, parent: reg-us-east-1, at: [4, 1]}
 edges:
 - {from: client, to: items-api, label: HTTPS POST /items, step: '1'}
 - {from: items-api, to: create-item, label: Lambda proxy integration, step: '2'}

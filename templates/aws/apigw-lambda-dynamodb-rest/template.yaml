@@ -13,15 +13,15 @@ source: https://docs.aws.amazon.com/lambda/latest/dg/services-apigateway-tutoria
 description: An API Gateway REST API exposes CRUD routes and proxies each request to a single Lambda function that reads and writes a DynamoDB table. IAM roles scope the function to the table, and CloudWatch
   Logs captures execution and access logs, with no servers to manage at any tier.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: client, type: common.client, name: client}
-- {id: mobile, type: common.mobile, name: mobile}
-- {id: items-api, type: aws.res.aws_api_gateway_rest_api, name: items-api, parent: reg-us-east-1, props: {name: changeme}}
-- {id: items-crud, type: aws.lambda_function, name: items-crud, parent: reg-us-east-1}
-- {id: items-crud-role, type: aws.res.aws_iam_role, name: items-crud-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
-- {id: items, type: aws.dynamodb_table, name: items, parent: reg-us-east-1}
-- {id: items-crud-logs, type: aws.res.aws_cloudwatch_log_group, name: items-crud-logs, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: mobile, type: common.mobile, name: mobile, at: [2, 1]}
+- {id: items-api, type: aws.res.aws_api_gateway_rest_api, name: items-api, parent: reg-us-east-1, props: {name: changeme}, at: [2, 1]}
+- {id: items-crud, type: aws.lambda_function, name: items-crud, parent: reg-us-east-1, at: [2, 2]}
+- {id: items-crud-role, type: aws.res.aws_iam_role, name: items-crud-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}, at: [1, 2]}
+- {id: items, type: aws.dynamodb_table, name: items, parent: reg-us-east-1, at: [2, 3]}
+- {id: items-crud-logs, type: aws.res.aws_cloudwatch_log_group, name: items-crud-logs, parent: reg-us-east-1, at: [3, 2]}
 edges:
 - {from: client, to: items-api, label: HTTPS GET/POST/PUT/DELETE /items, step: '1'}
 - {from: mobile, to: items-api, label: HTTPS, step: '1'}

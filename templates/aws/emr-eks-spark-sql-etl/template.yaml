@@ -13,26 +13,27 @@ source: https://aws.amazon.com/blogs/big-data/run-a-spark-sql-based-etl-pipeline
 description: An EMR virtual cluster is registered against an EKS cluster running on Fargate, and declarative Spark SQL jobs are submitted through the EMR on EKS job API; each driver and executor runs as
   an isolated pod that scales from zero and is torn down when the job completes. Jobs read raw data from S3, validate schema, aggregate and write Parquet results back to S3 with pod-level IAM roles.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-us-east-1, props: {cidr: 10.80.0.0/16}}
-- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}}
-- {id: sub-eks-private-a, type: aws.subnet, name: eks-private-a, parent: az-eks-a, props: {cidr: 10.80.1.0/24, az: a, public: false}}
-- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}}
-- {id: sub-eks-private-b, type: aws.subnet, name: eks-private-b, parent: az-eks-b, props: {cidr: 10.80.2.0/24, az: b, public: false}}
-- {id: user, type: common.user, name: user}
-- {id: analytics-eks, type: aws.eks_cluster, name: analytics-eks, parent: vpc-eks}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-us-east-1, props: {cidr: 10.80.0.0/16}, at: [2, 1, 3, 2]}
+- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}, at: [2, 2]}
+- {id: sub-eks-private-a, type: aws.subnet, name: eks-private-a, parent: az-eks-a, props: {cidr: 10.80.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}, at: [2, 3]}
+- {id: sub-eks-private-b, type: aws.subnet, name: eks-private-b, parent: az-eks-b, props: {cidr: 10.80.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: analytics-eks, type: aws.eks_cluster, name: analytics-eks, parent: vpc-eks, at: [1, 2, 1, 2]}
 - id: emr-virtual-cluster
   type: aws.res.aws_emrcontainers_virtual_cluster
   name: emr-virtual-cluster
   parent: vpc-eks
+  at: [1, 1, 2, 1]
   props: {container_provider: {}, name: changeme}
-- {id: raw-taxi-data, type: aws.s3_bucket, name: raw-taxi-data, parent: reg-us-east-1}
-- {id: etl-output, type: aws.s3_bucket, name: etl-output, parent: reg-us-east-1}
-- {id: job-artifacts, type: aws.s3_bucket, name: job-artifacts, parent: reg-us-east-1}
-- {id: spark-logs, type: aws.res.aws_cloudwatch_log_group, name: spark-logs, parent: reg-us-east-1}
-- {id: output-catalog, type: aws.res.aws_glue_catalog_database, name: output-catalog, parent: reg-us-east-1, props: {name: changeme}}
-- {id: verify-athena, type: aws.res.aws_athena_workgroup, name: verify-athena, parent: reg-us-east-1, props: {name: changeme}}
+- {id: raw-taxi-data, type: aws.s3_bucket, name: raw-taxi-data, parent: reg-us-east-1, at: [1, 1]}
+- {id: etl-output, type: aws.s3_bucket, name: etl-output, parent: reg-us-east-1, at: [2, 3]}
+- {id: job-artifacts, type: aws.s3_bucket, name: job-artifacts, parent: reg-us-east-1, at: [1, 2]}
+- {id: spark-logs, type: aws.res.aws_cloudwatch_log_group, name: spark-logs, parent: reg-us-east-1, at: [1, 3]}
+- {id: output-catalog, type: aws.res.aws_glue_catalog_database, name: output-catalog, parent: reg-us-east-1, props: {name: changeme}, at: [3, 3]}
+- {id: verify-athena, type: aws.res.aws_athena_workgroup, name: verify-athena, parent: reg-us-east-1, props: {name: changeme}, at: [4, 3]}
 edges:
 - {from: user, to: emr-virtual-cluster, label: start-job-run with SQL job spec, step: '1'}
 - {from: emr-virtual-cluster, to: analytics-eks, label: schedule driver and executor pods, step: '2'}

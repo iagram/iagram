@@ -14,38 +14,40 @@ description: An AWS Distro for OpenTelemetry collector deployed in the EKS clust
   where recording and alerting rules evaluate them and alert manager forwards firing alerts to SNS. An Amazon Managed Grafana workspace queries the Prometheus workspace as a data source, users authenticate
   through IAM Identity Center, and dashboards are provisioned by the AWS Observability Accelerator.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
-- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}}
-- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-eks-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
-- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.0.16.0/20, az: a, public: false}}
-- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}}
-- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.0.32.0/20, az: b, public: false}}
-- {id: user, type: common.user, name: user}
-- {id: workload-cluster, type: aws.eks_cluster, name: workload-cluster, parent: vpc-eks}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, at: [1, 1]}
+- {id: vpc-eks, type: aws.vpc, name: eks, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: az-eks-a, type: aws.availability_zone, name: a, parent: vpc-eks, props: {zone: a}, at: [1, 1]}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-eks-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: sub-private-a, type: aws.subnet, name: private-a, parent: az-eks-a, props: {cidr: 10.0.16.0/20, az: a, public: false}, at: [1, 2]}
+- {id: az-eks-b, type: aws.availability_zone, name: b, parent: vpc-eks, props: {zone: b}, at: [2, 1]}
+- {id: sub-private-b, type: aws.subnet, name: private-b, parent: az-eks-b, props: {cidr: 10.0.32.0/20, az: b, public: false}, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: workload-cluster, type: aws.eks_cluster, name: workload-cluster, parent: vpc-eks, at: [1, 2, 2, 1]}
 - id: workload-nodes
   type: aws.res.aws_eks_node_group
   name: workload-nodes
   parent: workload-cluster
+  at: [1, 1]
   props:
     cluster_name: changeme
     node_role_arn: changeme
     scaling_config: {}
     subnet_ids: []
-- {id: metrics-workspace, type: aws.res.aws_prometheus_workspace, name: metrics-workspace, parent: reg-us-west-2}
-- {id: prometheus-alerts, type: aws.res.aws_sns_topic, name: prometheus-alerts, parent: reg-us-west-2}
+- {id: metrics-workspace, type: aws.res.aws_prometheus_workspace, name: metrics-workspace, parent: reg-us-west-2, at: [1, 2, 2, 1]}
+- {id: prometheus-alerts, type: aws.res.aws_sns_topic, name: prometheus-alerts, parent: reg-us-west-2, at: [3, 2]}
 - id: dashboards-workspace
   type: aws.res.aws_grafana_workspace
   name: dashboards-workspace
   parent: reg-us-west-2
+  at: [1, 3]
   props:
     account_access_type: changeme
     authentication_providers: []
     permission_type: changeme
-- {id: adot-collector-role, type: aws.res.aws_iam_role, name: adot-collector-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}}
-- {id: grafana-workspace-role, type: aws.res.aws_iam_role, name: grafana-workspace-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}}
-- {id: metrics-export, type: aws.s3_bucket, name: metrics-export, parent: reg-us-west-2}
+- {id: adot-collector-role, type: aws.res.aws_iam_role, name: adot-collector-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}, at: [2, 1]}
+- {id: grafana-workspace-role, type: aws.res.aws_iam_role, name: grafana-workspace-role, parent: reg-us-west-2, props: {assume_role_policy: changeme}, at: [2, 3]}
+- {id: metrics-export, type: aws.s3_bucket, name: metrics-export, parent: reg-us-west-2, at: [3, 1]}
 edges:
 - {from: workload-nodes, to: metrics-workspace, label: remote_write scraped metrics (SigV4), step: '2'}
 - {from: adot-collector-role, to: workload-nodes, label: 'IRSA aps:RemoteWrite'}
