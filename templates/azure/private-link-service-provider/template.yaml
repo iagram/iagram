@@ -14,22 +14,23 @@ description: A service provider runs an application behind a Standard internal L
   appear as the source of all consumer traffic. Consumers in another subscription or tenant create a private endpoint that maps to the service alias, and the provider approves the connection request before
   traffic flows over the Azure backbone.
 nodes:
-- {id: sub-saas-provider, type: azure.subscription, name: saas-provider, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-provider, type: azure.resource_group, name: rg-provider, parent: sub-saas-provider, props: {location: westeurope}}
-- {id: vpc-vnet-provider, type: azure.vnet, name: vnet-provider, parent: rg-rg-provider, props: {cidr: 10.20.0.0/16}}
-- {id: sub-snet-backend, type: azure.subnet, name: snet-backend, parent: vpc-vnet-provider, props: {cidr: 10.20.1.0/24}}
-- {id: sub-snet-pls-nat, type: azure.subnet, name: snet-pls-nat, parent: vpc-vnet-provider, props: {cidr: 10.20.2.0/24}}
-- {id: sub-customer-a, type: azure.subscription, name: customer-a, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-consumer-a, type: azure.resource_group, name: rg-consumer-a, parent: sub-customer-a, props: {location: westeurope}}
-- {id: vpc-vnet-consumer-a, type: azure.vnet, name: vnet-consumer-a, parent: rg-rg-consumer-a, props: {cidr: 10.30.0.0/16}}
-- {id: sub-snet-consumer-pe, type: azure.subnet, name: snet-consumer-pe, parent: vpc-vnet-consumer-a, props: {cidr: 10.30.1.0/24}}
-- {id: sub-snet-consumer-app, type: azure.subnet, name: snet-consumer-app, parent: vpc-vnet-consumer-a, props: {cidr: 10.30.2.0/24}}
-- {id: client, type: common.client, name: client}
-- {id: ilb-provider, type: azure.res.azurerm_lb, name: ilb-provider, parent: sub-snet-backend, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: sub-saas-provider, type: azure.subscription, name: saas-provider, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 3]}
+- {id: rg-rg-provider, type: azure.resource_group, name: rg-provider, parent: sub-saas-provider, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-vnet-provider, type: azure.vnet, name: vnet-provider, parent: rg-rg-provider, props: {cidr: 10.20.0.0/16}, at: [1, 1]}
+- {id: sub-snet-backend, type: azure.subnet, name: snet-backend, parent: vpc-vnet-provider, props: {cidr: 10.20.1.0/24}, at: [1, 2]}
+- {id: sub-snet-pls-nat, type: azure.subnet, name: snet-pls-nat, parent: vpc-vnet-provider, props: {cidr: 10.20.2.0/24}, at: [1, 1]}
+- {id: sub-customer-a, type: azure.subscription, name: customer-a, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: rg-rg-consumer-a, type: azure.resource_group, name: rg-consumer-a, parent: sub-customer-a, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-vnet-consumer-a, type: azure.vnet, name: vnet-consumer-a, parent: rg-rg-consumer-a, props: {cidr: 10.30.0.0/16}, at: [1, 1, 2, 1]}
+- {id: sub-snet-consumer-pe, type: azure.subnet, name: snet-consumer-pe, parent: vpc-vnet-consumer-a, props: {cidr: 10.30.1.0/24}, at: [1, 2]}
+- {id: sub-snet-consumer-app, type: azure.subnet, name: snet-consumer-app, parent: vpc-vnet-consumer-a, props: {cidr: 10.30.2.0/24}, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: ilb-provider, type: azure.res.azurerm_lb, name: ilb-provider, parent: sub-snet-backend, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
 - id: vmss-service
   type: azure.res.azurerm_linux_virtual_machine_scale_set
   name: vmss-service
   parent: sub-snet-backend
+  at: [1, 2]
   props:
     admin_username: changeme
     location: westeurope
@@ -42,21 +43,23 @@ nodes:
   type: azure.res.azurerm_private_link_service
   name: pls-service
   parent: sub-snet-pls-nat
+  at: [1, 1]
   props:
     location: westeurope
     name: changeme
     nat_ip_configuration: []
     resource_group_name: changeme
-- {id: law-provider, type: azure.res.azurerm_log_analytics_workspace, name: law-provider, parent: rg-rg-provider, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-provider, type: azure.res.azurerm_log_analytics_workspace, name: law-provider, parent: rg-rg-provider, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
 - id: pe-consumer
   type: azure.res.azurerm_private_endpoint
   name: pe-consumer
   parent: sub-snet-consumer-pe
+  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: pdz-consumer, type: azure.res.azurerm_private_dns_zone, name: pdz-consumer, parent: rg-rg-consumer-a, props: {name: changeme, resource_group_name: changeme}}
-- {id: vm-consumer, type: azure.virtual_machine, name: vm-consumer, parent: sub-snet-consumer-app}
-- {id: vpc-rg-rg-consumer-a, type: azure.vnet, name: main, parent: rg-rg-consumer-a, props: {cidr: 10.200.0.0/16}}
-- {id: nsg-consumer, type: azure.network_security_group, name: nsg-consumer, parent: vpc-rg-rg-consumer-a}
+- {id: pdz-consumer, type: azure.res.azurerm_private_dns_zone, name: pdz-consumer, parent: rg-rg-consumer-a, props: {name: changeme, resource_group_name: changeme}, at: [2, 2]}
+- {id: vm-consumer, type: azure.virtual_machine, name: vm-consumer, parent: sub-snet-consumer-app, at: [1, 1]}
+- {id: vpc-rg-rg-consumer-a, type: azure.vnet, name: main, parent: rg-rg-consumer-a, props: {cidr: 10.200.0.0/16}, at: [1, 2]}
+- {id: nsg-consumer, type: azure.network_security_group, name: nsg-consumer, parent: vpc-rg-rg-consumer-a, at: [1, 1]}
 edges:
 - {from: vm-consumer, to: pe-consumer, label: private IP in consumer VNet, step: '1'}
 - {from: pe-consumer, to: pls-service, label: 'Private Link (alias, approved connection)', step: '2'}

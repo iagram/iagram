@@ -15,25 +15,27 @@ description: An Azure Arc Private Link Scope is attached to a private endpoint i
   or site-to-site VPN instead of public endpoints. Private DNS zones for privatelink.his.arc.azure.com and privatelink.guestconfiguration.azure.com are linked to the network and resolved from on-premises
   through a DNS forwarder, and Azure Monitor collection uses its own private link scope.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-arc-management, type: azure.resource_group, name: rg-arc-management, parent: sub-management, props: {location: westeurope}}
-- {id: vpc-vnet-arc, type: azure.vnet, name: vnet-arc, parent: rg-rg-arc-management, props: {cidr: 10.0.0.0/16}}
-- {id: sub-arc-gatewaysubnet, type: azure.subnet, name: arc-GatewaySubnet, parent: vpc-vnet-arc, props: {cidr: 10.0.0.0/27}}
-- {id: sub-snet-arc-endpoints, type: azure.subnet, name: snet-arc-endpoints, parent: vpc-vnet-arc, props: {cidr: 10.0.1.0/24}}
-- {id: internet, type: common.internet, name: internet}
-- {id: arc-private-link-scope, type: azure.res.azurerm_arc_private_link_scope, name: arc-private-link-scope, parent: rg-rg-arc-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 1, 1, 2]}
+- {id: sub-management, type: azure.subscription, name: management, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: rg-rg-arc-management, type: azure.resource_group, name: rg-arc-management, parent: sub-management, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-vnet-arc, type: azure.vnet, name: vnet-arc, parent: rg-rg-arc-management, props: {cidr: 10.0.0.0/16}, at: [2, 2]}
+- {id: sub-arc-gatewaysubnet, type: azure.subnet, name: arc-GatewaySubnet, parent: vpc-vnet-arc, props: {cidr: 10.0.0.0/27}, at: [1, 1]}
+- {id: sub-snet-arc-endpoints, type: azure.subnet, name: snet-arc-endpoints, parent: vpc-vnet-arc, props: {cidr: 10.0.1.0/24}, at: [1, 2]}
+- {id: internet, type: common.internet, name: internet, at: [1, 1]}
+- {id: arc-private-link-scope, type: azure.res.azurerm_arc_private_link_scope, name: arc-private-link-scope, parent: rg-rg-arc-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 3]}
 - id: pe-arc
   type: azure.res.azurerm_private_endpoint
   name: pe-arc
   parent: sub-snet-arc-endpoints
+  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: pdz-arc-his, type: azure.res.azurerm_private_dns_zone, name: pdz-arc-his, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}}
-- {id: pdz-guestconfiguration, type: azure.res.azurerm_private_dns_zone, name: pdz-guestconfiguration, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}}
+- {id: pdz-arc-his, type: azure.res.azurerm_private_dns_zone, name: pdz-arc-his, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: pdz-guestconfiguration, type: azure.res.azurerm_private_dns_zone, name: pdz-guestconfiguration, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}, at: [1, 2]}
 - id: ergw-arc
   type: azure.res.azurerm_virtual_network_gateway
   name: ergw-arc
   parent: sub-arc-gatewaysubnet
+  at: [1, 1]
   props:
     ip_configuration: []
     location: westeurope
@@ -45,18 +47,20 @@ nodes:
   type: azure.res.azurerm_express_route_circuit
   name: er-circuit-arc
   parent: rg-rg-arc-management
+  at: [2, 1]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
-- {id: vpc-rg-rg-arc-management, type: azure.vnet, name: main, parent: rg-rg-arc-management, props: {cidr: 10.200.0.0/16}}
-- {id: sub-rg-rg-arc-management, type: azure.subnet, name: main, parent: vpc-rg-rg-arc-management, props: {cidr: 10.200.0.0/24}}
-- {id: arc-server-01, type: azure.res.azurerm_arc_machine, name: arc-server-01, parent: sub-rg-rg-arc-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: arc-server-02, type: azure.res.azurerm_arc_machine, name: arc-server-02, parent: sub-rg-rg-arc-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: ampls, type: azure.res.azurerm_monitor_private_link_scope, name: ampls, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}}
+- {id: vpc-rg-rg-arc-management, type: azure.vnet, name: main, parent: rg-rg-arc-management, props: {cidr: 10.200.0.0/16}, at: [3, 1, 1, 2]}
+- {id: sub-rg-rg-arc-management, type: azure.subnet, name: main, parent: vpc-rg-rg-arc-management, props: {cidr: 10.200.0.0/24}, at: [1, 1]}
+- {id: arc-server-01, type: azure.res.azurerm_arc_machine, name: arc-server-01, parent: sub-rg-rg-arc-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: arc-server-02, type: azure.res.azurerm_arc_machine, name: arc-server-02, parent: sub-rg-rg-arc-management, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2]}
+- {id: ampls, type: azure.res.azurerm_monitor_private_link_scope, name: ampls, parent: rg-rg-arc-management, props: {name: changeme, resource_group_name: changeme}, at: [3, 3]}
 - id: pe-monitor
   type: azure.res.azurerm_private_endpoint
   name: pe-monitor
   parent: sub-snet-arc-endpoints
+  at: [2, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: law-arc, type: azure.res.azurerm_log_analytics_workspace, name: law-arc, parent: rg-rg-arc-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: law-arc, type: azure.res.azurerm_log_analytics_workspace, name: law-arc, parent: rg-rg-arc-management, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 3]}
 edges:
 - {from: dc-on-premises, to: er-circuit-arc, label: ExpressRoute private peering, step: '1'}
 - {from: er-circuit-arc, to: ergw-arc, label: ExpressRoute connection}

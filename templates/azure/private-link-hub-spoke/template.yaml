@@ -13,23 +13,24 @@ source: https://learn.microsoft.com/en-us/azure/architecture/networking/guide/pr
 description: Private endpoints give PaaS resources a private IP inside the hub or a spoke, with shared endpoints placed in a dedicated hub subnet so Azure Firewall can inspect and SNAT traffic from spokes
   and from on-premises over ExpressRoute. DNS forwarders in the hub and centralized private DNS zones linked to every virtual network resolve privatelink names to the endpoint addresses.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-hub-privatelink, type: azure.resource_group, name: rg-hub-privatelink, parent: sub-connectivity, props: {location: westeurope}}
-- {id: vpc-hub-pl, type: azure.vnet, name: hub-pl, parent: rg-rg-hub-privatelink, props: {cidr: 10.0.0.0/16}}
-- {id: sub-pl-gatewaysubnet, type: azure.subnet, name: pl-GatewaySubnet, parent: vpc-hub-pl, props: {cidr: 10.0.0.0/27}}
-- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub-pl, props: {cidr: 10.0.1.0/26}}
-- {id: sub-snet-dns-forwarders, type: azure.subnet, name: snet-dns-forwarders, parent: vpc-hub-pl, props: {cidr: 10.0.2.0/24}}
-- {id: sub-snet-pe-shared, type: azure.subnet, name: snet-pe-shared, parent: vpc-hub-pl, props: {cidr: 10.0.3.0/24}}
-- {id: sub-landing-zone, type: azure.subscription, name: landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-lz-privatelink, type: azure.resource_group, name: rg-lz-privatelink, parent: sub-landing-zone, props: {location: westeurope}}
-- {id: vpc-lz-pl, type: azure.vnet, name: lz-pl, parent: rg-rg-lz-privatelink, props: {cidr: 10.1.0.0/16}}
-- {id: sub-snet-lz-app, type: azure.subnet, name: snet-lz-app, parent: vpc-lz-pl, props: {cidr: 10.1.0.0/24}}
-- {id: sub-snet-lz-pe, type: azure.subnet, name: snet-lz-pe, parent: vpc-lz-pl, props: {cidr: 10.1.1.0/24}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1, 2, 1]}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: rg-rg-hub-privatelink, type: azure.resource_group, name: rg-hub-privatelink, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-hub-pl, type: azure.vnet, name: hub-pl, parent: rg-rg-hub-privatelink, props: {cidr: 10.0.0.0/16}, at: [2, 1, 1, 2]}
+- {id: sub-pl-gatewaysubnet, type: azure.subnet, name: pl-GatewaySubnet, parent: vpc-hub-pl, props: {cidr: 10.0.0.0/27}, at: [1, 1]}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-hub-pl, props: {cidr: 10.0.1.0/26}, at: [1, 2]}
+- {id: sub-snet-dns-forwarders, type: azure.subnet, name: snet-dns-forwarders, parent: vpc-hub-pl, props: {cidr: 10.0.2.0/24}, at: [2, 1, 1, 3]}
+- {id: sub-snet-pe-shared, type: azure.subnet, name: snet-pe-shared, parent: vpc-hub-pl, props: {cidr: 10.0.3.0/24}, at: [1, 3]}
+- {id: sub-landing-zone, type: azure.subscription, name: landing-zone, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 2]}
+- {id: rg-rg-lz-privatelink, type: azure.resource_group, name: rg-lz-privatelink, parent: sub-landing-zone, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-lz-pl, type: azure.vnet, name: lz-pl, parent: rg-rg-lz-privatelink, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: sub-snet-lz-app, type: azure.subnet, name: snet-lz-app, parent: vpc-lz-pl, props: {cidr: 10.1.0.0/24}, at: [1, 1]}
+- {id: sub-snet-lz-pe, type: azure.subnet, name: snet-lz-pe, parent: vpc-lz-pl, props: {cidr: 10.1.1.0/24}, at: [1, 2]}
 - id: ergw-hub
   type: azure.res.azurerm_virtual_network_gateway
   name: ergw-hub
   parent: sub-pl-gatewaysubnet
+  at: [1, 1]
   props:
     ip_configuration: []
     location: westeurope
@@ -37,26 +38,28 @@ nodes:
     resource_group_name: changeme
     sku: changeme
     type: changeme
-- {id: fw-hub, type: azure.res.azurerm_firewall, name: fw-hub, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
-- {id: dns-forwarder-1, type: azure.virtual_machine, name: dns-forwarder-1, parent: sub-snet-dns-forwarders}
-- {id: dns-forwarder-2, type: azure.virtual_machine, name: dns-forwarder-2, parent: sub-snet-dns-forwarders}
+- {id: fw-hub, type: azure.res.azurerm_firewall, name: fw-hub, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [1, 1]}
+- {id: dns-forwarder-1, type: azure.virtual_machine, name: dns-forwarder-1, parent: sub-snet-dns-forwarders, at: [1, 1]}
+- {id: dns-forwarder-2, type: azure.virtual_machine, name: dns-forwarder-2, parent: sub-snet-dns-forwarders, at: [1, 2]}
 - id: pe-storage-shared
   type: azure.res.azurerm_private_endpoint
   name: pe-storage-shared
   parent: sub-snet-pe-shared
+  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: st-shared, type: azure.storage_account, name: st-shared, parent: rg-rg-hub-privatelink}
-- {id: pdz-blob, type: azure.res.azurerm_private_dns_zone, name: pdz-blob, parent: rg-rg-hub-privatelink, props: {name: changeme, resource_group_name: changeme}}
-- {id: pdz-sql, type: azure.res.azurerm_private_dns_zone, name: pdz-sql, parent: rg-rg-hub-privatelink, props: {name: changeme, resource_group_name: changeme}}
-- {id: vpc-rg-rg-hub-privatelink, type: azure.vnet, name: main, parent: rg-rg-hub-privatelink, props: {cidr: 10.200.0.0/16}}
-- {id: nsg-pe-shared, type: azure.network_security_group, name: nsg-pe-shared, parent: vpc-rg-rg-hub-privatelink}
-- {id: vm-lz, type: azure.virtual_machine, name: vm-lz, parent: sub-snet-lz-app}
+- {id: st-shared, type: azure.storage_account, name: st-shared, parent: rg-rg-hub-privatelink, at: [2, 3]}
+- {id: pdz-blob, type: azure.res.azurerm_private_dns_zone, name: pdz-blob, parent: rg-rg-hub-privatelink, props: {name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: pdz-sql, type: azure.res.azurerm_private_dns_zone, name: pdz-sql, parent: rg-rg-hub-privatelink, props: {name: changeme, resource_group_name: changeme}, at: [1, 2]}
+- {id: vpc-rg-rg-hub-privatelink, type: azure.vnet, name: main, parent: rg-rg-hub-privatelink, props: {cidr: 10.200.0.0/16}, at: [1, 3]}
+- {id: nsg-pe-shared, type: azure.network_security_group, name: nsg-pe-shared, parent: vpc-rg-rg-hub-privatelink, at: [1, 1]}
+- {id: vm-lz, type: azure.virtual_machine, name: vm-lz, parent: sub-snet-lz-app, at: [1, 1]}
 - id: pe-sql-lz
   type: azure.res.azurerm_private_endpoint
   name: pe-sql-lz
   parent: sub-snet-lz-pe
+  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: sql-lz, type: azure.res.azurerm_mssql_server, name: sql-lz, parent: rg-rg-lz-privatelink, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+- {id: sql-lz, type: azure.res.azurerm_mssql_server, name: sql-lz, parent: rg-rg-lz-privatelink, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}, at: [1, 2]}
 edges:
 - {from: vpc-hub-pl, to: vpc-lz-pl, label: peering (gateway transit), link: azurerm_virtual_network_peering}
 - {from: pdz-blob, to: vpc-hub-pl, label: privatelink.blob.core.windows.net, link: azurerm_private_dns_zone_virtual_network_link}

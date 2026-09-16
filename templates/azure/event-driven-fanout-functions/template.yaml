@@ -13,36 +13,40 @@ source: https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-
 description: Producers publish events to an Event Grid custom topic; subscriptions fan the same event out to Azure Functions and to a Service Bus topic whose subscriptions feed further Functions for queue-based
   load leveling and competing consumers. Consumers are decoupled from producers and from each other, persist results to Cosmos DB and dead-letter failed messages.
 nodes:
-- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-events, type: azure.resource_group, name: rg-events, parent: sub-workload, props: {location: westeurope}}
-- {id: grp-event-ingestion, type: common.group, name: Event ingestion, parent: rg-rg-events}
-- {id: grp-event-consumers, type: common.group, name: Event consumers, parent: rg-rg-events}
-- {id: client, type: common.client, name: client}
-- {id: saas, type: common.saas, name: saas}
-- {id: egt-orders, type: azure.res.azurerm_eventgrid_topic, name: egt-orders, parent: grp-event-ingestion, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: sb-orders, type: azure.res.azurerm_servicebus_namespace, name: sb-orders, parent: grp-event-ingestion, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
-- {id: sbt-order-events, type: azure.res.azurerm_servicebus_topic, name: sbt-order-events, parent: grp-event-ingestion, props: {name: changeme, namespace_id: changeme}}
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: rg-rg-events, type: azure.resource_group, name: rg-events, parent: sub-workload, props: {location: westeurope}, at: [1, 1]}
+- {id: grp-event-ingestion, type: common.group, name: Event ingestion, parent: rg-rg-events, at: [1, 1, 2, 1]}
+- {id: grp-event-consumers, type: common.group, name: Event consumers, parent: rg-rg-events, at: [1, 2, 2, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: saas, type: common.saas, name: saas, at: [1, 3]}
+- {id: egt-orders, type: azure.res.azurerm_eventgrid_topic, name: egt-orders, parent: grp-event-ingestion, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: sb-orders, type: azure.res.azurerm_servicebus_namespace, name: sb-orders, parent: grp-event-ingestion, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}, at: [2, 1]}
+- {id: sbt-order-events, type: azure.res.azurerm_servicebus_topic, name: sbt-order-events, parent: grp-event-ingestion, props: {name: changeme, namespace_id: changeme}, at: [3, 1]}
 - {id: plan-functions, type: azure.res.azurerm_service_plan, name: plan-functions, parent: grp-event-consumers, props: {location: westeurope, name: changeme, os_type: changeme, resource_group_name: changeme,
-    sku_name: changeme}}
+    sku_name: changeme}, at: [1, 2, 3, 1]}
 - id: func-notify
   type: azure.res.azurerm_linux_function_app
   name: func-notify
   parent: grp-event-consumers
+  at: [1, 1]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
 - id: func-inventory
   type: azure.res.azurerm_linux_function_app
   name: func-inventory
   parent: grp-event-consumers
+  at: [2, 1]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
 - id: func-billing
   type: azure.res.azurerm_linux_function_app
   name: func-billing
   parent: grp-event-consumers
+  at: [3, 1]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
 - id: cosmos-orders
   type: azure.res.azurerm_cosmosdb_account
   name: cosmos-orders
   parent: rg-rg-events
+  at: [1, 3]
   props:
     consistency_policy: {}
     geo_location: []
@@ -50,7 +54,7 @@ nodes:
     name: changeme
     offer_type: changeme
     resource_group_name: changeme
-- {id: appi-events, type: azure.res.azurerm_application_insights, name: appi-events, parent: rg-rg-events, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: appi-events, type: azure.res.azurerm_application_insights, name: appi-events, parent: rg-rg-events, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 3]}
 edges:
 - {from: client, to: egt-orders, label: publish OrderCreated (HTTPS), step: '1'}
 - {from: egt-orders, to: func-notify, label: Event Grid trigger (push), step: '2'}

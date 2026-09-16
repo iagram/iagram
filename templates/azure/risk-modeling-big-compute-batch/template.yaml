@@ -16,25 +16,27 @@ description: Big compute workloads such as financial risk modeling and Monte Car
   VMs, which scale back to zero when the run finishes. Azure Batch provisions the pool, assigns tasks, monitors progress and autoscales, with input data and results in Azure Storage; tightly coupled tasks
   use RDMA-capable H-series VMs, and an on-premises HPC Pack head node can burst into Azure over ExpressRoute or VPN.
 nodes:
-- {id: dc-on-premises-hpc, type: common.datacenter, name: on-premises-hpc}
-- {id: sub-risk, type: azure.subscription, name: risk, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-risk-grid, type: azure.resource_group, name: rg-risk-grid, parent: sub-risk, props: {location: westeurope}}
-- {id: vpc-vnet-hpc, type: azure.vnet, name: vnet-hpc, parent: rg-rg-risk-grid, props: {cidr: 10.90.0.0/16}}
-- {id: sub-snet-batch-pool, type: azure.subnet, name: snet-batch-pool, parent: vpc-vnet-hpc, props: {cidr: 10.90.0.0/22}}
-- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-hpc, props: {cidr: 10.90.255.0/27}}
-- {id: user, type: common.user, name: user}
-- {id: batch-risk, type: azure.res.azurerm_batch_account, name: batch-risk, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: dc-on-premises-hpc, type: common.datacenter, name: on-premises-hpc, at: [2, 1]}
+- {id: sub-risk, type: azure.subscription, name: risk, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2, 2, 1]}
+- {id: rg-rg-risk-grid, type: azure.resource_group, name: rg-risk-grid, parent: sub-risk, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-vnet-hpc, type: azure.vnet, name: vnet-hpc, parent: rg-rg-risk-grid, props: {cidr: 10.90.0.0/16}, at: [1, 2, 3, 1]}
+- {id: sub-snet-batch-pool, type: azure.subnet, name: snet-batch-pool, parent: vpc-vnet-hpc, props: {cidr: 10.90.0.0/22}, at: [1, 2]}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-hpc, props: {cidr: 10.90.255.0/27}, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: batch-risk, type: azure.res.azurerm_batch_account, name: batch-risk, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
 - id: pool-hb-rdma
   type: azure.res.azurerm_batch_pool
   name: pool-hb-rdma
   parent: sub-snet-batch-pool
+  at: [1, 1]
   props: {account_name: changeme, name: changeme, node_agent_sku_id: changeme, resource_group_name: changeme, storage_image_reference: {}, vm_size: changeme}
-- {id: striskdata, type: azure.storage_account, name: striskdata, parent: rg-rg-risk-grid}
-- {id: kv-batch, type: azure.key_vault, name: kv-batch, parent: rg-rg-risk-grid}
+- {id: striskdata, type: azure.storage_account, name: striskdata, parent: rg-rg-risk-grid, at: [2, 1]}
+- {id: kv-batch, type: azure.key_vault, name: kv-batch, parent: rg-rg-risk-grid, at: [3, 1]}
 - id: vpngw-hpc
   type: azure.res.azurerm_virtual_network_gateway
   name: vpngw-hpc
   parent: sub-gatewaysubnet
+  at: [1, 1]
   props:
     ip_configuration: []
     location: westeurope
@@ -42,10 +44,10 @@ nodes:
     resource_group_name: changeme
     sku: changeme
     type: changeme
-- {id: vpc-rg-rg-risk-grid, type: azure.vnet, name: main, parent: rg-rg-risk-grid, props: {cidr: 10.200.0.0/16}}
-- {id: sub-rg-rg-risk-grid, type: azure.subnet, name: main, parent: vpc-rg-rg-risk-grid, props: {cidr: 10.200.0.0/24}}
-- {id: vm-hpc-head-node, type: azure.virtual_machine, name: vm-hpc-head-node, parent: sub-rg-rg-risk-grid}
-- {id: law-batch, type: azure.res.azurerm_log_analytics_workspace, name: law-batch, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vpc-rg-rg-risk-grid, type: azure.vnet, name: main, parent: rg-rg-risk-grid, props: {cidr: 10.200.0.0/16}, at: [1, 3]}
+- {id: sub-rg-rg-risk-grid, type: azure.subnet, name: main, parent: vpc-rg-rg-risk-grid, props: {cidr: 10.200.0.0/24}, at: [1, 1]}
+- {id: vm-hpc-head-node, type: azure.virtual_machine, name: vm-hpc-head-node, parent: sub-rg-rg-risk-grid, at: [1, 1]}
+- {id: law-batch, type: azure.res.azurerm_log_analytics_workspace, name: law-batch, parent: rg-rg-risk-grid, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 3]}
 edges:
 - {from: user, to: striskdata, label: upload market data and application packages, step: '1'}
 - {from: user, to: batch-risk, label: submit job with Monte Carlo tasks, step: '2'}

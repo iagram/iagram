@@ -14,23 +14,23 @@ description: Virtual machine NICs are grouped into AsgWeb, AsgLogic and AsgDb ap
   allows SQL from AsgLogic to AsgDb, and denies all other traffic to AsgDb ahead of the default AllowVNetInBound rule. Security policy follows the application structure without maintaining explicit IP addresses,
   and flow logs feed traffic analytics.
 nodes:
-- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-segmentation, type: azure.resource_group, name: rg-segmentation, parent: sub-workload, props: {location: westeurope}}
-- {id: vpc-vnet1, type: azure.vnet, name: vnet1, parent: rg-rg-segmentation, props: {cidr: 10.0.0.0/16}}
-- {id: sub-subnet-web, type: azure.subnet, name: subnet-web, parent: vpc-vnet1, props: {cidr: 10.0.1.0/24}}
-- {id: sub-subnet-data, type: azure.subnet, name: subnet-data, parent: vpc-vnet1, props: {cidr: 10.0.2.0/24}}
-- {id: internet, type: common.internet, name: internet}
-- {id: vpc-rg-rg-segmentation, type: azure.vnet, name: main, parent: rg-rg-segmentation, props: {cidr: 10.200.0.0/16}}
-- {id: nsg1, type: azure.network_security_group, name: nsg1, parent: vpc-rg-rg-segmentation}
-- {id: asg-web, type: azure.res.azurerm_application_security_group, name: asg-web, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: asg-logic, type: azure.res.azurerm_application_security_group, name: asg-logic, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: asg-db, type: azure.res.azurerm_application_security_group, name: asg-db, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: vm-web-1, type: azure.virtual_machine, name: vm-web-1, parent: sub-subnet-web}
-- {id: vm-web-2, type: azure.virtual_machine, name: vm-web-2, parent: sub-subnet-web}
-- {id: vm-logic, type: azure.virtual_machine, name: vm-logic, parent: sub-subnet-web}
-- {id: vm-db, type: azure.virtual_machine, name: vm-db, parent: sub-subnet-data}
-- {id: nw-flow-logs, type: azure.res.azurerm_network_watcher, name: nw-flow-logs, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: law-traffic, type: azure.res.azurerm_log_analytics_workspace, name: law-traffic, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1]}
+- {id: rg-rg-segmentation, type: azure.resource_group, name: rg-segmentation, parent: sub-workload, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-vnet1, type: azure.vnet, name: vnet1, parent: rg-rg-segmentation, props: {cidr: 10.0.0.0/16}, at: [2, 1, 1, 3]}
+- {id: sub-subnet-web, type: azure.subnet, name: subnet-web, parent: vpc-vnet1, props: {cidr: 10.0.1.0/24}, at: [1, 1]}
+- {id: sub-subnet-data, type: azure.subnet, name: subnet-data, parent: vpc-vnet1, props: {cidr: 10.0.2.0/24}, at: [2, 1]}
+- {id: internet, type: common.internet, name: internet, at: [1, 1]}
+- {id: vpc-rg-rg-segmentation, type: azure.vnet, name: main, parent: rg-rg-segmentation, props: {cidr: 10.200.0.0/16}, at: [1, 4, 2, 1]}
+- {id: nsg1, type: azure.network_security_group, name: nsg1, parent: vpc-rg-rg-segmentation, at: [1, 1]}
+- {id: asg-web, type: azure.res.azurerm_application_security_group, name: asg-web, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: asg-logic, type: azure.res.azurerm_application_security_group, name: asg-logic, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2]}
+- {id: asg-db, type: azure.res.azurerm_application_security_group, name: asg-db, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 3]}
+- {id: vm-web-1, type: azure.virtual_machine, name: vm-web-1, parent: sub-subnet-web, at: [1, 1]}
+- {id: vm-web-2, type: azure.virtual_machine, name: vm-web-2, parent: sub-subnet-web, at: [1, 2]}
+- {id: vm-logic, type: azure.virtual_machine, name: vm-logic, parent: sub-subnet-web, at: [1, 3]}
+- {id: vm-db, type: azure.virtual_machine, name: vm-db, parent: sub-subnet-data, at: [1, 1]}
+- {id: nw-flow-logs, type: azure.res.azurerm_network_watcher, name: nw-flow-logs, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 1]}
+- {id: law-traffic, type: azure.res.azurerm_log_analytics_workspace, name: law-traffic, parent: rg-rg-segmentation, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 2]}
 edges:
 - {from: nsg1, to: sub-subnet-web, label: subnet network security group association}
 - {from: nsg1, to: sub-subnet-data, label: subnet network security group association}

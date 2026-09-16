@@ -15,44 +15,48 @@ description: Data scientists iterate in a development workspace, and a CI/CD pip
   a compute cluster retrains and a managed online endpoint serves predictions. Data drift and model performance monitoring in Azure Monitor and Application Insights close the loop by triggering retraining,
   with Data Lake Storage, Key Vault, and Container Registry as the workspace dependencies.
 nodes:
-- {id: sub-ml-platform, type: azure.subscription, name: ml-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-mlops-dev, type: azure.resource_group, name: rg-mlops-dev, parent: sub-ml-platform, props: {location: westeurope}}
-- {id: rg-rg-mlops-prod, type: azure.resource_group, name: rg-mlops-prod, parent: sub-ml-platform, props: {location: westeurope}}
-- {id: vpc-vnet-mlops-prod, type: azure.vnet, name: vnet-mlops-prod, parent: rg-rg-mlops-prod, props: {cidr: 10.30.0.0/16}}
-- {id: sub-snet-training, type: azure.subnet, name: snet-training, parent: vpc-vnet-mlops-prod, props: {cidr: 10.30.1.0/24}}
-- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-mlops-prod, props: {cidr: 10.30.2.0/24}}
-- {id: user, type: common.user, name: user}
-- {id: client, type: common.client, name: client}
-- {id: saas, type: common.saas, name: saas}
+- {id: sub-ml-platform, type: azure.subscription, name: ml-platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2, 2, 1]}
+- {id: rg-rg-mlops-dev, type: azure.resource_group, name: rg-mlops-dev, parent: sub-ml-platform, props: {location: westeurope}, at: [1, 1]}
+- {id: rg-rg-mlops-prod, type: azure.resource_group, name: rg-mlops-prod, parent: sub-ml-platform, props: {location: westeurope}, at: [1, 2]}
+- {id: vpc-vnet-mlops-prod, type: azure.vnet, name: vnet-mlops-prod, parent: rg-rg-mlops-prod, props: {cidr: 10.30.0.0/16}, at: [1, 2, 3, 1]}
+- {id: sub-snet-training, type: azure.subnet, name: snet-training, parent: vpc-vnet-mlops-prod, props: {cidr: 10.30.1.0/24}, at: [1, 1]}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-mlops-prod, props: {cidr: 10.30.2.0/24}, at: [1, 2]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [1, 3, 2, 1]}
+- {id: saas, type: common.saas, name: saas, at: [2, 1]}
 - id: mlw-dev
   type: azure.res.azurerm_machine_learning_workspace
   name: mlw-dev
   parent: rg-rg-mlops-dev
+  at: [1, 3]
   props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
-- {id: ci-datascientist, type: azure.res.azurerm_machine_learning_compute_instance, name: ci-datascientist, parent: rg-rg-mlops-dev, props: {machine_learning_workspace_id: changeme, name: changeme, virtual_machine_size: changeme}}
-- {id: stmlopsdev, type: azure.storage_account, name: stmlopsdev, parent: rg-rg-mlops-dev}
+- {id: ci-datascientist, type: azure.res.azurerm_machine_learning_compute_instance, name: ci-datascientist, parent: rg-rg-mlops-dev, props: {machine_learning_workspace_id: changeme, name: changeme, virtual_machine_size: changeme}, at: [1, 2]}
+- {id: stmlopsdev, type: azure.storage_account, name: stmlopsdev, parent: rg-rg-mlops-dev, at: [1, 1]}
 - id: mlw-prod
   type: azure.res.azurerm_machine_learning_workspace
   name: mlw-prod
   parent: rg-rg-mlops-prod
+  at: [1, 1]
   props: {application_insights_id: changeme, identity: {}, key_vault_id: changeme, location: westeurope, name: changeme, resource_group_name: changeme, storage_account_id: changeme}
 - id: cpu-cluster-prod
   type: azure.res.azurerm_machine_learning_compute_cluster
   name: cpu-cluster-prod
   parent: sub-snet-training
+  at: [1, 1]
   props: {location: westeurope, machine_learning_workspace_id: changeme, name: changeme, scale_settings: {}, vm_priority: changeme, vm_size: changeme}
 - {id: aks-inference-prod, type: azure.res.azurerm_machine_learning_inference_cluster, name: aks-inference-prod, parent: sub-snet-training, props: {kubernetes_cluster_id: changeme, location: westeurope,
-    machine_learning_workspace_id: changeme, name: changeme}}
+    machine_learning_workspace_id: changeme, name: changeme}, at: [1, 2]}
 - id: pe-mlw-prod
   type: azure.res.azurerm_private_endpoint
   name: pe-mlw-prod
   parent: sub-snet-privateendpoints
+  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: stmlopsdatalake, type: azure.storage_account, name: stmlopsdatalake, parent: rg-rg-mlops-prod}
-- {id: acrmlops, type: azure.container_registry, name: acrmlops, parent: rg-rg-mlops-prod}
-- {id: kv-mlops-prod, type: azure.key_vault, name: kv-mlops-prod, parent: rg-rg-mlops-prod}
-- {id: appi-mlops-prod, type: azure.res.azurerm_application_insights, name: appi-mlops-prod, parent: rg-rg-mlops-prod, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: law-mlops, type: azure.res.azurerm_log_analytics_workspace, name: law-mlops, parent: rg-rg-mlops-prod, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: stmlopsdatalake, type: azure.storage_account, name: stmlopsdatalake, parent: rg-rg-mlops-prod, at: [2, 1]}
+- {id: acrmlops, type: azure.container_registry, name: acrmlops, parent: rg-rg-mlops-prod, at: [3, 1]}
+- {id: kv-mlops-prod, type: azure.key_vault, name: kv-mlops-prod, parent: rg-rg-mlops-prod, at: [3, 3]}
+- {id: appi-mlops-prod, type: azure.res.azurerm_application_insights, name: appi-mlops-prod, parent: rg-rg-mlops-prod, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 3]}
+- {id: law-mlops, type: azure.res.azurerm_log_analytics_workspace, name: law-mlops, parent: rg-rg-mlops-prod, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 3]}
 edges:
 - {from: user, to: ci-datascientist, label: experiment (inner loop), step: '1'}
 - {from: ci-datascientist, to: mlw-dev, label: track runs and register model, step: '2'}

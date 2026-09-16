@@ -13,24 +13,25 @@ source: https://learn.microsoft.com/en-us/azure/architecture/reference-architect
 description: Client applications authenticate with Microsoft Entra ID and call the API Management gateway, which validates the token and forwards requests to Logic Apps workflows imported as APIs. Logic
   Apps orchestrates calls to back-end systems such as SaaS applications, Azure services and line-of-business databases through connectors, with Key Vault holding secrets and Azure Monitor collecting diagnostics.
 nodes:
-- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-integration, type: azure.resource_group, name: rg-integration, parent: sub-workload, props: {location: westeurope}}
-- {id: client, type: common.client, name: client}
-- {id: idp, type: common.idp, name: idp}
-- {id: saas, type: common.saas, name: saas}
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2, 2, 1]}
+- {id: rg-rg-integration, type: azure.resource_group, name: rg-integration, parent: sub-workload, props: {location: westeurope}, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [2, 1]}
+- {id: idp, type: common.idp, name: idp, at: [1, 1]}
+- {id: saas, type: common.saas, name: saas, at: [1, 3, 2, 1]}
 - {id: apim-integration, type: azure.res.azurerm_api_management, name: apim-integration, parent: rg-rg-integration, props: {location: westeurope, name: changeme, publisher_email: changeme, publisher_name: changeme,
-    resource_group_name: changeme, sku_name: changeme}}
-- {id: logic-order-orchestration, type: azure.res.azurerm_logic_app_workflow, name: logic-order-orchestration, parent: rg-rg-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: logic-customer-sync, type: azure.res.azurerm_logic_app_workflow, name: logic-customer-sync, parent: rg-rg-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: kv-integration, type: azure.key_vault, name: kv-integration, parent: rg-rg-integration}
-- {id: sql-lob, type: azure.res.azurerm_mssql_server, name: sql-lob, parent: rg-rg-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}}
+    resource_group_name: changeme, sku_name: changeme}, at: [1, 1]}
+- {id: logic-order-orchestration, type: azure.res.azurerm_logic_app_workflow, name: logic-order-orchestration, parent: rg-rg-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2]}
+- {id: logic-customer-sync, type: azure.res.azurerm_logic_app_workflow, name: logic-customer-sync, parent: rg-rg-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 2]}
+- {id: kv-integration, type: azure.key_vault, name: kv-integration, parent: rg-rg-integration, at: [3, 2]}
+- {id: sql-lob, type: azure.res.azurerm_mssql_server, name: sql-lob, parent: rg-rg-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme, version: changeme}, at: [1, 3]}
 - id: api-lob-service
   type: azure.res.azurerm_linux_web_app
   name: api-lob-service
   parent: rg-rg-integration
+  at: [2, 3]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
-- {id: appi-apim, type: azure.res.azurerm_application_insights, name: appi-apim, parent: rg-rg-integration, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: law-integration, type: azure.res.azurerm_log_analytics_workspace, name: law-integration, parent: rg-rg-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: appi-apim, type: azure.res.azurerm_application_insights, name: appi-apim, parent: rg-rg-integration, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
+- {id: law-integration, type: azure.res.azurerm_log_analytics_workspace, name: law-integration, parent: rg-rg-integration, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 1]}
 edges:
 - {from: client, to: idp, label: OAuth 2.0 token, step: '1'}
 - {from: client, to: apim-integration, label: HTTPS with bearer token, step: '2'}

@@ -16,19 +16,20 @@ description: An agent service on AKS receives user queries behind Application Ga
   an LLM picks one or the top-scoring agent is invoked directly. An agent factory instantiates the selected agent, which calls Azure OpenAI models in Foundry, keeps multiturn context in Azure Managed Redis,
   and reaches external APIs or MCP servers through a firewall or NAT gateway.
 nodes:
-- {id: sub-agents-prod, type: azure.subscription, name: agents-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-agents-scale, type: azure.resource_group, name: rg-agents-scale, parent: sub-agents-prod, props: {location: westus3}}
-- {id: vpc-vnet-agents, type: azure.vnet, name: vnet-agents, parent: rg-rg-agents-scale, props: {cidr: 10.20.0.0/16}}
-- {id: sub-snet-gateway, type: azure.subnet, name: snet-gateway, parent: vpc-vnet-agents, props: {cidr: 10.20.0.0/24}}
-- {id: sub-snet-cluster, type: azure.subnet, name: snet-cluster, parent: vpc-vnet-agents, props: {cidr: 10.20.16.0/20}}
-- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-agents, props: {cidr: 10.20.1.0/24}}
-- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-agents, props: {cidr: 10.20.2.0/26}}
-- {id: users, type: common.users, name: users}
-- {id: internet, type: common.internet, name: internet}
+- {id: sub-agents-prod, type: azure.subscription, name: agents-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: rg-rg-agents-scale, type: azure.resource_group, name: rg-agents-scale, parent: sub-agents-prod, props: {location: westus3}, at: [1, 1]}
+- {id: vpc-vnet-agents, type: azure.vnet, name: vnet-agents, parent: rg-rg-agents-scale, props: {cidr: 10.20.0.0/16}, at: [1, 1, 1, 6]}
+- {id: sub-snet-gateway, type: azure.subnet, name: snet-gateway, parent: vpc-vnet-agents, props: {cidr: 10.20.0.0/24}, at: [1, 1]}
+- {id: sub-snet-cluster, type: azure.subnet, name: snet-cluster, parent: vpc-vnet-agents, props: {cidr: 10.20.16.0/20}, at: [2, 1]}
+- {id: sub-snet-privateendpoints, type: azure.subnet, name: snet-privateEndpoints, parent: vpc-vnet-agents, props: {cidr: 10.20.1.0/24}, at: [3, 1]}
+- {id: sub-azurefirewallsubnet, type: azure.subnet, name: AzureFirewallSubnet, parent: vpc-vnet-agents, props: {cidr: 10.20.2.0/26}, at: [4, 1]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [2, 2]}
 - id: agw-agents
   type: azure.res.azurerm_application_gateway
   name: agw-agents
   parent: sub-snet-gateway
+  at: [1, 1]
   props:
     backend_address_pool: []
     frontend_ip_configuration: []
@@ -38,22 +39,24 @@ nodes:
     name: changeme
     resource_group_name: changeme
     sku: {}
-- {id: aks-agents, type: azure.aks_cluster, name: aks-agents, parent: sub-snet-cluster}
-- {id: acragents, type: azure.container_registry, name: acragents, parent: rg-rg-agents-scale}
-- {id: srch-semantic-cache, type: azure.res.azurerm_search_service, name: srch-semantic-cache, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}}
+- {id: aks-agents, type: azure.aks_cluster, name: aks-agents, parent: sub-snet-cluster, at: [1, 1]}
+- {id: acragents, type: azure.container_registry, name: acragents, parent: rg-rg-agents-scale, at: [2, 1]}
+- {id: srch-semantic-cache, type: azure.res.azurerm_search_service, name: srch-semantic-cache, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: changeme}, at: [2, 2]}
 - {id: foundry-agents, type: azure.res.azurerm_cognitive_account, name: foundry-agents, parent: rg-rg-agents-scale, props: {kind: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
-    sku_name: changeme}}
+    sku_name: changeme}, at: [1, 7]}
 - id: gpt-4o-agents
   type: azure.res.azurerm_cognitive_deployment
   name: gpt-4o-agents
   parent: rg-rg-agents-scale
+  at: [2, 7]
   props: {cognitive_account_id: changeme, model: {}, name: changeme, sku: {}}
 - {id: redis-conversation, type: azure.res.azurerm_redis_cache, name: redis-conversation, parent: rg-rg-agents-scale, props: {capacity: 1, family: changeme, location: westeurope, name: changeme, resource_group_name: changeme,
-    sku_name: changeme}}
+    sku_name: changeme}, at: [2, 3]}
 - id: cosmos-agent-registry
   type: azure.res.azurerm_cosmosdb_account
   name: cosmos-agent-registry
   parent: rg-rg-agents-scale
+  at: [2, 5]
   props:
     consistency_policy: {}
     geo_location: []
@@ -61,16 +64,17 @@ nodes:
     name: changeme
     offer_type: changeme
     resource_group_name: changeme
-- {id: stagentlogs, type: azure.storage_account, name: stagentlogs, parent: rg-rg-agents-scale}
-- {id: kv-agents, type: azure.key_vault, name: kv-agents, parent: rg-rg-agents-scale}
+- {id: stagentlogs, type: azure.storage_account, name: stagentlogs, parent: rg-rg-agents-scale, at: [2, 4]}
+- {id: kv-agents, type: azure.key_vault, name: kv-agents, parent: rg-rg-agents-scale, at: [2, 6]}
 - id: pe-search-cache
   type: azure.res.azurerm_private_endpoint
   name: pe-search-cache
   parent: sub-snet-privateendpoints
+  at: [1, 1]
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: afw-agents, type: azure.res.azurerm_firewall, name: afw-agents, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}}
-- {id: appi-agents, type: azure.res.azurerm_application_insights, name: appi-agents, parent: rg-rg-agents-scale, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: law-agents, type: azure.res.azurerm_log_analytics_workspace, name: law-agents, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: afw-agents, type: azure.res.azurerm_firewall, name: afw-agents, parent: sub-azurefirewallsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme, sku_tier: changeme}, at: [1, 1]}
+- {id: appi-agents, type: azure.res.azurerm_application_insights, name: appi-agents, parent: rg-rg-agents-scale, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 6]}
+- {id: law-agents, type: azure.res.azurerm_log_analytics_workspace, name: law-agents, parent: rg-rg-agents-scale, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 7]}
 edges:
 - {from: users, to: agw-agents, label: HTTPS (WAF), step: '1'}
 - {from: agw-agents, to: aks-agents, label: AI agent service, step: '2'}

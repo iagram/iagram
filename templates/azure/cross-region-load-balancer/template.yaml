@@ -15,23 +15,24 @@ description: A global tier Standard Load Balancer deployed in a home region expo
   the closest participating region over the Microsoft backbone to the nearest healthy regional deployment. Health checks every 5 seconds remove a failed region from rotation, client IP is preserved as Layer
   4 pass-through, and outbound traffic uses regional outbound rules or a NAT gateway.
 nodes:
-- {id: sub-web-global, type: azure.subscription, name: web-global, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-glb-home, type: azure.resource_group, name: rg-glb-home, parent: sub-web-global, props: {location: westeurope}}
-- {id: rg-rg-glb-westus, type: azure.resource_group, name: rg-glb-westus, parent: sub-web-global, props: {location: westus}}
-- {id: vpc-vnet-westus, type: azure.vnet, name: vnet-westus, parent: rg-rg-glb-westus, props: {cidr: 10.1.0.0/16}}
-- {id: sub-snet-web-westus, type: azure.subnet, name: snet-web-westus, parent: vpc-vnet-westus, props: {cidr: 10.1.0.0/24}}
-- {id: rg-rg-glb-northeurope, type: azure.resource_group, name: rg-glb-northeurope, parent: sub-web-global, props: {location: northeurope}}
-- {id: vpc-vnet-northeurope, type: azure.vnet, name: vnet-northeurope, parent: rg-rg-glb-northeurope, props: {cidr: 10.2.0.0/16}}
-- {id: sub-snet-web-northeurope, type: azure.subnet, name: snet-web-northeurope, parent: vpc-vnet-northeurope, props: {cidr: 10.2.0.0/24}}
-- {id: users, type: common.users, name: users}
-- {id: internet, type: common.internet, name: internet}
-- {id: glb-global, type: azure.res.azurerm_lb, name: glb-global, parent: rg-rg-glb-home, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: law-glb, type: azure.res.azurerm_log_analytics_workspace, name: law-glb, parent: rg-rg-glb-home, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: lb-westus, type: azure.res.azurerm_lb, name: lb-westus, parent: sub-snet-web-westus, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: sub-web-global, type: azure.subscription, name: web-global, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1, 1, 2]}
+- {id: rg-rg-glb-home, type: azure.resource_group, name: rg-glb-home, parent: sub-web-global, props: {location: westeurope}, at: [1, 1, 1, 2]}
+- {id: rg-rg-glb-westus, type: azure.resource_group, name: rg-glb-westus, parent: sub-web-global, props: {location: westus}, at: [2, 1]}
+- {id: vpc-vnet-westus, type: azure.vnet, name: vnet-westus, parent: rg-rg-glb-westus, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: sub-snet-web-westus, type: azure.subnet, name: snet-web-westus, parent: vpc-vnet-westus, props: {cidr: 10.1.0.0/24}, at: [1, 1]}
+- {id: rg-rg-glb-northeurope, type: azure.resource_group, name: rg-glb-northeurope, parent: sub-web-global, props: {location: northeurope}, at: [2, 2]}
+- {id: vpc-vnet-northeurope, type: azure.vnet, name: vnet-northeurope, parent: rg-rg-glb-northeurope, props: {cidr: 10.2.0.0/16}, at: [1, 1]}
+- {id: sub-snet-web-northeurope, type: azure.subnet, name: snet-web-northeurope, parent: vpc-vnet-northeurope, props: {cidr: 10.2.0.0/24}, at: [1, 1]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [1, 2]}
+- {id: glb-global, type: azure.res.azurerm_lb, name: glb-global, parent: rg-rg-glb-home, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: law-glb, type: azure.res.azurerm_log_analytics_workspace, name: law-glb, parent: rg-rg-glb-home, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2]}
+- {id: lb-westus, type: azure.res.azurerm_lb, name: lb-westus, parent: sub-snet-web-westus, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1, 1, 2]}
 - id: vmss-westus
   type: azure.res.azurerm_linux_virtual_machine_scale_set
   name: vmss-westus
   parent: sub-snet-web-westus
+  at: [2, 1]
   props:
     admin_username: changeme
     location: westeurope
@@ -40,12 +41,13 @@ nodes:
     os_disk: {}
     resource_group_name: changeme
     sku: changeme
-- {id: natgw-westus, type: azure.res.azurerm_nat_gateway, name: natgw-westus, parent: sub-snet-web-westus, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: lb-northeurope, type: azure.res.azurerm_lb, name: lb-northeurope, parent: sub-snet-web-northeurope, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: natgw-westus, type: azure.res.azurerm_nat_gateway, name: natgw-westus, parent: sub-snet-web-westus, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 2]}
+- {id: lb-northeurope, type: azure.res.azurerm_lb, name: lb-northeurope, parent: sub-snet-web-northeurope, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
 - id: vmss-northeurope
   type: azure.res.azurerm_linux_virtual_machine_scale_set
   name: vmss-northeurope
   parent: sub-snet-web-northeurope
+  at: [2, 1]
   props:
     admin_username: changeme
     location: westeurope

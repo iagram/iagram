@@ -16,29 +16,30 @@ description: Azure Bastion is deployed in the hub's AzureBastionSubnet with a si
   networks, so no VM needs a public IP, agent or open management port. Entra ID authentication with MFA and just-in-time role activation gate access, SSH keys come from Key Vault, and Bastion audit logs
   and Premium session recordings provide the compliance trail.
 nodes:
-- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-hub, type: azure.resource_group, name: rg-hub, parent: sub-connectivity, props: {location: westeurope}}
-- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.0.0.0/16}}
-- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-hub, props: {cidr: 10.0.4.0/26}}
-- {id: sub-landing-zone-prod, type: azure.subscription, name: landing-zone-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-prod, type: azure.resource_group, name: rg-prod, parent: sub-landing-zone-prod, props: {location: westeurope}}
-- {id: vpc-spoke-prod, type: azure.vnet, name: spoke-prod, parent: rg-rg-prod, props: {cidr: 10.1.0.0/16}}
-- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-spoke-prod, props: {cidr: 10.1.1.0/24}}
-- {id: sub-snet-data, type: azure.subnet, name: snet-data, parent: vpc-spoke-prod, props: {cidr: 10.1.2.0/24}}
-- {id: user, type: common.user, name: user}
-- {id: internet, type: common.internet, name: internet}
-- {id: bastion-hub, type: azure.res.azurerm_bastion_host, name: bastion-hub, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: vpc-rg-rg-hub, type: azure.vnet, name: main, parent: rg-rg-hub, props: {cidr: 10.200.0.0/16}}
-- {id: nsg-bastion, type: azure.network_security_group, name: nsg-bastion, parent: vpc-rg-rg-hub}
-- {id: ddos-hub, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-hub, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: kv-admin-ssh-keys, type: azure.key_vault, name: kv-admin-ssh-keys, parent: rg-rg-hub}
-- {id: law-hub, type: azure.res.azurerm_log_analytics_workspace, name: law-hub, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: st-session-recordings, type: azure.storage_account, name: st-session-recordings, parent: rg-rg-hub}
-- {id: vm-app-1, type: azure.virtual_machine, name: vm-app-1, parent: sub-snet-app}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: rg-rg-hub, type: azure.resource_group, name: rg-hub, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-hub, type: azure.vnet, name: hub, parent: rg-rg-hub, props: {cidr: 10.0.0.0/16}, at: [2, 1, 1, 3]}
+- {id: sub-azurebastionsubnet, type: azure.subnet, name: AzureBastionSubnet, parent: vpc-hub, props: {cidr: 10.0.4.0/26}, at: [1, 1]}
+- {id: sub-landing-zone-prod, type: azure.subscription, name: landing-zone-prod, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 3]}
+- {id: rg-rg-prod, type: azure.resource_group, name: rg-prod, parent: sub-landing-zone-prod, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-spoke-prod, type: azure.vnet, name: spoke-prod, parent: rg-rg-prod, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: sub-snet-app, type: azure.subnet, name: snet-app, parent: vpc-spoke-prod, props: {cidr: 10.1.1.0/24}, at: [1, 1]}
+- {id: sub-snet-data, type: azure.subnet, name: snet-data, parent: vpc-spoke-prod, props: {cidr: 10.1.2.0/24}, at: [1, 2]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [2, 3]}
+- {id: bastion-hub, type: azure.res.azurerm_bastion_host, name: bastion-hub, parent: sub-azurebastionsubnet, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
+- {id: vpc-rg-rg-hub, type: azure.vnet, name: main, parent: rg-rg-hub, props: {cidr: 10.200.0.0/16}, at: [1, 1]}
+- {id: nsg-bastion, type: azure.network_security_group, name: nsg-bastion, parent: vpc-rg-rg-hub, at: [1, 1]}
+- {id: ddos-hub, type: azure.res.azurerm_network_ddos_protection_plan, name: ddos-hub, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 2, 1, 2]}
+- {id: kv-admin-ssh-keys, type: azure.key_vault, name: kv-admin-ssh-keys, parent: rg-rg-hub, at: [3, 1]}
+- {id: law-hub, type: azure.res.azurerm_log_analytics_workspace, name: law-hub, parent: rg-rg-hub, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 2]}
+- {id: st-session-recordings, type: azure.storage_account, name: st-session-recordings, parent: rg-rg-hub, at: [3, 3]}
+- {id: vm-app-1, type: azure.virtual_machine, name: vm-app-1, parent: sub-snet-app, at: [1, 1]}
 - id: vm-sql-1
   type: azure.res.azurerm_windows_virtual_machine
   name: vm-sql-1
   parent: sub-snet-data
+  at: [1, 1]
   props:
     location: westeurope
     name: changeme

@@ -17,29 +17,30 @@ description: Azure Monitor collects metrics, logs, traces and events from Azure 
   queried with KQL and an Azure Monitor workspace for Prometheus and OpenTelemetry metrics queried with PromQL. Application Insights provides OpenTelemetry-based APM, workbooks and Grafana dashboards visualize
   the data, and alerts drive action groups that run Logic Apps or Automation runbooks and autoscale.
 nodes:
-- {id: sub-platform, type: azure.subscription, name: platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-monitoring, type: azure.resource_group, name: rg-monitoring, parent: sub-platform, props: {location: westeurope}}
-- {id: grp-data-sources, type: common.group, name: Data sources, parent: rg-rg-monitoring}
-- {id: grp-data-platform, type: common.group, name: Data platform, parent: rg-rg-monitoring}
-- {id: grp-consume-and-respond, type: common.group, name: Consume and respond, parent: rg-rg-monitoring}
-- {id: user, type: common.user, name: user}
-- {id: vpc-rg-rg-monitoring, type: azure.vnet, name: main, parent: rg-rg-monitoring, props: {cidr: 10.200.0.0/16}}
-- {id: sub-rg-rg-monitoring, type: azure.subnet, name: main, parent: vpc-rg-rg-monitoring, props: {cidr: 10.200.0.0/24}}
-- {id: vm-app-server, type: azure.virtual_machine, name: vm-app-server, parent: sub-rg-rg-monitoring}
-- {id: aks-workload, type: azure.aks_cluster, name: aks-workload, parent: sub-rg-rg-monitoring}
+- {id: sub-platform, type: azure.subscription, name: platform, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 1]}
+- {id: rg-rg-monitoring, type: azure.resource_group, name: rg-monitoring, parent: sub-platform, props: {location: westeurope}, at: [1, 1]}
+- {id: grp-data-sources, type: common.group, name: Data sources, parent: rg-rg-monitoring, at: [1, 1]}
+- {id: grp-data-platform, type: common.group, name: Data platform, parent: rg-rg-monitoring, at: [1, 2, 2, 1]}
+- {id: grp-consume-and-respond, type: common.group, name: Consume and respond, parent: rg-rg-monitoring, at: [1, 3, 2, 1]}
+- {id: user, type: common.user, name: user, at: [1, 2]}
+- {id: vpc-rg-rg-monitoring, type: azure.vnet, name: main, parent: rg-rg-monitoring, props: {cidr: 10.200.0.0/16}, at: [2, 1]}
+- {id: sub-rg-rg-monitoring, type: azure.subnet, name: main, parent: vpc-rg-rg-monitoring, props: {cidr: 10.200.0.0/24}, at: [1, 1]}
+- {id: vm-app-server, type: azure.virtual_machine, name: vm-app-server, parent: sub-rg-rg-monitoring, at: [1, 1]}
+- {id: aks-workload, type: azure.aks_cluster, name: aks-workload, parent: sub-rg-rg-monitoring, at: [1, 2]}
 - id: app-web
   type: azure.res.azurerm_linux_web_app
   name: app-web
   parent: grp-data-sources
+  at: [1, 1]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, service_plan_id: changeme, site_config: {}}
-- {id: appi-web, type: azure.res.azurerm_application_insights, name: appi-web, parent: grp-data-platform, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: grp-data-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: amw-metrics, type: azure.res.azurerm_monitor_workspace, name: amw-metrics, parent: grp-data-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: appi-web, type: azure.res.azurerm_application_insights, name: appi-web, parent: grp-data-platform, props: {application_type: changeme, location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 1]}
+- {id: law-central, type: azure.res.azurerm_log_analytics_workspace, name: law-central, parent: grp-data-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
+- {id: amw-metrics, type: azure.res.azurerm_monitor_workspace, name: amw-metrics, parent: grp-data-platform, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [1, 1]}
 - {id: grafana-central, type: azure.res.azurerm_dashboard_grafana, name: grafana-central, parent: grp-consume-and-respond, props: {grafana_major_version: changeme, location: westeurope, name: changeme,
-    resource_group_name: changeme}}
-- {id: ag-oncall, type: azure.res.azurerm_monitor_action_group, name: ag-oncall, parent: grp-consume-and-respond, props: {name: changeme, resource_group_name: changeme, short_name: changeme}}
-- {id: logic-remediate, type: azure.res.azurerm_logic_app_workflow, name: logic-remediate, parent: grp-consume-and-respond, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: aa-runbooks, type: azure.res.azurerm_automation_account, name: aa-runbooks, parent: grp-consume-and-respond, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}}
+    resource_group_name: changeme}, at: [1, 1, 1, 2]}
+- {id: ag-oncall, type: azure.res.azurerm_monitor_action_group, name: ag-oncall, parent: grp-consume-and-respond, props: {name: changeme, resource_group_name: changeme, short_name: changeme}, at: [2, 1, 1, 2]}
+- {id: logic-remediate, type: azure.res.azurerm_logic_app_workflow, name: logic-remediate, parent: grp-consume-and-respond, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 1]}
+- {id: aa-runbooks, type: azure.res.azurerm_automation_account, name: aa-runbooks, parent: grp-consume-and-respond, props: {location: westeurope, name: changeme, resource_group_name: changeme, sku_name: changeme}, at: [3, 2]}
 edges:
 - {from: vm-app-server, to: law-central, label: Azure Monitor Agent + data collection rules, step: '1'}
 - {from: aks-workload, to: amw-metrics, label: Managed Prometheus metrics, step: '1'}
