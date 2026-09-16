@@ -7,7 +7,9 @@ attachments, links, allowed parents, required props).
 import json, re, sys, urllib.request, urllib.error, os
 import yaml
 
-provider, src, outdir, api = sys.argv[1:5]
+provider, src, outdir, api = [a for a in sys.argv[1:] if not a.startswith('--only=')][:4]
+# --only=slug1,slug2 regenerates just those architectures of the file
+ONLY = set(sum([a[len('--only='):].split(',') for a in sys.argv[1:] if a.startswith('--only=')], []))
 PFX = {'aws': 'aws', 'gcp': 'google', 'azure': 'azurerm'}[provider]
 
 def get(path):
@@ -66,7 +68,7 @@ def convert(arch):
     ids = {}          # ref key -> node id
     node_type = {}    # id -> element id
     node_parent = {}
-    def add(nid, typ, name, parent=None, props=None, caption=None):
+    def add(nid, typ, name, parent=None, props=None, caption=None, at=None):
         nid = slug(nid)
         base, i = nid, 2
         while nid in node_type: nid = f'{base}-{i}'; i += 1
@@ -75,6 +77,8 @@ def convert(arch):
         if parent: n['parent'] = parent
         if props: n['props'] = props
         if caption: n['caption'] = caption
+        # the grid cell inside the parent, as the vendor diagram arranges it
+        if at and len(at) >= 2: n['at'] = [int(x) for x in at]
         nodes.append(n); node_type[nid] = typ; node_parent[nid] = parent
         return nid
     first_region = None
@@ -91,24 +95,24 @@ def convert(arch):
         account_by_name[name] = aid
         ids[f'{ROOT_KINDS[provider][0]}:{name}'] = aid
         return aid
-    def add_region(acct, rname, label=None):
+    def add_region(acct, rname, label=None, at=None):
         nonlocal first_region
         if provider == 'aws':
-            rid = add(f'reg-{rname}', 'aws.region', rname, acct, {'region': rname}, caption=label)
+            rid = add(f'reg-{rname}', 'aws.region', rname, acct, {'region': rname}, caption=label, at=at)
         elif provider == 'gcp':
             # projects carry the region; no separate box
             for n in nodes:
                 if n['id'] == acct: n.setdefault('props', {})['region'] = rname if rname != 'global' else 'europe-west1'
             rid = acct
         else:
-            rid = add(f'rg-{rname}', 'azure.resource_group', rname, acct, {'location': rname}, caption=label)
+            rid = add(f'rg-{rname}', 'azure.resource_group', rname, acct, {'location': rname}, caption=label, at=at)
         if first_region is None: first_region = rid
         ids[f'region:{rname}'] = rid
         return rid
     for c in arch.get('containers') or []:
         if 'datacenter' in c:
             name = c['datacenter'] if isinstance(c['datacenter'], str) else 'on-premises'
-            did = add(f'dc-{name}', 'common.datacenter', name)
+            did = add(f'dc-{name}', 'common.datacenter', name, at=c.get('at'))
             ids['datacenter'] = did; ids[f'datacenter:{name}'] = did
             continue
         if 'group' in c and provider == 'gcp':
@@ -144,19 +148,19 @@ def convert(arch):
             ids['region'] = ids.get('region') or rid
             ids[f'resource_group:{rg["name"]}'] = rid
         else:
-            rid = add_region(acct, rname or PLACEHOLDER['region'], c.get('label'))
+            rid = add_region(acct, rname or PLACEHOLDER['region'], c.get('label'), c.get('at'))
             ids.setdefault('region', rid)
         for rg in c.get('resource_groups') or []:
             rid2 = add(f'rg-{rg["name"]}', 'azure.resource_group', rg['name'], acct, {'location': rg.get('location', 'westeurope')})
             ids[f'resource_group:{rg["name"]}'] = rid2
         for g in c.get('groups') or []:
             if isinstance(g, dict) and 'label' in g and 'accounts' not in g:
-                gid = add(f'grp-{g["label"]}', 'common.group', g['label'], acct if provider == 'azure' and not c.get('resource_group') else rid)
+                gid = add(f'grp-{g["label"]}', 'common.group', g['label'], acct if provider == 'azure' and not c.get('resource_group') else rid, at=g.get('at'))
                 ids[f'group:{g["label"]}'] = gid
         for v in c.get('vpcs') or c.get('vnets') or []:
             vtype = {'aws': 'aws.vpc', 'gcp': 'gcp.vpc', 'azure': 'azure.vnet'}[provider]
             vprops = {'cidr': v['cidr']} if v.get('cidr') else {}
-            vid = add(f'vpc-{v["name"]}', vtype, v['name'], rid, vprops)
+            vid = add(f'vpc-{v["name"]}', vtype, v['name'], rid, vprops, at=v.get('at'))
             ids[f'vpc:{v["name"]}'] = vid; ids[f'vnet:{v["name"]}'] = vid; ids[v['name']] = vid
             azs = {}
             for s in v.get('subnets') or []:
@@ -173,17 +177,21 @@ def convert(arch):
                         az = 'a' if az in ('outpost', 'outposts', 'onprem') else ('-' + az.lstrip('-'))
                     sprops.update({'az': az, 'public': bool(s.get('public'))})
                 if provider == 'gcp' and s.get('region'): sprops['region'] = s['region']
-                sid = add(f'sub-{s["name"]}', stype, s['name'], parent, sprops)
+                sid = add(f'sub-{s["name"]}', stype, s['name'], parent, sprops, at=s.get('at'))
                 ids[f'subnet:{s["name"]}'] = sid
     if first_root is None:
         first_root = ensure_account('prod'); first_region = add_region(first_root, PLACEHOLDER['region']); ids['region'] = first_region
     # actors
     for a in arch.get('actors') or []:
-        if a == 'datacenter':
-            if 'datacenter' not in ids: ids['datacenter'] = add('dc-on-premises', 'common.datacenter', 'on-premises')
+        # "idp" or {type: idp, name: Microsoft Entra ID, at: [1, 1]}
+        spec_a = a if isinstance(a, dict) else {'type': a}
+        kind = spec_a['type']
+        if kind == 'datacenter':
+            if 'datacenter' not in ids: ids['datacenter'] = add('dc-on-premises', 'common.datacenter', spec_a.get('name', 'on-premises'), at=spec_a.get('at'))
             continue
-        aid = add(a, f'common.{a}', a)
-        ids[a] = aid
+        aid = add(spec_a.get('name', kind), f'common.{kind}', spec_a.get('name', kind), at=spec_a.get('at'))
+        ids[kind] = aid
+        if spec_a.get('name'): ids[spec_a['name']] = aid
     def resolve_container(ref):
         if ref is None: return first_region
         if ref in ids: return ids[ref]
@@ -237,6 +245,13 @@ def convert(arch):
         while cur:
             if '*' in allowed or logical_type(cur) in allowed or e.get('attachment'): return cur
             cur = node_parent.get(cur)
+        # a regional service (Lambda, DynamoDB...) hung off an account goes in that
+        # account's region, not in an implicit VPC: the vendor draws no network for it
+        reg = region_of(cid)
+        if node_type.get(cid) in ('aws.account', 'gcp.project', 'azure.subscription'):
+            # the element hangs off an account: its own region (a child), not the first one drawn
+            reg = next((nid for nid, p in node_parent.items() if p == cid and node_type[nid] in ('aws.region', 'azure.resource_group')), reg)
+        if reg and logical_type(reg) in allowed: return reg
         for want in (f'{provider}.subnet', 'gcp.subnetwork', f'{provider}.vpc', 'azure.vnet'):
             if want in allowed:
                 return implicit_network(cid, want)
@@ -257,14 +272,14 @@ def convert(arch):
             owners = [nid for nid, t in node_type.items() if t in (e.get('allowed_parents') or [])]
             if not owners:
                 warn.append(f'{tf} ({el["name"]}) is a component of a cluster that is not drawn; dropped'); continue
-            nid = add(el['name'], eid, el['name'], owners[0]); ids[el['name']] = nid; continue
+            nid = add(el['name'], eid, el['name'], owners[0], at=el.get('at')); ids[el['name']] = nid; continue
         cid = resolve_container(el.get('in'))
         if cid is None:
             warn.append(f'{el["name"]}: unknown container {el.get("in")}; placed in region'); cid = first_region
         if entry(node_type[cid]).get('kind') != 'container':
             cid = node_parent.get(cid) or first_region
         cid = place(eid, cid)
-        nid = add(el['name'], eid, el['name'], cid)
+        nid = add(el['name'], eid, el['name'], cid, at=el.get('at'))
         ids[el['name']] = nid
     if provider == 'aws':
         for vid, vt in list(node_type.items()):
@@ -277,6 +292,17 @@ def convert(arch):
                     if cur == vid:
                         azs.setdefault(next(n for n in nodes if n['id'] == sid)['props'].get('az', 'a'), node_parent.get(sid))
             if not azs and not any(node_parent.get(x) == vid for x in node_type): continue
+            # a second Availability Zone only when something in the VPC needs one
+            # (load balancers, RDS: collect rules with min 2 distinct az); the vendor
+            # draws a single subnet otherwise
+            def under(nid):
+                cur = node_parent.get(nid)
+                while cur and cur != vid: cur = node_parent.get(cur)
+                return cur == vid
+            def wants_two(t):
+                col = ((entry(t) or {}).get('terraform') or {}).get('collect') or {}
+                return any(isinstance(r, dict) and r.get('min', 0) >= 2 and r.get('distinct') == 'az' for r in col.values())
+            if not any(under(nid) and wants_two(t) for nid, t in node_type.items()): continue
             for z in 'abc':
                 if len(azs) >= 2: break
                 if z in azs: continue
@@ -332,7 +358,8 @@ class Dumper(yaml.SafeDumper):
     pass
 def repr_dict(d, data):
     # flow style for node/edge rows
-    return d.represent_mapping('tag:yaml.org,2002:map', data, flow_style=all(not isinstance(v, (dict, list)) or (isinstance(v, dict) and all(not isinstance(x, (dict, list)) for x in v.values())) for v in data.values()) and 'nodes' not in data)
+    scalar_list = lambda v: isinstance(v, list) and all(not isinstance(x, (dict, list)) for x in v)
+    return d.represent_mapping('tag:yaml.org,2002:map', data, flow_style=all(not isinstance(v, (dict, list)) or scalar_list(v) or (isinstance(v, dict) and all(not isinstance(x, (dict, list)) for x in v.values())) for v in data.values()) and 'nodes' not in data)
 Dumper.add_representer(dict, repr_dict)
 
 from collections import Counter
@@ -340,10 +367,35 @@ dropped_types = Counter(); unknown_types = Counter(); bad_links = Counter()
 archs = yaml.safe_load(open(src))
 seen_slugs = set(os.listdir(os.path.join(outdir, provider))) if os.path.isdir(os.path.join(outdir, provider)) else set()
 total = 0
+def keep_cells(spec, path):
+    """Cells read off the vendor diagram live in the shipped template; a
+    regeneration keeps them for every node that still exists (a cell given
+    in the research catalogue wins)."""
+    if not os.path.exists(path): return 0
+    try:
+        old = yaml.safe_load(open(path)) or {}
+    except yaml.YAMLError:
+        return 0
+    cells = {n['id']: n['at'] for n in old.get('nodes') or [] if n.get('at')}
+    if old.get('image') and not spec.get('image'):
+        # the picture found by images.py stays with the template
+        items = list(spec.items())
+        i = next(k for k, (key, _) in enumerate(items) if key == 'source')
+        items.insert(i, ('image', old['image']))
+        spec.clear(); spec.update(items)
+    kept = 0
+    for n in spec['nodes']:
+        if 'at' not in n and n['id'] in cells:
+            n['at'] = cells[n['id']]; kept += 1
+    return kept
+
 for arch in archs:
-    if arch['slug'] in seen_slugs and not os.path.exists(os.path.join(outdir, provider, arch['slug'], '.from-' + os.path.basename(src))):
+    if ONLY and arch['slug'] not in ONLY: continue
+    if not ONLY and arch['slug'] in seen_slugs and not os.path.exists(os.path.join(outdir, provider, arch['slug'], '.from-' + os.path.basename(src))):
         print(f"{provider}/{arch['slug']}: slug already exists (another file); skipped"); continue
     spec, warn = convert(arch)
+    kept = keep_cells(spec, os.path.join(outdir, provider, arch['slug'], 'template.yaml'))
+    if kept: warn.append(f'kept {kept} grid cells from the existing template')
     for w in warn:
         m = re.match(r'(\S+) \(.*\) is configuration of another element', w)
         if m: dropped_types[m.group(1)] += 1
