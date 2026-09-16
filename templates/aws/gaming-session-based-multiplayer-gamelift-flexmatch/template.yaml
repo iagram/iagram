@@ -15,26 +15,27 @@ description: Guidance for Multiplayer Session-Based Game Hosting on AWS has game
   to Amazon GameLift FlexMatch; the GameLift queue places the match on the lowest-latency fleet location. Matchmaking events flow to an SNS topic and a Lambda function records ticket status in DynamoDB,
   the client polls for the game session IP and port, connects directly to the game server and instances ship logs and metrics to CloudWatch.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-backend-api, type: common.group, name: backend-api, parent: reg-us-east-1}
-- {id: grp-game-hosting, type: common.group, name: game-hosting, parent: reg-us-east-1}
-- {id: client, type: common.client, name: client}
-- {id: player-identity, type: aws.res.aws_cognito_user_pool, name: player-identity, parent: grp-backend-api, props: {name: changeme}}
-- {id: matchmaking-api, type: aws.res.aws_api_gateway_rest_api, name: matchmaking-api, parent: grp-backend-api, props: {name: changeme}}
-- {id: request-matchmaking, type: aws.lambda_function, name: request-matchmaking, parent: grp-backend-api}
-- {id: get-match-status, type: aws.lambda_function, name: get-match-status, parent: grp-backend-api}
-- {id: matchmaking-tickets, type: aws.dynamodb_table, name: matchmaking-tickets, parent: grp-backend-api}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-backend-api, type: common.group, name: backend-api, parent: reg-us-east-1, at: [1, 1, 3, 1]}
+- {id: grp-game-hosting, type: common.group, name: game-hosting, parent: reg-us-east-1, at: [1, 2, 3, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: player-identity, type: aws.res.aws_cognito_user_pool, name: player-identity, parent: grp-backend-api, props: {name: changeme}, at: [1, 1]}
+- {id: matchmaking-api, type: aws.res.aws_api_gateway_rest_api, name: matchmaking-api, parent: grp-backend-api, props: {name: changeme}, at: [2, 1]}
+- {id: request-matchmaking, type: aws.lambda_function, name: request-matchmaking, parent: grp-backend-api, at: [2, 2]}
+- {id: get-match-status, type: aws.lambda_function, name: get-match-status, parent: grp-backend-api, at: [1, 2]}
+- {id: matchmaking-tickets, type: aws.dynamodb_table, name: matchmaking-tickets, parent: grp-backend-api, at: [1, 3]}
 - id: game-server-build
   type: aws.res.aws_gamelift_build
   name: game-server-build
   parent: grp-game-hosting
+  at: [2, 2]
   props: {name: changeme, operating_system: changeme, storage_location: {}}
-- {id: game-server-fleet, type: aws.res.aws_gamelift_fleet, name: game-server-fleet, parent: grp-game-hosting, props: {ec2_instance_type: changeme, name: changeme}}
-- {id: placement-queue, type: aws.res.aws_gamelift_game_session_queue, name: placement-queue, parent: grp-game-hosting, props: {name: changeme}}
-- {id: matchmaking-events, type: aws.res.aws_sns_topic, name: matchmaking-events, parent: reg-us-east-1}
-- {id: process-matchmaking-events, type: aws.lambda_function, name: process-matchmaking-events, parent: reg-us-east-1}
-- {id: game-server-logs, type: aws.res.aws_cloudwatch_log_group, name: game-server-logs, parent: reg-us-east-1}
+- {id: game-server-fleet, type: aws.res.aws_gamelift_fleet, name: game-server-fleet, parent: grp-game-hosting, props: {ec2_instance_type: changeme, name: changeme}, at: [2, 1]}
+- {id: placement-queue, type: aws.res.aws_gamelift_game_session_queue, name: placement-queue, parent: grp-game-hosting, props: {name: changeme}, at: [1, 1]}
+- {id: matchmaking-events, type: aws.res.aws_sns_topic, name: matchmaking-events, parent: reg-us-east-1, at: [2, 3]}
+- {id: process-matchmaking-events, type: aws.lambda_function, name: process-matchmaking-events, parent: reg-us-east-1, at: [1, 3]}
+- {id: game-server-logs, type: aws.res.aws_cloudwatch_log_group, name: game-server-logs, parent: reg-us-east-1, at: [3, 3]}
 edges:
 - {from: client, to: matchmaking-tickets, label: latency probe to Regional endpoint, step: '1'}
 - {from: client, to: matchmaking-api, label: POST request-matchmaking with latencies, step: '2'}

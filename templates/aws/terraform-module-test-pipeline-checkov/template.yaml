@@ -14,16 +14,17 @@ description: Pushes to a CodeCommit repository trigger a CodePipeline whose firs
   terraform validate and terraform test to create, assert and destroy ephemeral resources. Test runs use a CodeBuild service role scoped to the resources under test, and pipeline artifacts and test reports
   are stored in S3 so a failing check blocks promotion of the module.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-east-1}
-- {id: grp-ephemeral-test-resources, type: common.group, name: ephemeral test resources, parent: reg-us-east-1}
-- {id: user, type: common.user, name: user}
-- {id: terraform-module-repo, type: aws.res.aws_codecommit_repository, name: terraform-module-repo, parent: grp-pipeline, props: {repository_name: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-pipeline, type: common.group, name: pipeline, parent: reg-us-east-1, at: [1, 1, 3, 1]}
+- {id: grp-ephemeral-test-resources, type: common.group, name: ephemeral test resources, parent: reg-us-east-1, at: [2, 2]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: terraform-module-repo, type: aws.res.aws_codecommit_repository, name: terraform-module-repo, parent: grp-pipeline, props: {repository_name: changeme}, at: [1, 1, 2, 1]}
 - id: terraform-ci-pipeline
   type: aws.res.aws_codepipeline
   name: terraform-ci-pipeline
   parent: grp-pipeline
+  at: [1, 2, 1, 2]
   props:
     artifact_store: []
     name: changeme
@@ -33,17 +34,19 @@ nodes:
   type: aws.res.aws_codebuild_project
   name: checkov-static-analysis
   parent: grp-pipeline
+  at: [2, 2]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
 - id: terraform-test-runner
   type: aws.res.aws_codebuild_project
   name: terraform-test-runner
   parent: grp-pipeline
+  at: [2, 3]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: grp-pipeline}
-- {id: codebuild-logs, type: aws.res.aws_cloudwatch_log_group, name: codebuild-logs, parent: grp-pipeline}
-- {id: terraform-test-role, type: aws.res.aws_iam_role, name: terraform-test-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
-- {id: module-under-test-bucket, type: aws.s3_bucket, name: module-under-test-bucket, parent: grp-ephemeral-test-resources}
-- {id: ci-notifications, type: aws.res.aws_sns_topic, name: ci-notifications, parent: reg-us-east-1}
+- {id: pipeline-artifacts, type: aws.s3_bucket, name: pipeline-artifacts, parent: grp-pipeline, at: [1, 4]}
+- {id: codebuild-logs, type: aws.res.aws_cloudwatch_log_group, name: codebuild-logs, parent: grp-pipeline, at: [2, 4]}
+- {id: terraform-test-role, type: aws.res.aws_iam_role, name: terraform-test-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}, at: [1, 2]}
+- {id: module-under-test-bucket, type: aws.s3_bucket, name: module-under-test-bucket, parent: grp-ephemeral-test-resources, at: [1, 1]}
+- {id: ci-notifications, type: aws.res.aws_sns_topic, name: ci-notifications, parent: reg-us-east-1, at: [3, 2]}
 edges:
 - {from: user, to: terraform-module-repo, label: git push module + tests/*.tftest.hcl, step: '1'}
 - {from: terraform-module-repo, to: terraform-ci-pipeline, label: source action, step: '2'}

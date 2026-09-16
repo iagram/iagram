@@ -15,24 +15,25 @@ description: Open5GS control-plane network functions (MME, HSS, PCRF, SMF, AMF) 
   ENIs for the S1, N2 and N3 interfaces. Subscriber profiles live in Amazon DocumentDB, Route 53 private hosted zones give the network functions service discovery, and custom controllers automate DNS records
   and secondary IP assignment on the worker instances.
 nodes:
-- {id: dc-radio-access-network, type: common.datacenter, name: radio-access-network}
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: vpc-mobile-core, type: aws.vpc, name: mobile-core, parent: reg-eu-west-1, props: {cidr: 10.30.0.0/16}}
-- {id: az-mobile-core-a, type: aws.availability_zone, name: a, parent: vpc-mobile-core, props: {zone: a}}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-mobile-core-a, props: {cidr: 10.30.0.0/24, az: a, public: true}}
-- {id: sub-control-plane-a, type: aws.subnet, name: control-plane-a, parent: az-mobile-core-a, props: {cidr: 10.30.10.0/24, az: a, public: false}}
-- {id: sub-user-plane-a, type: aws.subnet, name: user-plane-a, parent: az-mobile-core-a, props: {cidr: 10.30.20.0/24, az: a, public: false}}
-- {id: sub-multus-n3-a, type: aws.subnet, name: multus-n3-a, parent: az-mobile-core-a, props: {cidr: 10.30.30.0/24, az: a, public: false}}
-- {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-mobile-core-a, props: {cidr: 10.30.40.0/24, az: a, public: false}}
-- {id: device, type: common.device, name: device}
-- {id: users, type: common.users, name: users}
-- {id: internet, type: common.internet, name: internet}
-- {id: open5gs-cluster, type: aws.eks_cluster, name: open5gs-cluster, parent: vpc-mobile-core}
+- {id: dc-radio-access-network, type: common.datacenter, name: radio-access-network, at: [3, 1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 3, 1]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 1]}
+- {id: vpc-mobile-core, type: aws.vpc, name: mobile-core, parent: reg-eu-west-1, props: {cidr: 10.30.0.0/16}, at: [1, 1, 2, 1]}
+- {id: az-mobile-core-a, type: aws.availability_zone, name: a, parent: vpc-mobile-core, props: {zone: a}, at: [1, 2]}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-mobile-core-a, props: {cidr: 10.30.0.0/24, az: a, public: true}, at: [1, 2]}
+- {id: sub-control-plane-a, type: aws.subnet, name: control-plane-a, parent: az-mobile-core-a, props: {cidr: 10.30.10.0/24, az: a, public: false}, at: [2, 1, 1, 2]}
+- {id: sub-user-plane-a, type: aws.subnet, name: user-plane-a, parent: az-mobile-core-a, props: {cidr: 10.30.20.0/24, az: a, public: false}, at: [3, 1, 1, 3]}
+- {id: sub-multus-n3-a, type: aws.subnet, name: multus-n3-a, parent: az-mobile-core-a, props: {cidr: 10.30.30.0/24, az: a, public: false}, at: [2, 3]}
+- {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-mobile-core-a, props: {cidr: 10.30.40.0/24, az: a, public: false}, at: [1, 1]}
+- {id: device, type: common.device, name: device, at: [2, 1]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [3, 3]}
+- {id: open5gs-cluster, type: aws.eks_cluster, name: open5gs-cluster, parent: vpc-mobile-core, at: [1, 1, 2, 1]}
 - id: control-plane-nfs
   type: aws.res.aws_eks_node_group
   name: control-plane-nfs
   parent: open5gs-cluster
+  at: [1, 1]
   props:
     cluster_name: changeme
     node_role_arn: changeme
@@ -42,18 +43,19 @@ nodes:
   type: aws.res.aws_eks_node_group
   name: user-plane-nfs
   parent: open5gs-cluster
+  at: [2, 1]
   props:
     cluster_name: changeme
     node_role_arn: changeme
     scaling_config: {}
     subnet_ids: []
-- {id: subscriber-db, type: aws.res.aws_docdb_cluster, name: subscriber-db, parent: sub-data-a}
-- {id: core-service-discovery, type: aws.route53_zone, name: core-service-discovery, parent: reg-eu-west-1, props: {domain: example.com}}
-- {id: webui-nlb, type: aws.alb, name: webui-nlb, parent: az-mobile-core-a}
-- {id: open5gs-images, type: aws.res.aws_ecr_repository, name: open5gs-images, parent: reg-eu-west-1, props: {name: changeme}}
-- {id: core-nat, type: aws.res.aws_nat_gateway, name: core-nat, parent: sub-public-a}
-- {id: az-vpc-mobile-core-b, type: aws.availability_zone, name: b, parent: vpc-mobile-core, props: {zone: b}}
-- {id: sub-vpc-mobile-core-b, type: aws.subnet, name: private-b, parent: az-vpc-mobile-core-b, props: {cidr: 10.30.251.0/24, az: b, public: false}}
+- {id: subscriber-db, type: aws.res.aws_docdb_cluster, name: subscriber-db, parent: sub-data-a, at: [1, 1]}
+- {id: core-service-discovery, type: aws.route53_zone, name: core-service-discovery, parent: reg-eu-west-1, props: {domain: example.com}, at: [1, 2]}
+- {id: webui-nlb, type: aws.alb, name: webui-nlb, parent: az-mobile-core-a, at: [1, 3]}
+- {id: open5gs-images, type: aws.res.aws_ecr_repository, name: open5gs-images, parent: reg-eu-west-1, props: {name: changeme}, at: [2, 2]}
+- {id: core-nat, type: aws.res.aws_nat_gateway, name: core-nat, parent: sub-public-a, at: [1, 1]}
+- {id: az-vpc-mobile-core-b, type: aws.availability_zone, name: b, parent: vpc-mobile-core, props: {zone: b}, at: [2, 2]}
+- {id: sub-vpc-mobile-core-b, type: aws.subnet, name: private-b, parent: az-vpc-mobile-core-b, props: {cidr: 10.30.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: device, to: dc-radio-access-network, label: UE attaches via gNodeB}
 - {from: dc-radio-access-network, to: control-plane-nfs, label: S1-MME / N2 signalling, step: '1'}

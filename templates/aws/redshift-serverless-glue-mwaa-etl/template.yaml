@@ -13,39 +13,41 @@ source: https://aws.amazon.com/blogs/big-data/orchestrate-an-end-to-end-etl-pipe
 description: An Airflow DAG in MWAA waits for date-partitioned files in a source bucket, runs a Glue crawler and Glue job to stage them, loads a Redshift Serverless workgroup in private subnets, runs stored
   procedures and unloads the result back to a target bucket in the central account. The MWAA VPC peers with the Redshift VPC and reaches S3 and Secrets Manager through VPC endpoints.
 nodes:
-- {id: acct-central-data, type: aws.account, name: central-data}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-central-data, props: {region: us-east-1}}
-- {id: acct-processing, type: aws.account, name: processing}
-- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-processing, props: {region: us-east-1}}
-- {id: vpc-mwaa, type: aws.vpc, name: mwaa, parent: reg-us-east-1-2, props: {cidr: 10.50.0.0/16}}
-- {id: az-mwaa-a, type: aws.availability_zone, name: a, parent: vpc-mwaa, props: {zone: a}}
-- {id: sub-mwaa-private-a, type: aws.subnet, name: mwaa-private-a, parent: az-mwaa-a, props: {cidr: 10.50.1.0/24, az: a, public: false}}
-- {id: az-mwaa-b, type: aws.availability_zone, name: b, parent: vpc-mwaa, props: {zone: b}}
-- {id: sub-mwaa-private-b, type: aws.subnet, name: mwaa-private-b, parent: az-mwaa-b, props: {cidr: 10.50.2.0/24, az: b, public: false}}
-- {id: vpc-redshift, type: aws.vpc, name: redshift, parent: reg-us-east-1-2, props: {cidr: 10.60.0.0/16}}
-- {id: az-redshift-a, type: aws.availability_zone, name: a, parent: vpc-redshift, props: {zone: a}}
-- {id: sub-rs-private-a, type: aws.subnet, name: rs-private-a, parent: az-redshift-a, props: {cidr: 10.60.1.0/24, az: a, public: false}}
-- {id: az-redshift-b, type: aws.availability_zone, name: b, parent: vpc-redshift, props: {zone: b}}
-- {id: sub-rs-private-b, type: aws.subnet, name: rs-private-b, parent: az-redshift-b, props: {cidr: 10.60.2.0/24, az: b, public: false}}
-- {id: az-redshift-c, type: aws.availability_zone, name: c, parent: vpc-redshift, props: {zone: c}}
-- {id: sub-rs-private-c, type: aws.subnet, name: rs-private-c, parent: az-redshift-c, props: {cidr: 10.60.3.0/24, az: c, public: false}}
-- {id: source-products, type: aws.s3_bucket, name: source-products, parent: reg-us-east-1}
-- {id: target-unload, type: aws.s3_bucket, name: target-unload, parent: reg-us-east-1}
+- {id: acct-central-data, type: aws.account, name: central-data, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-central-data, props: {region: us-east-1}, at: [1, 1]}
+- {id: acct-processing, type: aws.account, name: processing, at: [1, 2]}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-processing, props: {region: us-east-1}, at: [1, 1, 1, 3]}
+- {id: vpc-mwaa, type: aws.vpc, name: mwaa, parent: reg-us-east-1-2, props: {cidr: 10.50.0.0/16}, at: [1, 1]}
+- {id: az-mwaa-a, type: aws.availability_zone, name: a, parent: vpc-mwaa, props: {zone: a}, at: [1, 1]}
+- {id: sub-mwaa-private-a, type: aws.subnet, name: mwaa-private-a, parent: az-mwaa-a, props: {cidr: 10.50.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-mwaa-b, type: aws.availability_zone, name: b, parent: vpc-mwaa, props: {zone: b}, at: [2, 1]}
+- {id: sub-mwaa-private-b, type: aws.subnet, name: mwaa-private-b, parent: az-mwaa-b, props: {cidr: 10.50.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: vpc-redshift, type: aws.vpc, name: redshift, parent: reg-us-east-1-2, props: {cidr: 10.60.0.0/16}, at: [1, 2]}
+- {id: az-redshift-a, type: aws.availability_zone, name: a, parent: vpc-redshift, props: {zone: a}, at: [1, 1]}
+- {id: sub-rs-private-a, type: aws.subnet, name: rs-private-a, parent: az-redshift-a, props: {cidr: 10.60.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-redshift-b, type: aws.availability_zone, name: b, parent: vpc-redshift, props: {zone: b}, at: [2, 1]}
+- {id: sub-rs-private-b, type: aws.subnet, name: rs-private-b, parent: az-redshift-b, props: {cidr: 10.60.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-redshift-c, type: aws.availability_zone, name: c, parent: vpc-redshift, props: {zone: c}, at: [3, 1]}
+- {id: sub-rs-private-c, type: aws.subnet, name: rs-private-c, parent: az-redshift-c, props: {cidr: 10.60.3.0/24, az: c, public: false}, at: [1, 1]}
+- {id: source-products, type: aws.s3_bucket, name: source-products, parent: reg-us-east-1, at: [2, 1]}
+- {id: target-unload, type: aws.s3_bucket, name: target-unload, parent: reg-us-east-1, at: [1, 1]}
 - id: airflow
   type: aws.res.aws_mwaa_environment
   name: airflow
   parent: sub-mwaa-private-a
+  at: [1, 1]
   props: {dag_s3_path: changeme, execution_role_arn: changeme, name: changeme, network_configuration: {}, source_bucket_arn: changeme}
-- {id: products-crawler, type: aws.res.aws_glue_crawler, name: products-crawler, parent: acct-processing, props: {database_name: changeme, name: changeme, role: changeme}}
-- {id: staging-db, type: aws.res.aws_glue_catalog_database, name: staging-db, parent: acct-processing, props: {name: changeme}}
+- {id: products-crawler, type: aws.res.aws_glue_crawler, name: products-crawler, parent: acct-processing, props: {database_name: changeme, name: changeme, role: changeme}, at: [2, 1]}
+- {id: staging-db, type: aws.res.aws_glue_catalog_database, name: staging-db, parent: acct-processing, props: {name: changeme}, at: [2, 2]}
 - id: products-etl
   type: aws.res.aws_glue_job
   name: products-etl
   parent: acct-processing
+  at: [2, 3]
   props: {command: {}, name: changeme, role_arn: changeme}
-- {id: dw-namespace, type: aws.res.aws_redshiftserverless_namespace, name: dw-namespace, parent: acct-processing, props: {namespace_name: changeme}}
-- {id: dw-workgroup, type: aws.res.aws_redshiftserverless_workgroup, name: dw-workgroup, parent: sub-rs-private-a, props: {namespace_name: changeme, workgroup_name: changeme}}
-- {id: s3-endpoint, type: aws.res.aws_vpc_endpoint, name: s3-endpoint, parent: vpc-redshift, props: {vpc_id: changeme}}
+- {id: dw-namespace, type: aws.res.aws_redshiftserverless_namespace, name: dw-namespace, parent: acct-processing, props: {namespace_name: changeme}, at: [1, 4]}
+- {id: dw-workgroup, type: aws.res.aws_redshiftserverless_workgroup, name: dw-workgroup, parent: sub-rs-private-a, props: {namespace_name: changeme, workgroup_name: changeme}, at: [1, 1]}
+- {id: s3-endpoint, type: aws.res.aws_vpc_endpoint, name: s3-endpoint, parent: vpc-redshift, props: {vpc_id: changeme}, at: [1, 2, 3, 1]}
 edges:
 - {from: airflow, to: vpc-redshift, label: vpc peering connection}
 - {from: airflow, to: source-products, label: S3KeySensor waits for partition, step: '1'}

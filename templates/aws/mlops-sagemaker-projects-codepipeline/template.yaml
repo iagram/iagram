@@ -13,17 +13,18 @@ source: https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-projects-templ
 description: The SageMaker-provided MLOps template creates a model-build CodePipeline whose CodeBuild step upserts and runs a SageMaker pipeline from a third-party Git repository, registering models in
   the Model Registry. An EventBridge rule on model approval starts a model-deploy CodePipeline that builds CloudFormation stacks and deploys endpoints to staging and, after manual approval, to production.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: grp-model-build, type: common.group, name: model-build, parent: reg-eu-west-1}
-- {id: grp-model-deploy, type: common.group, name: model-deploy, parent: reg-eu-west-1}
-- {id: user, type: common.user, name: user}
-- {id: saas, type: common.saas, name: saas}
-- {id: github-connection, type: aws.res.aws_codestarconnections_connection, name: github-connection, parent: reg-eu-west-1, props: {name: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 3]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 1]}
+- {id: grp-model-build, type: common.group, name: model-build, parent: reg-eu-west-1, at: [1, 2]}
+- {id: grp-model-deploy, type: common.group, name: model-deploy, parent: reg-eu-west-1, at: [1, 3]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: saas, type: common.saas, name: saas, at: [1, 2]}
+- {id: github-connection, type: aws.res.aws_codestarconnections_connection, name: github-connection, parent: reg-eu-west-1, props: {name: changeme}, at: [1, 1]}
 - id: model-build-pipeline
   type: aws.res.aws_codepipeline
   name: model-build-pipeline
   parent: grp-model-build
+  at: [1, 1]
   props:
     artifact_store: []
     name: changeme
@@ -33,15 +34,17 @@ nodes:
   type: aws.res.aws_codebuild_project
   name: build-pipeline-project
   parent: grp-model-build
+  at: [1, 2]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: abalone-pipeline, type: aws.res.aws_sagemaker_pipeline, name: abalone-pipeline, parent: grp-model-build, props: {pipeline_display_name: changeme, pipeline_name: changeme}}
-- {id: abalone-models, type: aws.res.aws_sagemaker_model_package_group, name: abalone-models, parent: grp-model-build, props: {model_package_group_name: changeme}}
-- {id: mlops-artifacts, type: aws.s3_bucket, name: mlops-artifacts, parent: reg-eu-west-1}
-- {id: model-approved-rule, type: aws.res.aws_cloudwatch_event_rule, name: model-approved-rule, parent: grp-model-deploy}
+- {id: abalone-pipeline, type: aws.res.aws_sagemaker_pipeline, name: abalone-pipeline, parent: grp-model-build, props: {pipeline_display_name: changeme, pipeline_name: changeme}, at: [2, 1]}
+- {id: abalone-models, type: aws.res.aws_sagemaker_model_package_group, name: abalone-models, parent: grp-model-build, props: {model_package_group_name: changeme}, at: [2, 2]}
+- {id: mlops-artifacts, type: aws.s3_bucket, name: mlops-artifacts, parent: reg-eu-west-1, at: [2, 2]}
+- {id: model-approved-rule, type: aws.res.aws_cloudwatch_event_rule, name: model-approved-rule, parent: grp-model-deploy, at: [2, 1]}
 - id: model-deploy-pipeline
   type: aws.res.aws_codepipeline
   name: model-deploy-pipeline
   parent: grp-model-deploy
+  at: [1, 1, 1, 2]
   props:
     artifact_store: []
     name: changeme
@@ -51,9 +54,10 @@ nodes:
   type: aws.res.aws_codebuild_project
   name: deploy-build-project
   parent: grp-model-deploy
+  at: [2, 2]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: staging-endpoint, type: aws.res.aws_sagemaker_endpoint, name: staging-endpoint, parent: grp-model-deploy, props: {endpoint_config_name: changeme}}
-- {id: prod-endpoint, type: aws.res.aws_sagemaker_endpoint, name: prod-endpoint, parent: grp-model-deploy, props: {endpoint_config_name: changeme}}
+- {id: staging-endpoint, type: aws.res.aws_sagemaker_endpoint, name: staging-endpoint, parent: grp-model-deploy, props: {endpoint_config_name: changeme}, at: [3, 1]}
+- {id: prod-endpoint, type: aws.res.aws_sagemaker_endpoint, name: prod-endpoint, parent: grp-model-deploy, props: {endpoint_config_name: changeme}, at: [3, 2]}
 edges:
 - {from: user, to: saas, label: push modelbuild repo, step: '1'}
 - {from: saas, to: github-connection, label: webhook}

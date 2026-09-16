@@ -12,22 +12,22 @@ source: https://docs.aws.amazon.com/wavelength/latest/developerguide/how-wavelen
 description: A VPC in the parent region is extended with a subnet in a Wavelength Zone inside the carrier network; EC2 instances there serve mobile devices through a carrier gateway that NATs Carrier IP
   addresses and admits only traffic from the carrier network. Latency-sensitive inference runs at the edge while state, control plane and analytics stay in regional subnets reached over the VPC local route.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-edge-app, type: aws.vpc, name: edge-app, parent: reg-us-east-1, props: {cidr: 10.40.0.0/16}}
-- {id: az-edge-app-wl1-bos-wlz-1, type: aws.availability_zone, name: wl1-bos-wlz-1, parent: vpc-edge-app, props: {zone: -wl1-bos-wlz-1}}
-- {id: sub-wavelength-bos, type: aws.subnet, name: wavelength-bos, parent: az-edge-app-wl1-bos-wlz-1, props: {cidr: 10.40.10.0/24, az: -wl1-bos-wlz-1, public: true}}
-- {id: az-edge-app-a, type: aws.availability_zone, name: a, parent: vpc-edge-app, props: {zone: a}}
-- {id: sub-region-private-a, type: aws.subnet, name: region-private-a, parent: az-edge-app-a, props: {cidr: 10.40.1.0/24, az: a, public: false}}
-- {id: mobile, type: common.mobile, name: mobile}
-- {id: carrier-gw, type: aws.res.aws_ec2_carrier_gateway, name: carrier-gw, parent: vpc-edge-app, props: {vpc_id: changeme}}
-- {id: edge-inference-server, type: aws.ec2_instance, name: edge-inference-server, parent: sub-wavelength-bos}
-- {id: edge-server-asg, type: aws.res.aws_autoscaling_group, name: edge-server-asg, parent: sub-wavelength-bos, props: {max_size: 1, min_size: 1}}
-- {id: edge-container-cluster, type: aws.res.aws_ecs_cluster, name: edge-container-cluster, parent: sub-wavelength-bos, props: {name: changeme}}
-- {id: control-plane-api, type: aws.ec2_instance, name: control-plane-api, parent: sub-region-private-a}
-- {id: session-db, type: aws.res.aws_rds_cluster, name: session-db, parent: sub-region-private-a, props: {engine: changeme}}
-- {id: model-artifacts, type: aws.s3_bucket, name: model-artifacts, parent: reg-us-east-1}
-- {id: edge-dns, type: aws.route53_zone, name: edge-dns, parent: reg-us-east-1, props: {domain: example.com}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-edge-app, type: aws.vpc, name: edge-app, parent: reg-us-east-1, props: {cidr: 10.40.0.0/16}, at: [1, 1, 1, 2]}
+- {id: az-edge-app-wl1-bos-wlz-1, type: aws.availability_zone, name: wl1-bos-wlz-1, parent: vpc-edge-app, props: {zone: -wl1-bos-wlz-1}, at: [1, 2]}
+- {id: sub-wavelength-bos, type: aws.subnet, name: wavelength-bos, parent: az-edge-app-wl1-bos-wlz-1, props: {cidr: 10.40.10.0/24, az: -wl1-bos-wlz-1, public: true}, at: [1, 1]}
+- {id: az-edge-app-a, type: aws.availability_zone, name: a, parent: vpc-edge-app, props: {zone: a}, at: [1, 1]}
+- {id: sub-region-private-a, type: aws.subnet, name: region-private-a, parent: az-edge-app-a, props: {cidr: 10.40.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: mobile, type: common.mobile, name: mobile, at: [1, 2]}
+- {id: carrier-gw, type: aws.res.aws_ec2_carrier_gateway, name: carrier-gw, parent: vpc-edge-app, props: {vpc_id: changeme}, at: [1, 3]}
+- {id: edge-inference-server, type: aws.ec2_instance, name: edge-inference-server, parent: sub-wavelength-bos, at: [1, 1]}
+- {id: edge-server-asg, type: aws.res.aws_autoscaling_group, name: edge-server-asg, parent: sub-wavelength-bos, props: {max_size: 1, min_size: 1}, at: [2, 1]}
+- {id: edge-container-cluster, type: aws.res.aws_ecs_cluster, name: edge-container-cluster, parent: sub-wavelength-bos, props: {name: changeme}, at: [1, 2]}
+- {id: control-plane-api, type: aws.ec2_instance, name: control-plane-api, parent: sub-region-private-a, at: [1, 1]}
+- {id: session-db, type: aws.res.aws_rds_cluster, name: session-db, parent: sub-region-private-a, props: {engine: changeme}, at: [1, 2]}
+- {id: model-artifacts, type: aws.s3_bucket, name: model-artifacts, parent: reg-us-east-1, at: [2, 1]}
+- {id: edge-dns, type: aws.route53_zone, name: edge-dns, parent: reg-us-east-1, props: {domain: example.com}, at: [2, 2]}
 edges:
 - {from: mobile, to: carrier-gw, label: 5G traffic to Carrier IP, step: '1'}
 - {from: carrier-gw, to: edge-inference-server, label: NAT to instance private IP, step: '2'}

@@ -12,17 +12,17 @@ source: https://aws.amazon.com/blogs/compute/implementing-serverless-manual-appr
 description: The workflow pauses at a waitForTaskToken step and a Lambda function emails the approver links that embed the task token. Clicking a link calls an API Gateway endpoint that invokes SendTaskSuccess
   or SendTaskFailure, and the workflow resumes without any long-running process waiting.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: user, type: common.user, name: user}
-- {id: client, type: common.client, name: client}
-- {id: request-api, type: aws.res.aws_api_gateway_rest_api, name: request-api, parent: reg-us-east-1, props: {name: changeme}}
-- {id: approval-workflow, type: aws.res.aws_sfn_state_machine, name: approval-workflow, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}}
-- {id: send-approval-email, type: aws.lambda_function, name: send-approval-email, parent: reg-us-east-1}
-- {id: approvals-sender, type: aws.res.aws_ses_email_identity, name: approvals-sender, parent: reg-us-east-1, props: {email: changeme}}
-- {id: approval-callback-api, type: aws.res.aws_api_gateway_rest_api, name: approval-callback-api, parent: reg-us-east-1, props: {name: changeme}}
-- {id: fulfil-request, type: aws.lambda_function, name: fulfil-request, parent: reg-us-east-1}
-- {id: approval-requests, type: aws.dynamodb_table, name: approval-requests, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [2, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: request-api, type: aws.res.aws_api_gateway_rest_api, name: request-api, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1]}
+- {id: approval-workflow, type: aws.res.aws_sfn_state_machine, name: approval-workflow, parent: reg-us-east-1, props: {definition: changeme, role_arn: changeme}, at: [1, 3]}
+- {id: send-approval-email, type: aws.lambda_function, name: send-approval-email, parent: reg-us-east-1, at: [1, 2]}
+- {id: approvals-sender, type: aws.res.aws_ses_email_identity, name: approvals-sender, parent: reg-us-east-1, props: {email: changeme}, at: [2, 2]}
+- {id: approval-callback-api, type: aws.res.aws_api_gateway_rest_api, name: approval-callback-api, parent: reg-us-east-1, props: {name: changeme}, at: [2, 3]}
+- {id: fulfil-request, type: aws.lambda_function, name: fulfil-request, parent: reg-us-east-1, at: [1, 4]}
+- {id: approval-requests, type: aws.dynamodb_table, name: approval-requests, parent: reg-us-east-1, at: [2, 4]}
 edges:
 - {from: client, to: request-api, label: submit request, step: '1'}
 - {from: request-api, to: approval-workflow, label: StartExecution, step: '2'}

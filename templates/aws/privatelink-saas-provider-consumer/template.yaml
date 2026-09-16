@@ -14,28 +14,28 @@ description: The provider places its application behind a Network Load Balancer 
   for consumer accounts. Each consumer creates an interface endpoint in its own VPC that surfaces as elastic network interfaces with private IPs, so the service is reached without internet exposure, peering,
   or overlapping-CIDR concerns.
 nodes:
-- {id: acct-provider, type: aws.account, name: provider}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-provider, props: {region: us-east-1}}
-- {id: vpc-provider, type: aws.vpc, name: provider, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-provider-a, type: aws.availability_zone, name: a, parent: vpc-provider, props: {zone: a}}
-- {id: sub-provider-private-a, type: aws.subnet, name: provider-private-a, parent: az-provider-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
-- {id: az-provider-b, type: aws.availability_zone, name: b, parent: vpc-provider, props: {zone: b}}
-- {id: sub-provider-private-b, type: aws.subnet, name: provider-private-b, parent: az-provider-b, props: {cidr: 10.0.2.0/24, az: b, public: false}}
-- {id: acct-consumer, type: aws.account, name: consumer}
-- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-consumer, props: {region: us-east-1}}
-- {id: vpc-consumer, type: aws.vpc, name: consumer, parent: reg-us-east-1-2, props: {cidr: 10.0.0.0/16}}
-- {id: az-consumer-a, type: aws.availability_zone, name: a, parent: vpc-consumer, props: {zone: a}}
-- {id: sub-consumer-private-a, type: aws.subnet, name: consumer-private-a, parent: az-consumer-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
-- {id: az-consumer-b, type: aws.availability_zone, name: b, parent: vpc-consumer, props: {zone: b}}
-- {id: sub-consumer-private-b, type: aws.subnet, name: consumer-private-b, parent: az-consumer-b, props: {cidr: 10.0.2.0/24, az: b, public: false}}
-- {id: provider-nlb-network, type: aws.alb, name: provider-nlb-network, parent: az-provider-a}
-- {id: saas-endpoint-service, type: aws.res.aws_vpc_endpoint_service, name: saas-endpoint-service, parent: vpc-provider, props: {acceptance_required: true}}
-- {id: saas-app-fleet, type: aws.res.aws_autoscaling_group, name: saas-app-fleet, parent: sub-provider-private-a, props: {max_size: 1, min_size: 1}}
-- {id: saas-app-1, type: aws.ec2_instance, name: saas-app-1, parent: sub-provider-private-a}
-- {id: saas-app-2, type: aws.ec2_instance, name: saas-app-2, parent: sub-provider-private-b}
-- {id: saas-interface-endpoint, type: aws.res.aws_vpc_endpoint, name: saas-interface-endpoint, parent: sub-consumer-private-a, props: {vpc_id: changeme}}
-- {id: saas-private-dns, type: aws.route53_zone, name: saas-private-dns, parent: reg-us-east-1-2, props: {domain: example.com}}
-- {id: consumer-app, type: aws.ec2_instance, name: consumer-app, parent: sub-consumer-private-a}
+- {id: acct-provider, type: aws.account, name: provider, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-provider, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-provider, type: aws.vpc, name: provider, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: az-provider-a, type: aws.availability_zone, name: a, parent: vpc-provider, props: {zone: a}, at: [1, 1]}
+- {id: sub-provider-private-a, type: aws.subnet, name: provider-private-a, parent: az-provider-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-provider-b, type: aws.availability_zone, name: b, parent: vpc-provider, props: {zone: b}, at: [2, 1]}
+- {id: sub-provider-private-b, type: aws.subnet, name: provider-private-b, parent: az-provider-b, props: {cidr: 10.0.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: acct-consumer, type: aws.account, name: consumer, at: [1, 2]}
+- {id: reg-us-east-1-2, type: aws.region, name: us-east-1, parent: acct-consumer, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-consumer, type: aws.vpc, name: consumer, parent: reg-us-east-1-2, props: {cidr: 10.0.0.0/16}, at: [1, 1]}
+- {id: az-consumer-a, type: aws.availability_zone, name: a, parent: vpc-consumer, props: {zone: a}, at: [1, 1]}
+- {id: sub-consumer-private-a, type: aws.subnet, name: consumer-private-a, parent: az-consumer-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-consumer-b, type: aws.availability_zone, name: b, parent: vpc-consumer, props: {zone: b}, at: [2, 1]}
+- {id: sub-consumer-private-b, type: aws.subnet, name: consumer-private-b, parent: az-consumer-b, props: {cidr: 10.0.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: provider-nlb-network, type: aws.alb, name: provider-nlb-network, parent: az-provider-a, at: [1, 2]}
+- {id: saas-endpoint-service, type: aws.res.aws_vpc_endpoint_service, name: saas-endpoint-service, parent: vpc-provider, props: {acceptance_required: true}, at: [1, 2, 2, 1]}
+- {id: saas-app-fleet, type: aws.res.aws_autoscaling_group, name: saas-app-fleet, parent: sub-provider-private-a, props: {max_size: 1, min_size: 1}, at: [1, 1]}
+- {id: saas-app-1, type: aws.ec2_instance, name: saas-app-1, parent: sub-provider-private-a, at: [1, 2]}
+- {id: saas-app-2, type: aws.ec2_instance, name: saas-app-2, parent: sub-provider-private-b, at: [1, 1]}
+- {id: saas-interface-endpoint, type: aws.res.aws_vpc_endpoint, name: saas-interface-endpoint, parent: sub-consumer-private-a, props: {vpc_id: changeme}, at: [1, 1]}
+- {id: saas-private-dns, type: aws.route53_zone, name: saas-private-dns, parent: reg-us-east-1-2, props: {domain: example.com}, at: [1, 2]}
+- {id: consumer-app, type: aws.ec2_instance, name: consumer-app, parent: sub-consumer-private-a, at: [1, 2]}
 edges:
 - {from: consumer-app, to: saas-private-dns, label: resolve api.saas.example.com, step: '1'}
 - {from: consumer-app, to: saas-interface-endpoint, label: TLS to endpoint ENI, step: '2'}

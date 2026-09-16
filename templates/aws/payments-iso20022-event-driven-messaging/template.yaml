@@ -15,26 +15,26 @@ description: Guidance for ISO 20022 Messaging Workflows on AWS receives payment 
   incoming, processing and releasing microservices connected by FIFO SQS queues. Each stage persists the ISO 20022 payload to S3 and updates the transaction status (ACCP, ACTC, ACSP, ACSC or RJCT); a timeout
   function rejects transactions that exceed the SLA and SNS notifies consumers when an outgoing message is ready.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-api-layer, type: common.group, name: api-layer, parent: reg-us-east-1}
-- {id: grp-workflow, type: common.group, name: workflow, parent: reg-us-east-1}
-- {id: client, type: common.client, name: client}
-- {id: api-consumer-auth, type: aws.res.aws_cognito_user_pool, name: api-consumer-auth, parent: grp-api-layer, props: {name: changeme}}
-- {id: payments-api, type: aws.res.aws_api_gateway_rest_api, name: payments-api, parent: grp-api-layer, props: {name: changeme}}
-- {id: transaction-msa, type: aws.lambda_function, name: transaction-msa, parent: grp-api-layer}
-- {id: transaction-status, type: aws.dynamodb_table, name: transaction-status, parent: reg-us-east-1}
-- {id: incoming-queue, type: aws.sqs_queue, name: incoming-queue, parent: grp-workflow}
-- {id: incoming-msa, type: aws.lambda_function, name: incoming-msa, parent: grp-workflow}
-- {id: processing-queue, type: aws.sqs_queue, name: processing-queue, parent: grp-workflow}
-- {id: processing-msa, type: aws.lambda_function, name: processing-msa, parent: grp-workflow}
-- {id: releasing-queue, type: aws.sqs_queue, name: releasing-queue, parent: grp-workflow}
-- {id: releasing-msa, type: aws.lambda_function, name: releasing-msa, parent: grp-workflow}
-- {id: iso20022-messages, type: aws.s3_bucket, name: iso20022-messages, parent: reg-us-east-1}
-- {id: outgoing-notifications, type: aws.res.aws_sns_topic, name: outgoing-notifications, parent: reg-us-east-1}
-- {id: timeout-msa, type: aws.lambda_function, name: timeout-msa, parent: grp-workflow}
-- {id: payments-cmk, type: aws.res.aws_kms_key, name: payments-cmk, parent: reg-us-east-1}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 2]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-api-layer, type: common.group, name: api-layer, parent: reg-us-east-1, at: [1, 1, 2, 1]}
+- {id: grp-workflow, type: common.group, name: workflow, parent: reg-us-east-1, at: [1, 2, 1, 4]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: api-consumer-auth, type: aws.res.aws_cognito_user_pool, name: api-consumer-auth, parent: grp-api-layer, props: {name: changeme}, at: [2, 1]}
+- {id: payments-api, type: aws.res.aws_api_gateway_rest_api, name: payments-api, parent: grp-api-layer, props: {name: changeme}, at: [1, 1]}
+- {id: transaction-msa, type: aws.lambda_function, name: transaction-msa, parent: grp-api-layer, at: [1, 2, 2, 1]}
+- {id: transaction-status, type: aws.dynamodb_table, name: transaction-status, parent: reg-us-east-1, at: [2, 4]}
+- {id: incoming-queue, type: aws.sqs_queue, name: incoming-queue, parent: grp-workflow, at: [2, 1]}
+- {id: incoming-msa, type: aws.lambda_function, name: incoming-msa, parent: grp-workflow, at: [1, 1]}
+- {id: processing-queue, type: aws.sqs_queue, name: processing-queue, parent: grp-workflow, at: [2, 2]}
+- {id: processing-msa, type: aws.lambda_function, name: processing-msa, parent: grp-workflow, at: [1, 2]}
+- {id: releasing-queue, type: aws.sqs_queue, name: releasing-queue, parent: grp-workflow, at: [2, 3]}
+- {id: releasing-msa, type: aws.lambda_function, name: releasing-msa, parent: grp-workflow, at: [1, 3]}
+- {id: iso20022-messages, type: aws.s3_bucket, name: iso20022-messages, parent: reg-us-east-1, at: [2, 2]}
+- {id: outgoing-notifications, type: aws.res.aws_sns_topic, name: outgoing-notifications, parent: reg-us-east-1, at: [2, 3]}
+- {id: timeout-msa, type: aws.lambda_function, name: timeout-msa, parent: grp-workflow, at: [1, 4]}
+- {id: payments-cmk, type: aws.res.aws_kms_key, name: payments-cmk, parent: reg-us-east-1, at: [2, 5]}
 edges:
 - {from: client, to: api-consumer-auth, label: OAuth 2.0 token, step: '1'}
 - {from: client, to: payments-api, label: POST transaction, step: '2'}

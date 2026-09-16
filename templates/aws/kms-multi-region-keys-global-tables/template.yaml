@@ -12,18 +12,18 @@ source: https://aws.amazon.com/blogs/security/encrypt-global-data-client-side-wi
 description: A primary KMS multi-Region key is replicated to a second Region so the replica shares the same key ID and key material; the application encrypts DynamoDB items client-side with the AWS Encryption
   SDK in one Region. DynamoDB global tables replicate the ciphertext and the application in the other Region decrypts locally with the replica key, avoiding cross-Region KMS calls.
 nodes:
-- {id: acct-app, type: aws.account, name: app}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-app, props: {region: us-east-1}}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-app, props: {region: eu-west-1}}
-- {id: users, type: common.users, name: users}
-- {id: primary-mrk, type: aws.res.aws_kms_key, name: primary-mrk, parent: reg-us-east-1}
-- {id: replica-mrk, type: aws.res.aws_kms_replica_key, name: replica-mrk, parent: reg-eu-west-1, props: {primary_key_arn: changeme}}
-- {id: orders-global-table, type: aws.dynamodb_table, name: orders-global-table, parent: reg-us-east-1}
-- {id: orders-replica-table, type: aws.dynamodb_table, name: orders-replica-table, parent: reg-eu-west-1}
-- {id: order-writer, type: aws.lambda_function, name: order-writer, parent: reg-us-east-1}
-- {id: order-reader, type: aws.lambda_function, name: order-reader, parent: reg-eu-west-1}
-- {id: encrypt-role, type: aws.res.aws_iam_role, name: encrypt-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}}
-- {id: decrypt-role, type: aws.res.aws_iam_role, name: decrypt-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}}
+- {id: acct-app, type: aws.account, name: app, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-app, props: {region: us-east-1}, at: [1, 1]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-app, props: {region: eu-west-1}, at: [1, 2]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: primary-mrk, type: aws.res.aws_kms_key, name: primary-mrk, parent: reg-us-east-1, at: [1, 2]}
+- {id: replica-mrk, type: aws.res.aws_kms_replica_key, name: replica-mrk, parent: reg-eu-west-1, props: {primary_key_arn: changeme}, at: [1, 1]}
+- {id: orders-global-table, type: aws.dynamodb_table, name: orders-global-table, parent: reg-us-east-1, at: [2, 2]}
+- {id: orders-replica-table, type: aws.dynamodb_table, name: orders-replica-table, parent: reg-eu-west-1, at: [2, 1]}
+- {id: order-writer, type: aws.lambda_function, name: order-writer, parent: reg-us-east-1, at: [2, 1]}
+- {id: order-reader, type: aws.lambda_function, name: order-reader, parent: reg-eu-west-1, at: [2, 2]}
+- {id: encrypt-role, type: aws.res.aws_iam_role, name: encrypt-role, parent: reg-us-east-1, props: {assume_role_policy: changeme}, at: [1, 1]}
+- {id: decrypt-role, type: aws.res.aws_iam_role, name: decrypt-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}, at: [1, 2]}
 edges:
 - {from: users, to: order-writer, label: write order, step: '1'}
 - {from: order-writer, to: primary-mrk, label: GenerateDataKey, step: '2'}

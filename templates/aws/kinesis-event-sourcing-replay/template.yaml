@@ -13,18 +13,18 @@ source: https://aws.amazon.com/blogs/big-data/architectural-patterns-for-real-ti
 description: Kinesis Data Streams acts as the centralized event store for event-sourcing microservices, retaining events for up to 365 days so consumers can replay them by resetting their position. A Managed
   Service for Apache Flink application maintains stateful aggregates with snapshots persisted to S3, and emits derived events to output streams consumed by Lambda-based microservices behind API Gateway.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-event-store, type: common.group, name: event store, parent: reg-us-east-1}
-- {id: grp-microservices, type: common.group, name: microservices, parent: reg-us-east-1}
-- {id: client, type: common.client, name: client}
-- {id: event-store, type: aws.res.aws_kinesis_stream, name: event-store, parent: grp-event-store, props: {name: changeme}}
-- {id: stateful-processor, type: aws.res.aws_kinesisanalyticsv2_application, name: stateful-processor, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}}
-- {id: state-snapshots, type: aws.s3_bucket, name: state-snapshots, parent: reg-us-east-1}
-- {id: derived-events, type: aws.res.aws_kinesis_stream, name: derived-events, parent: grp-event-store, props: {name: changeme}}
-- {id: order-service, type: aws.lambda_function, name: order-service, parent: grp-microservices}
-- {id: replay-consumer, type: aws.lambda_function, name: replay-consumer, parent: grp-microservices}
-- {id: commands-api, type: aws.res.aws_api_gateway_rest_api, name: commands-api, parent: grp-microservices, props: {name: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-event-store, type: common.group, name: event store, parent: reg-us-east-1, at: [1, 2, 2, 1]}
+- {id: grp-microservices, type: common.group, name: microservices, parent: reg-us-east-1, at: [1, 1, 2, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: event-store, type: aws.res.aws_kinesis_stream, name: event-store, parent: grp-event-store, props: {name: changeme}, at: [1, 1]}
+- {id: stateful-processor, type: aws.res.aws_kinesisanalyticsv2_application, name: stateful-processor, parent: reg-us-east-1, props: {name: changeme, runtime_environment: changeme, service_execution_role: changeme}, at: [1, 3]}
+- {id: state-snapshots, type: aws.s3_bucket, name: state-snapshots, parent: reg-us-east-1, at: [2, 3]}
+- {id: derived-events, type: aws.res.aws_kinesis_stream, name: derived-events, parent: grp-event-store, props: {name: changeme}, at: [2, 1]}
+- {id: order-service, type: aws.lambda_function, name: order-service, parent: grp-microservices, at: [2, 1]}
+- {id: replay-consumer, type: aws.lambda_function, name: replay-consumer, parent: grp-microservices, at: [3, 1]}
+- {id: commands-api, type: aws.res.aws_api_gateway_rest_api, name: commands-api, parent: grp-microservices, props: {name: changeme}, at: [1, 1]}
 edges:
 - {from: client, to: commands-api, label: commands, step: '1'}
 - {from: commands-api, to: event-store, label: append events, step: '2'}

@@ -14,24 +14,24 @@ description: Clinical systems land FHIR R4 bundles and legacy C-CDA or CSV expor
   NLP enriches unstructured notes and stores the extracted entities as FHIR resources. SMART on FHIR applications authenticate with Cognito and call the data store through API Gateway, EventBridge routes
   data store events, and Lake Formation governs Athena SQL analytics over the exported data.
 nodes:
-- {id: dc-hospital-ehr, type: common.datacenter, name: hospital-ehr}
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1}
-- {id: grp-fhir-access, type: common.group, name: fhir-access, parent: reg-us-east-1}
-- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1}
-- {id: client, type: common.client, name: client}
-- {id: fhir-staging, type: aws.s3_bucket, name: fhir-staging, parent: grp-ingestion}
-- {id: start-import-job, type: aws.lambda_function, name: start-import-job, parent: grp-ingestion}
-- {id: healthlake-cmk, type: aws.res.aws_kms_key, name: healthlake-cmk, parent: reg-us-east-1}
-- {id: smart-on-fhir-users, type: aws.res.aws_cognito_user_pool, name: smart-on-fhir-users, parent: grp-fhir-access, props: {name: changeme}}
-- {id: fhir-proxy-api, type: aws.res.aws_api_gateway_rest_api, name: fhir-proxy-api, parent: grp-fhir-access, props: {name: changeme}}
-- {id: fhir-request-signer, type: aws.lambda_function, name: fhir-request-signer, parent: grp-fhir-access}
-- {id: healthlake-events, type: aws.res.aws_cloudwatch_event_bus, name: healthlake-events, parent: reg-us-east-1, props: {name: changeme}}
-- {id: fhir-export, type: aws.s3_bucket, name: fhir-export, parent: grp-analytics}
-- {id: fhir-catalog, type: aws.res.aws_glue_catalog_database, name: fhir-catalog, parent: grp-analytics, props: {name: changeme}}
-- {id: population-health-queries, type: aws.res.aws_athena_workgroup, name: population-health-queries, parent: grp-analytics, props: {name: changeme}}
-- {id: fhir-audit-trail, type: aws.res.aws_cloudtrail, name: fhir-audit-trail, parent: reg-us-east-1, props: {name: changeme, s3_bucket_name: changeme}}
+- {id: dc-hospital-ehr, type: common.datacenter, name: hospital-ehr, at: [1, 1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-ingestion, type: common.group, name: ingestion, parent: reg-us-east-1, at: [1, 1, 3, 1]}
+- {id: grp-fhir-access, type: common.group, name: fhir-access, parent: reg-us-east-1, at: [1, 2]}
+- {id: grp-analytics, type: common.group, name: analytics, parent: reg-us-east-1, at: [2, 3, 2, 1]}
+- {id: client, type: common.client, name: client, at: [1, 3]}
+- {id: fhir-staging, type: aws.s3_bucket, name: fhir-staging, parent: grp-ingestion, at: [1, 1]}
+- {id: start-import-job, type: aws.lambda_function, name: start-import-job, parent: grp-ingestion, at: [1, 2]}
+- {id: healthlake-cmk, type: aws.res.aws_kms_key, name: healthlake-cmk, parent: reg-us-east-1, at: [1, 3]}
+- {id: smart-on-fhir-users, type: aws.res.aws_cognito_user_pool, name: smart-on-fhir-users, parent: grp-fhir-access, props: {name: changeme}, at: [1, 2]}
+- {id: fhir-proxy-api, type: aws.res.aws_api_gateway_rest_api, name: fhir-proxy-api, parent: grp-fhir-access, props: {name: changeme}, at: [2, 2]}
+- {id: fhir-request-signer, type: aws.lambda_function, name: fhir-request-signer, parent: grp-fhir-access, at: [2, 1]}
+- {id: healthlake-events, type: aws.res.aws_cloudwatch_event_bus, name: healthlake-events, parent: reg-us-east-1, props: {name: changeme}, at: [2, 2]}
+- {id: fhir-export, type: aws.s3_bucket, name: fhir-export, parent: grp-analytics, at: [1, 1]}
+- {id: fhir-catalog, type: aws.res.aws_glue_catalog_database, name: fhir-catalog, parent: grp-analytics, props: {name: changeme}, at: [1, 2]}
+- {id: population-health-queries, type: aws.res.aws_athena_workgroup, name: population-health-queries, parent: grp-analytics, props: {name: changeme}, at: [1, 3]}
+- {id: fhir-audit-trail, type: aws.res.aws_cloudtrail, name: fhir-audit-trail, parent: reg-us-east-1, props: {name: changeme, s3_bucket_name: changeme}, at: [3, 2]}
 edges:
 - {from: dc-hospital-ehr, to: fhir-staging, label: FHIR bundles and C-CDA exports, step: '1'}
 - {from: fhir-staging, to: start-import-job, label: S3 event, step: '2'}

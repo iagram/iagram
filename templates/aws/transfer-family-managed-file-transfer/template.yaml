@@ -15,25 +15,25 @@ description: Partners connect over SFTP or FTPS to a Transfer Family server reso
   up entitlements in Aurora and returns a scoped IAM policy with logical directory mappings into S3. Inbound files land in S3 and trigger a Lambda that queries subscriptions, optionally runs AWS Batch transformations
   and pushes outputs to customer SFTP destinations.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-mft, type: aws.vpc, name: mft, parent: reg-us-east-1, props: {cidr: 10.140.0.0/16}}
-- {id: az-mft-a, type: aws.availability_zone, name: a, parent: vpc-mft, props: {zone: a}}
-- {id: sub-mft-public-a, type: aws.subnet, name: mft-public-a, parent: az-mft-a, props: {cidr: 10.140.0.0/24, az: a, public: true}}
-- {id: sub-mft-private-a, type: aws.subnet, name: mft-private-a, parent: az-mft-a, props: {cidr: 10.140.1.0/24, az: a, public: false}}
-- {id: client, type: common.client, name: client}
-- {id: saas, type: common.saas, name: saas}
-- {id: transfer-dns, type: aws.route53_zone, name: transfer-dns, parent: reg-us-east-1, props: {domain: example.com}}
-- {id: sftp-server, type: aws.res.aws_transfer_server, name: sftp-server, parent: sub-mft-public-a}
-- {id: idp-api, type: aws.res.aws_api_gateway_rest_api, name: idp-api, parent: reg-us-east-1, props: {name: changeme}}
-- {id: authorizer, type: aws.lambda_function, name: authorizer, parent: reg-us-east-1}
-- {id: partner-users, type: aws.res.aws_cognito_user_pool, name: partner-users, parent: reg-us-east-1, props: {name: changeme}}
-- {id: entitlements-db, type: aws.res.aws_rds_cluster, name: entitlements-db, parent: sub-mft-private-a, props: {engine: changeme}}
-- {id: file-exchange, type: aws.s3_bucket, name: file-exchange, parent: reg-us-east-1}
-- {id: outbound-router, type: aws.lambda_function, name: outbound-router, parent: reg-us-east-1}
-- {id: transform-jobs, type: aws.res.aws_batch_job_queue, name: transform-jobs, parent: reg-us-east-1, props: {name: changeme, priority: 1, state: changeme}}
-- {id: az-vpc-mft-b, type: aws.availability_zone, name: b, parent: vpc-mft, props: {zone: b}}
-- {id: sub-vpc-mft-b, type: aws.subnet, name: private-b, parent: az-vpc-mft-b, props: {cidr: 10.140.251.0/24, az: b, public: false}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-mft, type: aws.vpc, name: mft, parent: reg-us-east-1, props: {cidr: 10.140.0.0/16}, at: [2, 2]}
+- {id: az-mft-a, type: aws.availability_zone, name: a, parent: vpc-mft, props: {zone: a}, at: [1, 1]}
+- {id: sub-mft-public-a, type: aws.subnet, name: mft-public-a, parent: az-mft-a, props: {cidr: 10.140.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: sub-mft-private-a, type: aws.subnet, name: mft-private-a, parent: az-mft-a, props: {cidr: 10.140.1.0/24, az: a, public: false}, at: [1, 2]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: saas, type: common.saas, name: saas, at: [1, 3]}
+- {id: transfer-dns, type: aws.route53_zone, name: transfer-dns, parent: reg-us-east-1, props: {domain: example.com}, at: [1, 1, 3, 1]}
+- {id: sftp-server, type: aws.res.aws_transfer_server, name: sftp-server, parent: sub-mft-public-a, at: [1, 1]}
+- {id: idp-api, type: aws.res.aws_api_gateway_rest_api, name: idp-api, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
+- {id: authorizer, type: aws.lambda_function, name: authorizer, parent: reg-us-east-1, at: [1, 3]}
+- {id: partner-users, type: aws.res.aws_cognito_user_pool, name: partner-users, parent: reg-us-east-1, props: {name: changeme}, at: [1, 4]}
+- {id: entitlements-db, type: aws.res.aws_rds_cluster, name: entitlements-db, parent: sub-mft-private-a, props: {engine: changeme}, at: [1, 1]}
+- {id: file-exchange, type: aws.s3_bucket, name: file-exchange, parent: reg-us-east-1, at: [2, 3]}
+- {id: outbound-router, type: aws.lambda_function, name: outbound-router, parent: reg-us-east-1, at: [3, 2]}
+- {id: transform-jobs, type: aws.res.aws_batch_job_queue, name: transform-jobs, parent: reg-us-east-1, props: {name: changeme, priority: 1, state: changeme}, at: [3, 3]}
+- {id: az-vpc-mft-b, type: aws.availability_zone, name: b, parent: vpc-mft, props: {zone: b}, at: [2, 1]}
+- {id: sub-vpc-mft-b, type: aws.subnet, name: private-b, parent: az-vpc-mft-b, props: {cidr: 10.140.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: client, to: transfer-dns, label: resolve SFTP hostname, step: '1'}
 - {from: client, to: sftp-server, label: 'SFTP/FTPS: user and key', step: '2'}

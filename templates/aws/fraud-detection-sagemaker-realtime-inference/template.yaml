@@ -13,20 +13,20 @@ source: https://aws.amazon.com/blogs/machine-learning/detect-fraudulent-transact
 description: Historical card transactions in S3 train an unsupervised Random Cut Forest model and supervised XGBoost models in SageMaker, which are deployed to managed real-time endpoints. Client applications
   call an API Gateway REST API whose Lambda function invokes both endpoints and streams the anomaly score and fraud prediction through Kinesis Data Firehose to S3 for analysis.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-training, type: common.group, name: training, parent: reg-us-east-1}
-- {id: grp-inference, type: common.group, name: inference, parent: reg-us-east-1}
-- {id: client, type: common.client, name: client}
-- {id: transactions-training-data, type: aws.s3_bucket, name: transactions-training-data, parent: grp-training}
-- {id: fraud-model-notebook, type: aws.res.aws_sagemaker_notebook_instance, name: fraud-model-notebook, parent: grp-training, props: {instance_type: changeme, name: changeme, role_arn: changeme}}
-- {id: xgboost-fraud-model, type: aws.res.aws_sagemaker_model, name: xgboost-fraud-model, parent: grp-training, props: {execution_role_arn: changeme}}
-- {id: rcf-anomaly-endpoint, type: aws.res.aws_sagemaker_endpoint, name: rcf-anomaly-endpoint, parent: grp-inference, props: {endpoint_config_name: changeme}}
-- {id: xgboost-fraud-endpoint, type: aws.res.aws_sagemaker_endpoint, name: xgboost-fraud-endpoint, parent: grp-inference, props: {endpoint_config_name: changeme}}
-- {id: fraud-scoring-api, type: aws.res.aws_api_gateway_rest_api, name: fraud-scoring-api, parent: grp-inference, props: {name: changeme}}
-- {id: invoke-models, type: aws.lambda_function, name: invoke-models, parent: grp-inference}
-- {id: predictions-firehose, type: aws.res.aws_kinesis_firehose_delivery_stream, name: predictions-firehose, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
-- {id: predictions-archive, type: aws.s3_bucket, name: predictions-archive, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-training, type: common.group, name: training, parent: reg-us-east-1, at: [1, 2]}
+- {id: grp-inference, type: common.group, name: inference, parent: reg-us-east-1, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: transactions-training-data, type: aws.s3_bucket, name: transactions-training-data, parent: grp-training, at: [1, 1]}
+- {id: fraud-model-notebook, type: aws.res.aws_sagemaker_notebook_instance, name: fraud-model-notebook, parent: grp-training, props: {instance_type: changeme, name: changeme, role_arn: changeme}, at: [2, 1]}
+- {id: xgboost-fraud-model, type: aws.res.aws_sagemaker_model, name: xgboost-fraud-model, parent: grp-training, props: {execution_role_arn: changeme}, at: [3, 1]}
+- {id: rcf-anomaly-endpoint, type: aws.res.aws_sagemaker_endpoint, name: rcf-anomaly-endpoint, parent: grp-inference, props: {endpoint_config_name: changeme}, at: [1, 3]}
+- {id: xgboost-fraud-endpoint, type: aws.res.aws_sagemaker_endpoint, name: xgboost-fraud-endpoint, parent: grp-inference, props: {endpoint_config_name: changeme}, at: [2, 3]}
+- {id: fraud-scoring-api, type: aws.res.aws_api_gateway_rest_api, name: fraud-scoring-api, parent: grp-inference, props: {name: changeme}, at: [1, 1, 2, 1]}
+- {id: invoke-models, type: aws.lambda_function, name: invoke-models, parent: grp-inference, at: [1, 2, 2, 1]}
+- {id: predictions-firehose, type: aws.res.aws_kinesis_firehose_delivery_stream, name: predictions-firehose, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [2, 1]}
+- {id: predictions-archive, type: aws.s3_bucket, name: predictions-archive, parent: reg-us-east-1, at: [2, 2]}
 edges:
 - {from: transactions-training-data, to: fraud-model-notebook, label: labelled transactions, step: '1'}
 - {from: fraud-model-notebook, to: xgboost-fraud-model, label: training job, step: '2'}

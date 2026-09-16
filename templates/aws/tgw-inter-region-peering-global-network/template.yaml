@@ -13,36 +13,36 @@ description: Each Region runs its own Transit Gateway hub with local VPC attachm
   than the public internet. Peering attachments do not propagate routes, so each TGW route table holds static routes for the remote Region's CIDRs; on-premises sites connected to one hub can reach VPCs
   in the other Region through the peering.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-east-app, type: aws.vpc, name: east-app, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
-- {id: az-east-app-a, type: aws.availability_zone, name: a, parent: vpc-east-app, props: {zone: a}}
-- {id: sub-east-app-private-a, type: aws.subnet, name: east-app-private-a, parent: az-east-app-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: vpc-east-shared, type: aws.vpc, name: east-shared, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}}
-- {id: az-east-shared-a, type: aws.availability_zone, name: a, parent: vpc-east-shared, props: {zone: a}}
-- {id: sub-east-shared-private-a, type: aws.subnet, name: east-shared-private-a, parent: az-east-shared-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: vpc-eu-app, type: aws.vpc, name: eu-app, parent: reg-eu-west-1, props: {cidr: 10.11.0.0/16}}
-- {id: az-eu-app-a, type: aws.availability_zone, name: a, parent: vpc-eu-app, props: {zone: a}}
-- {id: sub-eu-app-private-a, type: aws.subnet, name: eu-app-private-a, parent: az-eu-app-a, props: {cidr: 10.11.1.0/24, az: a, public: false}}
-- {id: tgw-east, type: aws.res.aws_ec2_transit_gateway, name: tgw-east, parent: reg-us-east-1}
-- {id: tgw-eu, type: aws.res.aws_ec2_transit_gateway, name: tgw-eu, parent: reg-eu-west-1}
-- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
-- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
-- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
-- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
-- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
-- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-us-east-1-a, props: {type: changeme}}
-- {id: east-app-server, type: aws.ec2_instance, name: east-app-server, parent: sub-east-app-private-a}
-- {id: east-directory, type: aws.ec2_instance, name: east-directory, parent: sub-east-shared-private-a}
-- {id: eu-app-server, type: aws.ec2_instance, name: eu-app-server, parent: sub-eu-app-private-a}
-- {id: az-vpc-east-app-b, type: aws.availability_zone, name: b, parent: vpc-east-app, props: {zone: b}}
-- {id: sub-vpc-east-app-b, type: aws.subnet, name: private-b, parent: az-vpc-east-app-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
-- {id: az-vpc-east-shared-b, type: aws.availability_zone, name: b, parent: vpc-east-shared, props: {zone: b}}
-- {id: sub-vpc-east-shared-b, type: aws.subnet, name: private-b, parent: az-vpc-east-shared-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
-- {id: az-vpc-eu-app-b, type: aws.availability_zone, name: b, parent: vpc-eu-app, props: {zone: b}}
-- {id: sub-vpc-eu-app-b, type: aws.subnet, name: private-b, parent: az-vpc-eu-app-b, props: {cidr: 10.11.251.0/24, az: b, public: false}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-east-app, type: aws.vpc, name: east-app, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 3]}
+- {id: az-east-app-a, type: aws.availability_zone, name: a, parent: vpc-east-app, props: {zone: a}, at: [1, 1]}
+- {id: sub-east-app-private-a, type: aws.subnet, name: east-app-private-a, parent: az-east-app-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-east-shared, type: aws.vpc, name: east-shared, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}, at: [2, 3]}
+- {id: az-east-shared-a, type: aws.availability_zone, name: a, parent: vpc-east-shared, props: {zone: a}, at: [1, 1]}
+- {id: sub-east-shared-private-a, type: aws.subnet, name: east-shared-private-a, parent: az-east-shared-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [2, 1]}
+- {id: vpc-eu-app, type: aws.vpc, name: eu-app, parent: reg-eu-west-1, props: {cidr: 10.11.0.0/16}, at: [1, 2]}
+- {id: az-eu-app-a, type: aws.availability_zone, name: a, parent: vpc-eu-app, props: {zone: a}, at: [1, 1]}
+- {id: sub-eu-app-private-a, type: aws.subnet, name: eu-app-private-a, parent: az-eu-app-a, props: {cidr: 10.11.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: tgw-east, type: aws.res.aws_ec2_transit_gateway, name: tgw-east, parent: reg-us-east-1, at: [1, 2, 2, 1]}
+- {id: tgw-eu, type: aws.res.aws_ec2_transit_gateway, name: tgw-eu, parent: reg-eu-west-1, at: [1, 1]}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}, at: [1, 1, 2, 1]}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}, at: [1, 1]}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}, at: [2, 1]}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
+- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-us-east-1-a, props: {type: changeme}, at: [1, 1]}
+- {id: east-app-server, type: aws.ec2_instance, name: east-app-server, parent: sub-east-app-private-a, at: [1, 1]}
+- {id: east-directory, type: aws.ec2_instance, name: east-directory, parent: sub-east-shared-private-a, at: [1, 1]}
+- {id: eu-app-server, type: aws.ec2_instance, name: eu-app-server, parent: sub-eu-app-private-a, at: [1, 1]}
+- {id: az-vpc-east-app-b, type: aws.availability_zone, name: b, parent: vpc-east-app, props: {zone: b}, at: [2, 1]}
+- {id: sub-vpc-east-app-b, type: aws.subnet, name: private-b, parent: az-vpc-east-app-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-east-shared-b, type: aws.availability_zone, name: b, parent: vpc-east-shared, props: {zone: b}, at: [2, 1]}
+- {id: sub-vpc-east-shared-b, type: aws.subnet, name: private-b, parent: az-vpc-east-shared-b, props: {cidr: 10.2.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-eu-app-b, type: aws.availability_zone, name: b, parent: vpc-eu-app, props: {zone: b}, at: [2, 1]}
+- {id: sub-vpc-eu-app-b, type: aws.subnet, name: private-b, parent: az-vpc-eu-app-b, props: {cidr: 10.11.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: tgw-east, to: vpc-east-app, link: aws_ec2_transit_gateway_vpc_attachment}
 - {from: tgw-east, to: vpc-east-shared, link: aws_ec2_transit_gateway_vpc_attachment}

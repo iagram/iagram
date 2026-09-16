@@ -12,26 +12,26 @@ source: https://aws.amazon.com/blogs/compute/architecture-patterns-for-consuming
 description: A producer account exposes a private API Gateway REST API backed by Lambda; its resource policy allows calls only from a named execute-api interface endpoint. A consumer account creates that
   endpoint in its VPC, resolves the API hostname through a Route 53 private hosted zone, and applications in private subnets call the API over PrivateLink without traversing the internet.
 nodes:
-- {id: acct-api-producer, type: aws.account, name: api-producer}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-api-producer, props: {region: eu-west-1}}
-- {id: acct-api-consumer, type: aws.account, name: api-consumer}
-- {id: reg-eu-west-1-2, type: aws.region, name: eu-west-1, parent: acct-api-consumer, props: {region: eu-west-1}}
-- {id: vpc-consumer, type: aws.vpc, name: consumer, parent: reg-eu-west-1-2, props: {cidr: 10.60.0.0/16}}
-- {id: az-consumer-a, type: aws.availability_zone, name: a, parent: vpc-consumer, props: {zone: a}}
-- {id: sub-consumer-private-a, type: aws.subnet, name: consumer-private-a, parent: az-consumer-a, props: {cidr: 10.60.1.0/24, az: a, public: false}}
-- {id: az-consumer-b, type: aws.availability_zone, name: b, parent: vpc-consumer, props: {zone: b}}
-- {id: sub-consumer-private-b, type: aws.subnet, name: consumer-private-b, parent: az-consumer-b, props: {cidr: 10.60.2.0/24, az: b, public: false}}
-- {id: private-orders-api, type: aws.res.aws_api_gateway_rest_api, name: private-orders-api, parent: acct-api-producer, props: {name: changeme}}
-- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
-- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
-- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
-- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
-- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
-- {id: orders-backend, type: aws.lambda_function, name: orders-backend, parent: sub-reg-eu-west-1-a}
-- {id: orders, type: aws.dynamodb_table, name: orders, parent: reg-eu-west-1}
-- {id: execute-api-endpoint, type: aws.res.aws_vpc_endpoint, name: execute-api-endpoint, parent: sub-consumer-private-a, props: {vpc_id: changeme}}
-- {id: api-private-zone, type: aws.route53_zone, name: api-private-zone, parent: acct-api-consumer, props: {domain: example.com}}
-- {id: consumer-app, type: aws.ec2_instance, name: consumer-app, parent: sub-consumer-private-b}
+- {id: acct-api-producer, type: aws.account, name: api-producer, at: [1, 2]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-api-producer, props: {region: eu-west-1}, at: [1, 2]}
+- {id: acct-api-consumer, type: aws.account, name: api-consumer, at: [1, 1]}
+- {id: reg-eu-west-1-2, type: aws.region, name: eu-west-1, parent: acct-api-consumer, props: {region: eu-west-1}, at: [2, 1]}
+- {id: vpc-consumer, type: aws.vpc, name: consumer, parent: reg-eu-west-1-2, props: {cidr: 10.60.0.0/16}, at: [1, 1]}
+- {id: az-consumer-a, type: aws.availability_zone, name: a, parent: vpc-consumer, props: {zone: a}, at: [1, 1]}
+- {id: sub-consumer-private-a, type: aws.subnet, name: consumer-private-a, parent: az-consumer-a, props: {cidr: 10.60.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-consumer-b, type: aws.availability_zone, name: b, parent: vpc-consumer, props: {zone: b}, at: [2, 1]}
+- {id: sub-consumer-private-b, type: aws.subnet, name: consumer-private-b, parent: az-consumer-b, props: {cidr: 10.60.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: private-orders-api, type: aws.res.aws_api_gateway_rest_api, name: private-orders-api, parent: acct-api-producer, props: {name: changeme}, at: [1, 1]}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}, at: [1, 1]}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}, at: [1, 1]}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}, at: [2, 1]}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
+- {id: orders-backend, type: aws.lambda_function, name: orders-backend, parent: sub-reg-eu-west-1-a, at: [1, 1]}
+- {id: orders, type: aws.dynamodb_table, name: orders, parent: reg-eu-west-1, at: [1, 2]}
+- {id: execute-api-endpoint, type: aws.res.aws_vpc_endpoint, name: execute-api-endpoint, parent: sub-consumer-private-a, props: {vpc_id: changeme}, at: [1, 1]}
+- {id: api-private-zone, type: aws.route53_zone, name: api-private-zone, parent: acct-api-consumer, props: {domain: example.com}, at: [1, 1]}
+- {id: consumer-app, type: aws.ec2_instance, name: consumer-app, parent: sub-consumer-private-b, at: [1, 1]}
 edges:
 - {from: consumer-app, to: api-private-zone, label: resolve api.internal alias, step: '1'}
 - {from: consumer-app, to: execute-api-endpoint, label: HTTPS via PrivateLink, step: '2'}

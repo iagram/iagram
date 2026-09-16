@@ -12,21 +12,21 @@ source: https://docs.aws.amazon.com/reference-architecture-diagrams/latest/hybri
 description: The on-premises data center reaches AWS over a Direct Connect connection with a transit virtual interface into a Direct Connect gateway, which associates with a Transit Gateway. A Site-to-Site
   VPN terminating on the same Transit Gateway provides an encrypted backup path over the internet; BGP prefers the Direct Connect route and fails over when it withdraws.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}}
-- {id: vpc-prod, type: aws.vpc, name: prod, parent: reg-eu-central-1, props: {cidr: 10.10.0.0/16}}
-- {id: az-prod-a, type: aws.availability_zone, name: a, parent: vpc-prod, props: {zone: a}}
-- {id: sub-prod-private-a, type: aws.subnet, name: prod-private-a, parent: az-prod-a, props: {cidr: 10.10.1.0/24, az: a, public: false}}
-- {id: az-prod-b, type: aws.availability_zone, name: b, parent: vpc-prod, props: {zone: b}}
-- {id: sub-prod-private-b, type: aws.subnet, name: prod-private-b, parent: az-prod-b, props: {cidr: 10.10.2.0/24, az: b, public: false}}
-- {id: internet, type: common.internet, name: internet}
-- {id: onprem-router, type: aws.res.aws_customer_gateway, name: onprem-router, parent: reg-eu-central-1, props: {type: changeme}}
-- {id: dx-1g, type: aws.res.aws_dx_connection, name: dx-1g, parent: reg-eu-central-1, props: {bandwidth: changeme, location: westeurope, name: changeme}}
-- {id: dxgw, type: aws.res.aws_dx_gateway, name: dxgw, parent: reg-eu-central-1, props: {amazon_side_asn: changeme, name: changeme}}
-- {id: tgw, type: aws.res.aws_ec2_transit_gateway, name: tgw, parent: reg-eu-central-1}
-- {id: app-1, type: aws.ec2_instance, name: app-1, parent: sub-prod-private-a}
-- {id: app-2, type: aws.ec2_instance, name: app-2, parent: sub-prod-private-b}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [2, 2]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1, 2, 1]}
+- {id: reg-eu-central-1, type: aws.region, name: eu-central-1, parent: acct-prod, props: {region: eu-central-1}, at: [1, 1]}
+- {id: vpc-prod, type: aws.vpc, name: prod, parent: reg-eu-central-1, props: {cidr: 10.10.0.0/16}, at: [1, 1, 2, 1]}
+- {id: az-prod-a, type: aws.availability_zone, name: a, parent: vpc-prod, props: {zone: a}, at: [1, 1]}
+- {id: sub-prod-private-a, type: aws.subnet, name: prod-private-a, parent: az-prod-a, props: {cidr: 10.10.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-prod-b, type: aws.availability_zone, name: b, parent: vpc-prod, props: {zone: b}, at: [2, 1]}
+- {id: sub-prod-private-b, type: aws.subnet, name: prod-private-b, parent: az-prod-b, props: {cidr: 10.10.2.0/24, az: b, public: false}, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [1, 2]}
+- {id: onprem-router, type: aws.res.aws_customer_gateway, name: onprem-router, parent: reg-eu-central-1, props: {type: changeme}, at: [1, 4]}
+- {id: dx-1g, type: aws.res.aws_dx_connection, name: dx-1g, parent: reg-eu-central-1, props: {bandwidth: changeme, location: westeurope, name: changeme}, at: [2, 4]}
+- {id: dxgw, type: aws.res.aws_dx_gateway, name: dxgw, parent: reg-eu-central-1, props: {amazon_side_asn: changeme, name: changeme}, at: [1, 3, 2, 1]}
+- {id: tgw, type: aws.res.aws_ec2_transit_gateway, name: tgw, parent: reg-eu-central-1, at: [1, 2, 2, 1]}
+- {id: app-1, type: aws.ec2_instance, name: app-1, parent: sub-prod-private-a, at: [1, 1]}
+- {id: app-2, type: aws.ec2_instance, name: app-2, parent: sub-prod-private-b, at: [1, 1]}
 edges:
 - {from: onprem-router, to: dx-1g, label: primary path (dedicated fibre), step: '1'}
 - {from: dx-1g, to: dxgw, label: transit VIF + BGP, step: '2'}

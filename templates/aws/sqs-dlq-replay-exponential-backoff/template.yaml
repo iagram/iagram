@@ -12,16 +12,16 @@ source: https://aws.amazon.com/blogs/compute/using-amazon-sqs-dead-letter-queues
 description: Messages that fail processing land in a dead-letter queue; a replay Lambda function moves them back to the main queue with a delay computed by exponential backoff and a retry counter in message
   attributes. Messages that exceed the retry limit are parked in a second dead-letter queue for manual inspection, and an alarm tracks its depth.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: client, type: common.client, name: client}
-- {id: main-queue, type: aws.sqs_queue, name: main-queue, parent: reg-us-east-1}
-- {id: main-dlq, type: aws.sqs_queue, name: main-dlq, parent: reg-us-east-1}
-- {id: manual-review-dlq, type: aws.sqs_queue, name: manual-review-dlq, parent: reg-us-east-1}
-- {id: message-consumer, type: aws.lambda_function, name: message-consumer, parent: reg-us-east-1}
-- {id: dlq-replay, type: aws.lambda_function, name: dlq-replay, parent: reg-us-east-1}
-- {id: manual-dlq-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: manual-dlq-alarm, parent: reg-us-east-1, props: {alarm_name: changeme}}
-- {id: operator-alerts, type: aws.res.aws_sns_topic, name: operator-alerts, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [1, 1]}
+- {id: main-queue, type: aws.sqs_queue, name: main-queue, parent: reg-us-east-1, at: [1, 1]}
+- {id: main-dlq, type: aws.sqs_queue, name: main-dlq, parent: reg-us-east-1, at: [2, 1]}
+- {id: manual-review-dlq, type: aws.sqs_queue, name: manual-review-dlq, parent: reg-us-east-1, at: [3, 3]}
+- {id: message-consumer, type: aws.lambda_function, name: message-consumer, parent: reg-us-east-1, at: [1, 3]}
+- {id: dlq-replay, type: aws.lambda_function, name: dlq-replay, parent: reg-us-east-1, at: [2, 2]}
+- {id: manual-dlq-alarm, type: aws.res.aws_cloudwatch_metric_alarm, name: manual-dlq-alarm, parent: reg-us-east-1, props: {alarm_name: changeme}, at: [4, 3]}
+- {id: operator-alerts, type: aws.res.aws_sns_topic, name: operator-alerts, parent: reg-us-east-1, at: [4, 2]}
 edges:
 - {from: client, to: main-queue, label: SendMessage, step: '1'}
 - {from: main-queue, to: message-consumer, link: aws_lambda_event_source_mapping}

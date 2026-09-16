@@ -14,30 +14,30 @@ description: A standard accelerator provides two static anycast IP addresses and
   traffic enters the AWS network at the nearest edge location and is routed to the closest healthy endpoint group; health checks, traffic dials, and endpoint weights drive automatic failover and controlled
   shifts between Regions.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-app-east, type: aws.vpc, name: app-east, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
-- {id: az-app-east-a, type: aws.availability_zone, name: a, parent: vpc-app-east, props: {zone: a}}
-- {id: sub-east-public-a, type: aws.subnet, name: east-public-a, parent: az-app-east-a, props: {cidr: 10.1.0.0/24, az: a, public: true}}
-- {id: sub-east-private-a, type: aws.subnet, name: east-private-a, parent: az-app-east-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: vpc-app-eu, type: aws.vpc, name: app-eu, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}}
-- {id: az-app-eu-a, type: aws.availability_zone, name: a, parent: vpc-app-eu, props: {zone: a}}
-- {id: sub-eu-public-a, type: aws.subnet, name: eu-public-a, parent: az-app-eu-a, props: {cidr: 10.2.0.0/24, az: a, public: true}}
-- {id: sub-eu-private-a, type: aws.subnet, name: eu-private-a, parent: az-app-eu-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
-- {id: users, type: common.users, name: users}
-- {id: app-accelerator, type: aws.res.aws_globalaccelerator_accelerator, name: app-accelerator, parent: reg-us-east-1, props: {name: changeme}}
-- {id: endpoint-group-east, type: aws.res.aws_globalaccelerator_endpoint_group, name: endpoint-group-east, parent: reg-us-east-1, props: {listener_arn: changeme}}
-- {id: endpoint-group-eu, type: aws.res.aws_globalaccelerator_endpoint_group, name: endpoint-group-eu, parent: reg-eu-west-1, props: {listener_arn: changeme}}
-- {id: east-alb-application, type: aws.alb, name: east-alb-application, parent: az-app-east-a}
-- {id: eu-alb-application, type: aws.alb, name: eu-alb-application, parent: az-app-eu-a}
+- {id: acct-prod, type: aws.account, name: prod, at: [2, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-app-east, type: aws.vpc, name: app-east, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [3, 1, 1, 2]}
+- {id: az-app-east-a, type: aws.availability_zone, name: a, parent: vpc-app-east, props: {zone: a}, at: [1, 1]}
+- {id: sub-east-public-a, type: aws.subnet, name: east-public-a, parent: az-app-east-a, props: {cidr: 10.1.0.0/24, az: a, public: true}, at: [2, 1]}
+- {id: sub-east-private-a, type: aws.subnet, name: east-private-a, parent: az-app-east-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [2, 2]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 2]}
+- {id: vpc-app-eu, type: aws.vpc, name: app-eu, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}, at: [2, 1]}
+- {id: az-app-eu-a, type: aws.availability_zone, name: a, parent: vpc-app-eu, props: {zone: a}, at: [1, 1]}
+- {id: sub-eu-public-a, type: aws.subnet, name: eu-public-a, parent: az-app-eu-a, props: {cidr: 10.2.0.0/24, az: a, public: true}, at: [2, 1]}
+- {id: sub-eu-private-a, type: aws.subnet, name: eu-private-a, parent: az-app-eu-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [2, 2]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: app-accelerator, type: aws.res.aws_globalaccelerator_accelerator, name: app-accelerator, parent: reg-us-east-1, props: {name: changeme}, at: [1, 2]}
+- {id: endpoint-group-east, type: aws.res.aws_globalaccelerator_endpoint_group, name: endpoint-group-east, parent: reg-us-east-1, props: {listener_arn: changeme}, at: [2, 1, 1, 2]}
+- {id: endpoint-group-eu, type: aws.res.aws_globalaccelerator_endpoint_group, name: endpoint-group-eu, parent: reg-eu-west-1, props: {listener_arn: changeme}, at: [1, 1]}
+- {id: east-alb-application, type: aws.alb, name: east-alb-application, parent: az-app-east-a, at: [1, 1, 1, 2]}
+- {id: eu-alb-application, type: aws.alb, name: eu-alb-application, parent: az-app-eu-a, at: [1, 1, 1, 2]}
 - {id: east-web-fleet, type: aws.res.aws_autoscaling_group, name: east-web-fleet, parent: sub-east-private-a, props: {max_size: 1, min_size: 1}}
 - {id: eu-web-fleet, type: aws.res.aws_autoscaling_group, name: eu-web-fleet, parent: sub-eu-private-a, props: {max_size: 1, min_size: 1}}
-- {id: public-zone, type: aws.route53_zone, name: public-zone, parent: reg-us-east-1, props: {domain: example.com}}
-- {id: az-vpc-app-east-b, type: aws.availability_zone, name: b, parent: vpc-app-east, props: {zone: b}}
-- {id: sub-vpc-app-east-b, type: aws.subnet, name: private-b, parent: az-vpc-app-east-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
-- {id: az-vpc-app-eu-b, type: aws.availability_zone, name: b, parent: vpc-app-eu, props: {zone: b}}
-- {id: sub-vpc-app-eu-b, type: aws.subnet, name: private-b, parent: az-vpc-app-eu-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+- {id: public-zone, type: aws.route53_zone, name: public-zone, parent: reg-us-east-1, props: {domain: example.com}, at: [1, 1]}
+- {id: az-vpc-app-east-b, type: aws.availability_zone, name: b, parent: vpc-app-east, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-app-east-b, type: aws.subnet, name: private-b, parent: az-vpc-app-east-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-app-eu-b, type: aws.availability_zone, name: b, parent: vpc-app-eu, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-app-eu-b, type: aws.subnet, name: private-b, parent: az-vpc-app-eu-b, props: {cidr: 10.2.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: users, to: public-zone, label: resolve app.example.com to static anycast IPs, step: '1'}
 - {from: users, to: app-accelerator, label: TCP 443 to nearest edge, step: '2'}

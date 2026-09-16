@@ -12,18 +12,18 @@ source: https://aws.amazon.com/blogs/compute/increasing-real-time-stream-process
 description: Producers write clickstream records to a Kinesis data stream; two Lambda functions consume the same stream through registered enhanced fan-out consumers so each gets dedicated 2 MB/s per shard
   over HTTP/2. Batches that exhaust retries are sent to an SQS on-failure destination and raw records are archived to S3 through Firehose.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: mobile, type: common.mobile, name: mobile}
-- {id: clickstream, type: aws.res.aws_kinesis_stream, name: clickstream, parent: reg-us-east-1, props: {name: changeme}}
-- {id: metrics-consumer, type: aws.res.aws_kinesis_stream_consumer, name: metrics-consumer, parent: reg-us-east-1, props: {name: changeme, stream_arn: changeme}}
-- {id: fraud-consumer, type: aws.res.aws_kinesis_stream_consumer, name: fraud-consumer, parent: reg-us-east-1, props: {name: changeme, stream_arn: changeme}}
-- {id: aggregate-metrics, type: aws.lambda_function, name: aggregate-metrics, parent: reg-us-east-1}
-- {id: detect-fraud, type: aws.lambda_function, name: detect-fraud, parent: reg-us-east-1}
-- {id: realtime-metrics, type: aws.dynamodb_table, name: realtime-metrics, parent: reg-us-east-1}
-- {id: stream-failures, type: aws.sqs_queue, name: stream-failures, parent: reg-us-east-1}
-- {id: raw-archive, type: aws.res.aws_kinesis_firehose_delivery_stream, name: raw-archive, parent: reg-us-east-1, props: {destination: changeme, name: changeme}}
-- {id: clickstream-archive, type: aws.s3_bucket, name: clickstream-archive, parent: reg-us-east-1}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: mobile, type: common.mobile, name: mobile, at: [1, 1]}
+- {id: clickstream, type: aws.res.aws_kinesis_stream, name: clickstream, parent: reg-us-east-1, props: {name: changeme}, at: [1, 1, 3, 1]}
+- {id: metrics-consumer, type: aws.res.aws_kinesis_stream_consumer, name: metrics-consumer, parent: reg-us-east-1, props: {name: changeme, stream_arn: changeme}, at: [1, 2]}
+- {id: fraud-consumer, type: aws.res.aws_kinesis_stream_consumer, name: fraud-consumer, parent: reg-us-east-1, props: {name: changeme, stream_arn: changeme}, at: [2, 2]}
+- {id: aggregate-metrics, type: aws.lambda_function, name: aggregate-metrics, parent: reg-us-east-1, at: [1, 3]}
+- {id: detect-fraud, type: aws.lambda_function, name: detect-fraud, parent: reg-us-east-1, at: [2, 3]}
+- {id: realtime-metrics, type: aws.dynamodb_table, name: realtime-metrics, parent: reg-us-east-1, at: [1, 4]}
+- {id: stream-failures, type: aws.sqs_queue, name: stream-failures, parent: reg-us-east-1, at: [2, 4]}
+- {id: raw-archive, type: aws.res.aws_kinesis_firehose_delivery_stream, name: raw-archive, parent: reg-us-east-1, props: {destination: changeme, name: changeme}, at: [3, 2]}
+- {id: clickstream-archive, type: aws.s3_bucket, name: clickstream-archive, parent: reg-us-east-1, at: [3, 3]}
 edges:
 - {from: mobile, to: clickstream, label: PutRecords, step: '1'}
 - {from: clickstream, to: metrics-consumer, label: SubscribeToShard HTTP/2, step: '2'}

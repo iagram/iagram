@@ -13,22 +13,23 @@ source: https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/deploy
 description: CodeBuild builds an image from a Lambda base image and pushes it to ECR; the Lambda function is created from that image URI (up to 10 GB) and Lambda pulls and caches it in its execution environment.
   An API Gateway HTTP API routes requests to the function, which reads and writes a DynamoDB table, so a team keeps its Docker-based tooling while running serverless.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: user, type: common.user, name: user}
-- {id: client, type: common.client, name: client}
-- {id: function-source, type: aws.res.aws_codecommit_repository, name: function-source, parent: reg-eu-west-1, props: {repository_name: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2, 2, 1]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 1]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: client, type: common.client, name: client, at: [2, 1]}
+- {id: function-source, type: aws.res.aws_codecommit_repository, name: function-source, parent: reg-eu-west-1, props: {repository_name: changeme}, at: [1, 1]}
 - id: image-build
   type: aws.res.aws_codebuild_project
   name: image-build
   parent: reg-eu-west-1
+  at: [1, 2]
   props: {artifacts: {}, environment: {}, name: changeme, service_role: changeme, source: {}}
-- {id: function-image, type: aws.res.aws_ecr_repository, name: function-image, parent: reg-eu-west-1, props: {name: changeme}}
-- {id: orders-fn, type: aws.lambda_function, name: orders-fn, parent: reg-eu-west-1}
-- {id: orders-http-api, type: aws.res.aws_apigatewayv2_api, name: orders-http-api, parent: reg-eu-west-1, props: {name: changeme, protocol_type: changeme}}
-- {id: orders-table, type: aws.dynamodb_table, name: orders-table, parent: reg-eu-west-1}
-- {id: orders-fn-role, type: aws.res.aws_iam_role, name: orders-fn-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}}
-- {id: orders-fn-logs, type: aws.res.aws_cloudwatch_log_group, name: orders-fn-logs, parent: reg-eu-west-1}
+- {id: function-image, type: aws.res.aws_ecr_repository, name: function-image, parent: reg-eu-west-1, props: {name: changeme}, at: [1, 3]}
+- {id: orders-fn, type: aws.lambda_function, name: orders-fn, parent: reg-eu-west-1, at: [2, 2]}
+- {id: orders-http-api, type: aws.res.aws_apigatewayv2_api, name: orders-http-api, parent: reg-eu-west-1, props: {name: changeme, protocol_type: changeme}, at: [2, 1]}
+- {id: orders-table, type: aws.dynamodb_table, name: orders-table, parent: reg-eu-west-1, at: [2, 3]}
+- {id: orders-fn-role, type: aws.res.aws_iam_role, name: orders-fn-role, parent: reg-eu-west-1, props: {assume_role_policy: changeme}, at: [3, 2]}
+- {id: orders-fn-logs, type: aws.res.aws_cloudwatch_log_group, name: orders-fn-logs, parent: reg-eu-west-1, at: [3, 3]}
 edges:
 - {from: user, to: function-source, label: git push Dockerfile + handler, step: '1'}
 - {from: function-source, to: image-build, label: build trigger, step: '2'}

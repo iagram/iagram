@@ -14,33 +14,33 @@ source: https://docs.aws.amazon.com/whitepapers/latest/best-practices-wordpress/
 description: CloudFront caches content close to users, pulling static files from an S3 bucket and dynamic pages from an Application Load Balancer in front of an Auto Scaling group of WordPress instances.
   Every instance mounts a shared EFS file system through a mount target in each Availability Zone, caches queries in ElastiCache, and stores the WordPress database in Aurora MySQL.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-eu-west-1}
-- {id: vpc-wordpress, type: aws.vpc, name: wordpress, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-wordpress-a, type: aws.availability_zone, name: a, parent: vpc-wordpress, props: {zone: a}}
-- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-wordpress-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
-- {id: az-wordpress-b, type: aws.availability_zone, name: b, parent: vpc-wordpress, props: {zone: b}}
-- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-wordpress-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
-- {id: sub-web-a, type: aws.subnet, name: web-a, parent: az-wordpress-a, props: {cidr: 10.0.10.0/24, az: a, public: false}}
-- {id: sub-web-b, type: aws.subnet, name: web-b, parent: az-wordpress-b, props: {cidr: 10.0.11.0/24, az: b, public: false}}
-- {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-wordpress-a, props: {cidr: 10.0.20.0/24, az: a, public: false}}
-- {id: sub-data-b, type: aws.subnet, name: data-b, parent: az-wordpress-b, props: {cidr: 10.0.21.0/24, az: b, public: false}}
-- {id: users, type: common.users, name: users}
-- {id: blog-zone, type: aws.route53_zone, name: blog-zone, parent: reg-eu-west-1, props: {domain: example.com}}
-- {id: blog-cert, type: aws.res.aws_acm_certificate, name: blog-cert, parent: reg-eu-west-1}
-- {id: blog-cdn, type: aws.cloudfront_distribution, name: blog-cdn, parent: grp-global-edge}
-- {id: media-assets, type: aws.s3_bucket, name: media-assets, parent: reg-eu-west-1}
-- {id: wp-igw, type: aws.res.aws_internet_gateway, name: wp-igw, parent: vpc-wordpress}
-- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a}
-- {id: nat-b, type: aws.res.aws_nat_gateway, name: nat-b, parent: sub-public-b}
-- {id: wp-alb, type: aws.alb, name: wp-alb, parent: vpc-wordpress}
-- {id: wp-asg, type: aws.res.aws_autoscaling_group, name: wp-asg, parent: vpc-wordpress, props: {max_size: 1, min_size: 1}}
-- {id: wp-a, type: aws.ec2_instance, name: wp-a, parent: sub-web-a}
-- {id: wp-b, type: aws.ec2_instance, name: wp-b, parent: sub-web-b}
-- {id: wp-content, type: aws.res.aws_efs_file_system, name: wp-content, parent: vpc-wordpress}
-- {id: wp-cache, type: aws.res.aws_elasticache_cluster, name: wp-cache, parent: sub-data-a, props: {cluster_id: changeme}}
-- {id: wp-aurora, type: aws.res.aws_rds_cluster, name: wp-aurora, parent: sub-data-b, props: {engine: changeme}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 1]}
+- {id: grp-global-edge, type: common.group, name: global edge, parent: reg-eu-west-1, at: [2, 1]}
+- {id: vpc-wordpress, type: aws.vpc, name: wordpress, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}, at: [1, 2, 4, 1]}
+- {id: az-wordpress-a, type: aws.availability_zone, name: a, parent: vpc-wordpress, props: {zone: a}, at: [1, 2]}
+- {id: sub-public-a, type: aws.subnet, name: public-a, parent: az-wordpress-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: az-wordpress-b, type: aws.availability_zone, name: b, parent: vpc-wordpress, props: {zone: b}, at: [2, 2]}
+- {id: sub-public-b, type: aws.subnet, name: public-b, parent: az-wordpress-b, props: {cidr: 10.0.1.0/24, az: b, public: true}, at: [1, 1]}
+- {id: sub-web-a, type: aws.subnet, name: web-a, parent: az-wordpress-a, props: {cidr: 10.0.10.0/24, az: a, public: false}, at: [1, 2]}
+- {id: sub-web-b, type: aws.subnet, name: web-b, parent: az-wordpress-b, props: {cidr: 10.0.11.0/24, az: b, public: false}, at: [1, 2]}
+- {id: sub-data-a, type: aws.subnet, name: data-a, parent: az-wordpress-a, props: {cidr: 10.0.20.0/24, az: a, public: false}, at: [1, 3]}
+- {id: sub-data-b, type: aws.subnet, name: data-b, parent: az-wordpress-b, props: {cidr: 10.0.21.0/24, az: b, public: false}, at: [1, 3]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: blog-zone, type: aws.route53_zone, name: blog-zone, parent: reg-eu-west-1, props: {domain: example.com}, at: [1, 1]}
+- {id: blog-cert, type: aws.res.aws_acm_certificate, name: blog-cert, parent: reg-eu-west-1, at: [4, 1]}
+- {id: blog-cdn, type: aws.cloudfront_distribution, name: blog-cdn, parent: grp-global-edge, at: [1, 1]}
+- {id: media-assets, type: aws.s3_bucket, name: media-assets, parent: reg-eu-west-1, at: [3, 1]}
+- {id: wp-igw, type: aws.res.aws_internet_gateway, name: wp-igw, parent: vpc-wordpress, at: [1, 1]}
+- {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-public-a, at: [1, 1]}
+- {id: nat-b, type: aws.res.aws_nat_gateway, name: nat-b, parent: sub-public-b, at: [1, 1]}
+- {id: wp-alb, type: aws.alb, name: wp-alb, parent: vpc-wordpress, at: [2, 1]}
+- {id: wp-asg, type: aws.res.aws_autoscaling_group, name: wp-asg, parent: vpc-wordpress, props: {max_size: 1, min_size: 1}, at: [3, 2]}
+- {id: wp-a, type: aws.ec2_instance, name: wp-a, parent: sub-web-a, at: [1, 1]}
+- {id: wp-b, type: aws.ec2_instance, name: wp-b, parent: sub-web-b, at: [1, 1]}
+- {id: wp-content, type: aws.res.aws_efs_file_system, name: wp-content, parent: vpc-wordpress, at: [1, 3, 2, 1]}
+- {id: wp-cache, type: aws.res.aws_elasticache_cluster, name: wp-cache, parent: sub-data-a, props: {cluster_id: changeme}, at: [1, 1]}
+- {id: wp-aurora, type: aws.res.aws_rds_cluster, name: wp-aurora, parent: sub-data-b, props: {engine: changeme}, at: [1, 1]}
 edges:
 - {from: users, to: blog-zone, label: DNS, step: '1'}
 - {from: users, to: blog-cdn, label: HTTPS, step: '2'}

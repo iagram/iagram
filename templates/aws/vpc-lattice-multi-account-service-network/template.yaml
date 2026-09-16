@@ -14,30 +14,30 @@ description: A central networking account owns a VPC Lattice service network and
   its own services with target groups pointing at instances, containers, or Lambda functions. Consumers call services by their Lattice DNS names through the link-local Lattice prefix, with IAM auth policies
   on the service network and services controlling who may invoke what, independent of VPC CIDRs.
 nodes:
-- {id: acct-networking, type: aws.account, name: networking}
-- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-networking, props: {region: us-west-2}}
-- {id: acct-payments, type: aws.account, name: payments}
-- {id: reg-us-west-2-2, type: aws.region, name: us-west-2, parent: acct-payments, props: {region: us-west-2}}
-- {id: vpc-payments, type: aws.vpc, name: payments, parent: reg-us-west-2-2, props: {cidr: 10.1.0.0/16}}
-- {id: az-payments-a, type: aws.availability_zone, name: a, parent: vpc-payments, props: {zone: a}}
-- {id: sub-payments-private-a, type: aws.subnet, name: payments-private-a, parent: az-payments-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: acct-orders, type: aws.account, name: orders}
-- {id: reg-us-west-2-3, type: aws.region, name: us-west-2, parent: acct-orders, props: {region: us-west-2}}
-- {id: vpc-orders, type: aws.vpc, name: orders, parent: reg-us-west-2-3, props: {cidr: 10.1.0.0/16}}
-- {id: az-orders-a, type: aws.availability_zone, name: a, parent: vpc-orders, props: {zone: a}}
-- {id: sub-orders-private-a, type: aws.subnet, name: orders-private-a, parent: az-orders-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: corp-service-network, type: aws.res.aws_vpclattice_service_network, name: corp-service-network, parent: acct-networking, props: {name: changeme}}
-- {id: service-network-share, type: aws.res.aws_ram_resource_share, name: service-network-share, parent: acct-networking, props: {name: changeme}}
-- {id: payments-service, type: aws.res.aws_vpclattice_service, name: payments-service, parent: acct-payments, props: {name: changeme}}
-- {id: payments-targets, type: aws.res.aws_vpclattice_target_group, name: payments-targets, parent: vpc-payments, props: {name: changeme, type: changeme}}
-- {id: payments-api, type: aws.ec2_instance, name: payments-api, parent: sub-payments-private-a}
-- {id: orders-service, type: aws.res.aws_vpclattice_service, name: orders-service, parent: acct-orders, props: {name: changeme}}
-- {id: orders-handler, type: aws.lambda_function, name: orders-handler, parent: reg-us-west-2-3}
-- {id: orders-client, type: aws.ec2_instance, name: orders-client, parent: sub-orders-private-a}
-- {id: az-vpc-payments-b, type: aws.availability_zone, name: b, parent: vpc-payments, props: {zone: b}}
-- {id: sub-vpc-payments-b, type: aws.subnet, name: private-b, parent: az-vpc-payments-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
-- {id: az-vpc-orders-b, type: aws.availability_zone, name: b, parent: vpc-orders, props: {zone: b}}
-- {id: sub-vpc-orders-b, type: aws.subnet, name: private-b, parent: az-vpc-orders-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
+- {id: acct-networking, type: aws.account, name: networking, at: [2, 1, 1, 2]}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-networking, props: {region: us-west-2}, at: [1, 1]}
+- {id: acct-payments, type: aws.account, name: payments, at: [1, 1]}
+- {id: reg-us-west-2-2, type: aws.region, name: us-west-2, parent: acct-payments, props: {region: us-west-2}, at: [2, 1]}
+- {id: vpc-payments, type: aws.vpc, name: payments, parent: reg-us-west-2-2, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-payments-a, type: aws.availability_zone, name: a, parent: vpc-payments, props: {zone: a}, at: [2, 1]}
+- {id: sub-payments-private-a, type: aws.subnet, name: payments-private-a, parent: az-payments-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: acct-orders, type: aws.account, name: orders, at: [1, 2]}
+- {id: reg-us-west-2-3, type: aws.region, name: us-west-2, parent: acct-orders, props: {region: us-west-2}, at: [2, 1]}
+- {id: vpc-orders, type: aws.vpc, name: orders, parent: reg-us-west-2-3, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-orders-a, type: aws.availability_zone, name: a, parent: vpc-orders, props: {zone: a}, at: [1, 1]}
+- {id: sub-orders-private-a, type: aws.subnet, name: orders-private-a, parent: az-orders-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: corp-service-network, type: aws.res.aws_vpclattice_service_network, name: corp-service-network, parent: acct-networking, props: {name: changeme}, at: [1, 2]}
+- {id: service-network-share, type: aws.res.aws_ram_resource_share, name: service-network-share, parent: acct-networking, props: {name: changeme}, at: [1, 3]}
+- {id: payments-service, type: aws.res.aws_vpclattice_service, name: payments-service, parent: acct-payments, props: {name: changeme}, at: [1, 1]}
+- {id: payments-targets, type: aws.res.aws_vpclattice_target_group, name: payments-targets, parent: vpc-payments, props: {name: changeme, type: changeme}, at: [1, 1, 1, 2]}
+- {id: payments-api, type: aws.ec2_instance, name: payments-api, parent: sub-payments-private-a, at: [1, 1]}
+- {id: orders-service, type: aws.res.aws_vpclattice_service, name: orders-service, parent: acct-orders, props: {name: changeme}, at: [1, 1]}
+- {id: orders-handler, type: aws.lambda_function, name: orders-handler, parent: reg-us-west-2-3, at: [1, 2]}
+- {id: orders-client, type: aws.ec2_instance, name: orders-client, parent: sub-orders-private-a, at: [1, 1]}
+- {id: az-vpc-payments-b, type: aws.availability_zone, name: b, parent: vpc-payments, props: {zone: b}, at: [2, 2]}
+- {id: sub-vpc-payments-b, type: aws.subnet, name: private-b, parent: az-vpc-payments-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-orders-b, type: aws.availability_zone, name: b, parent: vpc-orders, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-orders-b, type: aws.subnet, name: private-b, parent: az-vpc-orders-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: corp-service-network, to: vpc-payments, label: vpclattice service network vpc association}
 - {from: corp-service-network, to: vpc-orders, label: vpclattice service network vpc association}

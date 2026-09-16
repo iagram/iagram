@@ -13,28 +13,28 @@ source: https://aws.amazon.com/blogs/networking-and-content-delivery/scaling-vpn
 description: Several Site-to-Site VPN connections from the same customer gateway terminate on one Transit Gateway with ECMP enabled, and each connection contributes two IPsec tunnels. With BGP advertising
   identical prefixes over every tunnel, the Transit Gateway hashes flows across all tunnels, so aggregate bandwidth scales past the single-tunnel limit while each individual flow stays bound to one tunnel.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
-- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}}
-- {id: sub-app-private-a, type: aws.subnet, name: app-private-a, parent: az-app-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: vpc-data, type: aws.vpc, name: data, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}}
-- {id: az-data-a, type: aws.availability_zone, name: a, parent: vpc-data, props: {zone: a}}
-- {id: sub-data-private-a, type: aws.subnet, name: data-private-a, parent: az-data-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
-- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}}
-- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}}
-- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
-- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}}
-- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
-- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-us-east-1-a, props: {type: changeme}}
-- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1}
-- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-app-private-a}
-- {id: data-server, type: aws.ec2_instance, name: data-server, parent: sub-data-private-a}
-- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}}
-- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
-- {id: az-vpc-data-b, type: aws.availability_zone, name: b, parent: vpc-data, props: {zone: b}}
-- {id: sub-vpc-data-b, type: aws.subnet, name: private-b, parent: az-vpc-data-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 2]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-app, type: aws.vpc, name: app, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-app-a, type: aws.availability_zone, name: a, parent: vpc-app, props: {zone: a}, at: [1, 1]}
+- {id: sub-app-private-a, type: aws.subnet, name: app-private-a, parent: az-app-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-data, type: aws.vpc, name: data, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}, at: [2, 1]}
+- {id: az-data-a, type: aws.availability_zone, name: a, parent: vpc-data, props: {zone: a}, at: [1, 1]}
+- {id: sub-data-private-a, type: aws.subnet, name: data-private-a, parent: az-data-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-reg-us-east-1, type: aws.vpc, name: main, parent: reg-us-east-1, props: {cidr: 10.200.0.0/16}, at: [3, 1]}
+- {id: az-reg-us-east-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-us-east-1, props: {zone: a}, at: [1, 1]}
+- {id: sub-reg-us-east-1-a, type: aws.subnet, name: private-a, parent: az-reg-us-east-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-reg-us-east-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-us-east-1, props: {zone: b}, at: [1, 2]}
+- {id: sub-reg-us-east-1-b, type: aws.subnet, name: private-b, parent: az-reg-us-east-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
+- {id: dc-cgw, type: aws.res.aws_customer_gateway, name: dc-cgw, parent: sub-reg-us-east-1-a, props: {type: changeme}, at: [1, 1]}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1, at: [1, 2, 3, 1]}
+- {id: app-server, type: aws.ec2_instance, name: app-server, parent: sub-app-private-a, at: [1, 1]}
+- {id: data-server, type: aws.ec2_instance, name: data-server, parent: sub-data-private-a, at: [1, 1]}
+- {id: az-vpc-app-b, type: aws.availability_zone, name: b, parent: vpc-app, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-app-b, type: aws.subnet, name: private-b, parent: az-vpc-app-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-data-b, type: aws.availability_zone, name: b, parent: vpc-data, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-data-b, type: aws.subnet, name: private-b, parent: az-vpc-data-b, props: {cidr: 10.2.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: dc-on-premises, to: dc-cgw, label: BGP router, step: '1'}
 - {from: hub-tgw, to: vpc-app, link: aws_ec2_transit_gateway_vpc_attachment}

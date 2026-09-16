@@ -13,32 +13,32 @@ source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-
 description: Spoke VPCs carry both an IPv4 CIDR and an Amazon-provided IPv6 CIDR; IPv4 default routes go to the Transit Gateway and out through NAT gateways in a central egress VPC. Because IPv6 addresses
   are globally unique and NAT is not required, each spoke keeps its own egress-only internet gateway for the "::/0" route, so IPv6 traffic leaves locally while inbound IPv6 connections remain blocked.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: vpc-egress, type: aws.vpc, name: egress, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-egress-a, type: aws.availability_zone, name: a, parent: vpc-egress, props: {zone: a}}
-- {id: sub-egress-public-a, type: aws.subnet, name: egress-public-a, parent: az-egress-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
-- {id: sub-egress-tgw-a, type: aws.subnet, name: egress-tgw-a, parent: az-egress-a, props: {cidr: 10.0.10.0/28, az: a, public: false}}
-- {id: vpc-spoke-a, type: aws.vpc, name: spoke-a, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}}
-- {id: az-spoke-a-a, type: aws.availability_zone, name: a, parent: vpc-spoke-a, props: {zone: a}}
-- {id: sub-spoke-a-private, type: aws.subnet, name: spoke-a-private, parent: az-spoke-a-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: vpc-spoke-b, type: aws.vpc, name: spoke-b, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}}
-- {id: az-spoke-b-a, type: aws.availability_zone, name: a, parent: vpc-spoke-b, props: {zone: a}}
-- {id: sub-spoke-b-private, type: aws.subnet, name: spoke-b-private, parent: az-spoke-b-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
-- {id: internet, type: common.internet, name: internet}
-- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1}
-- {id: egress-nat-a, type: aws.res.aws_nat_gateway, name: egress-nat-a, parent: sub-egress-public-a}
-- {id: egress-igw, type: aws.res.aws_internet_gateway, name: egress-igw, parent: vpc-egress}
-- {id: spoke-a-eigw, type: aws.res.aws_egress_only_internet_gateway, name: spoke-a-eigw, parent: vpc-spoke-a, props: {vpc_id: changeme}}
-- {id: spoke-b-eigw, type: aws.res.aws_egress_only_internet_gateway, name: spoke-b-eigw, parent: vpc-spoke-b, props: {vpc_id: changeme}}
-- {id: app-a, type: aws.ec2_instance, name: app-a, parent: sub-spoke-a-private}
-- {id: app-b, type: aws.ec2_instance, name: app-b, parent: sub-spoke-b-private}
-- {id: az-vpc-egress-b, type: aws.availability_zone, name: b, parent: vpc-egress, props: {zone: b}}
-- {id: sub-vpc-egress-b, type: aws.subnet, name: private-b, parent: az-vpc-egress-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
-- {id: az-vpc-spoke-a-b, type: aws.availability_zone, name: b, parent: vpc-spoke-a, props: {zone: b}}
-- {id: sub-vpc-spoke-a-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-a-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
-- {id: az-vpc-spoke-b-b, type: aws.availability_zone, name: b, parent: vpc-spoke-b, props: {zone: b}}
-- {id: sub-vpc-spoke-b-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-b-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+- {id: acct-prod, type: aws.account, name: prod, at: [2, 1]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: vpc-egress, type: aws.vpc, name: egress, parent: reg-us-east-1, props: {cidr: 10.0.0.0/16}, at: [1, 1, 1, 2]}
+- {id: az-egress-a, type: aws.availability_zone, name: a, parent: vpc-egress, props: {zone: a}, at: [2, 1]}
+- {id: sub-egress-public-a, type: aws.subnet, name: egress-public-a, parent: az-egress-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: sub-egress-tgw-a, type: aws.subnet, name: egress-tgw-a, parent: az-egress-a, props: {cidr: 10.0.10.0/28, az: a, public: false}, at: [2, 1]}
+- {id: vpc-spoke-a, type: aws.vpc, name: spoke-a, parent: reg-us-east-1, props: {cidr: 10.1.0.0/16}, at: [3, 1]}
+- {id: az-spoke-a-a, type: aws.availability_zone, name: a, parent: vpc-spoke-a, props: {zone: a}, at: [2, 1]}
+- {id: sub-spoke-a-private, type: aws.subnet, name: spoke-a-private, parent: az-spoke-a-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-spoke-b, type: aws.vpc, name: spoke-b, parent: reg-us-east-1, props: {cidr: 10.2.0.0/16}, at: [3, 2]}
+- {id: az-spoke-b-a, type: aws.availability_zone, name: a, parent: vpc-spoke-b, props: {zone: a}, at: [2, 1]}
+- {id: sub-spoke-b-private, type: aws.subnet, name: spoke-b-private, parent: az-spoke-b-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [1, 1]}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-us-east-1, at: [2, 1, 1, 2]}
+- {id: egress-nat-a, type: aws.res.aws_nat_gateway, name: egress-nat-a, parent: sub-egress-public-a, at: [1, 1]}
+- {id: egress-igw, type: aws.res.aws_internet_gateway, name: egress-igw, parent: vpc-egress, at: [1, 1, 1, 2]}
+- {id: spoke-a-eigw, type: aws.res.aws_egress_only_internet_gateway, name: spoke-a-eigw, parent: vpc-spoke-a, props: {vpc_id: changeme}, at: [1, 1]}
+- {id: spoke-b-eigw, type: aws.res.aws_egress_only_internet_gateway, name: spoke-b-eigw, parent: vpc-spoke-b, props: {vpc_id: changeme}, at: [1, 1]}
+- {id: app-a, type: aws.ec2_instance, name: app-a, parent: sub-spoke-a-private, at: [1, 1]}
+- {id: app-b, type: aws.ec2_instance, name: app-b, parent: sub-spoke-b-private, at: [1, 1]}
+- {id: az-vpc-egress-b, type: aws.availability_zone, name: b, parent: vpc-egress, props: {zone: b}, at: [2, 2]}
+- {id: sub-vpc-egress-b, type: aws.subnet, name: private-b, parent: az-vpc-egress-b, props: {cidr: 10.0.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-spoke-a-b, type: aws.availability_zone, name: b, parent: vpc-spoke-a, props: {zone: b}, at: [3, 1]}
+- {id: sub-vpc-spoke-a-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-a-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-spoke-b-b, type: aws.availability_zone, name: b, parent: vpc-spoke-b, props: {zone: b}, at: [3, 1]}
+- {id: sub-vpc-spoke-b-b, type: aws.subnet, name: private-b, parent: az-vpc-spoke-b-b, props: {cidr: 10.2.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: hub-tgw, to: vpc-spoke-a, link: aws_ec2_transit_gateway_vpc_attachment}
 - {from: hub-tgw, to: vpc-spoke-b, link: aws_ec2_transit_gateway_vpc_attachment}

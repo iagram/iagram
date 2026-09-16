@@ -14,34 +14,34 @@ description: The on-premises SD-WAN device terminates a Direct Connect transit v
   is the transport for a Connect attachment. The SD-WAN device is a Connect peer that runs GRE and BGP directly to the Transit Gateway, extending SD-WAN segmentation into AWS with higher bandwidth and the
   larger BGP prefix limit of Connect peers.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: grp-dx-location, type: common.group, name: dx-location, parent: reg-eu-west-1}
-- {id: vpc-prod, type: aws.vpc, name: prod, parent: reg-eu-west-1, props: {cidr: 10.1.0.0/16}}
-- {id: az-prod-a, type: aws.availability_zone, name: a, parent: vpc-prod, props: {zone: a}}
-- {id: sub-prod-private-a, type: aws.subnet, name: prod-private-a, parent: az-prod-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: vpc-dev, type: aws.vpc, name: dev, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}}
-- {id: az-dev-a, type: aws.availability_zone, name: a, parent: vpc-dev, props: {zone: a}}
-- {id: sub-dev-private-a, type: aws.subnet, name: dev-private-a, parent: az-dev-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
-- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}}
-- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}}
-- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}}
-- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}}
-- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}}
-- {id: sdwan-headend, type: aws.ec2_instance, name: sdwan-headend, parent: sub-reg-eu-west-1-a}
-- {id: dx-connection, type: aws.res.aws_dx_connection, name: dx-connection, parent: grp-dx-location, props: {bandwidth: changeme, location: westeurope, name: changeme}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 2]}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}, at: [1, 1]}
+- {id: grp-dx-location, type: common.group, name: dx-location, parent: reg-eu-west-1, at: [1, 4, 3, 1]}
+- {id: vpc-prod, type: aws.vpc, name: prod, parent: reg-eu-west-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
+- {id: az-prod-a, type: aws.availability_zone, name: a, parent: vpc-prod, props: {zone: a}, at: [1, 1]}
+- {id: sub-prod-private-a, type: aws.subnet, name: prod-private-a, parent: az-prod-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-dev, type: aws.vpc, name: dev, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}, at: [2, 1]}
+- {id: az-dev-a, type: aws.availability_zone, name: a, parent: vpc-dev, props: {zone: a}, at: [1, 1]}
+- {id: sub-dev-private-a, type: aws.subnet, name: dev-private-a, parent: az-dev-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-reg-eu-west-1, type: aws.vpc, name: main, parent: reg-eu-west-1, props: {cidr: 10.200.0.0/16}, at: [3, 1]}
+- {id: az-reg-eu-west-1-a, type: aws.availability_zone, name: a, parent: vpc-reg-eu-west-1, props: {zone: a}, at: [1, 1]}
+- {id: sub-reg-eu-west-1-a, type: aws.subnet, name: private-a, parent: az-reg-eu-west-1-a, props: {cidr: 10.200.0.0/24, az: a, public: false}, at: [1, 1]}
+- {id: az-reg-eu-west-1-b, type: aws.availability_zone, name: b, parent: vpc-reg-eu-west-1, props: {zone: b}, at: [1, 2]}
+- {id: sub-reg-eu-west-1-b, type: aws.subnet, name: private-b, parent: az-reg-eu-west-1-b, props: {cidr: 10.200.1.0/24, az: b, public: false}, at: [1, 1]}
+- {id: sdwan-headend, type: aws.ec2_instance, name: sdwan-headend, parent: sub-reg-eu-west-1-a, at: [1, 1]}
+- {id: dx-connection, type: aws.res.aws_dx_connection, name: dx-connection, parent: grp-dx-location, props: {bandwidth: changeme, location: westeurope, name: changeme}, at: [1, 2]}
 - {id: transit-vif, type: aws.res.aws_dx_transit_virtual_interface, name: transit-vif, parent: grp-dx-location, props: {address_family: changeme, connection_id: changeme, dx_gateway_id: changeme, name: changeme,
-    vlan: 1}}
-- {id: dx-gateway, type: aws.res.aws_dx_gateway, name: dx-gateway, parent: reg-eu-west-1, props: {amazon_side_asn: changeme, name: changeme}}
-- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-eu-west-1}
-- {id: sdwan-connect, type: aws.res.aws_ec2_transit_gateway_connect, name: sdwan-connect, parent: reg-eu-west-1, props: {transit_gateway_id: changeme, transport_attachment_id: changeme}}
-- {id: prod-app, type: aws.ec2_instance, name: prod-app, parent: sub-prod-private-a}
-- {id: dev-app, type: aws.ec2_instance, name: dev-app, parent: sub-dev-private-a}
-- {id: az-vpc-prod-b, type: aws.availability_zone, name: b, parent: vpc-prod, props: {zone: b}}
-- {id: sub-vpc-prod-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
-- {id: az-vpc-dev-b, type: aws.availability_zone, name: b, parent: vpc-dev, props: {zone: b}}
-- {id: sub-vpc-dev-b, type: aws.subnet, name: private-b, parent: az-vpc-dev-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+    vlan: 1}, at: [1, 1]}
+- {id: dx-gateway, type: aws.res.aws_dx_gateway, name: dx-gateway, parent: reg-eu-west-1, props: {amazon_side_asn: changeme, name: changeme}, at: [2, 3]}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-eu-west-1, at: [1, 2, 3, 1]}
+- {id: sdwan-connect, type: aws.res.aws_ec2_transit_gateway_connect, name: sdwan-connect, parent: reg-eu-west-1, props: {transit_gateway_id: changeme, transport_attachment_id: changeme}, at: [1, 3]}
+- {id: prod-app, type: aws.ec2_instance, name: prod-app, parent: sub-prod-private-a, at: [1, 1]}
+- {id: dev-app, type: aws.ec2_instance, name: dev-app, parent: sub-dev-private-a, at: [1, 1]}
+- {id: az-vpc-prod-b, type: aws.availability_zone, name: b, parent: vpc-prod, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-prod-b, type: aws.subnet, name: private-b, parent: az-vpc-prod-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-dev-b, type: aws.availability_zone, name: b, parent: vpc-dev, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-dev-b, type: aws.subnet, name: private-b, parent: az-vpc-dev-b, props: {cidr: 10.2.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: sdwan-headend, to: dx-connection, label: cross-connect, step: '1'}
 - {from: dx-connection, to: transit-vif, label: VLAN, step: '2'}

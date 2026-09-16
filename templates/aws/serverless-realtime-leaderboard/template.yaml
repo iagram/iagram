@@ -14,20 +14,20 @@ description: Race telemetry lands in a Kinesis data stream where a Lambda consum
   final results. DynamoDB Streams trigger a publisher Lambda that pushes updates to live leaderboards through IoT Core, and an API Gateway endpoint serves historical rankings sorted by a global secondary
   index.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}}
-- {id: grp-stream-processing, type: common.group, name: stream processing, parent: reg-us-east-1}
-- {id: grp-serving, type: common.group, name: serving, parent: reg-us-east-1}
-- {id: device, type: common.device, name: device}
-- {id: users, type: common.users, name: users}
-- {id: race-telemetry, type: aws.res.aws_kinesis_stream, name: race-telemetry, parent: grp-stream-processing, props: {name: changeme}}
-- {id: tumbling-window-aggregator, type: aws.lambda_function, name: tumbling-window-aggregator, parent: grp-stream-processing}
-- {id: final-results, type: aws.lambda_function, name: final-results, parent: grp-stream-processing}
-- {id: leaderboard-table, type: aws.dynamodb_table, name: leaderboard-table, parent: grp-serving}
-- {id: publish-updates, type: aws.lambda_function, name: publish-updates, parent: grp-serving}
-- {id: leaderboard-topic, type: aws.res.aws_iot_topic_rule, name: leaderboard-topic, parent: grp-serving, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}}
-- {id: leaderboard-api, type: aws.res.aws_api_gateway_rest_api, name: leaderboard-api, parent: grp-serving, props: {name: changeme}}
-- {id: get-leaderboard, type: aws.lambda_function, name: get-leaderboard, parent: grp-serving}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 2]}
+- {id: reg-us-east-1, type: aws.region, name: us-east-1, parent: acct-prod, props: {region: us-east-1}, at: [1, 1]}
+- {id: grp-stream-processing, type: common.group, name: stream processing, parent: reg-us-east-1, at: [1, 1]}
+- {id: grp-serving, type: common.group, name: serving, parent: reg-us-east-1, at: [1, 2]}
+- {id: device, type: common.device, name: device, at: [1, 1]}
+- {id: users, type: common.users, name: users, at: [1, 3]}
+- {id: race-telemetry, type: aws.res.aws_kinesis_stream, name: race-telemetry, parent: grp-stream-processing, props: {name: changeme}, at: [1, 1, 2, 1]}
+- {id: tumbling-window-aggregator, type: aws.lambda_function, name: tumbling-window-aggregator, parent: grp-stream-processing, at: [1, 2]}
+- {id: final-results, type: aws.lambda_function, name: final-results, parent: grp-stream-processing, at: [2, 2]}
+- {id: leaderboard-table, type: aws.dynamodb_table, name: leaderboard-table, parent: grp-serving, at: [1, 1, 2, 1]}
+- {id: publish-updates, type: aws.lambda_function, name: publish-updates, parent: grp-serving, at: [1, 2]}
+- {id: leaderboard-topic, type: aws.res.aws_iot_topic_rule, name: leaderboard-topic, parent: grp-serving, props: {enabled: true, name: changeme, sql: changeme, sql_version: changeme}, at: [1, 3]}
+- {id: leaderboard-api, type: aws.res.aws_api_gateway_rest_api, name: leaderboard-api, parent: grp-serving, props: {name: changeme}, at: [2, 3]}
+- {id: get-leaderboard, type: aws.lambda_function, name: get-leaderboard, parent: grp-serving, at: [2, 2]}
 edges:
 - {from: device, to: race-telemetry, label: competitor metrics, step: '1'}
 - {from: race-telemetry, to: tumbling-window-aggregator, step: '2', link: aws_lambda_event_source_mapping}

@@ -12,21 +12,23 @@ source: https://learn.microsoft.com/en-us/azure/architecture/reference-architect
 description: An ExpressRoute circuit at a peering location provides two redundant links between the customer's local edge routers and Microsoft Enterprise Edge routers, with BGP sessions over Azure private
   peering. An ExpressRoute virtual network gateway in the GatewaySubnet terminates the ExpressRoute connection so on-premises hosts reach workloads in the virtual network over the Microsoft global network.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-expressroute, type: azure.resource_group, name: rg-expressroute, parent: sub-connectivity, props: {location: westeurope}}
-- {id: vpc-vnet-er, type: azure.vnet, name: vnet-er, parent: rg-rg-expressroute, props: {cidr: 10.0.0.0/16}}
-- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-er, props: {cidr: 10.0.255.0/27}}
-- {id: sub-snet-workload, type: azure.subnet, name: snet-workload, parent: vpc-vnet-er, props: {cidr: 10.0.1.0/24}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1]}
+- {id: sub-connectivity, type: azure.subscription, name: connectivity, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [1, 2]}
+- {id: rg-rg-expressroute, type: azure.resource_group, name: rg-expressroute, parent: sub-connectivity, props: {location: westeurope}, at: [1, 1]}
+- {id: vpc-vnet-er, type: azure.vnet, name: vnet-er, parent: rg-rg-expressroute, props: {cidr: 10.0.0.0/16}, at: [1, 2, 2, 1]}
+- {id: sub-gatewaysubnet, type: azure.subnet, name: GatewaySubnet, parent: vpc-vnet-er, props: {cidr: 10.0.255.0/27}, at: [1, 1]}
+- {id: sub-snet-workload, type: azure.subnet, name: snet-workload, parent: vpc-vnet-er, props: {cidr: 10.0.1.0/24}, at: [1, 2]}
 - id: er-circuit
   type: azure.res.azurerm_express_route_circuit
   name: er-circuit
   parent: rg-rg-expressroute
+  at: [1, 1]
   props: {location: westeurope, name: changeme, resource_group_name: changeme, sku: {}}
 - id: er-gateway
   type: azure.res.azurerm_virtual_network_gateway
   name: er-gateway
   parent: sub-gatewaysubnet
+  at: [1, 1]
   props:
     ip_configuration: []
     location: westeurope
@@ -34,11 +36,12 @@ nodes:
     resource_group_name: changeme
     sku: changeme
     type: changeme
-- {id: vm-app-1, type: azure.virtual_machine, name: vm-app-1, parent: sub-snet-workload}
+- {id: vm-app-1, type: azure.virtual_machine, name: vm-app-1, parent: sub-snet-workload, at: [1, 1]}
 - id: vm-app-2
   type: azure.res.azurerm_windows_virtual_machine
   name: vm-app-2
   parent: sub-snet-workload
+  at: [2, 1]
   props:
     location: westeurope
     name: changeme
@@ -46,10 +49,10 @@ nodes:
     os_disk: {}
     resource_group_name: changeme
     size: changeme
-- {id: vpc-rg-rg-expressroute, type: azure.vnet, name: main, parent: rg-rg-expressroute, props: {cidr: 10.200.0.0/16}}
-- {id: nsg-workload, type: azure.network_security_group, name: nsg-workload, parent: vpc-rg-rg-expressroute}
-- {id: law-er, type: azure.res.azurerm_log_analytics_workspace, name: law-er, parent: rg-rg-expressroute, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
-- {id: nw-connection-monitor, type: azure.res.azurerm_network_watcher, name: nw-connection-monitor, parent: rg-rg-expressroute, props: {location: westeurope, name: changeme, resource_group_name: changeme}}
+- {id: vpc-rg-rg-expressroute, type: azure.vnet, name: main, parent: rg-rg-expressroute, props: {cidr: 10.200.0.0/16}, at: [3, 2]}
+- {id: nsg-workload, type: azure.network_security_group, name: nsg-workload, parent: vpc-rg-rg-expressroute, at: [1, 1]}
+- {id: law-er, type: azure.res.azurerm_log_analytics_workspace, name: law-er, parent: rg-rg-expressroute, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [2, 1]}
+- {id: nw-connection-monitor, type: azure.res.azurerm_network_watcher, name: nw-connection-monitor, parent: rg-rg-expressroute, props: {location: westeurope, name: changeme, resource_group_name: changeme}, at: [3, 1]}
 edges:
 - {from: dc-on-premises, to: er-circuit, label: primary and secondary links to MSEEs (BGP), step: '1'}
 - {from: er-circuit, to: er-gateway, label: ExpressRoute connection, step: '2'}

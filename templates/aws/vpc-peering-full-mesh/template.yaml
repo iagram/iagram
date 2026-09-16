@@ -11,29 +11,29 @@ source: https://docs.aws.amazon.com/vpc/latest/peering/peering-configurations-fu
 description: Three VPCs that need to reach each other's full CIDR blocks are peered pairwise, because VPC peering is not transitive and a hub cannot relay traffic between spokes. Each VPC's route table
   carries one route per peer CIDR pointing at the corresponding peering connection, and security groups may reference peer security groups within the same Region.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
-- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}}
-- {id: vpc-vpc-a, type: aws.vpc, name: vpc-a, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}}
-- {id: az-vpc-a-a, type: aws.availability_zone, name: a, parent: vpc-vpc-a, props: {zone: a}}
-- {id: sub-a-private, type: aws.subnet, name: a-private, parent: az-vpc-a-a, props: {cidr: 10.0.1.0/24, az: a, public: false}}
-- {id: vpc-vpc-b, type: aws.vpc, name: vpc-b, parent: reg-us-west-2, props: {cidr: 10.1.0.0/16}}
-- {id: az-vpc-b-a, type: aws.availability_zone, name: a, parent: vpc-vpc-b, props: {zone: a}}
-- {id: sub-b-private, type: aws.subnet, name: b-private, parent: az-vpc-b-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: vpc-vpc-c, type: aws.vpc, name: vpc-c, parent: reg-us-west-2, props: {cidr: 10.2.0.0/16}}
-- {id: az-vpc-c-a, type: aws.availability_zone, name: a, parent: vpc-vpc-c, props: {zone: a}}
-- {id: sub-c-private, type: aws.subnet, name: c-private, parent: az-vpc-c-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
-- {id: server-a, type: aws.ec2_instance, name: server-a, parent: sub-a-private}
-- {id: server-b, type: aws.ec2_instance, name: server-b, parent: sub-b-private}
-- {id: server-c, type: aws.ec2_instance, name: server-c, parent: sub-c-private}
-- {id: rt-a, type: aws.res.aws_route_table, name: rt-a, parent: vpc-vpc-a, props: {vpc_id: changeme}}
-- {id: rt-b, type: aws.res.aws_route_table, name: rt-b, parent: vpc-vpc-b, props: {vpc_id: changeme}}
-- {id: rt-c, type: aws.res.aws_route_table, name: rt-c, parent: vpc-vpc-c, props: {vpc_id: changeme}}
-- {id: az-vpc-vpc-a-b, type: aws.availability_zone, name: b, parent: vpc-vpc-a, props: {zone: b}}
-- {id: sub-vpc-vpc-a-b, type: aws.subnet, name: private-b, parent: az-vpc-vpc-a-b, props: {cidr: 10.0.251.0/24, az: b, public: false}}
-- {id: az-vpc-vpc-b-b, type: aws.availability_zone, name: b, parent: vpc-vpc-b, props: {zone: b}}
-- {id: sub-vpc-vpc-b-b, type: aws.subnet, name: private-b, parent: az-vpc-vpc-b-b, props: {cidr: 10.1.251.0/24, az: b, public: false}}
-- {id: az-vpc-vpc-c-b, type: aws.availability_zone, name: b, parent: vpc-vpc-c, props: {zone: b}}
-- {id: sub-vpc-vpc-c-b, type: aws.subnet, name: private-b, parent: az-vpc-vpc-c-b, props: {cidr: 10.2.251.0/24, az: b, public: false}}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
+- {id: reg-us-west-2, type: aws.region, name: us-west-2, parent: acct-prod, props: {region: us-west-2}, at: [1, 1]}
+- {id: vpc-vpc-a, type: aws.vpc, name: vpc-a, parent: reg-us-west-2, props: {cidr: 10.0.0.0/16}, at: [1, 1, 1, 2]}
+- {id: az-vpc-a-a, type: aws.availability_zone, name: a, parent: vpc-vpc-a, props: {zone: a}, at: [1, 1]}
+- {id: sub-a-private, type: aws.subnet, name: a-private, parent: az-vpc-a-a, props: {cidr: 10.0.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-vpc-b, type: aws.vpc, name: vpc-b, parent: reg-us-west-2, props: {cidr: 10.1.0.0/16}, at: [2, 1]}
+- {id: az-vpc-b-a, type: aws.availability_zone, name: a, parent: vpc-vpc-b, props: {zone: a}, at: [1, 1]}
+- {id: sub-b-private, type: aws.subnet, name: b-private, parent: az-vpc-b-a, props: {cidr: 10.1.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: vpc-vpc-c, type: aws.vpc, name: vpc-c, parent: reg-us-west-2, props: {cidr: 10.2.0.0/16}, at: [2, 2]}
+- {id: az-vpc-c-a, type: aws.availability_zone, name: a, parent: vpc-vpc-c, props: {zone: a}, at: [1, 1]}
+- {id: sub-c-private, type: aws.subnet, name: c-private, parent: az-vpc-c-a, props: {cidr: 10.2.1.0/24, az: a, public: false}, at: [1, 1]}
+- {id: server-a, type: aws.ec2_instance, name: server-a, parent: sub-a-private, at: [1, 1]}
+- {id: server-b, type: aws.ec2_instance, name: server-b, parent: sub-b-private, at: [1, 1]}
+- {id: server-c, type: aws.ec2_instance, name: server-c, parent: sub-c-private, at: [1, 1]}
+- {id: rt-a, type: aws.res.aws_route_table, name: rt-a, parent: vpc-vpc-a, props: {vpc_id: changeme}, at: [2, 1, 1, 2]}
+- {id: rt-b, type: aws.res.aws_route_table, name: rt-b, parent: vpc-vpc-b, props: {vpc_id: changeme}, at: [2, 1, 1, 2]}
+- {id: rt-c, type: aws.res.aws_route_table, name: rt-c, parent: vpc-vpc-c, props: {vpc_id: changeme}, at: [2, 1, 1, 2]}
+- {id: az-vpc-vpc-a-b, type: aws.availability_zone, name: b, parent: vpc-vpc-a, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-vpc-a-b, type: aws.subnet, name: private-b, parent: az-vpc-vpc-a-b, props: {cidr: 10.0.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-vpc-b-b, type: aws.availability_zone, name: b, parent: vpc-vpc-b, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-vpc-b-b, type: aws.subnet, name: private-b, parent: az-vpc-vpc-b-b, props: {cidr: 10.1.251.0/24, az: b, public: false}, at: [1, 1]}
+- {id: az-vpc-vpc-c-b, type: aws.availability_zone, name: b, parent: vpc-vpc-c, props: {zone: b}, at: [1, 2]}
+- {id: sub-vpc-vpc-c-b, type: aws.subnet, name: private-b, parent: az-vpc-vpc-c-b, props: {cidr: 10.2.251.0/24, az: b, public: false}, at: [1, 1]}
 edges:
 - {from: vpc-vpc-a, to: vpc-vpc-b, label: pcx-ab, link: aws_vpc_peering_connection}
 - {from: vpc-vpc-b, to: vpc-vpc-c, label: pcx-bc, link: aws_vpc_peering_connection}
