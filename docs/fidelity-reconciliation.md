@@ -11,8 +11,8 @@ rendering of that template, on three axes scored 0 to 5:
 - **clarity**: overlaps, detours, clutter.
 
 The pilot covers 12 templates (4 per cloud) and was run on 2026-09-16 with
-the grid-cell mechanism ( on template nodes, see
-): the "after" arrangement score is the rendering once
+the grid-cell mechanism (`at: [row, col]` on template nodes, see
+`docs/spec/templates.md`): the "after" arrangement score is the rendering once
 the cells read off the reference were added to the template.
 
 ## Findings
@@ -27,7 +27,7 @@ the cells read off the reference were added to the template.
    reference draws (second consumer account, app tier, node pools, on-premises
    gateway, bronze/silver/gold layers) and draw infrastructure the reference
    leaves implicit (VPC scaffolding, NAT, health checks, private endpoints).
-   Both come from the research catalogues behind .
+   Both come from the research catalogues behind `scripts/refarch/convert.py`.
 3. **Some bundled images are not the diagram.** Three AWS templates carried a
    wrong picture: a Builder Center placeholder (three-tier-web), the TGW
    Connect figure from the same whitepaper page (tgw-hub-and-spoke), and the
