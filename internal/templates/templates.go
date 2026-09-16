@@ -294,6 +294,7 @@ func Render(c *catalog.Catalog, slug string, spec *Spec) (*document.Document, er
 	}
 	sort.SliceStable(d.Nodes, func(i, j int) bool { return rank(d.Nodes[i]) < rank(d.Nodes[j]) })
 	spanReferences(c, d)
+	adoptRegion(c, d)
 	layout.Auto(c, d)
 	return d, nil
 }
@@ -450,4 +451,38 @@ func spanReferences(c *catalog.Catalog, d *document.Document) {
 		}
 	}
 	d.Edges = append(keep, add...)
+}
+
+// adoptRegion moves regional resources that a spec hung directly off an AWS
+// account into the account's only region, so the diagram shows one region
+// box holding its services instead of an empty region beside them.
+func adoptRegion(c *catalog.Catalog, d *document.Document) {
+	byID := d.Index()
+	regions := map[string][]string{} // account id -> region ids
+	for _, n := range d.Nodes {
+		if n.Type == "aws.region" && n.Parent != "" {
+			regions[n.Parent] = append(regions[n.Parent], n.ID)
+		}
+	}
+	for i := range d.Nodes {
+		n := &d.Nodes[i]
+		p := byID[n.Parent]
+		if p == nil || p.Type != "aws.account" || len(regions[p.ID]) != 1 {
+			continue
+		}
+		e, ok := c.Get(n.Type)
+		if !ok || e.Kind == catalog.KindContainer || !allowsParent(e, "aws.region") {
+			continue
+		}
+		n.Parent = regions[p.ID][0]
+	}
+}
+
+func allowsParent(e *catalog.Entry, parent string) bool {
+	for _, a := range e.AllowedParents {
+		if a == "*" || a == parent {
+			return true
+		}
+	}
+	return false
 }

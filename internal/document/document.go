@@ -59,6 +59,11 @@ type Node struct {
 	// "vehicle lookup"); Step a callout number. Both informational.
 	Caption string `json:"caption,omitempty"`
 	Step    string `json:"step,omitempty"`
+	// View picks how a container is presented: "box" (children drawn inside)
+	// or "icon" (collapsed to the service icon, children hidden, arrows
+	// re-attached to it). Empty means automatic: composite services are an
+	// icon while empty, every other container a box.
+	View string `json:"view,omitempty"`
 }
 
 // Layout is position (relative to the parent) and, for containers, size.

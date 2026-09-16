@@ -83,7 +83,7 @@ interface State {
   onEdgesChange: (changes: EdgeChange<RFEdge>[]) => void
   addNode: (type: string, parentId: string | null, position: XYPosition) => string | null
   connect: (c: Connection) => void
-  updateNode: (id: string, patch: { name?: string; props?: Record<string, unknown>; caption?: string; step?: string }) => void
+  updateNode: (id: string, patch: { name?: string; props?: Record<string, unknown>; caption?: string; step?: string; view?: 'box' | 'icon' | '' }) => void
   /** Edit an edge's label, step or style (informational fields). */
   updateEdge: (id: string, patch: { label?: string; step?: string; style?: EdgeStyle; type?: string; name?: string; props?: Record<string, unknown> }) => void
   setSteps: (steps: Step[]) => void
@@ -425,7 +425,7 @@ export const useStore = create<State>((set, get) => ({
   updateNode(id, patch) {
     if (get().isProjected()) get().materialize()
     // typing in one field coalesces into a single undo step
-    get().commit(`update:${id}:${patch.name !== undefined ? 'name' : patch.caption !== undefined ? 'caption' : patch.step !== undefined ? 'step' : Object.keys(patch.props ?? {}).join(',')}`)
+    get().commit(`update:${id}:${patch.name !== undefined ? 'name' : patch.caption !== undefined ? 'caption' : patch.step !== undefined ? 'step' : 'view' in patch ? 'view' : Object.keys(patch.props ?? {}).join(',')}`)
     set({
       nodes: get().nodes.map((n) =>
         n.id === id
@@ -437,6 +437,7 @@ export const useStore = create<State>((set, get) => ({
                 ...(patch.props ? { props: patch.props } : {}),
                 ...(patch.caption !== undefined ? { caption: patch.caption || undefined } : {}),
                 ...(patch.step !== undefined ? { step: patch.step || undefined } : {}),
+                ...('view' in patch ? { view: patch.view || undefined } : {}),
               },
             }
           : n,

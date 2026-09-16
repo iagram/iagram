@@ -227,7 +227,23 @@ func (l *layouter) entry(n *document.Node) *catalog.Entry {
 
 func (l *layouter) isContainer(n *document.Node) bool {
 	e := l.entry(n)
-	return e != nil && e.Kind == catalog.KindContainer
+	return e != nil && e.Kind == catalog.KindContainer && !l.collapsed(n)
+}
+
+// collapsed reports a composite service (a cluster) with nothing inside: drawn
+// and placed as a plain icon.
+func (l *layouter) collapsed(n *document.Node) bool {
+	e := l.entry(n)
+	if e == nil || e.Kind != catalog.KindContainer {
+		return false
+	}
+	switch n.View {
+	case "icon":
+		return true
+	case "box":
+		return false
+	}
+	return e.Composite && len(l.children[n.ID]) == 0
 }
 
 func (l *layouter) isZone(n *document.Node) bool {
@@ -241,7 +257,7 @@ func (l *layouter) isActor(n *document.Node) bool {
 
 // size arranges n's children (recursively) and returns n's size.
 func (l *layouter) size(n *document.Node) (float64, float64) {
-	if !l.isContainer(n) {
+	if !l.isContainer(n) || l.collapsed(n) {
 		n.Layout.W, n.Layout.H = 0, 0
 		return leafW, leafH
 	}
@@ -250,7 +266,9 @@ func (l *layouter) size(n *document.Node) (float64, float64) {
 		if !l.o.ResizeContainers && n.Layout.W > 0 {
 			return n.Layout.W, n.Layout.H
 		}
-		if !l.isZone(n) && !strings.HasPrefix(n.Type, "common.") {
+		if !strings.HasPrefix(n.Type, "common.") {
+			// an empty box (a cluster without nodes, a region or subnet with
+			// nothing drawn in it) is a header-only card
 			n.Layout.W, n.Layout.H = compactW, compactH
 			return compactW, compactH
 		}

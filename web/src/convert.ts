@@ -11,6 +11,7 @@ export interface NodeData extends Record<string, unknown> {
   outputs?: Record<string, unknown>
   z?: number
   caption?: string
+  view?: 'box' | 'icon'
   step?: string
 }
 
@@ -72,7 +73,7 @@ export function makeNode(rules: Rules, n: DocNode): RFNode {
     id: n.id,
     type: container ? 'container' : 'resource',
     position: { x: n.layout.x, y: n.layout.y },
-    data: { type: n.type, name: n.name, props: n.props ?? {}, outputs: n.outputs, z: n.layout.z, caption: n.caption, step: n.step },
+    data: { type: n.type, name: n.name, props: n.props ?? {}, outputs: n.outputs, z: n.layout.z, caption: n.caption, step: n.step, view: n.view },
     parentId: n.parent || undefined,
     style: { width: w, height: h },
     zIndex: zIndexFor(container, n.layout.z),
@@ -144,6 +145,7 @@ export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[], steps
         props: n.data.props,
         ...(n.data.outputs && Object.keys(n.data.outputs).length ? { outputs: n.data.outputs } : {}),
         ...(n.data.caption ? { caption: n.data.caption } : {}),
+        ...(n.data.view ? { view: n.data.view } : {}),
         ...(n.data.step ? { step: n.data.step } : {}),
         layout: {
           x: round(n.position.x),

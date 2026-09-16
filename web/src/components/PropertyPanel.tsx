@@ -174,6 +174,7 @@ export function PropertyPanel() {
   }
 
   const entry = rules.entry(node.data.type)
+  const childCount = useStore.getState().nodes.filter((n) => n.parentId === node.id).length
   const schema: JSONSchema = entry?.props ?? {}
   const required = new Set(schema.required ?? [])
   const mine = problems.filter((p) => p.node === selectedId)
@@ -205,6 +206,21 @@ export function PropertyPanel() {
         <input value={node.data.name} onChange={(e) => updateNode(node.id, { name: e.target.value })} />
         <FieldProblems problems={byField.name} />
       </label>
+      {entry?.kind === 'container' && !entry.span && (
+        <label className="field">
+          <span>Presentation</span>
+          <select value={node.data.view ?? ''} onChange={(e) => updateNode(node.id, { view: e.target.value as 'box' | 'icon' | '' })}>
+            <option value="">{entry.composite ? 'Automatic (icon while empty, box once filled)' : 'Automatic (box)'}</option>
+            <option value="box">Box: elements drawn inside</option>
+            <option value="icon">Icon: collapsed, elements inside hidden</option>
+          </select>
+          <small>
+            {childCount > 0
+              ? `${childCount} element${childCount > 1 ? 's' : ''} inside. Collapse to the icon to simplify the diagram; arrows re-attach to it.`
+              : 'Nothing inside yet.'}
+          </small>
+        </label>
+      )}
       <details className="section">
         <summary>Annotation</summary>
         <label className="field">

@@ -62,6 +62,9 @@ type Entry struct {
 	Link bool `yaml:"-" json:"link,omitempty"`
 	// Span marks a spanning group: a band across containers (Auto Scaling group).
 	Span *Span `yaml:"-" json:"span,omitempty"`
+	// Composite containers are services (a Kubernetes cluster) drawn as a
+	// plain icon until components are placed inside them.
+	Composite bool `yaml:"composite,omitempty" json:"composite,omitempty"`
 }
 
 // Size is the default canvas size of a node.

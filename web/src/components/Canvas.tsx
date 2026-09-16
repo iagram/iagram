@@ -79,11 +79,43 @@ export function Canvas() {
   // are configured inside their parent's panel, never drawn.
   const sourceNodes = projected ? projection.nodes : nodes
   const sourceEdges = projected ? projection.edges : edges
-  const visibleNodes = useMemo(
-    () => sourceNodes.filter((n) => [activeProvider, COMMON].includes(n.data.type.split('.')[0]) && !rules?.entry(n.data.type)?.attachment),
+  // Collapsed containers: shown as the service icon (view "icon", or a
+  // composite with nothing inside); everything inside them is hidden and
+  // arrows to hidden elements re-attach to the icon.
+  const collapsedIds = useMemo(() => {
+    const parents = new Set(sourceNodes.map((n) => n.parentId).filter(Boolean))
+    const out = new Set<string>()
+    for (const n of sourceNodes) {
+      if (n.type !== 'container') continue
+      const v = n.data.view
+      if (v === 'icon' || (v !== 'box' && rules?.entry(n.data.type)?.composite && !parents.has(n.id))) out.add(n.id)
+    }
+    return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sourceNodes, activeProvider, rules, catalogVersion],
+  }, [sourceNodes, rules, catalogVersion])
+  /** The element an arrow end is drawn at: itself, or the collapsed ancestor hiding it. */
+  const shownAs = useCallback(
+    (id: string): string | null => {
+      const byId = new Map(sourceNodes.map((n) => [n.id, n]))
+      let shown: string | null = id
+      let cur = byId.get(id)
+      const seen = new Set<string>()
+      while (cur?.parentId && !seen.has(cur.id)) {
+        seen.add(cur.id)
+        if (collapsedIds.has(cur.parentId)) shown = cur.parentId
+        cur = byId.get(cur.parentId)
+      }
+      return shown
+    },
+    [sourceNodes, collapsedIds],
   )
+  const visibleNodes = useMemo(() => {
+    return sourceNodes
+      .filter((n) => [activeProvider, COMMON].includes(n.data.type.split('.')[0]) && !rules?.entry(n.data.type)?.attachment)
+      .filter((n) => shownAs(n.id) === n.id)
+      .map((n) => (collapsedIds.has(n.id) ? { ...n, style: { ...n.style, width: LEAF_W, height: LEAF_H }, data: { ...n.data, collapsed: true } } : n))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceNodes, activeProvider, rules, catalogVersion, collapsedIds, shownAs])
   const visibleIds = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes])
   useEffect(() => {
     const t = setTimeout(() => void fitView({ padding: 0.1, duration: 200 }), 30)
@@ -171,6 +203,7 @@ export function Canvas() {
         void ensureEntry(type).then((e) => {
           if (!e) return
           const parent = containerAt(point0)
+          if (parent?.data.view === 'icon') useStore.getState().updateNode(parent.id, { view: 'box' }) // dropping inside opens the box
           const size = { w: LEAF_W, h: LEAF_H }
           let pos = { x: point0.x - size.w / 2, y: point0.y - size.h / 2 }
           if (parent) {
@@ -183,6 +216,7 @@ export function Canvas() {
       }
       const point = screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
       const parent = containerAt(point)
+      if (parent?.data.view === 'icon') useStore.getState().updateNode(parent.id, { view: 'box' }) // dropping inside opens the box
       const size = entry.kind === 'container' ? entry.size ?? { w: 400, h: 300 } : { w: LEAF_W, h: LEAF_H }
       // Centre the new element on the cursor, relative to its parent.
       let pos = { x: point.x - size.w / 2, y: point.y - size.h / 2 }
@@ -230,6 +264,7 @@ export function Canvas() {
         if (!r) continue
         const centre = { x: r.x + r.w / 2, y: r.y + r.h / 2 }
         const target = containerAt(centre, subtree(n.id))
+        if (target?.data.view === 'icon') useStore.getState().updateNode(target.id, { view: 'box' })
         const targetId = target?.id ?? null
         if (targetId === (n.parentId ?? null)) continue // same parent: a plain move
         const targetType = target ? logicalParentType(target.id) : ROOT
@@ -269,11 +304,17 @@ export function Canvas() {
   const styledEdges = useMemo(
     () =>
       sourceEdges
-        .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
         // A component's binding to its own box is containment, not an arrow.
         .filter((e) => !(e.data?.kind === 'references' && sourceNodes.find((n) => n.id === e.source)?.parentId === e.target))
         // A band's coverage of the containers under it is drawn by position, not arrows.
         .filter((e) => !(e.data?.kind === 'references' && rules?.entry(sourceNodes.find((n) => n.id === e.source)?.data.type ?? '')?.span?.attr === e.data.attr))
+        // Arrows into a collapsed container attach to its icon; arrows inside it disappear with it.
+        .map((e) => {
+          const source = shownAs(e.source) ?? e.source
+          const target = shownAs(e.target) ?? e.target
+          return source === e.source && target === e.target ? e : { ...e, source, target }
+        })
+        .filter((e) => e.source !== e.target && visibleIds.has(e.source) && visibleIds.has(e.target))
         .map((e) => {
           const visible = showLabels || e.id === hoveredEdgeId || e.id === selectedEdgeId
           let ports: { sourceHandle?: string; targetHandle?: string } = {}
@@ -287,7 +328,7 @@ export function Canvas() {
           }
           return { ...e, ...ports, data: e.data ? { ...e.data, showLabel: visible } : e.data, className: badEdges.has(e.id) ? 'edge-error' : undefined }
         }),
-    [sourceEdges, sourceNodes, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds, rules, absRect],
+    [sourceEdges, sourceNodes, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds, rules, absRect, shownAs],
   )
 
   return (

@@ -35,6 +35,25 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
   const dropState = dragging && rules ? (rules.canContain(data.type, dragging) ? 'valid' : 'invalid') : ''
 
   const style = useMemo(() => styleOf(entry, data.props), [entry, data.props])
+  if (data.collapsed) {
+    // Composite service with nothing inside: the icon look of a resource; it
+    // becomes a box as soon as a component is dropped in.
+    return (
+      <div className={`node resource composite ${planClass} ${targetState} ${dropState} ${selected ? 'selected' : ''}`} data-type={data.type} data-provider={data.type.split('.')[0]} title="Drop components inside to open the box">
+        <Handle id="t" type="source" position={Position.Top} />
+        <Handle id="r" type="source" position={Position.Right} />
+        <Handle id="b" type="source" position={Position.Bottom} />
+        <Handle id="l" type="source" position={Position.Left} />
+        {data.step && <span className="step-badge">{data.step}</span>}
+        {icon && <img src={`/icons/${icon}`} alt="" draggable={false} />}
+        <div className="name" title={data.name}>
+          {data.name}
+        </div>
+        <div className="label">{captionOf(entry, data) ? <i>{captionOf(entry, data)}</i> : entry?.label ?? data.type}</div>
+        <NodeBadge id={id} />
+      </div>
+    )
+  }
   const css: Record<string, string> = {}
   if (style?.border) {
     css['--box-border'] = style.border

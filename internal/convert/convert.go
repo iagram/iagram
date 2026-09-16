@@ -184,7 +184,7 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 			rep.Dropped = append(rep.Dropped, fmt.Sprintf("%s: target %s missing from catalog", n.Name, targetType))
 			continue
 		}
-		tn := document.Node{ID: n.ID, Type: targetType, Name: n.Name, Props: map[string]any{}, Layout: n.Layout, Caption: n.Caption, Step: n.Step}
+		tn := document.Node{ID: n.ID, Type: targetType, Name: n.Name, Props: map[string]any{}, Layout: n.Layout, Caption: n.Caption, Step: n.Step, View: n.View}
 		// defaults first, then mapped properties
 		if props, ok := te.Props["properties"].(map[string]any); ok {
 			for k, v := range props {

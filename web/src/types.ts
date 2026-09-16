@@ -40,6 +40,8 @@ export interface Entry {
   component?: boolean
   link?: boolean
   /** spanning group: a band across containers; covered containers fill span.attr */
+  /** a service drawn as an icon until components are placed inside it */
+  composite?: boolean
   span?: Span
   transparent?: boolean
   id: string
@@ -126,6 +128,8 @@ export interface DocNode {
   layout: Layout
   outputs?: Record<string, unknown>
   /** free second line under the name; informational */
+  /** container presentation: box (children inside) or icon (collapsed); empty = automatic */
+  view?: 'box' | 'icon'
   caption?: string
   /** callout number of the walkthrough ("1", "9a"); informational */
   step?: string

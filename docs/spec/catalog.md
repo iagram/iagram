@@ -335,6 +335,10 @@ Rules that make them cloud-neutral:
   inside it are validated, wired (`inputs_from_parent`) and generated as if
   they were placed in the container's own parent: a subnet in a group in a
   VPC is a subnet of that VPC.
+- A **composite** container (`composite: true`, the Kubernetes clusters) is a
+  service that may hold components: it is drawn and laid out as a plain icon
+  while nothing is inside it, and opens into a box as soon as a component is
+  dropped in, the way the vendor diagrams show a bare cluster.
 - An edge with an actor or note at either end is a `flow` edge: drawn as an
   arrow, sets no Terraform input, always valid.
 - The generator ignores `common.*` nodes silently; `iagram convert` and the
