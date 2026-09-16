@@ -1,10 +1,10 @@
+import { useState } from 'react'
 import { useStore } from '../store'
 import { MenuBar } from './MenuBar'
 
 export function Toolbar() {
   const setShowGallery = useStore((s) => s.setShowGallery)
   const mirror = useStore((s) => s.mirror)
-  const autoArrange = useStore((s) => s.autoArrange)
   const setMirror = useStore((s) => s.setMirror)
   const dirty = useStore((s) => s.dirty)
   const saving = useStore((s) => s.saving)
@@ -25,24 +25,28 @@ export function Toolbar() {
   const running = job?.status === 'running'
   const canApply = !!plan && !planStale && plan.changes && !running && !dirty
 
+  const [showMenu, setShowMenu] = useState(false)
+
   const errors = problems.filter((p) => p.level === 'error').length
   const warnings = problems.length - errors
 
   return (
     <header className="toolbar">
-      <button className="brand" title="Home: reference architectures" onClick={() => setShowGallery(true)}>
-        iagram
-      </button>
-      <MenuBar />
-      <span className="doc">
-        {docName || 'iagram.iad'}
-        {dirty && <i title="unsaved changes"> ●</i>}
-      </span>
-
-      <button onClick={() => void autoArrange('LR')} title="Auto-arrange the diagram, or the selected container (⌘⇧L)">
-        Arrange
-      </button>
+      <div className="group left">
+        <button className="brand" title="Home: reference architectures" onClick={() => setShowGallery(true)}>
+          iagram
+        </button>
+        <button className={`hamburger ${showMenu ? 'on' : ''}`} onClick={() => setShowMenu((v) => !v)} title={showMenu ? 'Hide the menu bar' : 'Show the menu bar'} aria-label="Menu" aria-expanded={showMenu}>
+          ☰
+        </button>
+        {showMenu && <MenuBar />}
+        <span className="doc">
+          {docName || 'iagram.iad'}
+          {dirty && <i title="unsaved changes"> ●</i>}
+        </span>
+      </div>
       <span className="spacer" />
+      <div className="group right">
       <label className="mirror-toggle" title={mirror ? 'Mirror on: other clouds show the live equivalence of the tab you draw on; Plan and Apply run the source.' : 'Mirror off: independent canvases in one file; Plan and Apply cover all of them.'}>
         <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} /> mirror clouds
       </label>
@@ -77,6 +81,7 @@ export function Toolbar() {
       <button className={`apply ${canApply ? 'ready' : ''} ${plan?.destroy ? 'destroy' : ''}`} onClick={() => setConfirmApply(true)} disabled={!canApply} title={!plan ? 'Plan first' : planStale || dirty ? 'Diagram changed; plan again' : !plan.changes ? 'Nothing to apply' : 'Apply this plan'}>
         {running && job?.kind === 'apply' ? (plan?.destroy ? 'Destroying…' : 'Applying…') : plan?.destroy ? 'Destroy' : 'Apply'}
       </button>
+      </div>
     </header>
   )
 }

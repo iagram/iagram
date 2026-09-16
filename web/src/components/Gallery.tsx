@@ -48,21 +48,6 @@ export function Gallery() {
   const [provider, setProvider] = useState<string>('all')
   const [category, setCategory] = useState<string>('all')
   const [q, setQ] = useState('')
-  const [refImages, setRefImages] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('iagram.refimages') !== '0'
-    } catch {
-      return true
-    }
-  })
-  const toggleRefImages = (v: boolean) => {
-    setRefImages(v)
-    try {
-      localStorage.setItem('iagram.refimages', v ? '1' : '0')
-    } catch {
-      /* private mode */
-    }
-  }
   const PAGE = 48
   const [limit, setLimit] = useState(PAGE)
   useEffect(() => {
@@ -117,10 +102,6 @@ export function Gallery() {
           ))}
         </div>
         <input className="search" type="search" placeholder="Search architectures, services, tags…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <label className="field check refimages" title="Show the vendor's original diagram (bundled with iagram, credited on the card) instead of the generated miniature.">
-          <input type="checkbox" checked={refImages} onChange={(e) => toggleRefImages(e.target.checked)} />
-          <span>Original diagrams</span>
-        </label>
       </div>
       <div className="gallery-chips">
         <button className={category === 'all' ? 'chip active' : 'chip'} onClick={() => setCategory('all')}>
@@ -135,18 +116,9 @@ export function Gallery() {
       {!templates && <p className="muted gallery-empty">Loading…</p>}
       {templates && list.length === 0 && <p className="muted gallery-empty">No architecture matches.</p>}
       <div className="gallery-grid">
-        {!q && category === 'all' && (
-          <article className="card new" onClick={newIad} title="Start from a blank canvas">
-            <div className="preview plus">+</div>
-            <div className="card-body">
-              <h3>New IaD</h3>
-              <p>Start from a blank canvas: pick a cloud tab, drag elements from the palette, connect them, plan.</p>
-            </div>
-          </article>
-        )}
         {list.slice(0, limit).map((t) => (
           <article key={t.id} className="card" onClick={() => void useTemplate(t)} title="Open a copy in the editor (the reference architecture itself is never modified)">
-            <CardImage t={t} useRef={refImages} />
+            <CardImage t={t} />
             <div className="card-body">
               <div className="card-top">
                 <span className={`pill ${t.provider}`}>{PROVIDER_LABEL[t.provider] ?? t.provider}</span>
@@ -176,9 +148,9 @@ export function Gallery() {
 }
 
 /** The original vendor diagram when available and enabled, else the generated miniature. */
-function CardImage({ t, useRef }: { t: TemplateItem; useRef: boolean }) {
+function CardImage({ t }: { t: TemplateItem }) {
   const [failed, setFailed] = useState(false)
-  if (useRef && t.image && !failed) {
+  if (t.image && !failed) {
     let host = ''
     try {
       host = new URL(t.image_source ?? t.source).hostname

@@ -44,6 +44,7 @@ export function Canvas() {
   const theme = useStore((s) => s.theme)
   const showLabels = useStore((s) => s.showLabels)
   const cardStyle = useStore((s) => s.cardStyle)
+  const handMode = useStore((s) => s.handMode)
   const selectedEdgeId = useStore((s) => s.selectedEdgeId)
   const hoveredEdgeId = useStore((s) => s.hoveredEdgeId)
   const selectEdge = useStore((s) => s.selectEdge)
@@ -281,7 +282,7 @@ export function Canvas() {
   )
 
   return (
-    <div className={`canvas ${cardStyle ? 'cards' : 'icons'}`} onDrop={onDrop} onDragOver={onDragOver}>
+    <div className={`canvas ${cardStyle ? 'cards' : 'icons'} ${handMode ? 'hand' : 'pointer'}`} onDrop={onDrop} onDragOver={onDragOver}>
       <ReactFlow<RFNode, RFEdge>
         nodes={visibleNodes}
         edges={styledEdges}
@@ -294,7 +295,8 @@ export function Canvas() {
         onConnectEnd={() => setConnectingFrom(null)}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
-        panOnDrag
+        panOnDrag={handMode ? true : [1, 2]}
+        selectionOnDrag={!handMode}
         connectionMode={ConnectionMode.Loose}
         selectionKeyCode="Shift"
         multiSelectionKeyCode={['Meta', 'Control']}

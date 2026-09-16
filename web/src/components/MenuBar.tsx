@@ -3,6 +3,7 @@ import { getNodesBounds, getViewportForBounds, useReactFlow } from '@xyflow/reac
 import { toPng, toSvg } from 'html-to-image'
 import { api } from '../api'
 import { useStore } from '../store'
+import { DEFAULT_LAYOUT } from '../types'
 import type { Document } from '../types'
 
 interface Item {
@@ -188,13 +189,17 @@ export function MenuBar() {
       { label: 'Dark theme', checked: s.theme === 'dark', onClick: () => s.setTheme(s.theme === 'dark' ? 'light' : 'dark') },
     ],
     Arrange: [
-      { label: 'Auto-arrange, left to right', shortcut: '⌘⇧L', onClick: () => void s.autoArrange('LR'), disabled: s.nodes.length === 0 },
-      { label: 'Auto-arrange, top to bottom', onClick: () => void s.autoArrange('TB'), disabled: s.nodes.length === 0 },
+      { label: 'Horizontal flow…', shortcut: '⌘⇧L', onClick: () => s.setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'flow', dir: 'LR' }), disabled: s.nodes.length === 0 },
+      { label: 'Vertical flow…', onClick: () => s.setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'flow', dir: 'TB' }), disabled: s.nodes.length === 0 },
       { sep: true },
-      { label: 'Quick flow, horizontal', onClick: () => s.arrange('flow-h'), disabled: s.nodes.length === 0 },
-      { label: 'Quick flow, vertical', onClick: () => s.arrange('flow-v'), disabled: s.nodes.length === 0 },
-      { label: 'Grid', onClick: () => s.arrange('grid'), disabled: s.nodes.length === 0 },
-      { label: 'Circle', onClick: () => s.arrange('circle'), disabled: s.nodes.length === 0 },
+      { label: 'Horizontal tree…', onClick: () => s.setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'tree', dir: 'LR' }), disabled: s.nodes.length === 0 },
+      { label: 'Vertical tree…', onClick: () => s.setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'tree', dir: 'TB' }), disabled: s.nodes.length === 0 },
+      { label: 'Radial tree…', onClick: () => s.setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'radial' }), disabled: s.nodes.length === 0 },
+      { sep: true },
+      { label: 'Organic…', onClick: () => s.setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'organic' }), disabled: s.nodes.length === 0 },
+      { label: 'Circle…', onClick: () => s.setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'circle' }), disabled: s.nodes.length === 0 },
+      { label: 'Org chart…', onClick: () => s.setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'orgchart', dir: 'TB' }), disabled: s.nodes.length === 0 },
+      { label: 'Grid…', onClick: () => s.setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'grid' }), disabled: s.nodes.length === 0 },
       { sep: true },
       { label: 'Fit diagram', shortcut: '⇧1', onClick: () => void fitView({ padding: 0.1 }) },
     ],

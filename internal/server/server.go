@@ -94,23 +94,28 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// layoutDoc lays the posted document out (whole diagram, or the subtree under
-// ?root=<node id>) in the reference style and returns it.
+// layoutDoc arranges the posted document (whole diagram, or the subtree under
+// root) with the given options and returns it.
 func (s *Server) layoutDoc(w http.ResponseWriter, r *http.Request) {
-	var d document.Document
-	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+	var req struct {
+		Document document.Document `json:"document"`
+		Options  layout.Options    `json:"options"`
+		Root     string            `json:"root"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	dir := layout.LeftToRight
-	if r.URL.Query().Get("dir") == "TB" {
-		dir = layout.TopToBottom
+	d := req.Document
+	o := req.Options
+	if o.Algo == "" {
+		o = layout.Defaults()
 	}
-	if root := r.URL.Query().Get("root"); root != "" {
-		// Lay out only the subtree: run on a copy holding the root's descendants,
-		// then copy positions back (the root keeps its own place).
+	if req.Root != "" {
+		// Arrange only the subtree: run on a copy holding the root's
+		// descendants, then copy positions back (the root keeps its place).
 		sub := document.New(d.Name)
-		inside := map[string]bool{root: true}
+		inside := map[string]bool{req.Root: true}
 		for grew := true; grew; {
 			grew = false
 			for _, n := range d.Nodes {
@@ -130,24 +135,18 @@ func (s *Server) layoutDoc(w http.ResponseWriter, r *http.Request) {
 				sub.Edges = append(sub.Edges, e)
 			}
 		}
-		rootPos := map[string][2]float64{}
-		for _, n := range d.Nodes {
-			if n.ID == root {
-				rootPos[root] = [2]float64{n.Layout.X, n.Layout.Y}
-			}
-		}
-		layout.AutoWith(s.Catalog, sub, dir)
+		layout.Arrange(s.Catalog, sub, o)
 		byID := sub.Index()
 		for i := range d.Nodes {
 			if m, ok := byID[d.Nodes[i].ID]; ok {
-				if d.Nodes[i].ID == root {
-					m.Layout.X, m.Layout.Y = rootPos[root][0], rootPos[root][1]
+				if d.Nodes[i].ID == req.Root {
+					m.Layout.X, m.Layout.Y = d.Nodes[i].Layout.X, d.Nodes[i].Layout.Y
 				}
 				d.Nodes[i].Layout = m.Layout
 			}
 		}
 	} else {
-		layout.AutoWith(s.Catalog, &d, dir)
+		layout.Arrange(s.Catalog, &d, o)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"document": d})
 }

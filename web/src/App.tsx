@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
-import { useStore } from './store'
+import { pathShowsGallery, useStore } from './store'
 import { Palette } from './components/Palette'
 import { Canvas } from './components/Canvas'
 import { PropertyPanel } from './components/PropertyPanel'
@@ -8,11 +8,16 @@ import { Toolbar } from './components/Toolbar'
 import { ProblemsBar } from './components/ProblemsBar'
 import { LogDrawer } from './components/LogDrawer'
 import { Gallery } from './components/Gallery'
+import { DEFAULT_LAYOUT } from './types'
+import { ToolRail } from './components/ToolRail'
+import { ArrangeDialog } from './components/ArrangeDialog'
 import { ConfirmApply } from './components/ConfirmApply'
 import { InfoModals } from './components/InfoModals'
 
 export function App() {
   const load = useStore((s) => s.load)
+  const showPalette = useStore((s) => s.showPalette)
+  const showInspector = useStore((s) => s.showInspector)
   const save = useStore((s) => s.save)
   const error = useStore((s) => s.error)
   const toast = useStore((s) => s.toast)
@@ -42,19 +47,30 @@ export function App() {
       const prov = params.get('provider')
       if (prov) useStore.getState().setActiveProvider(prov)
       if (params.get('legend') === '1') useStore.getState().setShowLegend(true)
-      if (params.get('gallery') === '1') useStore.getState().setShowGallery(true)
       const m = /select=([^&]+)/.exec(location.hash)
       if (m) useStore.getState().requestSelect(decodeURIComponent(m[1]))
     })
   }, [load])
 
   useEffect(() => {
+    // Browser back/forward between "/" (gallery) and "/editor" (canvas).
+    const onPop = () => useStore.getState().setShowGallery(pathShowsGallery(), { silent: true })
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       const k = e.key.toLowerCase()
+      const typing = (e.target as HTMLElement)?.closest('input, textarea, select, [contenteditable]')
+      if (!mod && !typing && (k === 'v' || k === 'h')) {
+        useStore.getState().setHandMode(k === 'h')
+        return
+      }
       if (mod && e.shiftKey && k === 'l') {
         e.preventDefault()
-        void useStore.getState().autoArrange('LR')
+        useStore.getState().setArrangeDialog({ ...DEFAULT_LAYOUT, algo: 'flow', dir: 'LR' })
         return
       }
       const inField = (e.target as HTMLElement)?.closest('input, select, textarea')
@@ -125,13 +141,15 @@ export function App() {
       <div className="app">
         <Toolbar />
         <div className="body">
-          <Palette />
+          <ToolRail />
+          {showPalette && <Palette />}
           <div className="center">
             <Canvas />
           </div>
-          <PropertyPanel />
+          {showInspector && <PropertyPanel />}
         </div>
         <Gallery />
+        <ArrangeDialog />
         <LogDrawer />
         <ConfirmApply />
         <InfoModals />

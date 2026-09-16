@@ -13,9 +13,8 @@ import { Rules } from './rules'
 import { fromDocument, makeEdge, withMarkers, makeNode, newId, toDocument, zIndexFor, type RFEdge, type RFNode } from './convert'
 import type { Document } from './types'
 import { rfStore } from './rf'
-import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, EdgeStyle, Entry, Family, GeneratedSummary, Job, PlanResult, Problem, Step, TemplateItem } from './types'
+import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, EdgeStyle, Entry, Family, GeneratedSummary, Job, PlanResult, Problem, Step, TemplateItem, LayoutOptions } from './types'
 import { COMMON, ROOT } from './types'
-import { arrange as arrangeNodes, type Algo } from './layout'
 
 interface State {
   catalog: Catalog | null
@@ -26,6 +25,10 @@ interface State {
   showLegend: boolean
   /** Draw elements as white cards (legacy look) instead of bare icons with a label. */
   cardStyle: boolean
+  showPalette: boolean
+  showInspector: boolean
+  /** hand: drag the background to pan; otherwise drag selects */
+  handMode: boolean
   /** The reference-architecture gallery (front page). */
   showGallery: boolean
   templates: TemplateItem[] | null
@@ -83,12 +86,17 @@ interface State {
   updateEdge: (id: string, patch: { label?: string; step?: string; style?: EdgeStyle; type?: string; name?: string; props?: Record<string, unknown> }) => void
   setSteps: (steps: Step[]) => void
   /** Lay the diagram out (or the selected container's contents) with an algorithm. */
-  arrange: (algo: Algo) => void
-  /** Reference-style hierarchical layout by the server engine (whole diagram or selected container). */
-  autoArrange: (dir: 'LR' | 'TB') => Promise<void>
+  /** Arrange dialog: null closed, else the options being edited. */
+  arrangeDialog: LayoutOptions | null
+  setArrangeDialog: (o: LayoutOptions | null) => void
+  /** Run a layout algorithm (whole diagram or the selected container) on the server engine. */
+  autoArrange: (o: LayoutOptions) => Promise<void>
   setShowLegend: (v: boolean) => void
   setCardStyle: (v: boolean) => void
-  setShowGallery: (v: boolean) => void
+  setShowPalette: (v: boolean) => void
+  setShowInspector: (v: boolean) => void
+  setHandMode: (v: boolean) => void
+  setShowGallery: (v: boolean, opts?: { silent?: boolean }) => void
   loadTemplates: () => Promise<void>
   /** Open a reference architecture in the editor (replaces the unsaved canvas after confirmation). */
   useTemplate: (t: TemplateItem) => Promise<void>
@@ -205,6 +213,25 @@ let lastCommitAt = 0
 
 let validateTimer: ReturnType<typeof setTimeout> | undefined
 
+/** URL routing: the gallery (home) lives at "/", the canvas at "/editor".
+ *  "?gallery=0|1" is still honoured for old deep links. */
+export const EDITOR_PATH = '/editor'
+export function pathShowsGallery(): boolean {
+  const q = new URLSearchParams(location.search).get('gallery')
+  if (q === '0') return false
+  if (q === '1') return true
+  return !location.pathname.startsWith(EDITOR_PATH)
+}
+function pushPath(gallery: boolean) {
+  const want = gallery ? '/' : EDITOR_PATH
+  const params = new URLSearchParams(location.search)
+  params.delete('gallery')
+  const qs = params.toString()
+  const url = want + (qs ? '?' + qs : '') + (gallery ? '' : location.hash)
+  if (location.pathname === want && !new URLSearchParams(location.search).has('gallery')) return
+  history.pushState(null, '', url)
+}
+
 export const useStore = create<State>((set, get) => ({
   catalog: null,
   rules: null,
@@ -212,7 +239,11 @@ export const useStore = create<State>((set, get) => ({
   steps: [],
   showLegend: stored('iagram.legend', false),
   cardStyle: stored('iagram.cards', false),
+  showPalette: stored('iagram.palette', true),
+  showInspector: stored('iagram.inspector', true),
+  handMode: stored('iagram.hand', true),
   showGallery: false,
+  arrangeDialog: null,
   templates: null,
   nodes: [],
   edges: [],
@@ -267,7 +298,7 @@ export const useStore = create<State>((set, get) => ({
       const used = [...new Set(res.document.nodes.map((n) => n.type.split('.')[0]))].filter((p) => p !== COMMON)
       const current = get().activeProvider
       const activeProvider = providers.includes(current) ? current : used.find((p) => providers.includes(p)) ?? providers[0] ?? ''
-      set({ catalog, rules, nodes, edges, steps: res.document.steps ?? [], showGallery: !get().catalog && new URLSearchParams(location.search).get('gallery') !== '0', docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
+      set({ catalog, rules, nodes, edges, steps: res.document.steps ?? [], showGallery: get().catalog ? get().showGallery : pathShowsGallery(), docName: res.document.name ?? '', problems: res.validation.problems, dirty: false, error: null, past: [], future: [], activeProvider, projection: null })
       void get().refreshProjection()
       api.latestPlan().then((r) => set({ ...(r.plan ? { plan: r.plan, planStale: false } : {}), drift: r.drift })).catch(() => undefined)
       api.health().then((h) => set({ version: h.version })).catch(() => undefined)
@@ -862,26 +893,18 @@ export const useStore = create<State>((set, get) => ({
     if (patch.type !== undefined || patch.props !== undefined || patch.name !== undefined) get().validateSoon()
   },
 
-  arrange(algo) {
-    if (get().isProjected()) get().materialize()
-    const { rules, nodes, edges } = get()
-    if (!rules || nodes.length === 0) return
-    get().commit()
-    const sel = nodes.filter((n) => n.selected)
-    const root = sel.length === 1 && sel[0].type === 'container' ? sel[0].id : null
-    set({ nodes: arrangeNodes(nodes, edges, rules, algo, root), dirty: true })
-    get().syncSpans()
-    get().validateSoon()
+  setArrangeDialog(o) {
+    set({ arrangeDialog: o })
   },
 
-  async autoArrange(dir) {
+  async autoArrange(o) {
     if (get().isProjected()) get().materialize()
     const { rules, nodes } = get()
     if (!rules || nodes.length === 0) return
     const sel = nodes.filter((n) => n.selected)
     const root = sel.length === 1 && sel[0].type === 'container' ? sel[0].id : undefined
     try {
-      const r = await api.layout(get().currentDocument(), dir, root)
+      const r = await api.layout(get().currentDocument(), o, root)
       const laid = new Map(r.document.nodes.map((n) => [n.id, n]))
       get().commit()
       set({
@@ -906,7 +929,8 @@ export const useStore = create<State>((set, get) => ({
     set({ steps, dirty: true })
   },
 
-  setShowGallery(v) {
+  setShowGallery(v, opts) {
+    if (!opts?.silent) pushPath(v)
     set({ showGallery: v })
   },
 
@@ -933,9 +957,23 @@ export const useStore = create<State>((set, get) => ({
     // binary; the copy becomes this folder's diagram once saved.
     const copy: Document = JSON.parse(JSON.stringify(t.document))
     get().loadDocument(copy)
+    pushPath(false)
     set({ showGallery: false, activeProvider: t.provider, docName: get().docName || t.title })
     void get().refreshProjection()
     get().showToast(`Opened a copy of "${t.title}". Edit freely; Save writes it to your .iad file, the reference stays untouched.`)
+  },
+
+  setShowPalette(v) {
+    persist('iagram.palette', v)
+    set({ showPalette: v })
+  },
+  setShowInspector(v) {
+    persist('iagram.inspector', v)
+    set({ showInspector: v })
+  },
+  setHandMode(v) {
+    persist('iagram.hand', v)
+    set({ handMode: v })
   },
 
   setCardStyle(v) {

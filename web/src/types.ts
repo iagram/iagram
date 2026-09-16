@@ -312,3 +312,14 @@ export interface TemplateItem {
   document: Document
   types: Record<string, { icon?: string; container?: boolean; border?: string; dash?: string }>
 }
+
+export type LayoutAlgo = 'flow' | 'tree' | 'radial' | 'organic' | 'orgchart' | 'circle' | 'grid'
+export interface LayoutOptions {
+  algo: LayoutAlgo
+  dir: 'LR' | 'TB'
+  node_spacing: number
+  rank_spacing: number
+  resize_containers: boolean
+  preserve_origin: boolean
+}
+export const DEFAULT_LAYOUT: LayoutOptions = { algo: 'flow', dir: 'LR', node_spacing: 36, rank_spacing: 44, resize_containers: true, preserve_origin: true }
