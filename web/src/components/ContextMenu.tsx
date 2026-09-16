@@ -25,6 +25,8 @@ export function ContextMenu() {
     fn()
   }
   const selected = s.nodes.some((n) => n.selected)
+  const target = menu.target === 'node' && menu.id ? s.nodes.find((n) => n.id === menu.id) : undefined
+  const insideCount = target ? s.nodes.filter((n) => n.parentId === target.id).length : 0
   type Item = { label?: string; kbd?: string; onClick?: () => void; disabled?: boolean; danger?: boolean; sep?: boolean }
   const items: Item[] =
     menu.target === 'pane'
@@ -41,6 +43,14 @@ export function ContextMenu() {
             { label: 'Copy', kbd: '⌘C', onClick: run(s.copySelection), disabled: !selected },
             { label: 'Paste', kbd: '⌘V', onClick: run(() => s.paste()), disabled: !s.hasClipboard() },
             { label: 'Duplicate', kbd: '⌘D', onClick: run(s.duplicateSelection), disabled: !selected },
+            ...(target?.type === 'container' && !s.rules?.entry(target.data.type)?.span
+              ? [
+                  { sep: true },
+                  target.data.view === 'icon' || (!target.data.view && s.rules?.entry(target.data.type)?.composite && !s.nodes.some((n) => n.parentId === target.id))
+                    ? { label: 'Expand to box', onClick: run(() => s.updateNode(target.id, { view: 'box' })) }
+                    : { label: `Collapse to icon${insideCount ? ` (hides ${insideCount})` : ''}`, onClick: run(() => s.updateNode(target.id, { view: 'icon' })) },
+                ]
+              : []),
             { sep: true },
             { label: 'Bring to front', kbd: '⌘⇧]', onClick: run(() => s.reorder('front')) },
             { label: 'Bring forward', kbd: '⌘]', onClick: run(() => s.reorder('forward')) },

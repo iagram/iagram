@@ -30,6 +30,8 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
   const rules = useStore((s) => s.rules)
   const commit = useStore((s) => s.commit)
   const syncSpans = useStore((s) => s.syncSpans)
+  const updateNode = useStore((s) => s.updateNode)
+  const inside = useStore((s) => s.nodes.reduce((c, n) => c + (n.parentId === id ? 1 : 0), 0))
   const span = entry?.span
   const ghosts = span?.ghost ? Math.min(8, Math.max(0, Number(data.props[span.ghost.count] ?? data.props.min_size ?? 0) || 0)) : 0
   const dropState = dragging && rules ? (rules.canContain(data.type, dragging) ? 'valid' : 'invalid') : ''
@@ -50,6 +52,14 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
           {data.name}
         </div>
         <div className="label">{captionOf(entry, data) ? <i>{captionOf(entry, data)}</i> : entry?.label ?? data.type}</div>
+        {inside > 0 && (
+          <span className="inside" title={`${inside} element${inside > 1 ? 's' : ''} inside, hidden. Double-click or use the arrow to open the box.`}>
+            {inside}
+          </span>
+        )}
+        <button className="fold" title={inside > 0 ? 'Open the box: show the elements inside' : 'Open as a box to place elements inside'} onClick={(e) => (e.stopPropagation(), updateNode(id, { view: 'box' }))}>
+          ▸
+        </button>
         <NodeBadge id={id} />
       </div>
     )
@@ -79,6 +89,11 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
         <span className="name">{data.name}</span>
         {captionOf(entry, data) && <span className="caption">{captionOf(entry, data)}</span>}
         <NodeBadge id={id} />
+        {!span && (
+          <button className="fold" title={inside > 0 ? `Collapse to the icon: hides the ${inside} element${inside > 1 ? 's' : ''} inside, arrows re-attach to it` : 'Collapse to the icon'} onClick={(e) => (e.stopPropagation(), updateNode(id, { view: 'icon' }))}>
+            ▾
+          </button>
+        )}
       </header>
       {ghosts > 0 && span?.ghost && (
         <div className="ghosts" title={`${ghosts} instances (capacity)`}>

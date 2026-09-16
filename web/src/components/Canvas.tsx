@@ -356,6 +356,11 @@ export function Canvas() {
           selectEdge(sel.length === 0 && selE.length === 1 ? selE[0].id : null)
         }}
         onNodeDoubleClick={(_, n) => {
+          if (n.data.collapsed) {
+            // a collapsed container opens on double-click, like a folder
+            useStore.getState().updateNode(n.id, { view: 'box' })
+            return
+          }
           select(n.id)
           requestAnimationFrame(() => (document.querySelector('.panel input, .panel select') as HTMLElement | null)?.focus())
         }}
