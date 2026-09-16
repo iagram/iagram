@@ -42,6 +42,8 @@ export interface EdgeData extends Record<string, unknown> {
   ruleStyle?: EdgeStyle
   /** set by the canvas: false hides the label (labels-off mode, not hovered) */
   showLabel?: boolean
+  /** true until the author picks the anchors: the canvas chooses the facing sides */
+  autoPorts?: boolean
   attr?: string
   output?: string
   /** link edges: link element id, resource name, attributes besides the ends */
@@ -81,7 +83,8 @@ export function makeEdge(e: DocEdge, ruleLabel: string, ruleStyle?: EdgeStyle): 
   // Reference diagrams never write "references" or "protects" on a line:
   // those kinds stay silent unless the author typed a label.
   const quiet = e.kind === 'references' || e.kind === 'protects'
-  const data: EdgeData = { kind: e.kind, label: e.label || ruleLabel, userLabel: e.label, ruleLabel, step: e.step, style: e.style, ruleStyle, attr: e.attr, output: e.output, type: e.type, name: e.name, props: e.props, showLabel: !!e.label || !quiet }
+  // Without hand-set ports the canvas picks the sides facing each other.
+  const data: EdgeData = { kind: e.kind, label: e.label || ruleLabel, userLabel: e.label, ruleLabel, step: e.step, style: e.style, ruleStyle, attr: e.attr, output: e.output, type: e.type, name: e.name, props: e.props, showLabel: !!e.label || !quiet, autoPorts: !e.from_port && !e.to_port }
   return withMarkers({ id: e.id, source: e.source, target: e.target, sourceHandle: e.from_port || 'r', targetHandle: e.to_port || 'l', type: 'iagram', data })
 }
 
@@ -181,4 +184,22 @@ function round(v: number): number {
 export function newId(entry: Entry): string {
   const short = entry.id.split('.')[1].replace(/_.*$/, '').slice(0, 6)
   return `${short}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** The anchors two boxes face each other with: horizontal when they are more
+ *  apart sideways than vertically, else vertical (reference-diagram routing). */
+export function facingPorts(s: Rect, t: Rect): [string, string] {
+  const dx = t.x + t.w / 2 - (s.x + s.w / 2)
+  const dy = t.y + t.h / 2 - (s.y + s.h / 2)
+  const gapX = Math.abs(dx) - (s.w + t.w) / 2
+  const gapY = Math.abs(dy) - (s.h + t.h) / 2
+  if (gapX >= gapY) return dx >= 0 ? ['r', 'l'] : ['l', 'r']
+  return dy >= 0 ? ['b', 't'] : ['t', 'b']
 }

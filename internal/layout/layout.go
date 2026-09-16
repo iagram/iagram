@@ -619,7 +619,46 @@ func (l *layouter) flow(g *graph) (float64, float64) {
 	}
 	x, y := float64(padX), float64(padTop)
 	maxW := 0.0
+	// Straight arrows: a node sits level with the mean of the neighbours it is
+	// connected to in other columns (forward pass), then feeders are pulled
+	// level with what they feed (backward pass). Nodes never overlap: a node
+	// is pushed down (right, top-to-bottom) when the wanted spot is taken.
+	colOf := map[string]int{}
+	for r, col := range cols {
+		for _, k := range col {
+			colOf[k.ID] = r
+		}
+	}
+	centre := map[string]float64{} // cross-axis centre of placed kids (zones included)
+	meanOf := func(k *document.Node, r int) (float64, bool) {
+		sum, cnt := 0.0, 0
+		for _, p := range g.kids {
+			if p == k {
+				continue
+			}
+			if c, ok := centre[p.ID]; ok && colOf[p.ID] != r && (g.out[p.ID][k.ID] || g.out[k.ID][p.ID]) {
+				sum += c
+				cnt++
+			}
+		}
+		return sum / math.Max(1, float64(cnt)), cnt > 0
+	}
 	if tb {
+		rowTop := map[int]float64{}
+		placeRow := func(r int, left float64) float64 {
+			cx := left
+			for _, k := range cols[r] {
+				s := g.sz[k.ID]
+				want := cx
+				if m, ok := meanOf(k, r); ok {
+					want = math.Max(cx, m-s[0]/2)
+				}
+				k.Layout.X = want
+				centre[k.ID] = want + s[0]/2
+				cx = want + s[0] + gapY
+			}
+			return cx
+		}
 		for r := 0; r <= maxRank; r++ {
 			rowH := 0.0
 			cx := float64(padX)
@@ -628,6 +667,7 @@ func (l *layouter) flow(g *graph) (float64, float64) {
 				for _, z := range zones {
 					s := g.sz[z.ID]
 					z.Layout.X, z.Layout.Y = cx, y
+					centre[z.ID] = cx + s[0]/2
 					cx += s[0] + gapY
 					zh = math.Max(zh, s[1])
 				}
@@ -636,24 +676,46 @@ func (l *layouter) flow(g *graph) (float64, float64) {
 				}
 				rowH = zh
 			}
+			rowTop[r] = cx
 			for _, k := range cols[r] {
-				s := g.sz[k.ID]
-				k.Layout.X, k.Layout.Y = cx, y
-				cx += s[0] + gapY
-				rowH = math.Max(rowH, s[1])
+				k.Layout.Y = y
+				rowH = math.Max(rowH, g.sz[k.ID][1])
 			}
+			cx = placeRow(r, cx)
 			if rowH == 0 {
 				continue
 			}
 			maxW = math.Max(maxW, cx-gapY)
 			y += rowH + gapX
 		}
+		for r := maxRank; r >= 0; r-- {
+			if len(cols[r]) > 0 {
+				maxW = math.Max(maxW, placeRow(r, rowTop[r])-gapY)
+			}
+		}
 	} else {
 		flowTop := y
 		colBottom := flowTop
+		colTop := map[int]float64{}
+		colX := map[int]float64{}
+		placeCol := func(r int, top float64) float64 {
+			cy := top
+			for _, k := range cols[r] {
+				s := g.sz[k.ID]
+				want := cy
+				if m, ok := meanOf(k, r); ok {
+					want = math.Max(cy, m-s[1]/2)
+				}
+				k.Layout.X, k.Layout.Y = colX[r], want
+				centre[k.ID] = want + s[1]/2
+				cy = want + s[1] + gapY
+			}
+			return cy
+		}
 		for r := 0; r <= maxRank; r++ {
 			colW := 0.0
 			cy := flowTop
+			colX[r] = x
 			if len(zones) > 0 && r == zoneRank {
 				zx := x
 				rowH := 0.0
@@ -665,21 +727,26 @@ func (l *layouter) flow(g *graph) (float64, float64) {
 				}
 				for _, z := range zones {
 					z.Layout.H = rowH
+					centre[z.ID] = cy + rowH/2
 				}
 				colW = zx - gapY - x
 				cy += rowH + gapY
 			}
+			colTop[r] = cy
 			for _, k := range cols[r] {
-				s := g.sz[k.ID]
-				k.Layout.X, k.Layout.Y = x, cy
-				cy += s[1] + gapY
-				colW = math.Max(colW, s[0])
+				colW = math.Max(colW, g.sz[k.ID][0])
 			}
+			cy = placeCol(r, cy)
 			if colW == 0 {
 				continue
 			}
 			colBottom = math.Max(colBottom, cy-gapY)
 			x += colW + gapX
+		}
+		for r := maxRank; r >= 0; r-- {
+			if len(cols[r]) > 0 {
+				colBottom = math.Max(colBottom, placeCol(r, colTop[r])-gapY)
+			}
 		}
 		if x > padX {
 			maxW = math.Max(maxW, x-gapX)

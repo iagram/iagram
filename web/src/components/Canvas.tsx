@@ -13,7 +13,7 @@ import { useStore } from '../store'
 import { ContainerNode } from '../nodes/ContainerNode'
 import { ResourceNode } from '../nodes/ResourceNode'
 import { DND_TYPE } from './Palette'
-import { LEAF_H, LEAF_W, type RFEdge, type RFNode } from '../convert'
+import { LEAF_H, LEAF_W, type RFEdge, type RFNode, facingPorts } from '../convert'
 import { COMMON, ROOT } from '../types'
 import { setRfStore } from '../rf'
 import { CanvasControls } from './CanvasControls'
@@ -275,10 +275,19 @@ export function Canvas() {
         // A band's coverage of the containers under it is drawn by position, not arrows.
         .filter((e) => !(e.data?.kind === 'references' && rules?.entry(sourceNodes.find((n) => n.id === e.source)?.data.type ?? '')?.span?.attr === e.data.attr))
         .map((e) => {
-        const visible = showLabels || e.id === hoveredEdgeId || e.id === selectedEdgeId
-        return { ...e, data: e.data ? { ...e.data, showLabel: visible } : e.data, className: badEdges.has(e.id) ? 'edge-error' : undefined }
-      }),
-    [sourceEdges, sourceNodes, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds, rules],
+          const visible = showLabels || e.id === hoveredEdgeId || e.id === selectedEdgeId
+          let ports: { sourceHandle?: string; targetHandle?: string } = {}
+          if (e.data?.autoPorts) {
+            const s = absRect(e.source)
+            const t = absRect(e.target)
+            if (s && t && s.w && t.w) {
+              const [sp, tp] = facingPorts(s, t)
+              ports = { sourceHandle: sp, targetHandle: tp }
+            }
+          }
+          return { ...e, ...ports, data: e.data ? { ...e.data, showLabel: visible } : e.data, className: badEdges.has(e.id) ? 'edge-error' : undefined }
+        }),
+    [sourceEdges, sourceNodes, badEdges, showLabels, hoveredEdgeId, selectedEdgeId, visibleIds, rules, absRect],
   )
 
   return (
