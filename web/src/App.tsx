@@ -52,6 +52,11 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       const k = e.key.toLowerCase()
+      if (mod && e.shiftKey && k === 'l') {
+        e.preventDefault()
+        void useStore.getState().autoArrange('LR')
+        return
+      }
       const inField = (e.target as HTMLElement)?.closest('input, select, textarea')
       if (!mod) {
         if (e.key === 'Escape') {

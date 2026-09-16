@@ -84,6 +84,8 @@ interface State {
   setSteps: (steps: Step[]) => void
   /** Lay the diagram out (or the selected container's contents) with an algorithm. */
   arrange: (algo: Algo) => void
+  /** Reference-style hierarchical layout by the server engine (whole diagram or selected container). */
+  autoArrange: (dir: 'LR' | 'TB') => Promise<void>
   setShowLegend: (v: boolean) => void
   setCardStyle: (v: boolean) => void
   setShowGallery: (v: boolean) => void
@@ -870,6 +872,32 @@ export const useStore = create<State>((set, get) => ({
     set({ nodes: arrangeNodes(nodes, edges, rules, algo, root), dirty: true })
     get().syncSpans()
     get().validateSoon()
+  },
+
+  async autoArrange(dir) {
+    if (get().isProjected()) get().materialize()
+    const { rules, nodes } = get()
+    if (!rules || nodes.length === 0) return
+    const sel = nodes.filter((n) => n.selected)
+    const root = sel.length === 1 && sel[0].type === 'container' ? sel[0].id : undefined
+    try {
+      const r = await api.layout(get().currentDocument(), dir, root)
+      const laid = new Map(r.document.nodes.map((n) => [n.id, n]))
+      get().commit()
+      set({
+        nodes: get().nodes.map((n) => {
+          const m = laid.get(n.id)
+          if (!m) return n
+          const style = n.type === 'container' && m.layout.w ? { ...n.style, width: m.layout.w, height: m.layout.h } : n.style
+          return { ...n, position: { x: m.layout.x, y: m.layout.y }, style }
+        }),
+        dirty: true,
+      })
+      get().syncSpans()
+      get().validateSoon()
+    } catch (e) {
+      get().showToast((e as Error).message)
+    }
   },
 
   setSteps(steps) {

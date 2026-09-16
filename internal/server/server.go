@@ -18,6 +18,7 @@ import (
 	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
 	"github.com/iagram/iagram/internal/jobs"
+	"github.com/iagram/iagram/internal/layout"
 	"github.com/iagram/iagram/internal/templates"
 	"github.com/iagram/iagram/internal/validate"
 	"github.com/iagram/iagram/internal/workspace"
@@ -64,6 +65,7 @@ func New(c *catalog.Catalog, docPath string, webFS, iconsFS fs.FS, version strin
 	m.HandleFunc("POST /api/import", s.importState)
 	m.HandleFunc("POST /api/import/hcl", s.importHCL)
 	m.HandleFunc("POST /api/convert", s.convertDoc)
+	m.HandleFunc("POST /api/layout", s.layoutDoc)
 	m.HandleFunc("GET /api/resources", s.generatedList)
 	m.HandleFunc("GET /api/resources/attachments", s.attachmentsFor)
 	m.HandleFunc("GET /api/resources/{id}", s.generatedEntry)
@@ -90,6 +92,64 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// layoutDoc lays the posted document out (whole diagram, or the subtree under
+// ?root=<node id>) in the reference style and returns it.
+func (s *Server) layoutDoc(w http.ResponseWriter, r *http.Request) {
+	var d document.Document
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	dir := layout.LeftToRight
+	if r.URL.Query().Get("dir") == "TB" {
+		dir = layout.TopToBottom
+	}
+	if root := r.URL.Query().Get("root"); root != "" {
+		// Lay out only the subtree: run on a copy holding the root's descendants,
+		// then copy positions back (the root keeps its own place).
+		sub := document.New(d.Name)
+		inside := map[string]bool{root: true}
+		for grew := true; grew; {
+			grew = false
+			for _, n := range d.Nodes {
+				if !inside[n.ID] && inside[n.Parent] {
+					inside[n.ID] = true
+					grew = true
+				}
+			}
+		}
+		for _, n := range d.Nodes {
+			if inside[n.ID] {
+				sub.Nodes = append(sub.Nodes, n)
+			}
+		}
+		for _, e := range d.Edges {
+			if inside[e.Source] && inside[e.Target] {
+				sub.Edges = append(sub.Edges, e)
+			}
+		}
+		rootPos := map[string][2]float64{}
+		for _, n := range d.Nodes {
+			if n.ID == root {
+				rootPos[root] = [2]float64{n.Layout.X, n.Layout.Y}
+			}
+		}
+		layout.AutoWith(s.Catalog, sub, dir)
+		byID := sub.Index()
+		for i := range d.Nodes {
+			if m, ok := byID[d.Nodes[i].ID]; ok {
+				if d.Nodes[i].ID == root {
+					m.Layout.X, m.Layout.Y = rootPos[root][0], rootPos[root][1]
+				}
+				d.Nodes[i].Layout = m.Layout
+			}
+		}
+	} else {
+		layout.AutoWith(s.Catalog, &d, dir)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"document": d})
 }
 
 // listTemplates lists the shipped reference architectures with their documents

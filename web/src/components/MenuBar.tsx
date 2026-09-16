@@ -188,8 +188,11 @@ export function MenuBar() {
       { label: 'Dark theme', checked: s.theme === 'dark', onClick: () => s.setTheme(s.theme === 'dark' ? 'light' : 'dark') },
     ],
     Arrange: [
-      { label: 'Horizontal flow', onClick: () => s.arrange('flow-h'), disabled: s.nodes.length === 0 },
-      { label: 'Vertical flow', onClick: () => s.arrange('flow-v'), disabled: s.nodes.length === 0 },
+      { label: 'Auto-arrange, left to right', shortcut: '⌘⇧L', onClick: () => void s.autoArrange('LR'), disabled: s.nodes.length === 0 },
+      { label: 'Auto-arrange, top to bottom', onClick: () => void s.autoArrange('TB'), disabled: s.nodes.length === 0 },
+      { sep: true },
+      { label: 'Quick flow, horizontal', onClick: () => s.arrange('flow-h'), disabled: s.nodes.length === 0 },
+      { label: 'Quick flow, vertical', onClick: () => s.arrange('flow-v'), disabled: s.nodes.length === 0 },
       { label: 'Grid', onClick: () => s.arrange('grid'), disabled: s.nodes.length === 0 },
       { label: 'Circle', onClick: () => s.arrange('circle'), disabled: s.nodes.length === 0 },
       { sep: true },

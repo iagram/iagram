@@ -51,6 +51,8 @@ export const api = {
     ),
   health: () => fetch('/api/health').then((r) => json<{ ok: boolean; version: string; document: string }>(r)),
   generated: (provider: string) => fetch(`/api/resources?provider=${encodeURIComponent(provider)}`).then((r) => json<{ elements: GeneratedSummary[]; families: Family[] }>(r)),
+  layout: (doc: Document, dir: 'LR' | 'TB', root?: string) =>
+    fetch(`/api/layout?dir=${dir}${root ? `&root=${encodeURIComponent(root)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc) }).then((r) => json<{ document: Document }>(r)),
   templates: () => fetch('/api/templates').then((r) => json<{ templates: TemplateItem[] }>(r)),
   entry: (id: string) => fetch(`/api/resources/${encodeURIComponent(id)}`).then((r) => json<Entry>(r)),
   attachments: (type: string) => fetch(`/api/resources/attachments?type=${encodeURIComponent(type)}`).then((r) => json<{ attachments: AttachmentOption[] }>(r)),

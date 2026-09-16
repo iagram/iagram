@@ -4,6 +4,7 @@ import { MenuBar } from './MenuBar'
 export function Toolbar() {
   const setShowGallery = useStore((s) => s.setShowGallery)
   const mirror = useStore((s) => s.mirror)
+  const autoArrange = useStore((s) => s.autoArrange)
   const setMirror = useStore((s) => s.setMirror)
   const dirty = useStore((s) => s.dirty)
   const saving = useStore((s) => s.saving)
@@ -38,6 +39,9 @@ export function Toolbar() {
         {dirty && <i title="unsaved changes"> ●</i>}
       </span>
 
+      <button onClick={() => void autoArrange('LR')} title="Auto-arrange the diagram, or the selected container (⌘⇧L)">
+        Arrange
+      </button>
       <span className="spacer" />
       <label className="mirror-toggle" title={mirror ? 'Mirror on: other clouds show the live equivalence of the tab you draw on; Plan and Apply run the source.' : 'Mirror off: independent canvases in one file; Plan and Apply cover all of them.'}>
         <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} /> mirror clouds

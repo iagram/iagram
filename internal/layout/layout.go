@@ -21,9 +21,20 @@ const (
 	minW, minH   = 240, 150
 )
 
-// Auto lays out every node in d in place.
-func Auto(c *catalog.Catalog, d *document.Document) {
-	l := &layouter{c: c, d: d, byID: d.Index(), children: map[string][]*document.Node{}}
+// Direction of the flow: left to right (default) or top to bottom.
+type Direction string
+
+const (
+	LeftToRight Direction = "LR"
+	TopToBottom Direction = "TB"
+)
+
+// Auto lays out every node in d in place, left to right.
+func Auto(c *catalog.Catalog, d *document.Document) { AutoWith(c, d, LeftToRight) }
+
+// AutoWith lays out every node in d in place in the given direction.
+func AutoWith(c *catalog.Catalog, d *document.Document, dir Direction) {
+	l := &layouter{c: c, d: d, byID: d.Index(), children: map[string][]*document.Node{}, tb: dir == TopToBottom}
 	var roots []*document.Node
 	for i := range d.Nodes {
 		n := &d.Nodes[i]
@@ -46,6 +57,7 @@ type layouter struct {
 	d        *document.Document
 	byID     map[string]*document.Node
 	children map[string][]*document.Node
+	tb       bool // ranks as rows (top to bottom) instead of columns
 }
 
 func (l *layouter) entry(n *document.Node) *catalog.Entry {
@@ -268,40 +280,73 @@ func (l *layouter) place(kids []*document.Node, parent string) (float64, float64
 		}
 	}
 	flowTop := y
-	colBottom := flowTop
-	for r := 0; r <= maxRank; r++ {
-		colW := 0.0
-		cy := flowTop
-		if len(zones) > 0 && r == zoneRank {
-			zx := x
+	if l.tb {
+		// ranks as rows: each rank is a row of items placed left to right
+		for r := 0; r <= maxRank; r++ {
 			rowH := 0.0
-			for _, z := range zones {
-				s := sz[z.ID]
-				z.Layout.X, z.Layout.Y = zx, cy
-				zx += s[0] + gapX
+			cx := float64(padX)
+			if len(zones) > 0 && r == zoneRank {
+				zh := 0.0
+				for _, z := range zones {
+					s := sz[z.ID]
+					z.Layout.X, z.Layout.Y = cx, y
+					cx += s[0] + gapX
+					zh = math.Max(zh, s[1])
+				}
+				for _, z := range zones {
+					z.Layout.H = zh
+				}
+				rowH = zh
+			}
+			for _, k := range cols[r] {
+				s := sz[k.ID]
+				k.Layout.X, k.Layout.Y = cx, y
+				cx += s[0] + gapX
 				rowH = math.Max(rowH, s[1])
 			}
-			for _, z := range zones {
-				z.Layout.H = rowH // equal columns, like the reference diagrams
+			if rowH == 0 {
+				continue
 			}
-			colW = zx - gapX - x
-			cy += rowH + gapY
+			maxW = math.Max(maxW, cx-gapX)
+			y += rowH + gapY
 		}
-		for _, k := range cols[r] {
-			s := sz[k.ID]
-			k.Layout.X, k.Layout.Y = x, cy
-			cy += s[1] + gapY
-			colW = math.Max(colW, s[0])
+		x = padX
+	} else {
+		colBottom := flowTop
+		for r := 0; r <= maxRank; r++ {
+			colW := 0.0
+			cy := flowTop
+			if len(zones) > 0 && r == zoneRank {
+				zx := x
+				rowH := 0.0
+				for _, z := range zones {
+					s := sz[z.ID]
+					z.Layout.X, z.Layout.Y = zx, cy
+					zx += s[0] + gapX
+					rowH = math.Max(rowH, s[1])
+				}
+				for _, z := range zones {
+					z.Layout.H = rowH // equal columns, like the reference diagrams
+				}
+				colW = zx - gapX - x
+				cy += rowH + gapY
+			}
+			for _, k := range cols[r] {
+				s := sz[k.ID]
+				k.Layout.X, k.Layout.Y = x, cy
+				cy += s[1] + gapY
+				colW = math.Max(colW, s[0])
+			}
+			if colW == 0 {
+				continue
+			}
+			colBottom = math.Max(colBottom, cy-gapY)
+			x += colW + gapX
 		}
-		if colW == 0 {
-			continue
+		if x > padX {
+			maxW = math.Max(maxW, x-gapX)
+			y = colBottom + gapY
 		}
-		colBottom = math.Max(colBottom, cy-gapY)
-		x += colW + gapX
-	}
-	if x > padX {
-		maxW = math.Max(maxW, x-gapX)
-		y = colBottom + gapY
 	}
 	// 3. unconnected leaves: a compact grid below
 	if len(loose) > 0 {
