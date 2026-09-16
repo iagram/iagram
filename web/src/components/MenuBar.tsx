@@ -181,6 +181,7 @@ export function MenuBar() {
       { sep: true },
       { label: 'Connection labels', checked: s.showLabels, onClick: () => s.setShowLabels(!s.showLabels) },
       { label: 'Legend', checked: s.showLegend, onClick: () => s.setShowLegend(!s.showLegend) },
+      { label: 'Elements as cards', checked: s.cardStyle, onClick: () => s.setCardStyle(!s.cardStyle) },
       { label: 'Minimap', checked: s.showMinimap, onClick: () => s.setShowMinimap(!s.showMinimap) },
       { label: 'Snap to grid', checked: s.snapToGrid, onClick: () => s.setSnapToGrid(!s.snapToGrid) },
       { sep: true },

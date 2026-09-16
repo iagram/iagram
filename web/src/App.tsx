@@ -5,7 +5,6 @@ import { Palette } from './components/Palette'
 import { Canvas } from './components/Canvas'
 import { PropertyPanel } from './components/PropertyPanel'
 import { Toolbar } from './components/Toolbar'
-import { CanvasTabs } from './components/CanvasTabs'
 import { ProblemsBar } from './components/ProblemsBar'
 import { LogDrawer } from './components/LogDrawer'
 import { Gallery } from './components/Gallery'
@@ -123,7 +122,6 @@ export function App() {
         <div className="body">
           <Palette />
           <div className="center">
-            <CanvasTabs />
             <Canvas />
           </div>
           <PropertyPanel />

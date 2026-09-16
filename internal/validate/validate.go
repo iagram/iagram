@@ -269,6 +269,9 @@ func (v *validator) edges() {
 			v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("%s cannot connect to %s", src.Name, dst.Name)})
 			continue
 		}
+		if e.Kind == catalog.FlowKind {
+			continue // a documentation arrow is always welcome, whatever else the pair allows
+		}
 		if rule.Kind == catalog.ReferencesKind {
 			if e.Attr == "" {
 				v.add(Problem{Level: Warning, Edge: e.ID, Message: fmt.Sprintf("%s -> %s: choose which attribute of %s receives the reference", src.Name, dst.Name, src.Name)})
@@ -287,9 +290,6 @@ func (v *validator) edges() {
 			}
 			v.link(e, src, dst)
 			continue
-		}
-		if e.Kind == catalog.FlowKind {
-			continue // a documentation arrow is always welcome, whatever else the pair allows
 		}
 		if e.Kind != rule.Kind {
 			v.add(Problem{Level: Error, Edge: e.ID, Message: fmt.Sprintf("connection %s -> %s must be of kind %q", src.Name, dst.Name, rule.Kind)})

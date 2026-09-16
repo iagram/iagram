@@ -12,7 +12,6 @@ export function CanvasTabs() {
   const setActive = useStore((s) => s.setActiveProvider)
   const providers = useMemo(() => [...new Set((catalog?.entries ?? []).map((e) => e.provider))].filter((p) => p !== COMMON).sort(), [catalog])
   const mirror = useStore((s) => s.mirror)
-  const setMirror = useStore((s) => s.setMirror)
   const primary = useStore((s) => s.primaryProvider())
   const projection = useStore((s) => s.projection)
   const projecting = useStore((s) => s.projecting)
@@ -40,10 +39,6 @@ export function CanvasTabs() {
         </button>
         )
       })}
-      <label className="mirror-toggle" title="Mirror: other providers show the live equivalence of the tab you draw on. Off: independent canvases in one file.">
-        <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} /> mirror providers
-      </label>
-      <span className="hint">{mirror ? 'Other tabs mirror the source through the equivalence table; Plan and Apply run the source.' : 'Independent canvases in one file; Plan and Apply cover all of them.'}</span>
     </div>
   )
 }

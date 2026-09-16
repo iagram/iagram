@@ -3,6 +3,8 @@ import { MenuBar } from './MenuBar'
 
 export function Toolbar() {
   const setShowGallery = useStore((s) => s.setShowGallery)
+  const mirror = useStore((s) => s.mirror)
+  const setMirror = useStore((s) => s.setMirror)
   const dirty = useStore((s) => s.dirty)
   const saving = useStore((s) => s.saving)
   const save = useStore((s) => s.save)
@@ -37,6 +39,9 @@ export function Toolbar() {
       </span>
 
       <span className="spacer" />
+      <label className="mirror-toggle" title={mirror ? 'Mirror on: other clouds show the live equivalence of the tab you draw on; Plan and Apply run the source.' : 'Mirror off: independent canvases in one file; Plan and Apply cover all of them.'}>
+        <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} /> mirror clouds
+      </label>
       <span className={`status ${errors ? 'error' : warnings ? 'warning' : 'ok'}`}>
         {errors ? `${errors} error${errors > 1 ? 's' : ''}` : warnings ? `${warnings} warning${warnings > 1 ? 's' : ''}` : 'valid'}
       </span>

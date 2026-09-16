@@ -43,6 +43,7 @@ export function Canvas() {
   const problems = useStore((s) => s.problems)
   const theme = useStore((s) => s.theme)
   const showLabels = useStore((s) => s.showLabels)
+  const cardStyle = useStore((s) => s.cardStyle)
   const selectedEdgeId = useStore((s) => s.selectedEdgeId)
   const hoveredEdgeId = useStore((s) => s.hoveredEdgeId)
   const selectEdge = useStore((s) => s.selectEdge)
@@ -280,7 +281,7 @@ export function Canvas() {
   )
 
   return (
-    <div className="canvas" onDrop={onDrop} onDragOver={onDragOver}>
+    <div className={`canvas ${cardStyle ? 'cards' : 'icons'}`} onDrop={onDrop} onDragOver={onDragOver}>
       <ReactFlow<RFNode, RFEdge>
         nodes={visibleNodes}
         edges={styledEdges}

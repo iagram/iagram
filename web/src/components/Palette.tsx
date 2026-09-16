@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useStore } from '../store'
+import { CanvasTabs } from './CanvasTabs'
 import type { Entry } from '../types'
 import { COMMON, ROOT } from '../types'
 
@@ -82,6 +83,7 @@ export function Palette() {
 
   return (
     <aside className="palette">
+      <CanvasTabs />
       <h2>Elements</h2>
       <input className="search" type="search" placeholder={`Search ${PROVIDER_LABEL[provider] ?? provider} elements…`} value={query} onChange={(e) => setQuery(e.target.value)} />
       <p className="hint">

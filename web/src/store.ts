@@ -24,6 +24,8 @@ interface State {
   /** numbered walkthrough text, keyed by step number */
   steps: Step[]
   showLegend: boolean
+  /** Draw elements as white cards (legacy look) instead of bare icons with a label. */
+  cardStyle: boolean
   /** The reference-architecture gallery (front page). */
   showGallery: boolean
   templates: TemplateItem[] | null
@@ -83,6 +85,7 @@ interface State {
   /** Lay the diagram out (or the selected container's contents) with an algorithm. */
   arrange: (algo: Algo) => void
   setShowLegend: (v: boolean) => void
+  setCardStyle: (v: boolean) => void
   setShowGallery: (v: boolean) => void
   loadTemplates: () => Promise<void>
   /** Open a reference architecture in the editor (replaces the unsaved canvas after confirmation). */
@@ -206,6 +209,7 @@ export const useStore = create<State>((set, get) => ({
   docName: '',
   steps: [],
   showLegend: stored('iagram.legend', false),
+  cardStyle: stored('iagram.cards', false),
   showGallery: false,
   templates: null,
   nodes: [],
@@ -904,6 +908,11 @@ export const useStore = create<State>((set, get) => ({
     set({ showGallery: false, activeProvider: t.provider, docName: get().docName || t.title })
     void get().refreshProjection()
     get().showToast(`Opened a copy of "${t.title}". Edit freely; Save writes it to your .iad file, the reference stays untouched.`)
+  },
+
+  setCardStyle(v) {
+    persist('iagram.cards', v)
+    set({ cardStyle: v })
   },
 
   setShowLegend(v) {
