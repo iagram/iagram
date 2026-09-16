@@ -436,6 +436,11 @@ func (l *layouter) place(kids []*document.Node, parent string) (float64, float64
 	if len(kids) == 0 {
 		return 0, 0
 	}
+	// Cells read off the reference diagram win over any heuristic (flow only:
+	// an explicitly chosen algorithm is the user's call).
+	if l.o.Algo == Flow && hasGrid(kids) {
+		return l.gridCells(g)
+	}
 	// Inside a zone: subnets stacked top to bottom, public ones first.
 	if pn, ok := l.byID[parent]; ok && l.isZone(pn) {
 		return l.stackZone(g)
@@ -458,6 +463,117 @@ func (l *layouter) place(kids []*document.Node, parent string) (float64, float64
 		w, h = l.flow(g)
 	}
 	return w, h
+}
+
+func hasGrid(kids []*document.Node) bool {
+	for _, k := range kids {
+		if k.Layout.Row > 0 && k.Layout.Col > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// gridCells places kids on the grid their Row/Col cells describe: columns
+// are as wide as their widest cell and rows as tall as their tallest, a
+// spanning box takes the cells it covers, containers stretch to fill their
+// cell (uniform Availability Zone boxes), leaves sit centred in theirs.
+// Kids without a cell go in an extra row under the grid, in reading order.
+func (l *layouter) gridCells(g *graph) (float64, float64) {
+	gapX, gapY := l.o.RankSpacing, l.o.NodeSpacing
+	type cell struct {
+		n            *document.Node
+		r, c, rs, cs int
+	}
+	var cells []cell
+	var loose []*document.Node
+	maxR, maxC := 0, 0
+	for _, k := range g.order {
+		if k.Layout.Row <= 0 || k.Layout.Col <= 0 {
+			loose = append(loose, k)
+			continue
+		}
+		rs, cs := k.Layout.RowSpan, k.Layout.ColSpan
+		if rs < 1 {
+			rs = 1
+		}
+		if cs < 1 {
+			cs = 1
+		}
+		cells = append(cells, cell{k, k.Layout.Row, k.Layout.Col, rs, cs})
+		if k.Layout.Row+rs-1 > maxR {
+			maxR = k.Layout.Row + rs - 1
+		}
+		if k.Layout.Col+cs-1 > maxC {
+			maxC = k.Layout.Col + cs - 1
+		}
+	}
+	if len(loose) > 0 {
+		maxR++
+		for i, k := range loose {
+			cells = append(cells, cell{k, maxR, i + 1, 1, 1})
+			if i+1 > maxC {
+				maxC = i + 1
+			}
+		}
+	}
+	colW := make([]float64, maxC+1)
+	rowH := make([]float64, maxR+1)
+	// single-cell sizes first, then spanning boxes widen their last cell if needed
+	for _, c := range cells {
+		s := g.sz[c.n.ID]
+		if c.cs == 1 {
+			colW[c.c] = math.Max(colW[c.c], s[0])
+		}
+		if c.rs == 1 {
+			rowH[c.r] = math.Max(rowH[c.r], s[1])
+		}
+	}
+	for _, c := range cells {
+		s := g.sz[c.n.ID]
+		if c.cs > 1 {
+			have := float64(c.cs-1) * gapX
+			for i := c.c; i < c.c+c.cs; i++ {
+				have += colW[i]
+			}
+			if s[0] > have {
+				colW[c.c+c.cs-1] += s[0] - have
+			}
+		}
+		if c.rs > 1 {
+			have := float64(c.rs-1) * gapY
+			for i := c.r; i < c.r+c.rs; i++ {
+				have += rowH[i]
+			}
+			if s[1] > have {
+				rowH[c.r+c.rs-1] += s[1] - have
+			}
+		}
+	}
+	x := make([]float64, maxC+2)
+	x[1] = padX
+	for c := 1; c <= maxC; c++ {
+		x[c+1] = x[c] + colW[c] + gapX
+	}
+	y := make([]float64, maxR+2)
+	y[1] = padTop
+	for r := 1; r <= maxR; r++ {
+		y[r+1] = y[r] + rowH[r] + gapY
+	}
+	for _, c := range cells {
+		s := g.sz[c.n.ID]
+		cw := x[c.c+c.cs] - x[c.c] - gapX
+		ch := y[c.r+c.rs] - y[c.r] - gapY
+		if l.isContainer(c.n) && l.o.ResizeContainers {
+			c.n.Layout.X, c.n.Layout.Y = x[c.c], y[c.r]
+			c.n.Layout.W, c.n.Layout.H = cw, ch
+			g.sz[c.n.ID] = [2]float64{cw, ch}
+			continue
+		}
+		c.n.Layout.X = x[c.c] + (cw-s[0])/2
+		c.n.Layout.Y = y[c.r] + (ch-s[1])/2
+	}
+	return x[maxC+1] - gapX - padX, y[maxR+1] - gapY - padTop
 }
 
 func (l *layouter) stackZone(g *graph) (float64, float64) {

@@ -74,6 +74,13 @@ type Layout struct {
 	H float64 `json:"h,omitempty"`
 	// Z orders siblings front to back (higher is in front); 0 when unset.
 	Z int `json:"z,omitempty"`
+	// Row / Col place the node in a grid inside its parent (1-based, 0 =
+	// unset), the way the reference diagram arranges it; RowSpan / ColSpan
+	// let a box stretch over several cells. The flow layout honours them.
+	Row     int `json:"row,omitempty"`
+	Col     int `json:"col,omitempty"`
+	RowSpan int `json:"row_span,omitempty"`
+	ColSpan int `json:"col_span,omitempty"`
 }
 
 // Edge is a typed relationship between two nodes. For "references" edges from

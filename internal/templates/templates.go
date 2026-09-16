@@ -47,6 +47,9 @@ type SpecNode struct {
 	Caption string         `yaml:"caption"`
 	Step    string         `yaml:"step"`
 	Size    []float64      `yaml:"size"`
+	// At is the grid cell inside the parent, read off the reference diagram:
+	// [row, col] or [row, col, rowspan, colspan], 1-based.
+	At []int `yaml:"at"`
 }
 
 type SpecEdge struct {
@@ -201,6 +204,12 @@ func Render(c *catalog.Catalog, slug string, spec *Spec) (*document.Document, er
 			return nil, fmt.Errorf("node %s: parent %q must be declared before it", id, sn.Parent)
 		}
 		n := document.Node{ID: id, Type: typ, Name: name, Parent: sn.Parent, Props: props, Caption: sn.Caption, Step: sn.Step}
+		if len(sn.At) >= 2 {
+			n.Layout.Row, n.Layout.Col = sn.At[0], sn.At[1]
+			if len(sn.At) >= 4 {
+				n.Layout.RowSpan, n.Layout.ColSpan = sn.At[2], sn.At[3]
+			}
+		}
 		if len(sn.Size) == 2 {
 			n.Layout.W, n.Layout.H = sn.Size[0], sn.Size[1]
 		}

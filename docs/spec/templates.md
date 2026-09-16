@@ -36,3 +36,24 @@ Rules:
   them to the generated resources inside; generated resources take the
   element's name as their `name` attribute.
 - An edge with no matching rule is a documentation arrow (`flow`).
+
+### Arrangement from the reference (`at`)
+
+A node may carry `at: [row, col]` or `at: [row, col, rowspan, colspan]`
+(1-based): the grid cell it occupies **inside its parent**, read off the
+reference diagram (rows top to bottom, columns left to right). The layout
+places a parent's children on that grid: columns are as wide as their widest
+cell, rows as tall as their tallest, containers stretch to fill their cell
+(uniform Availability Zone boxes), leaves sit centred, a spanning box takes
+the cells it covers, and children without a cell go in an extra row under the
+grid. Cells only order siblings; sizes still come from the content. Without
+`at` the flow heuristic arranges the children. Cells are kept in the `.iad`
+(`layout.row`, `layout.col`, `layout.row_span`, `layout.col_span`) and
+survive Arrange > Horizontal flow; other algorithms ignore them.
+
+```yaml
+- {id: app-zone, type: route53_zone, name: app-zone, parent: reg, at: [1, 1]}
+- {id: vpc-web, type: vpc, name: web, parent: reg, at: [1, 2, 3, 1]}   # beside three rows of edge services
+- {id: az-a, type: availability_zone, name: a, parent: vpc-web, at: [1, 2]}
+- {id: sub-public-a, type: subnet, name: public-a, parent: az-a, at: [1, 1]}
+```
