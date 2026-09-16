@@ -104,3 +104,68 @@ Averages: content 2.8, arrangement before 2.1 -> after 4.2, clarity before 2.2.
 - **gcp/enterprise-hub-spoke-nva-inspection**: Before: prod and nonprod spoke projects were on the left, hub project on the right, on-premises top-left, peering lines crossing the hub. After: on-premises [1,1] on the left, hub project [1,2] spanning two rows in the middle, prod [1,3] and nonprod [2,3] stacked on the right; inside the hub the interconnect-facing 'main' VPC (onprem-router) is the left column with DNS zone and firewall policy under it, hub-shared-vpc spans the three rows to the right with VLAN attachments in column 1, routers/NAT in column 2 and the NVA backend above the NVA subnet in column 3.
 - **gcp/global-alb-mig-cloud-sql-three-tier**: Before: LB objects were scattered in a two-column blob with the VPC to the right and criss-crossing edges. Cells: users [1,1], project [1,2], internet [1,3]; inside the project the LB chain forwarding rule -> HTTPS proxy -> URL map -> backend service is row 1 ([1,1]..[1,4]) with the VPC beside it at [1,5,2,1]; row 2 holds the supporting objects under their owners (global IP under the forwarding rule as the reference's 'IPv4 or IPv6 address' annotation, cert under the proxy, instance template and health check under URL map / backend). Inside the VPC: web-sub tall at [1,1,2,1], data-sub [1,2], Cloud SQL [2,2], router/NAT bottom row.
 - **gcp/hub-and-spoke-ncc**: Before: the three projects sat in one row (spoke-a, hub, spoke-b) with the NCC hub tucked at the bottom of the hub project and spoke arrows crossing back. Cells: on-prem [1,1], hub project [1,2,1,2] on top, internet [1,4], spokes [2,2]/[2,3] centred below; inside the hub project the hub VPC spans [1,1,1,2] with the NCC hub resource beneath it at [2,1] (as the reference's 'Hub resource' between hub and spokes) and the DNS zone beside it; inside the hub VPC the VPN gateway + router form the left column facing on-prem, the subnet is the tall centre cell and the NAT sits lower right as in the reference.
+
+## Full run (all templates with a bundled picture)
+
+321 templates reviewed against their bundled picture; 241 annotated with grid cells; 80 pictures judged not to be that architecture's diagram (console screenshots, marketing strips, placeholders, another variant of the solution) and removed from the bundle.
+
+| Cloud | Reviewed | Annotated | Picture removed |
+|---|---|---|---|
+| aws | 198 | 153 | 45 |
+| azure | 48 | 36 | 12 |
+| gcp | 75 | 52 | 23 |
+
+### Most frequent gaps
+
+Elements the references draw that templates lack (mentions across templates):
+
+- route tables (4)
+- quicksight (3)
+- cloudwatch (3)
+- microsoft entra id (3)
+- iam (2)
+- ci/cd pipeline (2)
+- global accelerator (2)
+- route 53 latency routing (2)
+- memorydb (2)
+- transit gateway (2)
+- iam identity center (2)
+- cloudwatch logs (2)
+- aws backup (2)
+- security hub (2)
+- amazon cloudwatch (2)
+- lake formation (2)
+- spoke vpc (2)
+- route 53 (2)
+- amazon transcribe (2)
+- amazon comprehend (2)
+- amazon textract (2)
+- aws iot core (2)
+- secrets manager (2)
+- bedrock agent (2)
+- query/response messages (2)
+
+Elements templates draw that the references leave implicit:
+
+- cloudwatch log group (12)
+- users actor (9)
+- log analytics workspace (8)
+- nat gateway (7)
+- api gateway (7)
+- internet gateway (7)
+- alb (7)
+- account wrapper (6)
+- acm certificate (6)
+- account and region wrappers (6)
+- cognito user pool (6)
+- internet (6)
+- client actor (5)
+- kms key (5)
+- athena workgroup (5)
+- vpc (5)
+- account/region containers (5)
+- route 53 zone (5)
+- subscription/resource-group wrappers (5)
+- azs and subnets (4)
+
+The raw per-template findings are in `scripts/refarch/reconciliation.jsonl` (missing and extra elements, note, whether the picture was kept).
