@@ -45,9 +45,7 @@ anything that could expose users. We aim to acknowledge within 72 hours.
 
 ## Network access from the editor
 
-The editor talks only to the local `iagram up` server. The one exception is
-the reference-architecture gallery, which can display the original diagram of
-each template from its official source page (aws.amazon.com, cloud.google.com,
-learn.microsoft.com). Those images are fetched by your browser from the vendor
-site when the gallery is open, with no referrer. Untick "Original diagrams" in
-the gallery to disable it; the setting is remembered in the browser.
+The editor talks only to the local `iagram up` server. The reference
+diagrams shown on gallery cards are bundled copies served by that local
+server (see `templates/NOTICE.md` for attribution); nothing is fetched from
+the vendor sites.

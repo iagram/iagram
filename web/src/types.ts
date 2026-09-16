@@ -303,8 +303,10 @@ export interface TemplateItem {
   category: string
   tags: string[]
   source: string
-  /** original diagram on the source page; loaded from the vendor site */
+  /** bundled copy of the vendor diagram, served by the local server */
   image?: string
+  /** the vendor page the diagram was taken from (credit) */
+  image_source?: string
   description: string
   elements: number
   document: Document

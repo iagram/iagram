@@ -23,5 +23,5 @@ var SchemasFS embed.FS
 // TemplatesFS holds the reference architectures (templates/<provider>/<slug>/
 // template.yaml) listed by the gallery and opened pre-configured.
 //
-//go:embed templates/*/*/template.yaml
+//go:embed templates/*/*/template.yaml templates/*/*/diagram.*
 var TemplatesFS embed.FS

@@ -10,6 +10,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -54,6 +56,7 @@ func New(c *catalog.Catalog, docPath string, webFS, iconsFS fs.FS, version strin
 	m.HandleFunc("GET /api/catalog", s.catalog)
 	m.HandleFunc("GET /api/templates", s.listTemplates)
 	m.HandleFunc("GET /api/templates/{provider}/{slug}", s.getTemplate)
+	m.HandleFunc("GET /api/templates/{provider}/{slug}/diagram", s.templateDiagram)
 	m.HandleFunc("GET /api/document", s.getDocument)
 	m.HandleFunc("PUT /api/document", s.putDocument)
 	m.HandleFunc("POST /api/validate", s.validateDocument)
@@ -112,6 +115,32 @@ func (s *Server) getTemplate(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, t)
 			return
 		}
+	}
+	http.NotFound(w, r)
+}
+
+// templateDiagram serves the bundled vendor diagram of a template.
+func (s *Server) templateDiagram(w http.ResponseWriter, r *http.Request) {
+	list, err := s.templates()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	id := r.PathValue("provider") + "/" + r.PathValue("slug")
+	for _, t := range list {
+		if t.ID != id || t.DiagramFile == "" {
+			continue
+		}
+		data, err := fs.ReadFile(s.TemplatesFS, t.DiagramFile)
+		if err != nil {
+			break
+		}
+		ct := map[string]string{".jpg": "image/jpeg", ".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp"}[path.Ext(t.DiagramFile)]
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		w.Write(data)
+		return
 	}
 	http.NotFound(w, r)
 }

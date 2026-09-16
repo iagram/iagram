@@ -117,7 +117,7 @@ export function Gallery() {
           ))}
         </div>
         <input className="search" type="search" placeholder="Search architectures, services, tags…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <label className="field check refimages" title="Show the original diagram from the vendor's page. Images are loaded from aws.amazon.com, cloud.google.com or learn.microsoft.com when you open the gallery; switch off to keep iagram fully offline.">
+        <label className="field check refimages" title="Show the vendor's original diagram (bundled with iagram, credited on the card) instead of the generated miniature.">
           <input type="checkbox" checked={refImages} onChange={(e) => toggleRefImages(e.target.checked)} />
           <span>Original diagrams</span>
         </label>
@@ -181,13 +181,13 @@ function CardImage({ t, useRef }: { t: TemplateItem; useRef: boolean }) {
   if (useRef && t.image && !failed) {
     let host = ''
     try {
-      host = new URL(t.image).hostname
+      host = new URL(t.image_source ?? t.source).hostname
     } catch {
       /* keep empty */
     }
     return (
       <div className="preview ref">
-        <img src={t.image} alt={`Reference diagram: ${t.title}`} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+        <img src={t.image} alt={`Reference diagram: ${t.title}`} loading="lazy" onError={() => setFailed(true)} />
         {host && <span className="credit">Diagram from {host}</span>}
       </div>
     )

@@ -63,16 +63,20 @@ type SpecEdge struct {
 
 // Meta is what the gallery lists.
 type Meta struct {
-	ID          string   `json:"id"` // <provider>/<slug>
-	Provider    string   `json:"provider"`
-	Slug        string   `json:"slug"`
-	Title       string   `json:"title"`
-	Category    string   `json:"category"`
-	Tags        []string `json:"tags"`
-	Source      string   `json:"source"`
-	Image       string   `json:"image,omitempty"`
-	Description string   `json:"description"`
-	Elements    int      `json:"elements"`
+	ID       string   `json:"id"` // <provider>/<slug>
+	Provider string   `json:"provider"`
+	Slug     string   `json:"slug"`
+	Title    string   `json:"title"`
+	Category string   `json:"category"`
+	Tags     []string `json:"tags"`
+	Source   string   `json:"source"`
+	Image    string   `json:"image,omitempty"`
+	// ImageSource is the page the bundled diagram was taken from (credit).
+	ImageSource string `json:"image_source,omitempty"`
+	// DiagramFile is the bundled copy under the template directory, if any.
+	DiagramFile string `json:"-"`
+	Description string `json:"description"`
+	Elements    int    `json:"elements"`
 }
 
 // TypeInfo lets the gallery draw a preview without loading every element.
@@ -124,7 +128,17 @@ func Load(fsys fs.FS, c *catalog.Catalog) ([]Template, error) {
 				types[n.Type] = ti
 			}
 		}
-		out = append(out, Template{Meta: Meta{ID: provider + "/" + slug, Provider: provider, Slug: slug, Title: spec.Title, Category: spec.Category, Tags: spec.Tags, Source: spec.Source, Image: spec.Image, Description: spec.Description, Elements: countElements(c, doc)}, Document: doc, Types: types})
+		meta := Meta{ID: provider + "/" + slug, Provider: provider, Slug: slug, Title: spec.Title, Category: spec.Category, Tags: spec.Tags, Source: spec.Source, Description: spec.Description, Elements: countElements(c, doc)}
+		// A bundled copy of the vendor diagram (credited on the card) is served
+		// locally; without one the card shows the generated miniature.
+		for _, ext := range []string{"jpg", "svg", "png", "webp"} {
+			f := path.Join(path.Dir(p), "diagram."+ext)
+			if _, err := fs.Stat(fsys, f); err == nil {
+				meta.DiagramFile, meta.Image, meta.ImageSource = f, "/api/templates/"+provider+"/"+slug+"/diagram", spec.Image
+				break
+			}
+		}
+		out = append(out, Template{Meta: meta, Document: doc, Types: types})
 		return nil
 	})
 	if err != nil {
