@@ -15,25 +15,27 @@ description: A Premium container registry in its home region is geo-replicated t
   synced across replicas under eventual consistency. ACR Tasks build images in the home region, webhooks fire per replica when replication completes, and AKS clusters in each region pull their images from
   the local replica through the global or regional endpoint, optionally over private endpoints.
 nodes:
-- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}}
-- {id: rg-rg-acr-global, type: azure.resource_group, name: rg-acr-global, parent: sub-workload, props: {location: westeurope}}
-- {id: rg-rg-aks-westeurope, type: azure.resource_group, name: rg-aks-westeurope, parent: sub-workload, props: {location: westeurope}}
-- {id: rg-rg-aks-eastus, type: azure.resource_group, name: rg-aks-eastus, parent: sub-workload, props: {location: eastus}}
-- {id: user, type: common.user, name: user}
-- {id: acr-premium-geo, type: azure.container_registry, name: acr-premium-geo, parent: rg-rg-acr-global}
-- {id: kv-acr-cmk, type: azure.key_vault, name: kv-acr-cmk, parent: rg-rg-acr-global}
-- {id: vpc-rg-rg-aks-westeurope, type: azure.vnet, name: main, parent: rg-rg-aks-westeurope, props: {cidr: 10.200.0.0/16}}
+- {id: sub-workload, type: azure.subscription, name: workload, props: {subscription_id: 00000000-0000-0000-0000-000000000000}, at: [2, 1]}
+- {id: rg-rg-acr-global, type: azure.resource_group, name: rg-acr-global, parent: sub-workload, props: {location: westeurope}, at: [1, 1, 1, 2]}
+- {id: rg-rg-aks-westeurope, type: azure.resource_group, name: rg-aks-westeurope, parent: sub-workload, props: {location: westeurope}, at: [2, 1]}
+- {id: rg-rg-aks-eastus, type: azure.resource_group, name: rg-aks-eastus, parent: sub-workload, props: {location: eastus}, at: [2, 2]}
+- {id: user, type: common.user, name: user, at: [1, 1]}
+- {id: acr-premium-geo, type: azure.container_registry, name: acr-premium-geo, parent: rg-rg-acr-global, at: [1, 1]}
+- {id: kv-acr-cmk, type: azure.key_vault, name: kv-acr-cmk, parent: rg-rg-acr-global, at: [1, 2]}
+- {id: vpc-rg-rg-aks-westeurope, type: azure.vnet, name: main, parent: rg-rg-aks-westeurope, props: {cidr: 10.200.0.0/16}, at: [2, 1]}
 - {id: sub-rg-rg-aks-westeurope, type: azure.subnet, name: main, parent: vpc-rg-rg-aks-westeurope, props: {cidr: 10.200.0.0/24}}
 - {id: aks-westeurope, type: azure.aks_cluster, name: aks-westeurope, parent: sub-rg-rg-aks-westeurope}
 - id: pe-acr-westeurope
+  at: [1, 1]
   type: azure.res.azurerm_private_endpoint
   name: pe-acr-westeurope
   parent: rg-rg-aks-westeurope
   props: {location: westeurope, name: changeme, private_service_connection: {}, resource_group_name: changeme, subnet_id: changeme}
-- {id: vpc-rg-rg-aks-eastus, type: azure.vnet, name: main, parent: rg-rg-aks-eastus, props: {cidr: 10.201.0.0/16}}
+- {id: vpc-rg-rg-aks-eastus, type: azure.vnet, name: main, parent: rg-rg-aks-eastus, props: {cidr: 10.201.0.0/16}, at: [2, 1]}
 - {id: sub-rg-rg-aks-eastus, type: azure.subnet, name: main, parent: vpc-rg-rg-aks-eastus, props: {cidr: 10.201.0.0/24}}
 - {id: aks-eastus, type: azure.aks_cluster, name: aks-eastus, parent: sub-rg-rg-aks-eastus}
 - id: pe-acr-eastus
+  at: [1, 1]
   type: azure.res.azurerm_private_endpoint
   name: pe-acr-eastus
   parent: rg-rg-aks-eastus

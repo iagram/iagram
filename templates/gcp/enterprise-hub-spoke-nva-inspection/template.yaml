@@ -14,29 +14,29 @@ description: The enterprise foundations blueprint hub-and-spoke topology adds a 
   behind an internal passthrough load balancer used as next hop. Dedicated Interconnect terminates in the hub, Cloud NAT and Private Google Access provide controlled egress, and a DNS hub project centralizes
   hybrid resolution.
 nodes:
-- {id: dc-on-premises, type: common.datacenter, name: on-premises}
-- {id: prj-prj-net-hub, type: gcp.project, name: prj-net-hub, props: {project_id: prj-net-hub-123456, project: changeme, region: us-central1}}
-- {id: vpc-hub-shared-vpc, type: gcp.vpc, name: hub-shared-vpc, parent: prj-prj-net-hub, props: {cidr: 10.110.0.0/16}}
-- {id: sub-hub-nva-usc1, type: gcp.subnetwork, name: hub-nva-usc1, parent: vpc-hub-shared-vpc, props: {cidr: 10.110.0.0/24, region: us-central1}}
-- {id: prj-prj-net-prod, type: gcp.project, name: prj-net-prod, props: {project_id: prj-net-prod-123456, project: changeme, region: us-central1}}
+- {id: dc-on-premises, type: common.datacenter, name: on-premises, at: [1, 1]}
+- {id: prj-prj-net-hub, type: gcp.project, name: prj-net-hub, props: {project_id: prj-net-hub-123456, project: changeme, region: us-central1}, at: [1, 2, 2, 1]}
+- {id: vpc-hub-shared-vpc, type: gcp.vpc, name: hub-shared-vpc, parent: prj-prj-net-hub, props: {cidr: 10.110.0.0/16}, at: [1, 2, 3, 1]}
+- {id: sub-hub-nva-usc1, type: gcp.subnetwork, name: hub-nva-usc1, parent: vpc-hub-shared-vpc, props: {cidr: 10.110.0.0/24, region: us-central1}, at: [2, 3]}
+- {id: prj-prj-net-prod, type: gcp.project, name: prj-net-prod, props: {project_id: prj-net-prod-123456, project: changeme, region: us-central1}, at: [1, 3]}
 - {id: vpc-prod-shared-vpc, type: gcp.vpc, name: prod-shared-vpc, parent: prj-prj-net-prod, props: {cidr: 10.111.0.0/16}}
 - {id: sub-prod-usc1, type: gcp.subnetwork, name: prod-usc1, parent: vpc-prod-shared-vpc, props: {cidr: 10.111.0.0/24, region: us-central1}}
-- {id: prj-prj-net-nonprod, type: gcp.project, name: prj-net-nonprod, props: {project_id: prj-net-nonprod-123456, project: changeme, region: us-central1}}
+- {id: prj-prj-net-nonprod, type: gcp.project, name: prj-net-nonprod, props: {project_id: prj-net-nonprod-123456, project: changeme, region: us-central1}, at: [2, 3]}
 - {id: vpc-nonprod-shared-vpc, type: gcp.vpc, name: nonprod-shared-vpc, parent: prj-prj-net-nonprod, props: {cidr: 10.112.0.0/16}}
 - {id: sub-nonprod-usc1, type: gcp.subnetwork, name: nonprod-usc1, parent: vpc-nonprod-shared-vpc, props: {cidr: 10.112.0.0/24, region: us-central1}}
-- {id: nva-1, type: gcp.compute_instance, name: nva-1, parent: sub-hub-nva-usc1}
-- {id: nva-2, type: gcp.compute_instance, name: nva-2, parent: sub-hub-nva-usc1}
-- {id: nva-backend, type: gcp.res.google_compute_backend_service, name: nva-backend, parent: vpc-hub-shared-vpc, props: {name: changeme}}
-- {id: nva-ilb-next-hop, type: gcp.res.google_compute_forwarding_rule, name: nva-ilb-next-hop, parent: sub-hub-nva-usc1, props: {name: changeme}}
-- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-shared-vpc, props: {name: changeme, network: changeme}}
-- {id: hub-vlan-ead1, type: gcp.res.google_compute_interconnect_attachment, name: hub-vlan-ead1, parent: vpc-hub-shared-vpc, props: {name: changeme, router: changeme}}
-- {id: hub-vlan-ead2, type: gcp.res.google_compute_interconnect_attachment, name: hub-vlan-ead2, parent: vpc-hub-shared-vpc, props: {name: changeme, router: changeme}}
-- {id: hub-nat, type: gcp.res.google_compute_router_nat, name: hub-nat, parent: vpc-hub-shared-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
-- {id: dns-hub-zone, type: gcp.cloud_dns_zone, name: dns-hub-zone, parent: prj-prj-net-hub, props: {domain: example.com}}
-- {id: hierarchical-fw-policy, type: gcp.res.google_compute_network_firewall_policy, name: hierarchical-fw-policy, parent: prj-prj-net-hub, props: {name: changeme}}
+- {id: nva-1, type: gcp.compute_instance, name: nva-1, parent: sub-hub-nva-usc1, at: [1, 2]}
+- {id: nva-2, type: gcp.compute_instance, name: nva-2, parent: sub-hub-nva-usc1, at: [1, 3]}
+- {id: nva-backend, type: gcp.res.google_compute_backend_service, name: nva-backend, parent: vpc-hub-shared-vpc, props: {name: changeme}, at: [1, 3]}
+- {id: nva-ilb-next-hop, type: gcp.res.google_compute_forwarding_rule, name: nva-ilb-next-hop, parent: sub-hub-nva-usc1, props: {name: changeme}, at: [1, 1]}
+- {id: hub-router, type: gcp.res.google_compute_router, name: hub-router, parent: vpc-hub-shared-vpc, props: {name: changeme, network: changeme}, at: [1, 2]}
+- {id: hub-vlan-ead1, type: gcp.res.google_compute_interconnect_attachment, name: hub-vlan-ead1, parent: vpc-hub-shared-vpc, props: {name: changeme, router: changeme}, at: [1, 1]}
+- {id: hub-vlan-ead2, type: gcp.res.google_compute_interconnect_attachment, name: hub-vlan-ead2, parent: vpc-hub-shared-vpc, props: {name: changeme, router: changeme}, at: [2, 1]}
+- {id: hub-nat, type: gcp.res.google_compute_router_nat, name: hub-nat, parent: vpc-hub-shared-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [2, 2]}
+- {id: dns-hub-zone, type: gcp.cloud_dns_zone, name: dns-hub-zone, parent: prj-prj-net-hub, props: {domain: example.com}, at: [2, 1]}
+- {id: hierarchical-fw-policy, type: gcp.res.google_compute_network_firewall_policy, name: hierarchical-fw-policy, parent: prj-prj-net-hub, props: {name: changeme}, at: [3, 1]}
 - {id: prod-app, type: gcp.compute_instance, name: prod-app, parent: sub-prod-usc1}
 - {id: nonprod-app, type: gcp.compute_instance, name: nonprod-app, parent: sub-nonprod-usc1}
-- {id: vpc-prj-prj-net-hub, type: gcp.vpc, name: main, parent: prj-prj-net-hub}
+- {id: vpc-prj-prj-net-hub, type: gcp.vpc, name: main, parent: prj-prj-net-hub, at: [1, 1]}
 - {id: sub-prj-prj-net-hub, type: gcp.subnetwork, name: main, parent: vpc-prj-prj-net-hub, props: {cidr: 10.200.0.0/24, region: europe-west1}}
 - {id: onprem-router, type: gcp.res.google_compute_router, name: onprem-router, parent: sub-prj-prj-net-hub, props: {name: changeme, network: changeme}}
 edges:

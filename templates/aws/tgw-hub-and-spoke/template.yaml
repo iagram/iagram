@@ -11,25 +11,25 @@ source: https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-
 description: A regional Transit Gateway acts as the hub; each spoke VPC attaches once and reaches the others and the internet through TGW route tables. A shared egress VPC with NAT gateways centralizes
   outbound traffic so spokes hold no internet gateway of their own.
 nodes:
-- {id: acct-prod, type: aws.account, name: prod}
+- {id: acct-prod, type: aws.account, name: prod, at: [1, 1]}
 - {id: reg-eu-west-1, type: aws.region, name: eu-west-1, parent: acct-prod, props: {region: eu-west-1}}
-- {id: vpc-egress, type: aws.vpc, name: egress, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}}
-- {id: az-egress-a, type: aws.availability_zone, name: a, parent: vpc-egress, props: {zone: a}}
-- {id: sub-egress-public-a, type: aws.subnet, name: egress-public-a, parent: az-egress-a, props: {cidr: 10.0.0.0/24, az: a, public: true}}
-- {id: az-egress-b, type: aws.availability_zone, name: b, parent: vpc-egress, props: {zone: b}}
+- {id: vpc-egress, type: aws.vpc, name: egress, parent: reg-eu-west-1, props: {cidr: 10.0.0.0/16}, at: [1, 3, 3, 1]}
+- {id: az-egress-a, type: aws.availability_zone, name: a, parent: vpc-egress, props: {zone: a}, at: [1, 1]}
+- {id: sub-egress-public-a, type: aws.subnet, name: egress-public-a, parent: az-egress-a, props: {cidr: 10.0.0.0/24, az: a, public: true}, at: [1, 1]}
+- {id: az-egress-b, type: aws.availability_zone, name: b, parent: vpc-egress, props: {zone: b}, at: [1, 2]}
 - {id: sub-egress-public-b, type: aws.subnet, name: egress-public-b, parent: az-egress-b, props: {cidr: 10.0.1.0/24, az: b, public: true}}
-- {id: sub-egress-tgw-a, type: aws.subnet, name: egress-tgw-a, parent: az-egress-a, props: {cidr: 10.0.10.0/28, az: a, public: false}}
-- {id: vpc-spoke-a, type: aws.vpc, name: spoke-a, parent: reg-eu-west-1, props: {cidr: 10.1.0.0/16}}
+- {id: sub-egress-tgw-a, type: aws.subnet, name: egress-tgw-a, parent: az-egress-a, props: {cidr: 10.0.10.0/28, az: a, public: false}, at: [2, 1]}
+- {id: vpc-spoke-a, type: aws.vpc, name: spoke-a, parent: reg-eu-west-1, props: {cidr: 10.1.0.0/16}, at: [1, 1]}
 - {id: az-spoke-a-a, type: aws.availability_zone, name: a, parent: vpc-spoke-a, props: {zone: a}}
 - {id: sub-app-a, type: aws.subnet, name: app-a, parent: az-spoke-a-a, props: {cidr: 10.1.1.0/24, az: a, public: false}}
-- {id: vpc-spoke-b, type: aws.vpc, name: spoke-b, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}}
+- {id: vpc-spoke-b, type: aws.vpc, name: spoke-b, parent: reg-eu-west-1, props: {cidr: 10.2.0.0/16}, at: [3, 1]}
 - {id: az-spoke-b-a, type: aws.availability_zone, name: a, parent: vpc-spoke-b, props: {zone: a}}
 - {id: sub-app-b, type: aws.subnet, name: app-b, parent: az-spoke-b-a, props: {cidr: 10.2.1.0/24, az: a, public: false}}
-- {id: internet, type: common.internet, name: internet}
-- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-eu-west-1}
-- {id: spoke-rt, type: aws.res.aws_ec2_transit_gateway_route_table, name: spoke-rt, parent: reg-eu-west-1, props: {transit_gateway_id: changeme}}
-- {id: egress-rt, type: aws.res.aws_ec2_transit_gateway_route_table, name: egress-rt, parent: reg-eu-west-1, props: {transit_gateway_id: changeme}}
-- {id: egress-igw, type: aws.res.aws_internet_gateway, name: egress-igw, parent: vpc-egress}
+- {id: internet, type: common.internet, name: internet, at: [1, 2]}
+- {id: hub-tgw, type: aws.res.aws_ec2_transit_gateway, name: hub-tgw, parent: reg-eu-west-1, at: [2, 2]}
+- {id: spoke-rt, type: aws.res.aws_ec2_transit_gateway_route_table, name: spoke-rt, parent: reg-eu-west-1, props: {transit_gateway_id: changeme}, at: [1, 2]}
+- {id: egress-rt, type: aws.res.aws_ec2_transit_gateway_route_table, name: egress-rt, parent: reg-eu-west-1, props: {transit_gateway_id: changeme}, at: [3, 2]}
+- {id: egress-igw, type: aws.res.aws_internet_gateway, name: egress-igw, parent: vpc-egress, at: [1, 3]}
 - {id: nat-a, type: aws.res.aws_nat_gateway, name: nat-a, parent: sub-egress-public-a}
 - {id: nat-b, type: aws.res.aws_nat_gateway, name: nat-b, parent: sub-egress-public-b}
 - {id: app-a, type: aws.ec2_instance, name: app-a, parent: sub-app-a}

@@ -5,23 +5,23 @@ image: https://builder.aws.com/assets/og-hiXAX-on.png
 source: https://docs.aws.amazon.com/whitepapers/latest/web-application-hosting-best-practices/an-aws-cloud-architecture-for-web-hosting.html
 description: The classic AWS web hosting architecture. Route 53 and CloudFront front an Application Load Balancer; web servers in an Auto Scaling group span two Availability Zones and a Multi-AZ RDS database sits in private subnets.
 nodes:
-  - {id: users, type: common.users, name: users, step: "1"}
-  - {id: acct, type: account, name: prod}
+  - {id: users, type: common.users, name: users, step: "1", at: [1, 1]}
+  - {id: acct, type: account, name: prod, at: [1, 2]}
   - {id: reg, type: region, name: eu-west-1, parent: acct, props: {region: eu-west-1}}
-  - {id: dns, type: route53_zone, name: example.com, parent: reg, props: {domain: example.com}}
-  - {id: cdn, type: cloudfront_distribution, name: edge, parent: reg}
-  - {id: vpc, type: vpc, name: main, parent: reg, props: {cidr: 10.0.0.0/16}}
-  - {id: az-a, type: availability_zone, name: a, parent: vpc, props: {zone: a}}
-  - {id: az-b, type: availability_zone, name: b, parent: vpc, props: {zone: b}}
-  - {id: pub-a, type: subnet, name: public-a, parent: az-a, props: {cidr: 10.0.1.0/24, az: a, public: true}}
-  - {id: priv-a, type: subnet, name: private-a, parent: az-a, props: {cidr: 10.0.11.0/24, az: a}}
-  - {id: pub-b, type: subnet, name: public-b, parent: az-b, props: {cidr: 10.0.2.0/24, az: b, public: true}}
-  - {id: priv-b, type: subnet, name: private-b, parent: az-b, props: {cidr: 10.0.12.0/24, az: b}}
-  - {id: alb, type: alb, name: web-alb, parent: vpc}
+  - {id: dns, type: route53_zone, name: example.com, parent: reg, props: {domain: example.com}, at: [1, 1]}
+  - {id: cdn, type: cloudfront_distribution, name: edge, parent: reg, at: [2, 1]}
+  - {id: vpc, type: vpc, name: main, parent: reg, props: {cidr: 10.0.0.0/16}, at: [1, 2, 2, 1]}
+  - {id: az-a, type: availability_zone, name: a, parent: vpc, props: {zone: a}, at: [2, 1]}
+  - {id: az-b, type: availability_zone, name: b, parent: vpc, props: {zone: b}, at: [2, 2]}
+  - {id: pub-a, type: subnet, name: public-a, parent: az-a, props: {cidr: 10.0.1.0/24, az: a, public: true}, at: [1, 1]}
+  - {id: priv-a, type: subnet, name: private-a, parent: az-a, props: {cidr: 10.0.11.0/24, az: a}, at: [2, 1]}
+  - {id: pub-b, type: subnet, name: public-b, parent: az-b, props: {cidr: 10.0.2.0/24, az: b, public: true}, at: [1, 1]}
+  - {id: priv-b, type: subnet, name: private-b, parent: az-b, props: {cidr: 10.0.12.0/24, az: b}, at: [2, 1]}
+  - {id: alb, type: alb, name: web-alb, parent: vpc, at: [1, 1, 1, 2]}
   - {id: web-a, type: ec2_instance, name: web-a, parent: pub-a}
   - {id: web-b, type: ec2_instance, name: web-b, parent: pub-b}
   - {id: db, type: rds_instance, name: app-db, parent: priv-a, props: {multi_az: true}}
-  - {id: sg, type: security_group, name: web-sg, parent: vpc}
+  - {id: sg, type: security_group, name: web-sg, parent: vpc, at: [1, 3]}
 edges:
   - {from: users, to: dns, label: DNS, step: "1"}
   - {from: dns, to: cdn}

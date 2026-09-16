@@ -14,19 +14,19 @@ description: A global forwarding rule on a reserved anycast IP hands HTTPS to a 
   managed instance groups built from an instance template and watched by an HTTP health check. The web tier reads session state from Memorystore for Redis and persists data in a regional Cloud SQL instance
   reached over private IP, while a Cloud NAT gateway gives the private VMs outbound access for package updates.
 nodes:
-- {id: prj-web-tier-prj, type: gcp.project, name: web-tier-prj, props: {project_id: web-tier-prj-123456, project: changeme, region: europe-west1}}
-- {id: vpc-web-vpc, type: gcp.vpc, name: web-vpc, parent: prj-web-tier-prj, props: {cidr: 10.10.0.0/16}}
-- {id: sub-web-sub, type: gcp.subnetwork, name: web-sub, parent: vpc-web-vpc, props: {cidr: 10.10.1.0/24, region: europe-west1}}
-- {id: sub-data-sub, type: gcp.subnetwork, name: data-sub, parent: vpc-web-vpc, props: {cidr: 10.10.2.0/24, region: europe-west1}}
-- {id: users, type: common.users, name: users}
-- {id: internet, type: common.internet, name: internet}
-- {id: web-ip, type: gcp.res.google_compute_global_address, name: web-ip, parent: prj-web-tier-prj, props: {name: changeme}}
-- {id: web-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: web-https-rule, parent: prj-web-tier-prj, props: {name: changeme, target: changeme}}
-- {id: web-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: web-https-proxy, parent: prj-web-tier-prj, props: {name: changeme, url_map: changeme}}
-- {id: web-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: web-cert, parent: prj-web-tier-prj}
-- {id: web-url-map, type: gcp.res.google_compute_url_map, name: web-url-map, parent: prj-web-tier-prj, props: {name: changeme}}
-- {id: web-backend, type: gcp.res.google_compute_backend_service, name: web-backend, parent: prj-web-tier-prj, props: {name: changeme}}
-- {id: web-hc, type: gcp.res.google_compute_health_check, name: web-hc, parent: prj-web-tier-prj, props: {name: changeme}}
+- {id: prj-web-tier-prj, type: gcp.project, name: web-tier-prj, props: {project_id: web-tier-prj-123456, project: changeme, region: europe-west1}, at: [1, 2]}
+- {id: vpc-web-vpc, type: gcp.vpc, name: web-vpc, parent: prj-web-tier-prj, props: {cidr: 10.10.0.0/16}, at: [1, 5, 2, 1]}
+- {id: sub-web-sub, type: gcp.subnetwork, name: web-sub, parent: vpc-web-vpc, props: {cidr: 10.10.1.0/24, region: europe-west1}, at: [1, 1, 2, 1]}
+- {id: sub-data-sub, type: gcp.subnetwork, name: data-sub, parent: vpc-web-vpc, props: {cidr: 10.10.2.0/24, region: europe-west1}, at: [1, 2]}
+- {id: users, type: common.users, name: users, at: [1, 1]}
+- {id: internet, type: common.internet, name: internet, at: [1, 3]}
+- {id: web-ip, type: gcp.res.google_compute_global_address, name: web-ip, parent: prj-web-tier-prj, props: {name: changeme}, at: [2, 1]}
+- {id: web-https-rule, type: gcp.res.google_compute_global_forwarding_rule, name: web-https-rule, parent: prj-web-tier-prj, props: {name: changeme, target: changeme}, at: [1, 1]}
+- {id: web-https-proxy, type: gcp.res.google_compute_target_https_proxy, name: web-https-proxy, parent: prj-web-tier-prj, props: {name: changeme, url_map: changeme}, at: [1, 2]}
+- {id: web-cert, type: gcp.res.google_compute_managed_ssl_certificate, name: web-cert, parent: prj-web-tier-prj, at: [2, 2]}
+- {id: web-url-map, type: gcp.res.google_compute_url_map, name: web-url-map, parent: prj-web-tier-prj, props: {name: changeme}, at: [1, 3]}
+- {id: web-backend, type: gcp.res.google_compute_backend_service, name: web-backend, parent: prj-web-tier-prj, props: {name: changeme}, at: [1, 4]}
+- {id: web-hc, type: gcp.res.google_compute_health_check, name: web-hc, parent: prj-web-tier-prj, props: {name: changeme}, at: [2, 4]}
 - id: web-template
   type: gcp.res.google_compute_instance_template
   name: web-template
@@ -34,6 +34,7 @@ nodes:
   props:
     disk: []
     machine_type: changeme
+  at: [2, 3]
 - id: web-mig
   type: gcp.res.google_compute_region_instance_group_manager
   name: web-mig
@@ -43,9 +44,9 @@ nodes:
     name: changeme
     version: []
 - {id: session-cache, type: gcp.res.google_redis_instance, name: session-cache, parent: sub-data-sub, props: {memory_size_gb: 1, name: changeme}}
-- {id: app-db, type: gcp.cloud_sql_instance, name: app-db, parent: vpc-web-vpc}
-- {id: web-router, type: gcp.res.google_compute_router, name: web-router, parent: vpc-web-vpc, props: {name: changeme, network: changeme}}
-- {id: web-nat, type: gcp.res.google_compute_router_nat, name: web-nat, parent: vpc-web-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}}
+- {id: app-db, type: gcp.cloud_sql_instance, name: app-db, parent: vpc-web-vpc, at: [2, 2]}
+- {id: web-router, type: gcp.res.google_compute_router, name: web-router, parent: vpc-web-vpc, props: {name: changeme, network: changeme}, at: [3, 1]}
+- {id: web-nat, type: gcp.res.google_compute_router_nat, name: web-nat, parent: vpc-web-vpc, props: {name: changeme, router: changeme, source_subnetwork_ip_ranges_to_nat: changeme}, at: [3, 2]}
 edges:
 - {from: users, to: web-https-rule, label: HTTPS to anycast IP, step: '1'}
 - {from: web-https-rule, to: web-https-proxy, step: '2'}
