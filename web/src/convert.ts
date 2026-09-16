@@ -79,7 +79,7 @@ export function makeNode(rules: Rules, n: DocNode): RFNode {
 
 export function makeEdge(e: DocEdge, ruleLabel: string, ruleStyle?: EdgeStyle): RFEdge {
   const data: EdgeData = { kind: e.kind, label: e.label || ruleLabel, userLabel: e.label, ruleLabel, step: e.step, style: e.style, ruleStyle, attr: e.attr, output: e.output, type: e.type, name: e.name, props: e.props }
-  return withMarkers({ id: e.id, source: e.source, target: e.target, type: 'iagram', data })
+  return withMarkers({ id: e.id, source: e.source, target: e.target, sourceHandle: e.from_port || 'r', targetHandle: e.to_port || 'l', type: 'iagram', data })
 }
 
 /** Arrow heads follow the effective direction (one, both, none) and colour. */
@@ -158,6 +158,8 @@ export function toDocument(name: string, nodes: RFNode[], edges: RFEdge[], steps
       ...(e.data?.type ? { type: e.data.type } : {}),
       ...(e.data?.name ? { name: e.data.name } : {}),
       ...(e.data?.props && Object.keys(e.data.props).length ? { props: e.data.props } : {}),
+      ...(e.sourceHandle && e.sourceHandle !== 'r' ? { from_port: e.sourceHandle } : {}),
+      ...(e.targetHandle && e.targetHandle !== 'l' ? { to_port: e.targetHandle } : {}),
     })),
   }
 }

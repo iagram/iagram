@@ -15,6 +15,7 @@ import type { Document } from './types'
 import { rfStore } from './rf'
 import type { ApplyResult, AttachmentOption, Catalog, ConvertReport, DriftResult, EdgeStyle, Entry, Family, GeneratedSummary, Job, PlanResult, Problem, Step, TemplateItem } from './types'
 import { COMMON, ROOT } from './types'
+import { arrange as arrangeNodes, type Algo } from './layout'
 
 interface State {
   catalog: Catalog | null
@@ -79,6 +80,8 @@ interface State {
   /** Edit an edge's label, step or style (informational fields). */
   updateEdge: (id: string, patch: { label?: string; step?: string; style?: EdgeStyle; type?: string; name?: string; props?: Record<string, unknown> }) => void
   setSteps: (steps: Step[]) => void
+  /** Lay the diagram out (or the selected container's contents) with an algorithm. */
+  arrange: (algo: Algo) => void
   setShowLegend: (v: boolean) => void
   setShowGallery: (v: boolean) => void
   loadTemplates: () => Promise<void>
@@ -370,7 +373,7 @@ export const useStore = create<State>((set, get) => ({
     if (edges.some((e) => e.source === c.source && e.target === c.target)) return
     get().commit()
     const link = rule.kind === 'link' ? { type: rule.type, name: `${src.data.name}-${dst.data.name}`.replace(/[^A-Za-z0-9_-]+/g, '_'), props: { ...(rules.links.find((l) => l.id === rule.type)?.defaults ?? {}) } } : {}
-    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: c.source, target: c.target, ...link }, rule.label ?? (rule.kind === 'flow' ? '' : rule.kind), rule.style)
+    const edge = makeEdge({ id: `e-${Math.random().toString(36).slice(2, 8)}`, kind: rule.kind, source: c.source, target: c.target, from_port: c.sourceHandle ?? undefined, to_port: c.targetHandle ?? undefined, ...link }, rule.label ?? (rule.kind === 'flow' ? '' : rule.kind), rule.style)
     set({ edges: addEdge(edge, edges), dirty: true })
     get().validateSoon()
     // The attachment's configuration opens right away (attribute picker for references).
@@ -851,6 +854,18 @@ export const useStore = create<State>((set, get) => ({
       dirty: true,
     })
     if (patch.type !== undefined || patch.props !== undefined || patch.name !== undefined) get().validateSoon()
+  },
+
+  arrange(algo) {
+    if (get().isProjected()) get().materialize()
+    const { rules, nodes, edges } = get()
+    if (!rules || nodes.length === 0) return
+    get().commit()
+    const sel = nodes.filter((n) => n.selected)
+    const root = sel.length === 1 && sel[0].type === 'container' ? sel[0].id : null
+    set({ nodes: arrangeNodes(nodes, edges, rules, algo, root), dirty: true })
+    get().syncSpans()
+    get().validateSoon()
   },
 
   setSteps(steps) {

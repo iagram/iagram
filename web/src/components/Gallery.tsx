@@ -48,6 +48,21 @@ export function Gallery() {
   const [provider, setProvider] = useState<string>('all')
   const [category, setCategory] = useState<string>('all')
   const [q, setQ] = useState('')
+  const [refImages, setRefImages] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('iagram.refimages') !== '0'
+    } catch {
+      return true
+    }
+  })
+  const toggleRefImages = (v: boolean) => {
+    setRefImages(v)
+    try {
+      localStorage.setItem('iagram.refimages', v ? '1' : '0')
+    } catch {
+      /* private mode */
+    }
+  }
   const PAGE = 48
   const [limit, setLimit] = useState(PAGE)
   useEffect(() => {
@@ -102,6 +117,10 @@ export function Gallery() {
           ))}
         </div>
         <input className="search" type="search" placeholder="Search architectures, services, tags…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <label className="field check refimages" title="Show the original diagram from the vendor's page. Images are loaded from aws.amazon.com, cloud.google.com or learn.microsoft.com when you open the gallery; switch off to keep iagram fully offline.">
+          <input type="checkbox" checked={refImages} onChange={(e) => toggleRefImages(e.target.checked)} />
+          <span>Original diagrams</span>
+        </label>
       </div>
       <div className="gallery-chips">
         <button className={category === 'all' ? 'chip active' : 'chip'} onClick={() => setCategory('all')}>
@@ -127,7 +146,7 @@ export function Gallery() {
         )}
         {list.slice(0, limit).map((t) => (
           <article key={t.id} className="card" onClick={() => void useTemplate(t)} title="Open a copy in the editor (the reference architecture itself is never modified)">
-            <Preview doc={t.document} provider={t.provider} types={t.types} />
+            <CardImage t={t} useRef={refImages} />
             <div className="card-body">
               <div className="card-top">
                 <span className={`pill ${t.provider}`}>{PROVIDER_LABEL[t.provider] ?? t.provider}</span>
@@ -154,6 +173,26 @@ export function Gallery() {
       )}
     </div>
   )
+}
+
+/** The original vendor diagram when available and enabled, else the generated miniature. */
+function CardImage({ t, useRef }: { t: TemplateItem; useRef: boolean }) {
+  const [failed, setFailed] = useState(false)
+  if (useRef && t.image && !failed) {
+    let host = ''
+    try {
+      host = new URL(t.image).hostname
+    } catch {
+      /* keep empty */
+    }
+    return (
+      <div className="preview ref">
+        <img src={t.image} alt={`Reference diagram: ${t.title}`} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+        {host && <span className="credit">Diagram from {host}</span>}
+      </div>
+    )
+  }
+  return <Preview doc={t.document} provider={t.provider} types={t.types} />
 }
 
 /** Miniature of the diagram: containers as tinted boxes, elements as icons. */

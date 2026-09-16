@@ -14,6 +14,7 @@ import (
 
 	"github.com/iagram/iagram/internal/catalog"
 	"github.com/iagram/iagram/internal/document"
+	"github.com/iagram/iagram/internal/layout"
 )
 
 // Table is the parsed equivalence file.
@@ -288,7 +289,7 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 			rep.Edges = append(rep.Edges, fmt.Sprintf("%s -> %s (%s): no equivalent connection in %s", byID[e.Source].Name, byID[e.Target].Name, e.Kind, target))
 			continue
 		}
-		out.Edges = append(out.Edges, document.Edge{ID: e.ID, Kind: rule.Kind, Source: s, Target: t2, Label: e.Label, Step: e.Step, Style: e.Style})
+		out.Edges = append(out.Edges, document.Edge{ID: e.ID, Kind: rule.Kind, Source: s, Target: t2, Label: e.Label, Step: e.Step, Style: e.Style, FromPort: e.FromPort, ToPort: e.ToPort})
 	}
 	// Root containers usually need an identifier only the user knows.
 	for _, elemID := range root.Chain {
@@ -307,6 +308,9 @@ func Run(c *catalog.Catalog, t *Table, d *document.Document, target string) (*do
 	sort.Strings(rep.Dropped)
 	sort.Strings(rep.Edges)
 	sort.Strings(rep.Notes)
+	// The target has a different container chain and element sizes: a fresh
+	// layout beats source coordinates that no longer fit anything.
+	layout.Auto(c, out)
 	return out, rep, nil
 }
 

@@ -38,6 +38,8 @@ type EdgeStyle struct {
 	Direction string `json:"direction,omitempty"`
 	Dash      string `json:"dash,omitempty"`
 	Color     string `json:"color,omitempty"`
+	Width     int    `json:"width,omitempty"` // stroke width in px (1..6), default 1.5
+	Curve     string `json:"curve,omitempty"` // step (default) | straight | bezier
 	Inactive  bool   `json:"inactive,omitempty"`
 }
 
@@ -90,6 +92,10 @@ type Edge struct {
 	Type  string         `json:"type,omitempty"`
 	Name  string         `json:"name,omitempty"`
 	Props map[string]any `json:"props,omitempty"`
+	// FromPort / ToPort are the anchors the arrow leaves and enters by:
+	// t (top), r (right), b (bottom), l (left). Default: right to left.
+	FromPort string `json:"from_port,omitempty"`
+	ToPort   string `json:"to_port,omitempty"`
 }
 
 // New returns an empty document.

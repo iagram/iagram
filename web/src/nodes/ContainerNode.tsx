@@ -49,8 +49,10 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<RFNode>) {
       style={css as CSSProperties}
     >
       <NodeResizer isVisible={selected} onResizeStart={() => commit()} onResizeEnd={() => span && syncSpans()} minWidth={200} minHeight={span ? 80 : 120} lineClassName="resizer-line" handleClassName="resizer-handle" />
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
+      <Handle id="t" type="source" position={Position.Top} />
+      <Handle id="r" type="source" position={Position.Right} />
+      <Handle id="b" type="source" position={Position.Bottom} />
+      <Handle id="l" type="source" position={Position.Left} />
       <header>
         {data.step && <span className="step-badge">{data.step}</span>}
         {icon && <img src={`/icons/${icon}`} alt="" draggable={false} />}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, type DragEvent } from 'react'
 import {
+  ConnectionMode,
   Background,
   MiniMap,
   ReactFlow,
@@ -292,8 +293,8 @@ export function Canvas() {
         onConnectEnd={() => setConnectingFrom(null)}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
-        selectionOnDrag
-        panOnDrag={[1, 2]}
+        panOnDrag
+        connectionMode={ConnectionMode.Loose}
         selectionKeyCode="Shift"
         multiSelectionKeyCode={['Meta', 'Control']}
         isValidConnection={isValidConnection}

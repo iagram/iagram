@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store'
-import type { JSONSchema, Problem } from '../types'
+import type { EdgeStyle, JSONSchema, Problem } from '../types'
 
 export function PropertyPanel() {
   const selectedId = useStore((s) => s.selectedId)
@@ -111,26 +111,10 @@ export function PropertyPanel() {
             <span>Step</span>
             <input value={edge.data?.step ?? ''} placeholder="1, 2, 9a…" onChange={(e) => updateEdge(edge.id, { step: e.target.value })} />
           </label>
-          <label className="field">
-            <span>Direction</span>
-            <select value={edge.data?.style?.direction ?? edge.data?.ruleStyle?.direction ?? 'one'} onChange={(e) => updateEdge(edge.id, { style: { direction: e.target.value as 'one' | 'both' | 'none' } })}>
-              <option value="one">one way →</option>
-              <option value="both">both ways ↔</option>
-              <option value="none">plain line (association)</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Line</span>
-            <select value={edge.data?.style?.dash ?? edge.data?.ruleStyle?.dash ?? 'solid'} onChange={(e) => updateEdge(edge.id, { style: { dash: e.target.value as 'solid' | 'dashed' | 'dotted' } })}>
-              <option value="solid">solid</option>
-              <option value="dashed">dashed</option>
-              <option value="dotted">dotted</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Colour</span>
-            <input value={edge.data?.style?.color ?? ''} placeholder="CSS colour, e.g. #8C4FFF" onChange={(e) => updateEdge(edge.id, { style: { color: e.target.value } })} />
-          </label>
+          <EdgeStyleControls
+            style={{ ...(edge.data?.ruleStyle ?? {}), ...(edge.data?.style ?? {}) }}
+            onChange={(patch) => updateEdge(edge.id, { style: patch })}
+          />
           <label className="field check">
             <input type="checkbox" checked={!!edge.data?.style?.inactive} onChange={(e) => updateEdge(edge.id, { style: { inactive: e.target.checked } })} />
             <span>Inactive (standby path, greyed out)</span>
@@ -811,5 +795,96 @@ function LinkSection({ edgeId, sourceType, targetType, type, name, props, proble
           )
         })}
     </details>
+  )
+}
+
+
+/** Segmented buttons for the arrow head, line style and width, plus a colour picker. */
+function EdgeStyleControls({ style, onChange }: { style: EdgeStyle; onChange: (patch: EdgeStyle) => void }) {
+  const dir = style.direction ?? 'one'
+  const dash = style.dash ?? 'solid'
+  const width = style.width ?? 2
+  const color = style.color ?? ''
+  const Line = ({ d, w }: { d?: string; w?: number }) => (
+    <svg width="34" height="10" aria-hidden>
+      <line x1="2" y1="5" x2="32" y2="5" stroke="currentColor" strokeWidth={w ?? 1.5} strokeDasharray={d === 'dashed' ? '6 4' : d === 'dotted' ? '2 3' : undefined} />
+    </svg>
+  )
+  return (
+    <>
+      <div className="field">
+        <span>Arrow</span>
+        <div className="segmented" role="radiogroup">
+          <button type="button" className={dir === 'one' ? 'active' : ''} title="One way" onClick={() => onChange({ direction: 'one' })}>
+            <svg width="34" height="10" aria-hidden>
+              <line x1="2" y1="5" x2="26" y2="5" stroke="currentColor" strokeWidth="1.5" />
+              <polygon points="25,1 32,5 25,9" fill="currentColor" />
+            </svg>
+          </button>
+          <button type="button" className={dir === 'both' ? 'active' : ''} title="Both ways" onClick={() => onChange({ direction: 'both' })}>
+            <svg width="34" height="10" aria-hidden>
+              <line x1="8" y1="5" x2="26" y2="5" stroke="currentColor" strokeWidth="1.5" />
+              <polygon points="25,1 32,5 25,9" fill="currentColor" />
+              <polygon points="9,1 2,5 9,9" fill="currentColor" />
+            </svg>
+          </button>
+          <button type="button" className={dir === 'none' ? 'active' : ''} title="Plain line (association)" onClick={() => onChange({ direction: 'none' })}>
+            <Line />
+          </button>
+        </div>
+      </div>
+      <div className="field">
+        <span>Shape</span>
+        <div className="segmented" role="radiogroup">
+          <button type="button" className={(style.curve ?? 'step') === 'step' ? 'active' : ''} title="Orthogonal" onClick={() => onChange({ curve: 'step' })}>
+            <svg width="34" height="14" aria-hidden>
+              <polyline points="2,12 14,12 14,2 32,2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </button>
+          <button type="button" className={style.curve === 'straight' ? 'active' : ''} title="Straight" onClick={() => onChange({ curve: 'straight' })}>
+            <svg width="34" height="14" aria-hidden>
+              <line x1="2" y1="12" x2="32" y2="2" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </button>
+          <button type="button" className={style.curve === 'bezier' ? 'active' : ''} title="Curved" onClick={() => onChange({ curve: 'bezier' })}>
+            <svg width="34" height="14" aria-hidden>
+              <path d="M2,12 C14,12 20,2 32,2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div className="field">
+        <span>Line</span>
+        <div className="segmented" role="radiogroup">
+          {(['solid', 'dashed', 'dotted'] as const).map((d) => (
+            <button key={d} type="button" className={dash === d ? 'active' : ''} title={d} onClick={() => onChange({ dash: d })}>
+              <Line d={d} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="field">
+        <span>Width</span>
+        <div className="segmented" role="radiogroup">
+          {[1, 2, 3, 5].map((w) => (
+            <button key={w} type="button" className={width === w ? 'active' : ''} title={`${w} px`} onClick={() => onChange({ width: w })}>
+              <Line w={w} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="field">
+        <span>Colour</span>
+        <div className="colorpick">
+          <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#7d8998'} onChange={(e) => onChange({ color: e.target.value })} title="Pick a colour" />
+          {['#232F3E', '#ED7100', '#8C4FFF', '#7AA116', '#DD344C', '#1d8bd6', '#E7157B'].map((c) => (
+            <button key={c} type="button" className={`swatch ${color.toLowerCase() === c.toLowerCase() ? 'active' : ''}`} style={{ background: c }} title={c} onClick={() => onChange({ color: c })} />
+          ))}
+          <button type="button" className="swatch clear" title="Default colour" onClick={() => onChange({ color: '' })}>
+            ✕
+          </button>
+        </div>
+      </div>
+    </>
   )
 }

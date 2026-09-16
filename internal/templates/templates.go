@@ -20,10 +20,13 @@ import (
 
 // Spec is the hand-written source of a template.
 type Spec struct {
-	Title       string          `yaml:"title" json:"title"`
-	Category    string          `yaml:"category" json:"category"`
-	Tags        []string        `yaml:"tags" json:"tags"`
-	Source      string          `yaml:"source" json:"source"`
+	Title    string   `yaml:"title" json:"title"`
+	Category string   `yaml:"category" json:"category"`
+	Tags     []string `yaml:"tags" json:"tags"`
+	Source   string   `yaml:"source" json:"source"`
+	// Image is the original diagram on the source page, loaded by the gallery
+	// from the vendor site (never copied into the repository).
+	Image       string          `yaml:"image" json:"image,omitempty"`
 	Description string          `yaml:"description" json:"description"`
 	Provider    string          `yaml:"provider" json:"provider"`
 	Nodes       []SpecNode      `yaml:"nodes" json:"-"`
@@ -67,6 +70,7 @@ type Meta struct {
 	Category    string   `json:"category"`
 	Tags        []string `json:"tags"`
 	Source      string   `json:"source"`
+	Image       string   `json:"image,omitempty"`
 	Description string   `json:"description"`
 	Elements    int      `json:"elements"`
 }
@@ -120,7 +124,7 @@ func Load(fsys fs.FS, c *catalog.Catalog) ([]Template, error) {
 				types[n.Type] = ti
 			}
 		}
-		out = append(out, Template{Meta: Meta{ID: provider + "/" + slug, Provider: provider, Slug: slug, Title: spec.Title, Category: spec.Category, Tags: spec.Tags, Source: spec.Source, Description: spec.Description, Elements: countElements(c, doc)}, Document: doc, Types: types})
+		out = append(out, Template{Meta: Meta{ID: provider + "/" + slug, Provider: provider, Slug: slug, Title: spec.Title, Category: spec.Category, Tags: spec.Tags, Source: spec.Source, Image: spec.Image, Description: spec.Description, Elements: countElements(c, doc)}, Document: doc, Types: types})
 		return nil
 	})
 	if err != nil {

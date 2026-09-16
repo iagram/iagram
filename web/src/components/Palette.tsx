@@ -9,7 +9,27 @@ export const DND_TYPE = 'application/x-iagram-type'
 
 const PROVIDER_LABEL: Record<string, string> = { aws: 'AWS', gcp: 'Google Cloud', azure: 'Azure' }
 
+const OPEN_KEY = 'iagram.palette.open'
+function loadOpen(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(OPEN_KEY) ?? '{}') as Record<string, boolean>
+  } catch {
+    return {}
+  }
+}
+
 export function Palette() {
+  const [open, setOpen] = useState<Record<string, boolean>>(loadOpen)
+  const toggle = (key: string, v: boolean) => {
+    const next = { ...open, [key]: v }
+    setOpen(next)
+    try {
+      localStorage.setItem(OPEN_KEY, JSON.stringify(next))
+    } catch {
+      /* private mode */
+    }
+  }
+  const isOpen = (key: string, fallback: boolean) => (q ? true : open[key] ?? fallback)
   const catalog = useStore((s) => s.catalog)
   const rules = useStore((s) => s.rules)
   const selectedId = useStore((s) => s.selectedId)
@@ -69,9 +89,11 @@ export function Palette() {
       </p>
       {[...groups.entries()]
         .sort(([a], [b]) => ORDER.indexOf(a) - ORDER.indexOf(b))
-        .map(([cat, entries]) => (
-          <section key={cat}>
-            <h3>{cat}</h3>
+        .map(([cat, entries], idx) => (
+          <details key={cat} className="group" open={isOpen(`c:${cat}`, idx === 0)} onToggle={(ev) => !q && toggle(`c:${cat}`, (ev.currentTarget as HTMLDetailsElement).open)}>
+            <summary>
+              {cat} <span className="count">{entries.length}</span>
+            </summary>
             {entries.map((e) => {
               const fits = rules.canContain(contextType, e.id)
               return (
@@ -89,7 +111,7 @@ export function Palette() {
                 </div>
               )
             })}
-          </section>
+          </details>
         ))}
       <section className="generated">
         <h3>
@@ -100,8 +122,10 @@ export function Palette() {
           {attachmentCount}) attach from there.
         </p>
         {grouped.map(([cat, fams]) => (
-          <div key={cat}>
-            <h4>{cat}</h4>
+          <details key={cat} className="group" open={isOpen(`f:${cat}`, false)} onToggle={(ev) => !q && toggle(`f:${cat}`, (ev.currentTarget as HTMLDetailsElement).open)}>
+            <summary>
+              {cat} <span className="count">{fams.length}</span>
+            </summary>
             {fams.map((f) => {
               const fits = rules.canContain(contextType, f.default) || !rules.entry(f.default)
               return (
@@ -127,7 +151,7 @@ export function Palette() {
                 </div>
               )
             })}
-          </div>
+          </details>
         ))}
         {q && generatedMatches.length > 0 && (
           <div>

@@ -186,6 +186,14 @@ export function MenuBar() {
       { sep: true },
       { label: 'Dark theme', checked: s.theme === 'dark', onClick: () => s.setTheme(s.theme === 'dark' ? 'light' : 'dark') },
     ],
+    Arrange: [
+      { label: 'Horizontal flow', onClick: () => s.arrange('flow-h'), disabled: s.nodes.length === 0 },
+      { label: 'Vertical flow', onClick: () => s.arrange('flow-v'), disabled: s.nodes.length === 0 },
+      { label: 'Grid', onClick: () => s.arrange('grid'), disabled: s.nodes.length === 0 },
+      { label: 'Circle', onClick: () => s.arrange('circle'), disabled: s.nodes.length === 0 },
+      { sep: true },
+      { label: 'Fit diagram', shortcut: '⇧1', onClick: () => void fitView({ padding: 0.1 }) },
+    ],
     Infrastructure: [
       { label: 'Plan', onClick: () => void s.runPlan(), disabled: running || errors > 0 },
       { label: s.plan?.destroy ? 'Destroy (apply plan)' : 'Apply', onClick: () => s.setConfirmApply(true), disabled: !canApply },

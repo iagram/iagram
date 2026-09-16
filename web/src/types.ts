@@ -135,6 +135,8 @@ export interface EdgeStyle {
   direction?: 'one' | 'both' | 'none'
   dash?: 'solid' | 'dashed' | 'dotted'
   color?: string
+  width?: number
+  curve?: 'step' | 'straight' | 'bezier'
   inactive?: boolean
 }
 
@@ -153,6 +155,9 @@ export interface DocEdge {
   type?: string
   name?: string
   props?: Record<string, unknown>
+  /** anchors: t | r | b | l (default r -> l) */
+  from_port?: string
+  to_port?: string
 }
 
 export interface Step {
@@ -298,6 +303,8 @@ export interface TemplateItem {
   category: string
   tags: string[]
   source: string
+  /** original diagram on the source page; loaded from the vendor site */
+  image?: string
   description: string
   elements: number
   document: Document
