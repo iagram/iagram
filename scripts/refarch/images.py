@@ -9,7 +9,15 @@ import os, re, sys, glob, html, urllib.request, urllib.parse, concurrent.futures
 import yaml
 
 UA = {'User-Agent': 'Mozilla/5.0 (compatible; iagram-templates/1.0; +https://github.com/iagram/iagram)'}
-BAD = re.compile(r'(logo|icon|avatar|badge|favicon|sprite|arrow|button|thumb|pixel|tracking|1x1|banner|hero|social|share|featured|warning|caution|note|important|tip|callout|alert|info\b|\.gif$)', re.I)
+BAD = re.compile(r'(logo|icon|avatar|badge|favicon|sprite|arrow|button|thumb|pixel|tracking|1x1|banner|hero|social|share|featured|warning|caution|note|important|tip|callout|alert|info\b|\.gif$'
+                 # pictures that are not the architecture drawing: console and browser screenshots, code and
+                 # payload snippets, photos, Open Graph / social cards and placeholders
+                 r'|screenshot|screen-shot|console|dashboard|terminal|snippet|payload|code-sample|keynote|photo|og-image|og_image|opengraph|open-graph|social-card|twitter|linkedin|facebook|placeholder|default-image|card\.|preview)', re.I)
+# tokens too generic to prove an image belongs to a template's subject
+STOP = {'aws', 'amazon', 'azure', 'microsoft', 'google', 'cloud', 'gcp', 'with', 'and', 'for', 'the', 'using', 'on', 'in', 'to', 'of', 'a', 'an', 'architecture', 'diagram', 'solution', 'reference', 'pattern', 'service', 'services'}
+
+def tokens(text):
+    return {t for t in re.split(r'[^a-z0-9]+', (text or '').lower()) if len(t) > 2 and t not in STOP}
 GOOD = re.compile(r'(architecture|diagram|arch|overview|topology|flow|reference|solution|design|figure)', re.I)
 
 def fetch(url, timeout=25):
@@ -38,12 +46,18 @@ def head_ok(url):
 IMG = re.compile(r'<img\b[^>]*>', re.I)
 ATTR = re.compile(r'([a-zA-Z-]+)\s*=\s*("([^"]*)"|\'([^\']*)\')')
 
-def candidates(base, page):
+def candidates(base, page, subject=None):
+    subject = subject or set()
     out = []
     # limit to the main content when the page marks it
     m = re.search(r'<div[^>]+class="[^"]*blog-post-content[^"]*".*?</article>', page, re.S | re.I) or re.search(r'<(main|article)\b.*?</\1>', page, re.S | re.I)
     body = m.group(0) if m else page
-    for i, tag in enumerate(IMG.findall(body)):
+    for i, m in enumerate(IMG.finditer(body)):
+        tag = m.group(0)
+        # the caption right after the picture, when the page has one
+        tail = body[m.end():m.end() + 600]
+        cap = re.search(r'<figcaption[^>]*>(.*?)</figcaption>', tail, re.S | re.I)
+        caption = re.sub(r'<[^>]+>', ' ', cap.group(1)) if cap else ''
         attrs = {k.lower(): html.unescape(v3 if v3 is not None else v4 or '') for k, _, v3, v4 in ATTR.findall(tag)}
         src = attrs.get('data-src') or attrs.get('src') or ''
         if src.startswith('data:') or not src:
@@ -59,6 +73,15 @@ def candidates(base, page):
             score += 4
         if GOOD.search(src):
             score += 2
+        if GOOD.search(caption):
+            score += 3
+        # the picture should be about this template's subject: alt, file name or caption
+        # sharing words with the title and tags
+        overlap = len(subject & (tokens(alt) | tokens(caption) | tokens(src.rsplit('/', 1)[-1])))
+        if overlap >= 2:
+            score += 3
+        elif overlap == 1:
+            score += 1
         try:
             w = int(re.sub(r'\D', '', attrs.get('width', '')) or 0)
             if w and w < 200:
@@ -72,18 +95,19 @@ def candidates(base, page):
     out.sort(key=lambda t: -t[0])
     return [u for s, u in out if s > -3]
 
-def find(source):
+def find(source, subject=None):
     try:
         base, page = fetch(source)
     except Exception as e:
         return None, f'fetch failed: {e}'
-    # Open Graph image is a good hint on blogs and Microsoft Learn
+    cands = candidates(base, page, subject)
+    # The Open Graph image is usually the site's social card, not the figure: only
+    # when it is named as a diagram does it count, and then as the last resort.
     og = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', page, re.I) or re.search(r'<meta[^>]+content="([^"]+)"[^>]+property="og:image"', page, re.I)
-    cands = candidates(base, page)
-    if og and 'blogs' not in source and 'blog' not in source:
+    if og:
         ogu = urllib.parse.urljoin(base, html.unescape(og.group(1)))
-        if not BAD.search(ogu) and 'learn.microsoft.com' not in source:
-            cands.append(ogu)  # last resort only
+        if GOOD.search(ogu) and not BAD.search(ogu):
+            cands.append(ogu)
     for u in cands[:5]:
         if head_ok(u):
             return u, None
@@ -95,7 +119,7 @@ def process(path):
     spec = yaml.safe_load(open(path))
     if spec.get('image') and not REFRESH:
         return path, spec['image'], 'kept'
-    url, err = find(spec['source'])
+    url, err = find(spec['source'], tokens(spec.get('title', '')) | set().union(*[tokens(t) for t in spec.get('tags', [])]))
     text = open(path).read()
     text = re.sub(r'^image: .*\n', '', text, flags=re.M)
     if url:
